@@ -59,4 +59,48 @@ class DocumentSchemaTest extends TestCase
         $this->assertSame("Fleet report\nTen trucks ran today.", $schema->plainText($doc));
         $this->assertSame(6, $schema->wordCount($doc));
     }
+
+    public function test_ensure_ids_treats_non_array_content_as_empty(): void
+    {
+        $schema = new DocumentSchema;
+        $out = $schema->ensureIds(['type' => 'doc', 'content' => 'junk']);
+        $this->assertSame([], $out['content']);
+        $this->assertSame([], $schema->validate($out));
+    }
+
+    public function test_plain_text_renders_cross_ref_label(): void
+    {
+        $doc = ['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'See '],
+            ['type' => 'crossRef', 'attrs' => ['label' => 'Figure 2']],
+        ]];
+        $schema = new DocumentSchema;
+        $this->assertSame('See Figure 2', $schema->plainText($doc));
+    }
+
+    public function test_word_count_counts_unicode_letters(): void
+    {
+        $schema = new DocumentSchema;
+        $accented = ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'café résumé naïve']]],
+        ]];
+        $this->assertSame(3, $schema->wordCount($accented));
+
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'heading', 'attrs' => ['level' => 2], 'content' => [['type' => 'text', 'text' => 'Fleet report']]],
+            ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Ten trucks ran '], ['type' => 'text', 'text' => 'today.', 'marks' => [['type' => 'bold']]]]],
+        ]];
+        $this->assertSame(6, $schema->wordCount($doc));
+    }
+
+    public function test_validate_rejects_unknown_mark_type(): void
+    {
+        $schema = new DocumentSchema;
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'attrs' => ['id' => 'aaaaaaaa'], 'content' => [
+                ['type' => 'text', 'text' => 'hi', 'marks' => [['type' => 'blink']]],
+            ]],
+        ]];
+        $this->assertContains('Unknown mark type blink', $schema->validate($doc));
+    }
 }

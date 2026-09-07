@@ -28,7 +28,8 @@ class DocumentSchema
     public function ensureIds(array $doc): array
     {
         $seen = [];
-        $doc['content'] = array_map(fn ($n) => $this->ensureNodeIds($n, $seen), $doc['content'] ?? []);
+        $content = $doc['content'] ?? [];
+        $doc['content'] = array_map(fn ($n) => $this->ensureNodeIds($n, $seen), is_array($content) ? $content : []);
         $doc['attrs'] = array_merge(['schema' => self::VERSION, 'style' => 'report', 'vars' => []], $doc['attrs'] ?? []);
 
         return $doc;
@@ -39,7 +40,9 @@ class DocumentSchema
         if (in_array($node['type'] ?? '', self::BLOCKS, true)) {
             $id = $node['attrs']['id'] ?? null;
             if (! BlockId::isValid($id) || isset($seen[$id])) {
-                $id = BlockId::generate();
+                do {
+                    $id = BlockId::generate();
+                } while (isset($seen[$id]));
             }
             $seen[$id] = true;
             $node['attrs'] = array_merge($node['attrs'] ?? [], ['id' => $id]);
@@ -92,7 +95,8 @@ class DocumentSchema
     public function walk(array $node, callable $fn, array $path = []): void
     {
         $fn($node, $path);
-        foreach ($node['content'] ?? [] as $i => $child) {
+        $content = $node['content'] ?? [];
+        foreach (is_array($content) ? $content : [] as $i => $child) {
             $this->walk($child, $fn, [...$path, $i]);
         }
     }
@@ -122,6 +126,9 @@ class DocumentSchema
         if ($type === 'variable') {
             return '{{'.($node['attrs']['key'] ?? '').'}}';
         }
+        if ($type === 'crossRef') {
+            return $node['attrs']['label'] ?? '?';
+        }
         $parts = array_map(fn ($c) => $this->plainText($c), $node['content'] ?? []);
         $isBlock = in_array($type, self::BLOCKS, true) || $type === 'doc';
         $joined = implode($isBlock && $this->hasBlockChildren($node) ? "\n" : '', $parts);
@@ -142,6 +149,8 @@ class DocumentSchema
 
     public function wordCount(array $doc): int
     {
-        return str_word_count(preg_replace('/[^\p{L}\p{N}\s\']+/u', ' ', $this->plainText($doc)) ?? '');
+        preg_match_all('/[\p{L}\p{N}][\p{L}\p{N}\'’\-]*/u', $this->plainText($doc), $matches);
+
+        return count($matches[0]);
     }
 }
