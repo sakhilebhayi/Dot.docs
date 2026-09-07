@@ -101,9 +101,9 @@ class Document extends Model
         return $this->hasMany(DocumentSuggestion::class);
     }
 
-    public function style(): BelongsTo
+    public function resolvedStyle(): ?DocumentStyle
     {
-        return $this->belongsTo(DocumentStyle::class, 'style_key', 'key');
+        return DocumentStyle::resolve($this->style_key, $this->team_id);
     }
 
     public function brandKit(): BelongsTo

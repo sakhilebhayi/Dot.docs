@@ -6,6 +6,7 @@ use App\Models\AuditLog;
 use App\Models\Document;
 use App\Models\DocumentStyle;
 use App\Models\DocumentVersion;
+use App\Models\Team;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -53,5 +54,43 @@ class SchemaMigrationTest extends TestCase
         $log = AuditLog::create(['actor_type' => 'user', 'actor_id' => 1, 'action' => 'document.viewed', 'subject_type' => Document::class, 'subject_id' => 1, 'context' => []]);
         $this->assertNotNull($log->created_at);
         $this->assertFalse($log->timestamps);
+    }
+
+    public function test_audit_log_refuses_updates_and_deletes(): void
+    {
+        $log = AuditLog::create(['actor_type' => 'user', 'actor_id' => 1, 'action' => 'document.viewed', 'subject_type' => Document::class, 'subject_id' => 1, 'context' => []]);
+
+        $updateResult = $log->update(['action' => 'document.deleted']);
+        $this->assertFalse($updateResult);
+        $this->assertSame('document.viewed', $log->fresh()->action);
+
+        $deleteResult = $log->delete();
+        $this->assertFalse($deleteResult);
+        $this->assertNotNull(AuditLog::find($log->id));
+    }
+
+    public function test_document_style_resolves_team_override_before_system_default(): void
+    {
+        $team = Team::factory()->create();
+
+        $systemStyle = DocumentStyle::create([
+            'key' => 'legal', 'name' => 'System Legal', 'category' => 'legal',
+            'tokens' => ['source' => 'system'], 'is_system' => true, 'team_id' => null,
+        ]);
+
+        $teamStyle = DocumentStyle::create([
+            'key' => 'legal', 'name' => 'Team Legal', 'category' => 'legal',
+            'tokens' => ['source' => 'team'], 'is_system' => false, 'team_id' => $team->id,
+        ]);
+
+        $this->assertTrue(DocumentStyle::resolve('legal', $team->id)->is($teamStyle));
+        $this->assertTrue(DocumentStyle::resolve('legal', null)->is($systemStyle));
+        $this->assertTrue(DocumentStyle::resolve('legal', 999)->is($systemStyle));
+
+        $user = User::factory()->create();
+        $doc = Document::factory()->for($user, 'owner')->create(['team_id' => $team->id, 'style_key' => 'legal']);
+
+        $this->assertTrue($doc->resolvedStyle()->is($teamStyle));
+        $this->assertFalse(method_exists($doc, 'style'));
     }
 }
