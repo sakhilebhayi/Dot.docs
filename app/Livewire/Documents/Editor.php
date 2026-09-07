@@ -9,7 +9,9 @@ use App\Events\UserJoinedDocument;
 use App\Events\UserLeftDocument;
 use App\Models\AiSuggestion;
 use App\Models\Document;
+use App\Models\DocumentStyle;
 use App\Services\PresenceService;
+use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
@@ -142,6 +144,33 @@ class Editor extends Component
         $this->saved = true;
     }
 
+    /**
+     * Switch the document's style. Valid keys are the fourteen system
+     * styles or a team-owned custom style of the same key. Re-saves the
+     * document through DocumentStore so heading/figure numbering is
+     * rebuilt against the new style's numbering rules.
+     */
+    public function setStyle(string $key): void
+    {
+        $this->authorize('update', $this->document);
+
+        $engine = app(StyleEngine::class);
+        $valid = in_array($key, StyleEngine::systemKeys(), true)
+            || DocumentStyle::where('key', $key)->where('team_id', $this->document->team_id)->exists();
+
+        if (! $valid) {
+            $this->addError('style', 'Unknown style');
+
+            return;
+        }
+
+        $this->document->style_key = $key;
+        $this->document = app(DocumentStore::class)->save($this->document, $this->document->content_json, Auth::user(), ['version' => 'none']);
+        $this->contentJson = $this->document->content_json;
+
+        $this->dispatch('style-changed', css: $engine->css($engine->resolve($this->document), 'canvas'));
+    }
+
     public function heartbeat(): void
     {
         app(PresenceService::class)->heartbeat($this->document, Auth::user());
@@ -177,6 +206,9 @@ class Editor extends Component
 
     public function render(): View
     {
-        return view('livewire.documents.editor');
+        $engine = app(StyleEngine::class);
+        $styleCss = $engine->css($engine->resolve($this->document), 'canvas');
+
+        return view('livewire.documents.editor', ['styleCss' => $styleCss]);
     }
 }

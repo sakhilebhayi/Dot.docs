@@ -8,6 +8,7 @@ use App\Documents\Render\HtmlRenderer;
 use App\Documents\Render\RenderContext;
 use App\Documents\Schema\DocumentSchema;
 use App\Models\Document;
+use App\Models\DocumentStyle;
 use App\Models\DocumentVersion;
 use App\Models\User;
 use App\Services\WebhookService;
@@ -28,7 +29,7 @@ class DocumentStore
     public function create(User $owner, string $title, ?array $json = null, array $attrs = []): Document
     {
         $json = $this->schema->ensureIds($json ?? DocumentSchema::empty());
-        $doc = new Document(array_merge(['title' => $title, 'owner_id' => $owner->id, 'team_id' => $owner->currentTeam?->id, 'version' => 1], $attrs));
+        $doc = new Document(array_merge(['title' => $title, 'owner_id' => $owner->id, 'team_id' => $owner->currentTeam?->id, 'version' => 1, 'style_key' => 'report'], $attrs));
         $this->fill($doc, $json);
         $doc->save();
 
@@ -118,7 +119,9 @@ class DocumentStore
 
     private function fill(Document $doc, array $json): void
     {
-        $result = $this->outline->build($json);
+        $style = $doc->resolvedStyle() ?? DocumentStyle::resolve('report');
+        $rules = $style?->tokens['numbering'] ?? [];
+        $result = $this->outline->build($json, $rules);
         $json = $this->outline->apply($json, $result);
         $ctx = RenderContext::editor();
         $ctx->numbers = $result->numbers;

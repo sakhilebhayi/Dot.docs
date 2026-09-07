@@ -1,3 +1,5 @@
+<style id="doc-style">{!! $styleCss !!}</style>
+
 <div
     x-data="{
         editor: null,
@@ -169,6 +171,20 @@
                    class="w-full text-lg font-semibold bg-transparent border-none focus:ring-0 text-gray-900 dark:text-white truncate p-0"
                    placeholder="Untitled" />
         </div>
+
+        {{-- Style switcher (Task 9 restyles this) --}}
+        <select wire:change="setStyle($event.target.value)"
+                class="text-xs border border-gray-300 rounded px-1 py-1 bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white mr-2"
+                title="Document style">
+            @foreach(\App\Styles\StyleEngine::systemKeys() as $styleKey)
+                <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
+            @endforeach
+        </select>
+        @error('style')
+            <span class="text-xs text-red-500 mr-2">{{ $message }}</span>
+        @enderror
+
+        <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
 
         {{-- Format buttons --}}
         <button @click="editor.chain().focus().toggleBold().run()" title="Bold"
