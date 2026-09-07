@@ -14,8 +14,10 @@ use App\Documents\Schema\DocumentSchema;
  * - startLevel/maxLevel bound which heading levels participate in numbering
  *   and the TOC. A heading outside that range is neither numbered nor listed.
  * - A heading's own attrs.numbered defaults to true; explicitly false excludes
- *   it from numbers and the TOC (unless headings === 'none', which lists every
- *   in-range heading regardless, each with number '').
+ *   it from numbers only - it is still listed in the TOC, with number ''
+ *   (numbering and listing are orthogonal, as in Word). headings === 'none'
+ *   applies the same "listed with number ''" treatment to every in-range
+ *   heading, numbered or not.
  * - figures: 'sequential' (default) numbers images and tables in two separate
  *   running counters; 'byChapter' prefixes the current top-level (level 1)
  *   heading's number and resets each counter when the chapter changes. Before
@@ -65,13 +67,9 @@ class Outline
             if ($type === 'figure') {
                 $kind = $node['attrs']['kind'] ?? 'image';
                 $id = $node['attrs']['id'] ?? '';
-                $counters = $kind === 'table' ? $tableCounters : $figureCounters;
-                $number = $this->nextFigureNumber($counters, $rules['figures'], $chapter);
-                if ($kind === 'table') {
-                    $tableCounters = $counters;
-                } else {
-                    $figureCounters = $counters;
-                }
+                $number = $kind === 'table'
+                    ? $this->nextFigureNumber($tableCounters, $rules['figures'], $chapter)
+                    : $this->nextFigureNumber($figureCounters, $rules['figures'], $chapter);
                 $result->numbers[$id] = $number;
                 $result->kinds[$id] = $kind === 'table' ? 'table' : 'figure';
                 $entry = ['id' => $id, 'number' => $number];
@@ -92,8 +90,8 @@ class Outline
             if (($node['type'] ?? '') !== 'crossRef') {
                 return;
             }
-            $targetId = $node['attrs']['targetId'] ?? null;
-            if ($targetId !== null && ! isset($result->numbers[$targetId])) {
+            $targetId = $node['attrs']['targetId'] ?? '';
+            if (! isset($result->numbers[$targetId])) {
                 $result->broken[] = $targetId;
             }
         });

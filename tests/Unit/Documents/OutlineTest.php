@@ -30,7 +30,8 @@ class OutlineTest extends TestCase
         $r = (new Outline)->build($doc);
         $this->assertSame(['H1AAAAAA' => '1', 'H2AAAAAA' => '1.1', 'H2BBBBBB' => '1.2', 'H3AAAAAA' => '1.2.1', 'H1BBBBBB' => '2'], $r->numbers);
         $this->assertSame(['id' => 'H2AAAAAA', 'level' => 2, 'text' => 'Scope', 'number' => '1.1'], $r->toc[1]);
-        $this->assertCount(5, $r->toc);
+        $this->assertCount(6, $r->toc);
+        $this->assertSame(['id' => 'H2CCCCCC', 'level' => 2, 'text' => 'Unnumbered', 'number' => ''], $r->toc[5]);
 
         $out = (new Outline)->apply($doc, $r);
         $this->assertSame('1.2', $out['content'][0]['attrs']['entries'][2]['number']);
@@ -44,16 +45,18 @@ class OutlineTest extends TestCase
                 ['type' => 'crossRef', 'attrs' => ['targetId' => 'F2F2F2F2', 'kind' => 'figure']],
                 ['type' => 'crossRef', 'attrs' => ['targetId' => 'T1T1T1T1', 'kind' => 'table']],
                 ['type' => 'crossRef', 'attrs' => ['targetId' => 'NOPE0000', 'kind' => 'figure']],
+                ['type' => 'crossRef', 'attrs' => ['kind' => 'figure']],
             ]],
         ]];
         $r = (new Outline)->build($doc);
         $this->assertSame('2', $r->numbers['F2F2F2F2']);
         $this->assertSame('1', $r->numbers['T1T1T1T1']);
-        $this->assertSame(['NOPE0000'], $r->broken);
+        $this->assertSame(['NOPE0000', ''], $r->broken);
         $out = (new Outline)->apply($doc, $r);
         $this->assertSame('Figure 2', $out['content'][3]['content'][0]['attrs']['label']);
         $this->assertSame('Table 1', $out['content'][3]['content'][1]['attrs']['label']);
         $this->assertSame('?', $out['content'][3]['content'][2]['attrs']['label']);
+        $this->assertSame('?', $out['content'][3]['content'][3]['attrs']['label']);
     }
 
     public function test_renumbering_after_move(): void

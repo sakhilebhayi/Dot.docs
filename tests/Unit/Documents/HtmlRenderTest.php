@@ -124,6 +124,21 @@ class HtmlRenderTest extends TestCase
         $this->assertStringContainsString('<span class="num">Figure 1</span>', $html);
     }
 
+    public function test_table_figure_caption_uses_table_prefix(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'figure', 'attrs' => ['id' => 'f3f3f3f3', 'kind' => 'table'], 'content' => [
+                ['type' => 'table', 'attrs' => ['id' => 't3t3t3t3'], 'content' => []],
+                ['type' => 'caption', 'attrs' => ['id' => 'c4c4c4c4'], 'content' => [['type' => 'text', 'text' => 'Cap']]],
+            ]],
+        ]];
+        $ctx = RenderContext::print();
+        $ctx->numbers = ['f3f3f3f3' => '1'];
+        $ctx->kinds = ['f3f3f3f3' => 'table'];
+        $html = (new HtmlRenderer)->render($doc, $ctx);
+        $this->assertStringContainsString('<figcaption data-id="c4c4c4c4"><span class="num">Table 1</span>Cap</figcaption>', $html);
+    }
+
     public function test_ordered_list_start_attribute_round_trips(): void
     {
         $html = '<ol start="3"><li><p>Third</p></li></ol>';

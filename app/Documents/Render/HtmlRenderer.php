@@ -188,7 +188,8 @@ class HtmlRenderer
     private function renderCaption(array $node, RenderContext $ctx, ?string $parentId): string
     {
         $number = $parentId !== null ? ($ctx->numbers[$parentId] ?? null) : null;
-        $num = $number !== null ? '<span class="num">Figure '.$this->esc($number).'</span>' : '';
+        $kindPrefix = ($parentId !== null && ($ctx->kinds[$parentId] ?? null) === 'table') ? 'Table ' : 'Figure ';
+        $num = $number !== null ? '<span class="num">'.$kindPrefix.$this->esc($number).'</span>' : '';
 
         return '<figcaption data-id="'.$this->id($node)."\">{$num}".$this->renderChildren($node, $ctx).'</figcaption>';
     }

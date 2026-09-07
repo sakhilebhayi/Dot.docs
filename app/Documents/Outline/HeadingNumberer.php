@@ -9,11 +9,12 @@ use App\Documents\Schema\DocumentSchema;
  * as it walks the document in order. One instance covers a single build() call.
  *
  * A heading outside [startLevel, maxLevel] is skipped entirely (not numbered,
- * not listed). Within range: when headings === 'none' every heading is listed
- * in the TOC with number '' and none are numbered; otherwise a heading whose
- * own attrs.numbered is explicitly false is skipped entirely (matching the
- * per-heading "don't list this" intent), and every other heading gets both a
- * computed decimal number and a TOC entry.
+ * not listed). Within range, every heading gets a TOC entry: when
+ * headings === 'none', or when the heading's own attrs.numbered is explicitly
+ * false, the entry carries number '' and the heading is excluded from
+ * numbers (numbering and TOC listing are orthogonal - an unnumbered
+ * "Foreword" is still listed, just without a number, as in Word). Every
+ * other heading gets both a computed decimal number and a TOC entry.
  */
 class HeadingNumberer
 {
@@ -38,12 +39,8 @@ class HeadingNumberer
         $text = $schema->plainText($node);
         $individuallyNumbered = ($node['attrs']['numbered'] ?? true) !== false;
 
-        if ($this->headingsNone) {
+        if ($this->headingsNone || ! $individuallyNumbered) {
             return ['id' => $id, 'level' => $level, 'text' => $text, 'number' => ''];
-        }
-
-        if (! $individuallyNumbered) {
-            return null;
         }
 
         $this->counters[$level] = ($this->counters[$level] ?? 0) + 1;
