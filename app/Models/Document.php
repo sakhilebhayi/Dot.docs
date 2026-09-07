@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\Hash;
 
 class Document extends Model
 {
+    use HasFactory;
     use SoftDeletes;
 
     protected $fillable = [
@@ -25,11 +27,28 @@ class Document extends Model
         'is_public',
         'share_password',
         'share_expires_at',
+        'content_json',
+        'search_text',
+        'schema_version',
+        'style_key',
+        'brand_kit_id',
+        'page_setup',
+        'variables',
+        'health_score',
+        'health_checked_at',
+        'review_state',
+        'slug',
+        'word_count',
+        'view_count',
     ];
 
     protected $casts = [
         'is_public' => 'boolean',
         'share_expires_at' => 'datetime',
+        'content_json' => 'array',
+        'page_setup' => 'array',
+        'variables' => 'array',
+        'health_checked_at' => 'datetime',
     ];
 
     public function owner(): BelongsTo
@@ -75,6 +94,21 @@ class Document extends Model
     public function webhooks(): HasMany
     {
         return $this->hasMany(DocumentWebhook::class);
+    }
+
+    public function suggestions(): HasMany
+    {
+        return $this->hasMany(DocumentSuggestion::class);
+    }
+
+    public function style(): BelongsTo
+    {
+        return $this->belongsTo(DocumentStyle::class, 'style_key', 'key');
+    }
+
+    public function brandKit(): BelongsTo
+    {
+        return $this->belongsTo(BrandKit::class);
     }
 
     /**

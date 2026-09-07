@@ -15,10 +15,15 @@ class DocumentTemplate extends Model
         'is_global',
         'team_id',
         'created_by',
+        'content_json',
+        'style_key',
+        'page_setup',
     ];
 
     protected $casts = [
         'is_global' => 'boolean',
+        'content_json' => 'array',
+        'page_setup' => 'array',
     ];
 
     public function creator(): BelongsTo

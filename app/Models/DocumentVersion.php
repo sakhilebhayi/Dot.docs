@@ -15,10 +15,16 @@ class DocumentVersion extends Model
         'version_number',
         'created_by',
         'created_at',
+        'content_json',
+        'label',
+        'kind',
+        'summary',
+        'word_count',
     ];
 
     protected $casts = [
         'created_at' => 'datetime',
+        'content_json' => 'array',
     ];
 
     public function document(): BelongsTo
