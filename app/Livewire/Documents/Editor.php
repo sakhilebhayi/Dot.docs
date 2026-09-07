@@ -4,6 +4,7 @@ namespace App\Livewire\Documents;
 
 use App\Documents\DocumentStore;
 use App\Documents\Import\HtmlToJson;
+use App\Documents\Outline\Outline;
 use App\Events\DocumentUpdated;
 use App\Events\UserJoinedDocument;
 use App\Events\UserLeftDocument;
@@ -89,6 +90,22 @@ class Editor extends Component
             // Broadcasting unavailable — continue without real-time sync
         }
         app(PresenceService::class)->heartbeat($this->document, Auth::user());
+    }
+
+    /**
+     * Heading/figure numbers and the table of contents for the document as it
+     * is currently stored. Numbering is authoritative on the server (it
+     * depends on the style's numbering tokens - see .ai/rules/styles.md), so
+     * the editor asks for it after every save instead of computing its own.
+     *
+     * @return array{numbers: array<string,string>, toc: list<array{id:string,level:int,text:string,number:string}>}
+     */
+    public function outline(): array
+    {
+        $style = $this->document->resolvedStyle() ?? DocumentStyle::resolve('report');
+        $result = app(Outline::class)->build($this->document->content_json ?? [], $style?->tokens['numbering'] ?? []);
+
+        return ['numbers' => $result->numbers, 'toc' => $result->toc];
     }
 
     /**

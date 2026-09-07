@@ -1,0 +1,18 @@
+{
+    "version": "0.0.1",
+    "configurations": [
+        {
+            "name": "dotdoc",
+            "runtimeExecutable": "env",
+            "runtimeArgs": [
+                "SESSION_SECURE_COOKIE=false",
+                "php",
+                "artisan",
+                "serve",
+                "--host=127.0.0.1",
+                "--port=8014"
+            ],
+            "port": 8014
+        }
+    ]
+}

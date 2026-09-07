@@ -76,6 +76,7 @@
         select.dot-input option { background:#1a1a1f; }
     </style>
     @livewireStyles
+    @vite(['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js'])
     <script defer src="https://unpkg.com/alpinejs@3.10.2/dist/cdn.min.js"></script>
 </head>
 <body>

@@ -1,0 +1,54 @@
+<?php
+
+namespace Tests\Feature\Documents;
+
+use App\Documents\DocumentStore;
+use App\Documents\Schema\BlockId;
+use App\Livewire\Documents\Editor;
+use App\Models\User;
+use Database\Seeders\DocumentStyleSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
+use Tests\TestCase;
+
+class EditorMountTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_editor_page_ships_json_style_and_mount_hook(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Mount me');
+        $this->actingAs($user)->get(route('documents.edit', $doc->uuid))
+            ->assertOk()
+            ->assertSee('id="doc-style"', false)
+            ->assertSee('DotDoc.mount', false)
+            ->assertSee('&quot;type&quot;:&quot;doc&quot;', false);
+    }
+
+    public function test_outline_returns_numbers_and_toc_for_numbered_headings(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $topId = BlockId::generate();
+        $subId = BlockId::generate();
+        $doc = app(DocumentStore::class)->create($user, 'Numbered', [
+            'type' => 'doc',
+            'content' => [
+                ['type' => 'heading', 'attrs' => ['id' => $topId, 'level' => 1], 'content' => [['type' => 'text', 'text' => 'Overview']]],
+                ['type' => 'heading', 'attrs' => ['id' => $subId, 'level' => 2], 'content' => [['type' => 'text', 'text' => 'Detail']]],
+            ],
+        ]);
+
+        $outline = Livewire::actingAs($user)
+            ->test(Editor::class, ['uuid' => $doc->uuid])
+            ->instance()
+            ->outline();
+
+        $this->assertSame('1', $outline['numbers'][$topId]);
+        $this->assertSame('1.1', $outline['numbers'][$subId]);
+        $this->assertSame(['1', '1.1'], array_column($outline['toc'], 'number'));
+        $this->assertSame(['Overview', 'Detail'], array_column($outline['toc'], 'text'));
+    }
+}

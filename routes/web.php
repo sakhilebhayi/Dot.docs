@@ -114,3 +114,11 @@ Route::middleware([
     Route::post('/documents/{uuid}/import', [DocumentImportController::class, 'store'])
         ->name('documents.import');
 });
+
+// TEMPORARY (Task 8 browser verification only) — removed before commit.
+Route::get('/__task8_login/{id}', function (int $id) {
+    abort_unless(app()->environment('local'), 404);
+    Illuminate\Support\Facades\Auth::loginUsingId($id);
+
+    return redirect('/documents');
+});

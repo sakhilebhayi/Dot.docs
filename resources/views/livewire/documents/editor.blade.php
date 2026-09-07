@@ -1,43 +1,72 @@
 <div
     x-data="{
-        editor: null,
+        owns: false,
         echo: null,
-        saveTimeout: null,
         heartbeatInterval: null,
         isTyping: false,
         typingTimeout: null,
         isOffline: !navigator.onLine,
         docUuid: '{{ $document->uuid }}',
-        remoteVersion: @entangle('document.version').live,
+        selection: { blockId: null, type: null },
+        tick: 0,
+
+        // The editor is NEVER stored in Alpine's reactive data: a reactivity
+        // proxy around it hands every command a proxied EditorState and
+        // ProseMirror then rejects the transaction it builds ('Applying a
+        // mismatched transaction'). Read it through this accessor instead,
+        // which returns the raw handle the bundle parked on the element.
+        // Reading `tick` keeps toolbar :class bindings re-evaluating as the
+        // selection moves.
+        ed() {
+            this.tick;
+            return window.DotDoc?.get(this.$refs.editorEl)?.editor ?? null;
+        },
 
         init() {
-            this.editor = window.createTipTapEditor({
-                element: this.$refs.editorEl,
+            // layouts/app.blade.php currently loads Alpine twice (the CDN tag
+            // and Livewire's own bundle), so x-init runs more than once on this
+            // element — and the CDN copy can run BEFORE Livewire has registered
+            // this component, when @this is still undefined and every server
+            // call would throw. Leave the work to the instance that has a live
+            // Livewire component; the other one does nothing at all.
+            // Task 9 removes the duplicate Alpine; these guards are cheap anyway.
+            if (typeof window.Livewire === 'undefined' || !@this || !window.DotDoc) return;
+
+            const host = this.$refs.editorEl;
+            if (!host) return;
+            this.owns = !window.DotDoc.get(host);
+
+            // window.DotDoc comes from resources/js/editor/index.js. It owns the
+            // 1200ms autosave debounce, the palette, the slash menu and the
+            // selection bubble; this component only bridges it to Livewire.
+            // mount() is idempotent per element, so a second Alpine instance
+            // gets the same editor rather than a second one over the same DOM.
+            const editor = window.DotDoc.mount(host, {
                 content: @js($contentJson),
+                vars: @js($document->variables ?? []),
                 uploadUrl: '{{ route('documents.images.store', $document->uuid) }}',
                 csrfToken: document.querySelector('meta[name=csrf-token]').content,
-                onChange: (html) => {
-                    // Show typing indicator
-                    this.isTyping = true;
-                    clearTimeout(this.typingTimeout);
-                    this.typingTimeout = setTimeout(() => { this.isTyping = false; }, 1000);
+                onChange: (json) => this.persist(json),
+                onSelection: (s) => { this.selection = s; this.tick++; },
+                onCommand: (name, params) => this.hostCommand(name, params),
+            }).editor;
 
-                    // Always persist draft to IndexedDB (works offline too)
-                    if (window.offlineDraft) {
-                        window.offlineDraft.saveDraft(this.docUuid, html);
-                    }
+            if (!this.owns) return;
 
-                    // Debounced autosave (skipped when offline — SW queues it)
-                    clearTimeout(this.saveTimeout);
-                    this.saveTimeout = setTimeout(() => {
-                        @this.saveContent(this.editor.getJSON());
-                    }, 1500);
+            // Typing indicator and the offline draft run off every keystroke;
+            // the save itself is debounced inside the bundle.
+            editor.on('update', () => {
+                this.isTyping = true;
+                this.tick++;
+                clearTimeout(this.typingTimeout);
+                this.typingTimeout = setTimeout(() => { this.isTyping = false; }, 1000);
+                if (window.offlineDraft) {
+                    window.offlineDraft.saveDraft(this.docUuid, JSON.stringify(editor.getJSON()));
                 }
             });
 
-            // Restore IndexedDB draft if newer than server content
+            this.refreshOutline();
             this.restoreDraftIfNewer();
-
             this.setupEcho();
 
             // Online / offline events (dispatched by offline.js initOfflineSupport)
@@ -45,7 +74,7 @@
             window.addEventListener('app-online',  () => {
                 this.isOffline = false;
                 // Flush current draft to server now that we're back online
-                if (this.editor) @this.saveContent(this.editor.getJSON());
+                this.persist(editor.getJSON());
                 if (window.offlineDraft) window.offlineDraft.clearDraft(this.docUuid);
             });
 
@@ -60,21 +89,45 @@
             });
         },
 
+        persist(json) {
+            return @this.saveContent(json).then(() => this.refreshOutline());
+        },
+
+        // Numbering rules live in the document style, so the server owns them.
+        // Pull the fresh numbers after every save and hand them to the bundle.
+        refreshOutline() {
+            return @this.outline().then((outline) => {
+                if (outline) window.DotDoc.setOutline(outline);
+            });
+        },
+
+        // Registry commands in the 'system' group need the page to act.
+        hostCommand(name, params) {
+            if (name === 'export.pdf') {
+                window.location.href = '{{ route('documents.export', [$document->uuid, 'pdf']) }}';
+            } else if (name === 'style.switch' && params && params.key) {
+                @this.setStyle(params.key);
+            } else if (name === 'comment') {
+                if (!@this.commentSidebarOpen) @this.toggleCommentSidebar();
+            } else if (name === 'find') {
+                // The browser's own find bar cannot be opened from script.
+                window.dispatchEvent(new CustomEvent('dotdoc-find', { detail: params }));
+            }
+        },
+
         async restoreDraftIfNewer() {
             if (!window.offlineDraft) return;
             try {
+                const editor = this.ed();
                 const draft = await window.offlineDraft.loadDraft(this.docUuid);
-                if (draft && draft !== this.editor?.getHTML()) {
-                    // Only prompt if draft appears to differ from current server content
-                    const serverLen = (this.editor?.getText() || '').length;
-                    const draftLen  = draft.replace(/<[^>]+>/g, '').length;
-                    if (draftLen > serverLen) {
-                        if (confirm('An unsaved offline draft was found. Restore it?')) {
-                            this.editor.commands.setContent(draft, false);
-                        }
-                        window.offlineDraft.clearDraft(this.docUuid);
-                    }
+                if (!draft || !editor) return;
+                const parsed = JSON.parse(draft);
+                if (!parsed || parsed.type !== 'doc') return;
+                if (JSON.stringify(parsed) === JSON.stringify(editor.getJSON())) return;
+                if (confirm('An unsaved offline draft was found. Restore it?')) {
+                    editor.commands.setContent(parsed);
                 }
+                window.offlineDraft.clearDraft(this.docUuid);
             } catch (_) {}
         },
 
@@ -93,11 +146,13 @@
                 })
                 .listen('.document.updated', (e) => {
                     // Only apply remote updates if from another user
-                    if (e.editor.id !== {{ auth()->id() }}) {
-                        const currentPos = this.editor.state.selection.anchor;
-                        this.editor.commands.setContent(e.json ?? e.content, false);
+                    const editor = this.ed();
+                    if (editor && e.editor.id !== {{ auth()->id() }}) {
+                        const currentPos = editor.state.selection.anchor;
+                        editor.commands.setContent(e.json ?? e.content, { emitUpdate: false });
                         // Try to restore cursor position
-                        try { this.editor.commands.setTextSelection(currentPos); } catch(_) {}
+                        try { editor.commands.setTextSelection(currentPos); } catch(_) {}
+                        this.refreshOutline();
                     }
                 })
                 .listen('.user.joined', (e) => {
@@ -113,39 +168,43 @@
 
         destroy() {
             clearInterval(this.heartbeatInterval);
+            clearTimeout(this.typingTimeout);
             if (this.echo) this.echo.leave();
-            if (this.editor) this.editor.destroy();
+            // Only the instance that mounted the editor tears it down.
+            if (this.owns) {
+                window.DotDoc?.get(this.$refs.editorEl)?.destroy();
+            }
         },
 
         // Apply AI result to the editor
         applyAiContent(type, content) {
-            if (!this.editor) return;
+            const editor = this.ed();
+            if (!editor) return;
             if (type === 'replace') {
-                this.editor.commands.setContent(content, true);
-                @this.saveContent(this.editor.getJSON());
+                editor.commands.setContent(content);
             } else {
-                this.editor.commands.focus('end');
-                this.editor.commands.insertContent(content);
-                @this.saveContent(this.editor.getJSON());
+                editor.commands.focus('end');
+                editor.commands.insertContent(content);
             }
+            this.persist(editor.getJSON());
         },
 
         // Insert voice-transcribed text at current cursor position
         insertVoiceText(text) {
-            if (!this.editor || !text) return;
-            this.editor.commands.focus();
-            this.editor.commands.insertContent(text + ' ');
-            clearTimeout(this.saveTimeout);
-            this.saveTimeout = setTimeout(() => { @this.saveContent(this.editor.getJSON()); }, 1500);
+            const editor = this.ed();
+            if (!editor || !text) return;
+            editor.commands.focus();
+            editor.commands.insertContent(text + ' ');
         }
     }"
     x-init="init()"
     x-destroy="destroy()"
     @ai-apply.window="applyAiContent('replace', $event.detail.content)"
-    @suggestion-accepted.window="if (editor) { editor.commands.setContent($event.detail.content, true); }"
+    @suggestion-accepted.window="if (ed()) { ed().commands.setContent($event.detail.content); refreshOutline(); }"
     @voice-transcript.window="insertVoiceText($event.detail.text)"
-    @keydown.ctrl.k.window.prevent="$dispatch('open-ai-palette')"
-    @keydown.meta.k.window.prevent="$dispatch('open-ai-palette')"
+    @style-changed.window="document.getElementById('doc-style').textContent = $event.detail.css; refreshOutline()"
+    @keydown.ctrl.shift.k.window.prevent="$dispatch('open-ai-palette')"
+    @keydown.meta.shift.k.window.prevent="$dispatch('open-ai-palette')"
     class="flex flex-col h-screen bg-gray-50 dark:bg-gray-900"
 >
     <style id="doc-style">{!! $styleCss !!}</style>
@@ -187,57 +246,68 @@
         <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
 
         {{-- Format buttons --}}
-        <button @click="editor.chain().focus().toggleBold().run()" title="Bold"
-                :class="editor?.isActive('bold') ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
+        <button @click="ed().chain().focus().toggleBold().run()" title="Bold"
+                :class="ed()?.isActive('bold') ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                 class="p-1.5 rounded transition text-sm font-bold">B</button>
 
-        <button @click="editor.chain().focus().toggleItalic().run()" title="Italic"
-                :class="editor?.isActive('italic') ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
+        <button @click="ed().chain().focus().toggleItalic().run()" title="Italic"
+                :class="ed()?.isActive('italic') ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                 class="p-1.5 rounded transition text-sm italic">I</button>
 
         <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
 
         @foreach([1,2,3] as $h)
-            <button @click="editor.chain().focus().toggleHeading({ level: {{ $h }} }).run()"
-                    :class="editor?.isActive('heading', { level: {{ $h }} }) ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
+            <button @click="ed().chain().focus().toggleHeading({ level: {{ $h }} }).run()"
+                    :class="ed()?.isActive('heading', { level: {{ $h }} }) ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                     class="p-1.5 rounded transition text-xs font-bold">H{{ $h }}</button>
         @endforeach
 
         <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
 
-        <button @click="editor.chain().focus().toggleBulletList().run()"
-                :class="editor?.isActive('bulletList') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
+        <button @click="ed().chain().focus().toggleBulletList().run()"
+                :class="ed()?.isActive('bulletList') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                 class="p-1.5 rounded transition text-sm">• List</button>
 
-        <button @click="editor.chain().focus().toggleOrderedList().run()"
-                :class="editor?.isActive('orderedList') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
+        <button @click="ed().chain().focus().toggleOrderedList().run()"
+                :class="ed()?.isActive('orderedList') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                 class="p-1.5 rounded transition text-sm">1. List</button>
 
         <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
 
-        <button @click="editor.chain().focus().toggleBlockquote().run()"
-                :class="editor?.isActive('blockquote') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
+        <button @click="ed().chain().focus().toggleBlockquote().run()"
+                :class="ed()?.isActive('blockquote') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                 class="p-1.5 rounded transition text-sm" title="Blockquote">"</button>
 
-        <button @click="editor.chain().focus().toggleCode().run()"
-                :class="editor?.isActive('code') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
+        <button @click="ed().chain().focus().toggleCode().run()"
+                :class="ed()?.isActive('code') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                 class="p-1.5 rounded transition text-xs font-mono" title="Inline code">&lt;/&gt;</button>
 
-        <button @click="editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()"
+        <button @click="ed().chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()"
                 class="p-1.5 rounded transition text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" title="Insert Table">⊞ Table</button>
 
         {{-- Image upload --}}
         <label class="p-1.5 rounded transition text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 cursor-pointer" title="Insert Image">
             🖼
             <input type="file" accept="image/*" class="hidden"
-                   @change="editor.uploadImage($event.target.files[0]); $event.target.value = ''" />
+                   @change="ed().uploadImage($event.target.files[0]); $event.target.value = ''" />
         </label>
 
         <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
 
-        <button @click="editor.chain().focus().undo().run()" title="Undo"
+        {{-- Everything structural (TOC, figure, cross-reference, callout,
+             columns, breaks, variables) lives in the command registry, which
+             the palette and the slash menu both list. --}}
+        <button @click="window.DotDoc.openPalette(ed())"
+                title="Commands (⌘K) — or type / in the document"
+                class="p-1.5 rounded transition text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 flex items-center gap-1">
+            ⌘K <span class="hidden sm:inline">Commands</span>
+        </button>
+
+        <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
+
+        <button @click="ed().chain().focus().undo().run()" title="Undo"
                 class="p-1.5 rounded transition text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700">↩</button>
-        <button @click="editor.chain().focus().redo().run()" title="Redo"
+        <button @click="ed().chain().focus().redo().run()" title="Redo"
                 class="p-1.5 rounded transition text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700">↪</button>
 
         <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
@@ -304,8 +374,8 @@
             <span class="w-px h-5 bg-gray-300 dark:bg-gray-600"></span>
             <button @click="$dispatch('open-ai-palette')"
                     class="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium flex items-center gap-1 px-1.5 py-1 rounded hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
-                    title="AI Command Palette (Ctrl+K)">
-                ✨ AI <kbd class="text-[9px] bg-gray-100 dark:bg-gray-700 rounded px-1 ml-0.5">⌘K</kbd>
+                    title="AI Command Palette (Ctrl+Shift+K)">
+                ✨ AI <kbd class="text-[9px] bg-gray-100 dark:bg-gray-700 rounded px-1 ml-0.5">⇧⌘K</kbd>
             </button>
             <div x-data="{ open: false }" class="relative">
                 <button @click="open = !open"
@@ -450,12 +520,10 @@
 
     {{-- Editor area (with optional comment sidebar) --}}
     <div class="flex flex-1 overflow-hidden">
-        {{-- Main editor --}}
+        {{-- Main editor. wire:ignore keeps Livewire's DOM morph out of the
+             ProseMirror subtree, which it did not render and must not diff. --}}
         <div class="flex-1 overflow-auto">
-            <div class="{{ $commentSidebarOpen ? 'mx-auto py-10 px-6' : 'max-w-4xl mx-auto py-10 px-6' }}">
-                <div x-ref="editorEl"
-                     class="prose prose-lg dark:prose-invert max-w-none min-h-[60vh] focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror-focused]:outline-none"></div>
-            </div>
+            <div x-ref="editorEl" wire:ignore class="desk"></div>
         </div>
 
         {{-- Comment sidebar --}}
