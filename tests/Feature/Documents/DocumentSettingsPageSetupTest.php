@@ -19,6 +19,7 @@ class DocumentSettingsPageSetupTest extends TestCase
         $this->seed(DocumentStyleSeeder::class);
         $user = User::factory()->create();
         $doc = app(DocumentStore::class)->create($user, 'Monthly report');
+        $originalVersion = $doc->version;
 
         Livewire::actingAs($user)
             ->test(DocumentSettings::class, ['uuid' => $doc->uuid])
@@ -41,6 +42,11 @@ class DocumentSettingsPageSetupTest extends TestCase
             'header' => '{{ title }}',
             'footer' => 'Page {{ page }} of {{ pages }}',
         ], $doc->page_setup);
+
+        // Page setup is not document content: saving it must never bump
+        // documents.version or cut a version snapshot (see .ai/rules/print.md).
+        $this->assertSame($originalVersion, $doc->version);
+        $this->assertDatabaseCount('document_versions', 0);
     }
 
     public function test_invalid_orientation_is_rejected(): void

@@ -2,7 +2,6 @@
 
 namespace App\Livewire\Documents;
 
-use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\Folder;
 use App\Models\User;
@@ -10,7 +9,6 @@ use App\Print\PageSetup;
 use App\Services\TagRepository;
 use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -73,11 +71,12 @@ class DocumentSettings extends Component
     /**
      * page_setup is not document content (see .ai/rules/app.md's
      * DocumentStore-only-writer rule for content/content_json/etc.), so it
-     * is written directly via ->update(). Header/footer templates can
-     * reference $doc->variables (see PrintRenderer::band()), so content is
-     * re-saved via DocumentStore::save() afterwards purely to re-render
-     * those variables into content/content_json - 'version' => 'none'
-     * means this never cuts a version snapshot on its own.
+     * is written directly via ->update() and never goes through
+     * DocumentStore::save(). Header/footer {{ variable }} templates are
+     * substituted at print/PDF time (PrintRenderer::band()), not baked into
+     * content/content_json, so a page-format-only change like this must
+     * never re-save content, bump documents.version, or fire the on_save
+     * webhook - see .ai/rules/print.md.
      */
     public function savePageSetup(): void
     {
@@ -108,8 +107,6 @@ class DocumentSettings extends Component
                 'footer' => $this->footer,
             ],
         ]);
-
-        $this->document = app(DocumentStore::class)->save($this->document, $this->document->content_json, Auth::user(), ['version' => 'none']);
 
         session()->flash('status', 'Page setup saved.');
     }

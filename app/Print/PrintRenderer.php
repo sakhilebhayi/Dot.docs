@@ -65,6 +65,14 @@ class PrintRenderer
         $header = $this->band($setup->header, $vars);
         $footer = $this->band($setup->footer, $vars);
 
+        // page_text() draws on the raw PDF canvas, outside the normal CSS
+        // box model, so its x/y offsets are computed here in points rather
+        // than left as guesswork pixels - x sits at the left margin, y
+        // inside the top/bottom margin band (see toPoints() below).
+        $leftPt = self::toPoints($setup->margins['left']);
+        $topPt = self::toPoints($setup->margins['top']);
+        $bottomPt = self::toPoints($setup->margins['bottom']);
+
         return view('print.document', [
             'title' => $doc->title,
             'css' => $css,
@@ -74,6 +82,9 @@ class PrintRenderer
             'footerHtml' => $footer['html'],
             'headerPageTextLiteral' => $header['pageText'] === null ? null : self::phpStringLiteral($header['pageText']),
             'footerPageTextLiteral' => $footer['pageText'] === null ? null : self::phpStringLiteral($footer['pageText']),
+            'pageTextX' => round($leftPt, 2),
+            'headerPageTextY' => round(max($topPt - 14, 4), 2),
+            'footerPageTextYFromBottom' => round(max($bottomPt - 14, 4), 2),
         ])->render();
     }
 
@@ -83,7 +94,13 @@ class PrintRenderer
         $setup = PageSetup::fromDocument($doc, $style);
         $html = $this->html($doc);
 
-        return Pdf::setOption(['isPhpEnabled' => true])
+        // Only grant dompdf's eval()-backed PHP evaluator (a security
+        // surface - see .ai/rules/print.md) when html() actually emitted a
+        // <script type="text/php"> block, i.e. a header/footer template
+        // used {{ page }}/{{ pages }}. Most documents render with it off.
+        $needsPhpEval = str_contains($html, 'type="text/php"');
+
+        return Pdf::setOption(['isPhpEnabled' => $needsPhpEval])
             ->loadHTML($html)
             ->setPaper(strtolower($setup->size), $setup->orientation)
             ->output();
@@ -110,7 +127,9 @@ class PrintRenderer
                 return $m[0];
             }
 
-            return (string) ($vars[$key] ?? '');
+            $value = $vars[$key] ?? '';
+
+            return is_scalar($value) ? (string) $value : '';
         }, $template);
 
         $needsPageNumber = (bool) preg_match('/\{\{\s*pages?\s*\}\}/', $substituted);
@@ -142,5 +161,29 @@ class PrintRenderer
         $text = str_ireplace('</script', '<\\/script', $text);
 
         return "'".addcslashes($text, "\\'")."'";
+    }
+
+    /**
+     * Converts a PageSetup margin length (already restricted to
+     * pt|px|mm|cm|em|rem|% by App\Styles\TokenGuard::length()) to PDF
+     * points for page_text()'s x/y offsets: 1mm = 2.8346pt,
+     * 1cm = 28.346pt, 1in = 72pt. A value already in points (or any other
+     * unit TokenGuard allows) passes through as its leading numeric value -
+     * points is what page_text() expects either way.
+     */
+    private static function toPoints(string $length): float
+    {
+        if (! preg_match('/^(\d+(?:\.\d+)?)(mm|cm|pt|in)$/', $length, $m)) {
+            return (float) $length;
+        }
+
+        $value = (float) $m[1];
+
+        return match ($m[2]) {
+            'mm' => $value * 2.8346,
+            'cm' => $value * 28.346,
+            'in' => $value * 72,
+            default => $value,
+        };
     }
 }

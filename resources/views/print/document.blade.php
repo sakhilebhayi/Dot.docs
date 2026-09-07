@@ -48,10 +48,10 @@
     if (isset($pdf)) {
         $font = $fontMetrics->getFont('Helvetica');
         @if($headerPageTextLiteral)
-        $pdf->page_text(40, 24, {!! $headerPageTextLiteral !!}, $font, 9);
+        $pdf->page_text({{ $pageTextX }}, {{ $headerPageTextY }}, {!! $headerPageTextLiteral !!}, $font, 9);
         @endif
         @if($footerPageTextLiteral)
-        $pdf->page_text(40, $pdf->get_height() - 30, {!! $footerPageTextLiteral !!}, $font, 9);
+        $pdf->page_text({{ $pageTextX }}, $pdf->get_height() - {{ $footerPageTextYFromBottom }}, {!! $footerPageTextLiteral !!}, $font, 9);
         @endif
     }
     </script>
