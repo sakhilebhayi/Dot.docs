@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""Call a Laravel Boost MCP tool from the shell.
+
+Usage:
+  bin/boost list
+  bin/boost search-docs '{"queries":["livewire computed property","rate limiting"]}'
+  bin/boost database-schema '{}'
+  bin/boost database-query '{"query":"select count(*) from documents"}'
+  bin/boost application-info '{}'
+Prints the tool's text result. Runs `php artisan boost:mcp` over stdio (JSON-RPC).
+"""
+import json, subprocess, sys, os
+
+root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+proc = subprocess.Popen(['php', 'artisan', 'boost:mcp'], cwd=root, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+def send(msg):
+    proc.stdin.write(json.dumps(msg) + "\n"); proc.stdin.flush()
+
+def recv(expect_id):
+    while True:
+        line = proc.stdout.readline()
+        if not line:
+            err = proc.stderr.read()
+            sys.exit(f"boost exited without reply\n{err}")
+        line = line.strip()
+        if not line.startswith('{'):
+            continue
+        msg = json.loads(line)
+        if msg.get('id') == expect_id:
+            return msg
+
+send({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"bin/boost","version":"1"}}})
+recv(1)
+send({"jsonrpc":"2.0","method":"notifications/initialized"})
+
+cmd = sys.argv[1] if len(sys.argv) > 1 else 'list'
+if cmd == 'list':
+    send({"jsonrpc":"2.0","id":2,"method":"tools/list"})
+    for t in recv(2)['result']['tools']:
+        print(f"- {t['name']}: {t.get('description','').strip().splitlines()[0][:110]}")
+else:
+    args = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+    send({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":cmd,"arguments":args}})
+    res = recv(3)
+    if 'error' in res:
+        print(json.dumps(res['error'], indent=2)); sys.exit(1)
+    for c in res['result'].get('content', []):
+        print(c.get('text', json.dumps(c)))
+proc.stdin.close(); proc.terminate()
