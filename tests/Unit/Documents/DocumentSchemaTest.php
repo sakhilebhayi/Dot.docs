@@ -1,0 +1,62 @@
+<?php
+
+namespace Tests\Unit\Documents;
+
+use App\Documents\Schema\BlockId;
+use App\Documents\Schema\DocumentSchema;
+use PHPUnit\Framework\TestCase;
+
+class DocumentSchemaTest extends TestCase
+{
+    public function test_block_ids_are_eight_base62_chars_and_unique(): void
+    {
+        $ids = array_map(fn () => BlockId::generate(), range(1, 200));
+        foreach ($ids as $id) {
+            $this->assertTrue(BlockId::isValid($id), $id);
+        }
+        $this->assertCount(200, array_unique($ids));
+        $this->assertFalse(BlockId::isValid('abc'));
+        $this->assertFalse(BlockId::isValid('abcd-fgh'));
+    }
+
+    public function test_ensure_ids_assigns_ids_to_every_block_and_keeps_existing(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'heading', 'attrs' => ['level' => 1, 'id' => 'KeepMe01'], 'content' => [['type' => 'text', 'text' => 'T']]],
+            ['type' => 'bulletList', 'content' => [
+                ['type' => 'listItem', 'content' => [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'a']]]]],
+            ]],
+        ]];
+        $out = (new DocumentSchema)->ensureIds($doc);
+        $this->assertSame('KeepMe01', $out['content'][0]['attrs']['id']);
+        $this->assertTrue(BlockId::isValid($out['content'][1]['attrs']['id']));
+        $this->assertTrue(BlockId::isValid($out['content'][1]['content'][0]['attrs']['id']));
+        $this->assertTrue(BlockId::isValid($out['content'][1]['content'][0]['content'][0]['attrs']['id']));
+        $this->assertArrayNotHasKey('attrs', $out['content'][0]['content'][0]);
+    }
+
+    public function test_validate_rejects_unknown_nodes_and_duplicate_ids(): void
+    {
+        $schema = new DocumentSchema;
+        $bad = ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'attrs' => ['id' => 'aaaaaaaa'], 'content' => []],
+            ['type' => 'paragraph', 'attrs' => ['id' => 'aaaaaaaa'], 'content' => []],
+            ['type' => 'marquee', 'attrs' => ['id' => 'bbbbbbbb']],
+        ]];
+        $errors = $schema->validate($bad);
+        $this->assertContains('Duplicate block id aaaaaaaa', $errors);
+        $this->assertContains('Unknown node type marquee', $errors);
+        $this->assertSame([], $schema->validate($schema->ensureIds(['type' => 'doc', 'content' => []])));
+    }
+
+    public function test_plain_text_and_word_count(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'heading', 'attrs' => ['level' => 2], 'content' => [['type' => 'text', 'text' => 'Fleet report']]],
+            ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Ten trucks ran '], ['type' => 'text', 'text' => 'today.', 'marks' => [['type' => 'bold']]]]],
+        ]];
+        $schema = new DocumentSchema;
+        $this->assertSame("Fleet report\nTen trucks ran today.", $schema->plainText($doc));
+        $this->assertSame(6, $schema->wordCount($doc));
+    }
+}
