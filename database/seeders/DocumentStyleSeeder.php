@@ -13,13 +13,16 @@ use Illuminate\Database\Seeder;
  */
 class DocumentStyleSeeder extends Seeder
 {
-    private const SANS_JETBRAINS = 'https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap';
+    // Semicolons are percent-encoded (%3B) so these URLs pass
+    // TokenGuard::fontImport()'s no-';' rule; Google's css2 endpoint
+    // decodes %3B the same as a literal ';' in the family weight list.
+    private const SANS_JETBRAINS = 'https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400%3B600%3B700&family=JetBrains+Mono:wght@400%3B500&display=swap';
 
-    private const SANS_IBM_PLEX = 'https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap';
+    private const SANS_IBM_PLEX = 'https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400%3B600%3B700&family=IBM+Plex+Mono:wght@400%3B500&display=swap';
 
-    private const SERIF_JETBRAINS = 'https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap';
+    private const SERIF_JETBRAINS = 'https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400%3B600%3B700&family=JetBrains+Mono:wght@400%3B500&display=swap';
 
-    private const SERIF_SANS_JETBRAINS = 'https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600;700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap';
+    private const SERIF_SANS_JETBRAINS = 'https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400%3B600%3B700&family=Source+Sans+3:wght@400%3B600%3B700&family=JetBrains+Mono:wght@400%3B500&display=swap';
 
     /**
      * @var array<string, array{name:string,category:string,tokens:array}>
@@ -50,7 +53,7 @@ class DocumentStyleSeeder extends Seeder
                 'sizes' => ['body' => '12pt', 'h1' => '24pt', 'h2' => '17pt', 'h3' => '14pt', 'small' => '9pt'],
                 'leading' => 1.45,
                 'spacing' => ['paragraph' => '0.6em', 'headingTop' => '1.6em', 'headingBottom' => '0.5em'],
-                'colours' => ['ink' => '#1f2023', 'heading' => '#1f2023', 'accent' => '#9a9a94', 'rule' => '#d5d1c7', 'muted' => '#5d5e5a'],
+                'colours' => ['ink' => '#1f2023', 'heading' => '#1f2023', 'accent' => '#5d5e5a', 'rule' => '#d5d1c7', 'muted' => '#5d5e5a'],
                 'numbering' => ['headings' => 'none', 'startLevel' => 1, 'maxLevel' => 3, 'figures' => 'sequential'],
                 'headingCase' => 'none',
                 'table' => ['header' => 'rule', 'zebra' => false, 'border' => 'hairline'],
@@ -101,7 +104,7 @@ class DocumentStyleSeeder extends Seeder
                 'sizes' => ['body' => '11pt', 'h1' => '22pt', 'h2' => '16pt', 'h3' => '13pt', 'small' => '9pt'],
                 'leading' => 1.45,
                 'spacing' => ['paragraph' => '0.6em', 'headingTop' => '1.6em', 'headingBottom' => '0.5em'],
-                'colours' => ['ink' => '#1f2023', 'heading' => '#1f2023', 'accent' => '#f1c62e', 'rule' => '#d5d1c7', 'muted' => '#5d5e5a'],
+                'colours' => ['ink' => '#1f2023', 'heading' => '#1f2023', 'accent' => '#8a6d05', 'rule' => '#d5d1c7', 'muted' => '#5d5e5a'],
                 'numbering' => ['headings' => 'decimal', 'startLevel' => 1, 'maxLevel' => 3, 'figures' => 'sequential'],
                 'headingCase' => 'none',
                 'table' => ['header' => 'band', 'zebra' => false, 'border' => 'grid'],
@@ -118,7 +121,7 @@ class DocumentStyleSeeder extends Seeder
                 'sizes' => ['body' => '11pt', 'h1' => '22pt', 'h2' => '16pt', 'h3' => '13pt', 'small' => '9pt'],
                 'leading' => 1.45,
                 'spacing' => ['paragraph' => '0.6em', 'headingTop' => '1.6em', 'headingBottom' => '0.5em'],
-                'colours' => ['ink' => '#1f2023', 'heading' => '#1f2023', 'accent' => '#3f8f5a', 'rule' => '#d5d1c7', 'muted' => '#5d5e5a'],
+                'colours' => ['ink' => '#1f2023', 'heading' => '#1f2023', 'accent' => '#2f7043', 'rule' => '#d5d1c7', 'muted' => '#5d5e5a'],
                 'numbering' => ['headings' => 'decimal', 'startLevel' => 1, 'maxLevel' => 4, 'figures' => 'sequential'],
                 'headingCase' => 'none',
                 'table' => ['header' => 'band', 'zebra' => false, 'border' => 'grid'],
@@ -169,7 +172,7 @@ class DocumentStyleSeeder extends Seeder
                 'sizes' => ['body' => '11pt', 'h1' => '22pt', 'h2' => '16pt', 'h3' => '13pt', 'small' => '9pt'],
                 'leading' => 1.45,
                 'spacing' => ['paragraph' => '0.6em', 'headingTop' => '1.6em', 'headingBottom' => '0.5em'],
-                'colours' => ['ink' => '#1f2023', 'heading' => '#1f2023', 'accent' => '#2a2f38', 'rule' => '#d5d1c7', 'muted' => '#5d5e5a'],
+                'colours' => ['ink' => '#1f2023', 'heading' => '#1f2023', 'accent' => '#5d5e5a', 'rule' => '#d5d1c7', 'muted' => '#5d5e5a'],
                 'numbering' => ['headings' => 'decimal', 'startLevel' => 1, 'maxLevel' => 4, 'figures' => 'byChapter'],
                 'headingCase' => 'none',
                 'table' => ['header' => 'band', 'zebra' => false, 'border' => 'grid'],
@@ -182,7 +185,7 @@ class DocumentStyleSeeder extends Seeder
             'name' => 'Marketing',
             'category' => 'marketing',
             'tokens' => [
-                'fonts' => ['body' => 'Source Sans 3', 'heading' => 'Source Sans 3', 'mono' => 'JetBrains Mono', 'import' => self::SANS_JETBRAINS],
+                'fonts' => ['body' => 'Source Sans 3', 'heading' => 'Source Sans 3', 'mono' => 'JetBrains Mono', 'import' => self::SANS_JETBRAINS, 'headingWeight' => 700],
                 'sizes' => ['body' => '11pt', 'h1' => '30pt', 'h2' => '20pt', 'h3' => '15pt', 'small' => '9pt'],
                 'leading' => 1.45,
                 'spacing' => ['paragraph' => '0.6em', 'headingTop' => '1.6em', 'headingBottom' => '0.5em'],

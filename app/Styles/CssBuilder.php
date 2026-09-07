@@ -3,6 +3,7 @@
 namespace App\Styles;
 
 use App\Models\DocumentStyle;
+use Database\Seeders\DocumentStyleSeeder;
 
 /**
  * Turns one DocumentStyle's token array into a CSS string for either the
@@ -12,23 +13,34 @@ use App\Models\DocumentStyle;
  *
  * Callouts always get a full hairline border plus a tone-coloured title
  * (never a thick single-side border) - a design constraint, not a token.
+ *
+ * A team-owned DocumentStyle's tokens are arbitrary JSON a team member can
+ * set (unlike the fourteen system styles, which are literal PHP arrays
+ * this codebase controls) - every free-form value (colours, font names,
+ * lengths, the leading number, the font-import URL) is read through
+ * TokenGuard before it is interpolated into CSS, falling back to the
+ * 'report' style's equivalent token when a value doesn't pass.
  */
 class CssBuilder
 {
     /** @var array<string,mixed> */
     private array $tokens;
 
+    /** @var array<string,mixed> The 'report' style's tokens - the fallback for every guarded value. */
+    private array $fallback;
+
     public function __construct(private DocumentStyle $style, private string $mode)
     {
         $this->tokens = $style->tokens;
+        $this->fallback = DocumentStyleSeeder::STYLES['report']['tokens'];
     }
 
     public function build(): string
     {
         $parts = [];
 
-        $import = $this->tokens['fonts']['import'] ?? '';
-        if (is_string($import) && str_starts_with($import, 'https://fonts.googleapis.com/')) {
+        $import = TokenGuard::fontImport($this->tokens['fonts']['import'] ?? null, $this->fallback['fonts']['import']);
+        if ($import !== '') {
             $parts[] = "@import url({$import});";
         }
 
@@ -64,29 +76,30 @@ class CssBuilder
 
     private function paperRule(): string
     {
-        $fonts = $this->tokens['fonts'];
-        $sizes = $this->tokens['sizes'];
-        $spacing = $this->tokens['spacing'];
-        $colours = $this->tokens['colours'];
+        $fonts = $this->tokens['fonts'] ?? [];
+        $sizes = $this->tokens['sizes'] ?? [];
+        $spacing = $this->tokens['spacing'] ?? [];
+        $colours = $this->tokens['colours'] ?? [];
+        $fb = $this->fallback;
 
         $vars = [
-            '--doc-font-body' => $this->fontStack($fonts['body']),
-            '--doc-font-heading' => $this->fontStack($fonts['heading']),
-            '--doc-font-mono' => $this->fontStack($fonts['mono']),
-            '--doc-size-body' => $sizes['body'],
-            '--doc-size-h1' => $sizes['h1'],
-            '--doc-size-h2' => $sizes['h2'],
-            '--doc-size-h3' => $sizes['h3'],
-            '--doc-size-small' => $sizes['small'],
-            '--doc-leading' => (string) $this->tokens['leading'],
-            '--doc-space-paragraph' => $spacing['paragraph'],
-            '--doc-space-heading-top' => $spacing['headingTop'],
-            '--doc-space-heading-bottom' => $spacing['headingBottom'],
-            '--doc-ink' => $colours['ink'],
-            '--doc-heading' => $colours['heading'],
-            '--doc-accent' => $colours['accent'],
-            '--doc-rule' => $colours['rule'],
-            '--doc-muted' => $colours['muted'],
+            '--doc-font-body' => $this->fontStack(TokenGuard::fontName($fonts['body'] ?? null, $fb['fonts']['body'])),
+            '--doc-font-heading' => $this->fontStack(TokenGuard::fontName($fonts['heading'] ?? null, $fb['fonts']['heading'])),
+            '--doc-font-mono' => $this->fontStack(TokenGuard::fontName($fonts['mono'] ?? null, $fb['fonts']['mono'])),
+            '--doc-size-body' => TokenGuard::length($sizes['body'] ?? null, $fb['sizes']['body']),
+            '--doc-size-h1' => TokenGuard::length($sizes['h1'] ?? null, $fb['sizes']['h1']),
+            '--doc-size-h2' => TokenGuard::length($sizes['h2'] ?? null, $fb['sizes']['h2']),
+            '--doc-size-h3' => TokenGuard::length($sizes['h3'] ?? null, $fb['sizes']['h3']),
+            '--doc-size-small' => TokenGuard::length($sizes['small'] ?? null, $fb['sizes']['small']),
+            '--doc-leading' => (string) TokenGuard::number($this->tokens['leading'] ?? null, (float) $fb['leading']),
+            '--doc-space-paragraph' => TokenGuard::length($spacing['paragraph'] ?? null, $fb['spacing']['paragraph']),
+            '--doc-space-heading-top' => TokenGuard::length($spacing['headingTop'] ?? null, $fb['spacing']['headingTop']),
+            '--doc-space-heading-bottom' => TokenGuard::length($spacing['headingBottom'] ?? null, $fb['spacing']['headingBottom']),
+            '--doc-ink' => TokenGuard::colour($colours['ink'] ?? null, $fb['colours']['ink']),
+            '--doc-heading' => TokenGuard::colour($colours['heading'] ?? null, $fb['colours']['heading']),
+            '--doc-accent' => TokenGuard::colour($colours['accent'] ?? null, $fb['colours']['accent']),
+            '--doc-rule' => TokenGuard::colour($colours['rule'] ?? null, $fb['colours']['rule']),
+            '--doc-muted' => TokenGuard::colour($colours['muted'] ?? null, $fb['colours']['muted']),
         ];
 
         if ($this->mode === 'canvas') {
@@ -102,16 +115,30 @@ class CssBuilder
 
     private function margins(): string
     {
-        $m = $this->tokens['page']['margins'];
+        $m = $this->tokens['page']['margins'] ?? [];
+        $fb = $this->fallback['page']['margins'];
 
-        return "{$m['top']} {$m['right']} {$m['bottom']} {$m['left']}";
+        $top = TokenGuard::length($m['top'] ?? null, $fb['top']);
+        $right = TokenGuard::length($m['right'] ?? null, $fb['right']);
+        $bottom = TokenGuard::length($m['bottom'] ?? null, $fb['bottom']);
+        $left = TokenGuard::length($m['left'] ?? null, $fb['left']);
+
+        return "{$top} {$right} {$bottom} {$left}";
     }
 
+    /**
+     * Weight per level defaults to 700/600/500; a style may set
+     * fonts.headingWeight to override ALL levels uniformly (marketing
+     * wants its bold weight at every heading level, not the gradient).
+     */
     private function headingRules(): string
     {
         $upper = ($this->tokens['headingCase'] ?? 'none') === 'upper';
+        $rawWeight = $this->tokens['fonts']['headingWeight'] ?? null;
+
         $rules = '';
-        foreach (['h1' => 700, 'h2' => 600, 'h3' => 500] as $tag => $weight) {
+        foreach (['h1' => 700, 'h2' => 600, 'h3' => 500] as $tag => $default) {
+            $weight = $rawWeight === null ? $default : (int) TokenGuard::number($rawWeight, (float) $default, 100, 900);
             $transform = $tag === 'h1' && $upper ? 'uppercase' : 'none';
             $rules .= ".paper {$tag}{font-family:var(--doc-font-heading);font-size:var(--doc-size-{$tag});".
                 "font-weight:{$weight};color:var(--doc-heading);text-transform:{$transform};".
@@ -123,7 +150,9 @@ class CssBuilder
 
     private function paragraphRule(): string
     {
-        $align = $this->tokens['align'] ?? 'left';
+        // 'align' is a two-value enum (brief §token shape); any other
+        // value collapses to the safe default rather than reaching CSS.
+        $align = ($this->tokens['align'] ?? 'left') === 'justify' ? 'justify' : 'left';
 
         return '.paper p{font-family:var(--doc-font-body);font-size:var(--doc-size-body);'.
             'line-height:var(--doc-leading);color:var(--doc-ink);text-align:'.$align.';'.
@@ -214,8 +243,9 @@ class CssBuilder
 
     private function pageRule(): string
     {
-        $page = $this->tokens['page'];
+        $size = $this->tokens['page']['size'] ?? null;
+        $size = (is_string($size) && preg_match('/^[A-Za-z0-9]{1,20}$/', $size)) ? $size : $this->fallback['page']['size'];
 
-        return "@page{size:{$page['size']} portrait;margin:{$this->margins()}}";
+        return "@page{size:{$size} portrait;margin:{$this->margins()}}";
     }
 }

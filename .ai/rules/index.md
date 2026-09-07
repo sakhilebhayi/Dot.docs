@@ -5,5 +5,6 @@ Before planning or editing, find the row whose globs match the file's path and r
 | Applies to | Rule file |
 | --- | --- |
 | app/** | .ai/rules/app.md |
+| resources/views/livewire/** | .ai/rules/livewire.md |
 | app/Documents/Outline/** | .ai/rules/outline.md |
 | app/Styles/** | .ai/rules/styles.md |

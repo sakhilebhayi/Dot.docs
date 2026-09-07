@@ -1,5 +1,3 @@
-<style id="doc-style">{!! $styleCss !!}</style>
-
 <div
     x-data="{
         editor: null,
@@ -150,6 +148,8 @@
     @keydown.meta.k.window.prevent="$dispatch('open-ai-palette')"
     class="flex flex-col h-screen bg-gray-50 dark:bg-gray-900"
 >
+    <style id="doc-style">{!! $styleCss !!}</style>
+
     {{-- AI Components (outside toolbar, at root level) --}}
     <livewire:documents.ai-assistant :document="$document" wire:key="ai-assistant" lazy />
     <livewire:documents.ai-chat :document="$document" wire:key="ai-chat" lazy />
