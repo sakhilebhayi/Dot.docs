@@ -45,6 +45,9 @@ class Editor extends Component
     /** Whether comment sidebar is open */
     public bool $commentSidebarOpen = false;
 
+    /** Whether the editor is showing the print/PDF stylesheet instead of the canvas one (see StyleEngine::css()) */
+    public bool $printPreview = false;
+
     public function mount(string $uuid): void
     {
         $this->document = Document::where('uuid', $uuid)->firstOrFail();
@@ -100,6 +103,12 @@ class Editor extends Component
     public function toggleCommentSidebar(): void
     {
         $this->commentSidebarOpen = ! $this->commentSidebarOpen;
+    }
+
+    /** Swaps $styleCss (see render()) between the canvas and print stylesheets, e.g. to preview @page margins/header/footer before exporting. */
+    public function togglePrintPreview(): void
+    {
+        $this->printPreview = ! $this->printPreview;
     }
 
     public function acceptSuggestion(int $suggestionId): void
@@ -207,7 +216,7 @@ class Editor extends Component
     public function render(): View
     {
         $engine = app(StyleEngine::class);
-        $styleCss = $engine->css($engine->resolve($this->document), 'canvas');
+        $styleCss = $engine->css($engine->resolve($this->document), $this->printPreview ? 'print' : 'canvas');
 
         return view('livewire.documents.editor', ['styleCss' => $styleCss]);
     }

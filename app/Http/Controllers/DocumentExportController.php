@@ -3,8 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Document;
+use App\Print\PrintRenderer;
 use App\Services\WebhookService;
-use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
@@ -14,6 +15,8 @@ use PhpOffice\PhpWord\PhpWord;
 
 class DocumentExportController extends Controller
 {
+    use AuthorizesRequests;
+
     public function export(string $uuid, string $format): Response|\Symfony\Component\HttpFoundation\Response
     {
         $document = Document::where('uuid', $uuid)->firstOrFail();
@@ -44,11 +47,12 @@ class DocumentExportController extends Controller
 
     private function exportPdf(Document $document, string $safeTitle): \Symfony\Component\HttpFoundation\Response
     {
-        $html = view('documents.export-pdf', compact('document'))->render();
+        $pdf = app(PrintRenderer::class)->pdf($document);
 
-        return Pdf::loadHTML($html)
-            ->setPaper('a4')
-            ->download("{$safeTitle}.pdf");
+        return response($pdf, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => "attachment; filename=\"{$safeTitle}.pdf\"",
+        ]);
     }
 
     private function exportWord(Document $document, string $safeTitle): Response

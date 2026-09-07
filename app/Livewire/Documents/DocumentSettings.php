@@ -2,17 +2,23 @@
 
 namespace App\Livewire\Documents;
 
+use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\Folder;
 use App\Models\User;
+use App\Print\PageSetup;
 use App\Services\TagRepository;
+use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class DocumentSettings extends Component
 {
     use AuthorizesRequests;
+
+    private const MARGIN_REGEX = '/^\d+(\.\d+)?(mm|cm|pt|in)$/';
 
     public Document $document;
 
@@ -28,6 +34,22 @@ class DocumentSettings extends Component
 
     public string $newTagName = '';
 
+    public string $pageSize = 'A4';
+
+    public string $orientation = 'portrait';
+
+    public string $marginTop = '25mm';
+
+    public string $marginRight = '20mm';
+
+    public string $marginBottom = '25mm';
+
+    public string $marginLeft = '20mm';
+
+    public string $header = '';
+
+    public string $footer = '';
+
     public function mount(string $uuid): void
     {
         $this->document = Document::where('uuid', $uuid)->firstOrFail();
@@ -36,6 +58,60 @@ class DocumentSettings extends Component
         $this->title = $this->document->title;
         $this->isPublic = $this->document->is_public;
         $this->folderId = $this->document->folder_id;
+
+        $setup = PageSetup::fromDocument($this->document, app(StyleEngine::class)->resolve($this->document));
+        $this->pageSize = $setup->size;
+        $this->orientation = $setup->orientation;
+        $this->marginTop = $setup->margins['top'];
+        $this->marginRight = $setup->margins['right'];
+        $this->marginBottom = $setup->margins['bottom'];
+        $this->marginLeft = $setup->margins['left'];
+        $this->header = $setup->header;
+        $this->footer = $setup->footer;
+    }
+
+    /**
+     * page_setup is not document content (see .ai/rules/app.md's
+     * DocumentStore-only-writer rule for content/content_json/etc.), so it
+     * is written directly via ->update(). Header/footer templates can
+     * reference $doc->variables (see PrintRenderer::band()), so content is
+     * re-saved via DocumentStore::save() afterwards purely to re-render
+     * those variables into content/content_json - 'version' => 'none'
+     * means this never cuts a version snapshot on its own.
+     */
+    public function savePageSetup(): void
+    {
+        $this->authorize('update', $this->document);
+
+        $this->validate([
+            'pageSize' => 'required|in:A4,A3,Letter',
+            'orientation' => 'required|in:portrait,landscape',
+            'marginTop' => ['required', 'string', 'regex:'.self::MARGIN_REGEX],
+            'marginRight' => ['required', 'string', 'regex:'.self::MARGIN_REGEX],
+            'marginBottom' => ['required', 'string', 'regex:'.self::MARGIN_REGEX],
+            'marginLeft' => ['required', 'string', 'regex:'.self::MARGIN_REGEX],
+            'header' => 'nullable|string|max:200',
+            'footer' => 'nullable|string|max:200',
+        ]);
+
+        $this->document->update([
+            'page_setup' => [
+                'size' => $this->pageSize,
+                'orientation' => $this->orientation,
+                'margins' => [
+                    'top' => $this->marginTop,
+                    'right' => $this->marginRight,
+                    'bottom' => $this->marginBottom,
+                    'left' => $this->marginLeft,
+                ],
+                'header' => $this->header,
+                'footer' => $this->footer,
+            ],
+        ]);
+
+        $this->document = app(DocumentStore::class)->save($this->document, $this->document->content_json, Auth::user(), ['version' => 'none']);
+
+        session()->flash('status', 'Page setup saved.');
     }
 
     public function save(): void
