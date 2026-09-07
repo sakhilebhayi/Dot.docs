@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Documents\DocumentStore;
+use App\Documents\Import\HtmlToJson;
 use App\Models\Document;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use League\CommonMark\CommonMarkConverter;
 use PhpOffice\PhpWord\Element\Text;
@@ -14,7 +17,7 @@ use PhpOffice\PhpWord\IOFactory;
 
 class DocumentImportController extends Controller
 {
-    public function store(Request $request, string $uuid): RedirectResponse
+    public function store(Request $request, string $uuid, DocumentStore $store, HtmlToJson $htmlToJson): RedirectResponse
     {
         $document = Document::where('uuid', $uuid)->firstOrFail();
         Gate::authorize('update', $document);
@@ -30,6 +33,7 @@ class DocumentImportController extends Controller
 
         $file = $request->file('file');
         $extension = strtolower($file->getClientOriginalExtension());
+        $originalName = $file->getClientOriginalName();
 
         $content = match ($extension) {
             'docx' => $this->parseDocx($file->getRealPath()),
@@ -37,7 +41,8 @@ class DocumentImportController extends Controller
             default => abort(422, 'Unsupported file type.'),
         };
 
-        $document->update(['content' => $content]);
+        $json = $htmlToJson->convert($content);
+        $store->save($document, $json, Auth::user(), ['version' => 'named', 'label' => 'Imported '.$originalName]);
 
         return redirect()
             ->route('documents.edit', $document->uuid)

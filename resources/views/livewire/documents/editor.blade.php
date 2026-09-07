@@ -45,8 +45,7 @@
             window.addEventListener('app-online',  () => {
                 this.isOffline = false;
                 // Flush current draft to server now that we're back online
-                const html = this.editor?.getHTML();
-                if (html) @this.saveContent(this.editor.getJSON());
+                if (this.editor) @this.saveContent(this.editor.getJSON());
                 if (window.offlineDraft) window.offlineDraft.clearDraft(this.docUuid);
             });
 
@@ -96,7 +95,7 @@
                     // Only apply remote updates if from another user
                     if (e.editor.id !== {{ auth()->id() }}) {
                         const currentPos = this.editor.state.selection.anchor;
-                        this.editor.commands.setContent(e.content, false);
+                        this.editor.commands.setContent(e.json ?? e.content, false);
                         // Try to restore cursor position
                         try { this.editor.commands.setTextSelection(currentPos); } catch(_) {}
                     }
@@ -123,7 +122,7 @@
             if (!this.editor) return;
             if (type === 'replace') {
                 this.editor.commands.setContent(content, true);
-                @this.saveContent(content);
+                @this.saveContent(this.editor.getJSON());
             } else {
                 this.editor.commands.focus('end');
                 this.editor.commands.insertContent(content);

@@ -3,6 +3,7 @@
 namespace App\Livewire\Documents;
 
 use App\Documents\DocumentStore;
+use App\Documents\Import\HtmlToJson;
 use App\Events\DocumentUpdated;
 use App\Events\UserJoinedDocument;
 use App\Events\UserLeftDocument;
@@ -107,16 +108,18 @@ class Editor extends Component
             ->whereNull('accepted_at')
             ->findOrFail($suggestionId);
 
-        $this->document->update([
-            'content' => $suggestion->suggestion_text,
-            'version' => $this->document->version + 1,
+        $json = app(HtmlToJson::class)->convert($suggestion->suggestion_text);
+        $this->document = app(DocumentStore::class)->save($this->document, $json, Auth::user(), [
+            'version' => 'named',
+            'label' => 'Accepted suggestion',
         ]);
+        $this->contentJson = $this->document->content_json;
 
         $suggestion->update(['accepted_at' => now()]);
         $this->loadPendingSuggestions();
         $this->saved = true;
 
-        $this->dispatch('suggestion-accepted', content: $suggestion->suggestion_text);
+        $this->dispatch('suggestion-accepted', content: $this->contentJson);
     }
 
     public function rejectSuggestion(int $suggestionId): void
