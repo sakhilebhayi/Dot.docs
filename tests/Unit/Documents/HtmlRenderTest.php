@@ -99,4 +99,79 @@ class HtmlRenderTest extends TestCase
         $html = (new HtmlRenderer)->render($doc, RenderContext::editor());
         $this->assertStringContainsString('colspan="2"', $html);
     }
+
+    public function test_image_block_renders_with_data_id(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'image', 'attrs' => ['id' => 'i1i1i1i1', 'src' => 'https://example.com/a.png', 'alt' => 'Alt']],
+        ]];
+        $html = (new HtmlRenderer)->render($doc, RenderContext::editor());
+        $this->assertStringContainsString('<img data-id="i1i1i1i1"', $html);
+    }
+
+    public function test_figure_and_caption_render_with_data_id(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'figure', 'attrs' => ['id' => 'f1f1f1f1', 'kind' => 'figure'], 'content' => [
+                ['type' => 'image', 'attrs' => ['id' => 'i2i2i2i2', 'src' => 'https://example.com/a.png']],
+                ['type' => 'caption', 'attrs' => ['id' => 'c2c2c2c2'], 'content' => [['type' => 'text', 'text' => 'A caption']]],
+            ]],
+        ]];
+        $ctx = RenderContext::print();
+        $ctx->numbers = ['f1f1f1f1' => '1'];
+        $html = (new HtmlRenderer)->render($doc, $ctx);
+        $this->assertStringContainsString('<figcaption data-id="c2c2c2c2">', $html);
+        $this->assertStringContainsString('<span class="num">Figure 1</span>', $html);
+    }
+
+    public function test_ordered_list_start_attribute_round_trips(): void
+    {
+        $html = '<ol start="3"><li><p>Third</p></li></ol>';
+        $doc = (new HtmlToJson)->convert($html);
+        $this->assertSame(3, $doc['content'][0]['attrs']['start']);
+        $rendered = (new HtmlRenderer)->render($doc, RenderContext::editor());
+        $this->assertStringContainsString('<ol start="3"', $rendered);
+    }
+
+    public function test_ordered_list_start_of_one_is_not_stored(): void
+    {
+        $doc = (new HtmlToJson)->convert('<ol start="1"><li><p>One</p></li></ol>');
+        $this->assertArrayNotHasKey('start', $doc['content'][0]['attrs'] ?? []);
+    }
+
+    public function test_section_break_setup_defaults_to_empty_object_on_encode_failure(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'sectionBreak', 'attrs' => ['id' => 's1s1s1s1', 'bad' => "\xB1\x31"]],
+        ]];
+        $html = (new HtmlRenderer)->render($doc, RenderContext::editor());
+        $this->assertStringContainsString("data-setup='{}'", $html);
+    }
+
+    public function test_image_src_only_allows_storage_and_images_paths(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'image', 'attrs' => ['id' => 'i3i3i3i3', 'src' => '/uploads/evil.png']],
+        ]];
+        $html = (new HtmlRenderer)->render($doc, RenderContext::editor());
+        $this->assertStringNotContainsString('src=', $html);
+    }
+
+    public function test_image_src_allows_storage_path(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'image', 'attrs' => ['id' => 'i4i4i4i4', 'src' => '/storage/uploads/a.png']],
+        ]];
+        $html = (new HtmlRenderer)->render($doc, RenderContext::editor());
+        $this->assertStringContainsString('src="/storage/uploads/a.png"', $html);
+    }
+
+    public function test_image_src_allows_images_path(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'image', 'attrs' => ['id' => 'i5i5i5i5', 'src' => '/images/a.png']],
+        ]];
+        $html = (new HtmlRenderer)->render($doc, RenderContext::editor());
+        $this->assertStringContainsString('src="/images/a.png"', $html);
+    }
 }

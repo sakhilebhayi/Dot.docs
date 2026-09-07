@@ -61,7 +61,7 @@ class HtmlToJson
             ],
             $tag === 'p' => ['type' => 'paragraph', 'content' => $this->convertInlineChildren($node)],
             $tag === 'ul' => ['type' => 'bulletList', 'content' => $this->convertListItems($node)],
-            $tag === 'ol' => ['type' => 'orderedList', 'content' => $this->convertListItems($node)],
+            $tag === 'ol' => $this->convertOrderedList($node),
             $tag === 'blockquote' => ['type' => 'blockquote', 'content' => $this->convertBlockChildrenWrapped($node)],
             $tag === 'pre' => ['type' => 'codeBlock', 'content' => [['type' => 'text', 'text' => $node->textContent]]],
             $tag === 'hr' => ['type' => 'horizontalRule'],
@@ -82,6 +82,21 @@ class HtmlToJson
         }
 
         return ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => $node->textContent]]];
+    }
+
+    /** @return array<string,mixed> */
+    private function convertOrderedList(DOMElement $node): array
+    {
+        $doc = ['type' => 'orderedList'];
+        if ($node->hasAttribute('start')) {
+            $start = (int) $node->getAttribute('start');
+            if ($start > 1) {
+                $doc['attrs'] = ['start' => $start];
+            }
+        }
+        $doc['content'] = $this->convertListItems($node);
+
+        return $doc;
     }
 
     /** @return list<array<string,mixed>> */

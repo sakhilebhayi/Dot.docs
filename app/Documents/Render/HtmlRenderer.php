@@ -142,6 +142,11 @@ class HtmlRenderer
         return '<pre data-id="'.$this->id($node)."\"><code{$class}>".$this->renderChildren($node, $ctx).'</code></pre>';
     }
 
+    /**
+     * A src is valid iff it is an absolute http(s) URL, or a path served by
+     * the app's own upload/asset storage (`/storage/...` or `/images/...`).
+     * Any other value (relative paths, `javascript:`, `data:`, etc.) is rejected.
+     */
     private function isValidImageSrc(mixed $src): bool
     {
         if (! is_string($src) || $src === '') {
@@ -151,13 +156,13 @@ class HtmlRenderer
             return true;
         }
 
-        return str_starts_with($src, '/');
+        return str_starts_with($src, '/storage/') || str_starts_with($src, '/images/');
     }
 
     private function renderImage(array $node): string
     {
         $attrs = $node['attrs'] ?? [];
-        $html = '';
+        $html = ' data-id="'.$this->id($node).'"';
         if ($this->isValidImageSrc($attrs['src'] ?? null)) {
             $html .= ' src="'.$this->esc($attrs['src']).'"';
         }
@@ -185,7 +190,7 @@ class HtmlRenderer
         $number = $parentId !== null ? ($ctx->numbers[$parentId] ?? null) : null;
         $num = $number !== null ? '<span class="num">Figure '.$this->esc($number).'</span>' : '';
 
-        return "<figcaption>{$num}".$this->renderChildren($node, $ctx).'</figcaption>';
+        return '<figcaption data-id="'.$this->id($node)."\">{$num}".$this->renderChildren($node, $ctx).'</figcaption>';
     }
 
     private function renderTable(array $node, RenderContext $ctx): string
@@ -229,7 +234,7 @@ class HtmlRenderer
         $attrs = $node['attrs'] ?? [];
         $setup = $attrs;
         unset($setup['id']);
-        $json = $this->esc(json_encode($setup));
+        $json = $this->esc(json_encode($setup) ?: '{}');
 
         return '<div class="section-break" data-id="'.$this->id($node)."\" data-setup='{$json}'></div>";
     }
