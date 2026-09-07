@@ -3,8 +3,6 @@
 namespace App\Observers;
 
 use App\Models\Document;
-use App\Models\DocumentVersion;
-use App\Services\WebhookService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
@@ -19,25 +17,13 @@ class DocumentObserver
     }
 
     /**
-     * Snapshot a new version whenever content changes.
+     * Bust caches whenever the document changes. Version snapshotting and
+     * webhook firing now live in App\Documents\DocumentStore, the single
+     * write path for document content.
      */
     public function updated(Document $document): void
     {
-        // Bust permission + content caches
         $this->bustDocumentCache($document);
-
-        if ($document->wasChanged('content') && $document->content !== null) {
-            DocumentVersion::create([
-                'document_id' => $document->id,
-                'content_snapshot' => $document->content,
-                'version_number' => $document->version,
-                'created_by' => auth()->id() ?? $document->owner_id,
-                'created_at' => now(),
-            ]);
-
-            // Fire on_save webhooks asynchronously (best-effort)
-            app(WebhookService::class)->fire($document, 'on_save');
-        }
     }
 
     public function deleted(Document $document): void

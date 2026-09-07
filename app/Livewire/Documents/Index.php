@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Documents;
 
+use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\Folder;
 use App\Services\TagRepository;
@@ -145,12 +146,8 @@ class Index extends Component
     {
         $this->validate(['newTitle' => 'required|string|max:255']);
 
-        $document = Document::create([
-            'title' => $this->newTitle,
-            'owner_id' => auth()->id(),
-            'team_id' => auth()->user()->currentTeam?->id,
+        $document = app(DocumentStore::class)->create(auth()->user(), $this->newTitle, null, [
             'folder_id' => $this->folderId,
-            'version' => 1,
             'is_public' => false,
         ]);
 

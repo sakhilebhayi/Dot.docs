@@ -2,17 +2,18 @@
 
 namespace App\Livewire\Documents;
 
+use App\Documents\DocumentStore;
 use App\Events\DocumentUpdated;
 use App\Events\UserJoinedDocument;
 use App\Events\UserLeftDocument;
 use App\Models\AiSuggestion;
 use App\Models\Document;
-use App\Services\HtmlSanitizer;
 use App\Services\PresenceService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
+use InvalidArgumentException;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -25,7 +26,8 @@ class Editor extends Component
 
     public string $title = '';
 
-    public string $content = '';
+    /** Current document content as Dot.Doc JSON (see App\Documents\Schema\DocumentSchema) */
+    public array $contentJson = [];
 
     public bool $saved = false;
 
@@ -46,7 +48,7 @@ class Editor extends Component
         $this->authorize('view', $this->document);
 
         $this->title = $this->document->title;
-        $this->content = $this->document->content ?? '';
+        $this->contentJson = app(DocumentStore::class)->json($this->document);
 
         $presence = app(PresenceService::class);
         $presence->join($this->document, Auth::user());
@@ -61,41 +63,32 @@ class Editor extends Component
         $this->loadPendingSuggestions();
     }
 
-    public function saveContent(string $content): void
+    public function saveContent(array $content): void
     {
         $this->authorize('update', $this->document);
 
-        $content = app(HtmlSanitizer::class)->clean($content);
-
-        if ($this->suggestionMode) {
-            // Store as a suggestion instead of saving directly
-            AiSuggestion::create([
-                'document_id' => $this->document->id,
-                'user_id' => Auth::id(),
-                'suggestion_text' => $content,
-                'created_at' => now(),
-            ]);
-            $this->loadPendingSuggestions();
-            $this->saved = true;
+        try {
+            $this->document = app(DocumentStore::class)->save($this->document, $content, Auth::user());
+        } catch (InvalidArgumentException $e) {
+            $this->addError('content', $e->getMessage());
 
             return;
         }
-
-        $this->content = $content;
-        $this->document->update([
-            'content' => $content,
-            'version' => $this->document->version + 1,
-        ]);
+        $this->contentJson = $this->document->content_json;
         $this->saved = true;
 
         try {
-            DocumentUpdated::dispatch($this->document, Auth::user(), $content, $this->document->version);
+            DocumentUpdated::dispatch($this->document, Auth::user(), $this->document->content, $this->document->content_json, $this->document->version);
         } catch (\Throwable) {
             // Broadcasting unavailable — continue without real-time sync
         }
         app(PresenceService::class)->heartbeat($this->document, Auth::user());
     }
 
+    /**
+     * Suggestion / track-changes mode is rebuilt against the JSON document
+     * in Phase 3. This flag is kept as a no-op toggle for the toolbar UI.
+     */
     public function toggleSuggestionMode(): void
     {
         $this->suggestionMode = ! $this->suggestionMode;
@@ -118,7 +111,6 @@ class Editor extends Component
             'content' => $suggestion->suggestion_text,
             'version' => $this->document->version + 1,
         ]);
-        $this->content = $suggestion->suggestion_text;
 
         $suggestion->update(['accepted_at' => now()]);
         $this->loadPendingSuggestions();

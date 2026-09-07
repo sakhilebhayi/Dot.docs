@@ -18,6 +18,7 @@ class DocumentUpdated implements ShouldBroadcast
         public readonly Document $document,
         public readonly User $editor,
         public readonly string $content,
+        public readonly array $json,
         public readonly int $version,
     ) {}
 
@@ -38,6 +39,7 @@ class DocumentUpdated implements ShouldBroadcast
         return [
             'document_id' => $this->document->id,
             'content' => $this->content,
+            'json' => $this->json,
             'version' => $this->version,
             'editor' => [
                 'id' => $this->editor->id,

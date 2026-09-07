@@ -1,0 +1,135 @@
+<?php
+
+namespace App\Documents;
+
+use App\Documents\Import\HtmlToJson;
+use App\Documents\Outline\Outline;
+use App\Documents\Render\HtmlRenderer;
+use App\Documents\Render\RenderContext;
+use App\Documents\Schema\DocumentSchema;
+use App\Models\Document;
+use App\Models\DocumentVersion;
+use App\Models\User;
+use App\Services\WebhookService;
+use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
+
+class DocumentStore
+{
+    public const AUTO_VERSION_WINDOW_SECONDS = 120;
+
+    public function __construct(
+        private DocumentSchema $schema,
+        private HtmlRenderer $renderer,
+        private Outline $outline,
+        private HtmlToJson $legacy,
+    ) {}
+
+    public function create(User $owner, string $title, ?array $json = null, array $attrs = []): Document
+    {
+        $json = $this->schema->ensureIds($json ?? DocumentSchema::empty());
+        $doc = new Document(array_merge(['title' => $title, 'owner_id' => $owner->id, 'team_id' => $owner->currentTeam?->id, 'version' => 1], $attrs));
+        $this->fill($doc, $json);
+        $doc->save();
+
+        return $doc;
+    }
+
+    public function json(Document $doc): array
+    {
+        if (is_array($doc->content_json) && ($doc->content_json['type'] ?? null) === 'doc') {
+            return $doc->content_json;
+        }
+
+        return $this->legacy->convert($doc->content ?? '');
+    }
+
+    /** @param array{version?:string,label?:string|null} $opts */
+    public function save(Document $doc, array $json, User $actor, array $opts = []): Document
+    {
+        $json = $this->schema->ensureIds($json);
+        $errors = $this->schema->validate($json);
+        if ($errors !== []) {
+            throw new InvalidArgumentException(implode('; ', $errors));
+        }
+
+        return DB::transaction(function () use ($doc, $json, $actor, $opts) {
+            $this->fill($doc, $json);
+            $doc->version = $doc->version + 1;
+            $doc->save();
+
+            $kind = $opts['version'] ?? 'auto';
+            if ($kind !== 'none' && $this->shouldCut($doc, $actor, $kind)) {
+                $this->cutVersion($doc, $actor, $kind, $opts['label'] ?? null);
+            }
+            app(WebhookService::class)->fire($doc, 'on_save');
+
+            return $doc;
+        });
+    }
+
+    public function cutVersion(Document $doc, User $actor, string $kind = 'auto', ?string $label = null): DocumentVersion
+    {
+        return DocumentVersion::create([
+            'document_id' => $doc->id,
+            'content_snapshot' => $doc->content ?? '',
+            'content_json' => $doc->content_json,
+            'version_number' => $doc->version,
+            'created_by' => $actor->id,
+            'created_at' => now(),
+            'label' => $label,
+            'kind' => $kind,
+            'word_count' => $doc->word_count,
+        ]);
+    }
+
+    public function restore(Document $doc, DocumentVersion $version, User $actor): Document
+    {
+        abort_unless($version->document_id === $doc->id, 404);
+        $json = $version->content_json ?? $this->legacy->convert($version->content_snapshot);
+
+        return $this->save($doc, $json, $actor, ['version' => 'restore', 'label' => 'Restored v'.$version->version_number]);
+    }
+
+    /**
+     * Fill and persist a document's rendered/derived fields from JSON
+     * without cutting a version or firing events. Used by the backfill
+     * command to migrate legacy HTML documents onto the JSON pipeline.
+     */
+    public function refill(Document $doc, array $json): void
+    {
+        $this->fill($doc, $json);
+        $doc->saveQuietly();
+    }
+
+    private function shouldCut(Document $doc, User $actor, string $kind): bool
+    {
+        if ($kind !== 'auto') {
+            return true;
+        }
+        $latest = $doc->versions()->latest('id')->first();
+        if ($latest === null) {
+            return true;
+        }
+
+        return $latest->created_by !== $actor->id
+            || $latest->created_at->lt(now()->subSeconds(self::AUTO_VERSION_WINDOW_SECONDS));
+    }
+
+    private function fill(Document $doc, array $json): void
+    {
+        $result = $this->outline->build($json);
+        $json = $this->outline->apply($json, $result);
+        $ctx = RenderContext::editor();
+        $ctx->numbers = $result->numbers;
+        $ctx->kinds = $result->kinds;
+        $ctx->toc = $result->toc;
+        $ctx->vars = $doc->variables ?? [];
+
+        $doc->content_json = $json;
+        $doc->schema_version = DocumentSchema::VERSION;
+        $doc->content = $this->renderer->render($json, $ctx);
+        $doc->search_text = $this->schema->plainText($json);
+        $doc->word_count = $this->schema->wordCount($json);
+    }
+}

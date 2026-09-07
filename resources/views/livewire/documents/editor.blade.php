@@ -13,7 +13,7 @@
         init() {
             this.editor = window.createTipTapEditor({
                 element: this.$refs.editorEl,
-                content: @js($content),
+                content: @js($contentJson),
                 uploadUrl: '{{ route('documents.images.store', $document->uuid) }}',
                 csrfToken: document.querySelector('meta[name=csrf-token]').content,
                 onChange: (html) => {
@@ -30,7 +30,7 @@
                     // Debounced autosave (skipped when offline — SW queues it)
                     clearTimeout(this.saveTimeout);
                     this.saveTimeout = setTimeout(() => {
-                        @this.saveContent(html);
+                        @this.saveContent(this.editor.getJSON());
                     }, 1500);
                 }
             });
@@ -46,7 +46,7 @@
                 this.isOffline = false;
                 // Flush current draft to server now that we're back online
                 const html = this.editor?.getHTML();
-                if (html) @this.saveContent(html);
+                if (html) @this.saveContent(this.editor.getJSON());
                 if (window.offlineDraft) window.offlineDraft.clearDraft(this.docUuid);
             });
 
@@ -127,8 +127,7 @@
             } else {
                 this.editor.commands.focus('end');
                 this.editor.commands.insertContent(content);
-                const html = this.editor.getHTML();
-                @this.saveContent(html);
+                @this.saveContent(this.editor.getJSON());
             }
         },
 
@@ -137,9 +136,8 @@
             if (!this.editor || !text) return;
             this.editor.commands.focus();
             this.editor.commands.insertContent(text + ' ');
-            const html = this.editor.getHTML();
             clearTimeout(this.saveTimeout);
-            this.saveTimeout = setTimeout(() => { @this.saveContent(html); }, 1500);
+            this.saveTimeout = setTimeout(() => { @this.saveContent(this.editor.getJSON()); }, 1500);
         }
     }"
     x-init="init()"
