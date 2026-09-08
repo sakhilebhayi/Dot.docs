@@ -77,7 +77,11 @@
     </style>
     @livewireStyles
     @vite(['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js'])
-    <script defer src="https://unpkg.com/alpinejs@3.10.2/dist/cdn.min.js"></script>
+    {{-- Alpine is NOT loaded here: Livewire 3 bundles its own copy and starts it
+         from @livewireScripts. A second Alpine (the alpinejs CDN tag that used to
+         sit on this line) wins the `window.Alpine` slot and Livewire then dies on
+         `window.Alpine.cloneNode is not a function`, taking every wire:click,
+         wire:model and $wire call on the page with it. --}}
 </head>
 <body>
     <x-banner />

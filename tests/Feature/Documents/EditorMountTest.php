@@ -27,6 +27,40 @@ class EditorMountTest extends TestCase
             ->assertSee('&quot;type&quot;:&quot;doc&quot;', false);
     }
 
+    public function test_editor_page_seeds_the_outline_so_headings_render_numbered_before_the_first_save(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $topId = BlockId::generate();
+        $doc = app(DocumentStore::class)->create($user, 'Seeded', [
+            'type' => 'doc',
+            'content' => [
+                ['type' => 'heading', 'attrs' => ['id' => $topId, 'level' => 1], 'content' => [['type' => 'text', 'text' => 'Overview']]],
+            ],
+        ]);
+
+        $this->actingAs($user)->get(route('documents.edit', $doc->uuid))
+            ->assertOk()
+            ->assertSee('data-outline', false)
+            ->assertSee('&quot;'.$topId.'&quot;:&quot;1&quot;', false);
+    }
+
+    public function test_editor_page_loads_alpine_only_once(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'One Alpine');
+
+        // Livewire bundles and boots its own Alpine. A second copy (the
+        // alpinejs CDN tag this layout used to carry) takes the
+        // window.Alpine slot first and Livewire dies on
+        // "window.Alpine.cloneNode is not a function" - every wire:click,
+        // wire:model and $wire call on the page stops working.
+        $this->actingAs($user)->get(route('documents.edit', $doc->uuid))
+            ->assertOk()
+            ->assertDontSee('alpinejs', false);
+    }
+
     public function test_outline_returns_numbers_and_toc_for_numbered_headings(): void
     {
         $this->seed(DocumentStyleSeeder::class);

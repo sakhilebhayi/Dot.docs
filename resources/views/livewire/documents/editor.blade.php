@@ -23,18 +23,25 @@
         },
 
         init() {
-            // layouts/app.blade.php currently loads Alpine twice (the CDN tag
-            // and Livewire's own bundle), so x-init runs more than once on this
-            // element — and the CDN copy can run BEFORE Livewire has registered
-            // this component, when @this is still undefined and every server
-            // call would throw. Leave the work to the instance that has a live
-            // Livewire component; the other one does nothing at all.
-            // Task 9 removes the duplicate Alpine; these guards are cheap anyway.
+            // Alpine now comes only from Livewire's bundle (the duplicate CDN
+            // tag is gone from layouts/app.blade.php — two Alpines break
+            // Livewire outright), but x-init can still run before the editor
+            // bundle has loaded, and Livewire re-inits this element after a
+            // morph. Both guards below stay: the mount is idempotent and the
+            // second instance simply bridges to the editor the first mounted.
             if (typeof window.Livewire === 'undefined' || !@this || !window.DotDoc) return;
 
             const host = this.$refs.editorEl;
             if (!host) return;
             this.owns = !window.DotDoc.get(host);
+
+            // Numbers first, editor second: the heading-number decorations are
+            // built when the view is created, so seeding the server's outline
+            // before mount() is what stops a numbered document rendering
+            // unnumbered for one round trip.
+            try {
+                window.DotDoc.setOutline(JSON.parse(host.dataset.outline || '{}'));
+            } catch (_) {}
 
             // window.DotDoc comes from resources/js/editor/index.js. It owns the
             // 1200ms autosave debounce, the palette, the slash menu and the
@@ -169,7 +176,16 @@
         destroy() {
             clearInterval(this.heartbeatInterval);
             clearTimeout(this.typingTimeout);
-            if (this.echo) this.echo.leave();
+            // Echo.join() hands back the CHANNEL, which has no leave() of its
+            // own — leaving is done on the Echo instance, by name. Calling
+            // this.echo.leave() threw, and Alpine's error report (which
+            // includes the element) was then serialised by the browser
+            // logger, walking el.__livewire.$wire and firing a bogus
+            // `toJSON` Livewire request that 500s.
+            if (this.echo && window.Echo) {
+                window.Echo.leave('document.{{ $document->id }}');
+            }
+            this.echo = null;
             // Only the instance that mounted the editor tears it down.
             if (this.owns) {
                 window.DotDoc?.get(this.$refs.editorEl)?.destroy();
@@ -523,7 +539,10 @@
         {{-- Main editor. wire:ignore keeps Livewire's DOM morph out of the
              ProseMirror subtree, which it did not render and must not diff. --}}
         <div class="flex-1 overflow-auto">
-            <div x-ref="editorEl" wire:ignore class="desk"></div>
+            {{-- data-outline seeds the numbering before the first save round
+                 trip; it rides on the wire:ignore'd host so a Livewire morph
+                 never rewrites it. --}}
+            <div x-ref="editorEl" wire:ignore class="desk" data-outline="{{ json_encode($outline) }}"></div>
         </div>
 
         {{-- Comment sidebar --}}

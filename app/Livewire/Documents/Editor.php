@@ -235,6 +235,15 @@ class Editor extends Component
         $engine = app(StyleEngine::class);
         $styleCss = $engine->css($engine->resolve($this->document), $this->printPreview ? 'print' : 'canvas');
 
-        return view('livewire.documents.editor', ['styleCss' => $styleCss]);
+        return view('livewire.documents.editor', [
+            'styleCss' => $styleCss,
+            // Seeds window.DotDoc.setOutline() at mount. Without it every page
+            // load paints its headings unnumbered until the first outline()
+            // round trip answers - the TOC and cross-references hide the gap
+            // (they fall back to the entries/label the server stamped into the
+            // JSON) but a heading number is decoration only, with nothing to
+            // fall back to.
+            'outline' => $this->outline(),
+        ]);
     }
 }

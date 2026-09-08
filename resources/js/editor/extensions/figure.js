@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core';
+import { TextSelection } from '@tiptap/pm/state';
 
 /**
  * `caption` from DocumentSchema — inline content only. The "Figure 3" /
@@ -99,6 +100,20 @@ export const Figure = Node.create({
 
                     if (dispatch) {
                         tr.replaceWith(target.pos, target.pos + target.node.nodeSize, figure);
+                        // Land in the empty caption, in the SAME transaction:
+                        // after replaceWith the old selection maps to the
+                        // figure's boundary, so a follow-up focusCaption()
+                        // has no figure ancestor to find and the writer is
+                        // left with an unlabelled figure.
+                        // figure.pos + 1 opens the wrapped node, + nodeSize
+                        // skips it, + 1 more steps inside the caption.
+                        const captionInside = target.pos + 1 + target.node.nodeSize + 1;
+                        try {
+                            tr.setSelection(TextSelection.create(tr.doc, captionInside));
+                        } catch (_) {
+                            // Caption unreachable (shouldn't happen) - the
+                            // figure itself is still worth keeping.
+                        }
                         dispatch(tr);
                     }
 
