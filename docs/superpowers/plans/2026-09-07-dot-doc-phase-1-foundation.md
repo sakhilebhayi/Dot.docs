@@ -1692,3 +1692,29 @@ public function test_rate_limit_is_enforced(): void
 **Placeholder scan:** none of the banned phrases; every task has test code and implementation shape.
 
 **Type consistency:** `DocumentStore::save(Document, array, User, array)` used identically in T4, T6, T7, T10, T11, T12; `OutlineResult` fields `numbers/kinds/toc/broken` match between T4, T5 and the renderer; `RenderContext` gains `toc` in T3 and is used in T4/T7; `StyleEngine::resolve/css` used in T7, T8, T10; `AuditLogger` (service) vs `AuditLog` (model) distinguished in T12.
+
+---
+
+## Addendum (2026-09-08): Dot.Files integration and the inner-page design pass
+
+Spec: `docs/superpowers/specs/2026-09-08-dot-doc-files-integration-design.md`. Owner request: files and folders created in Dot.Doc appear in Dot.Files seamlessly; inner pages get a full design pass with the design skills and the Impeccable detector.
+
+### Task 9 amendment
+Task 9 (shell redesign) must invoke the `frontend-design` and `ui-ux-pro-max` skills before layout work, and its Impeccable run covers dashboard, documents index, editor, history, share, settings, template gallery and the published page in BOTH night and day. Contrast is measured with a script, not eyeballed.
+
+### Task 14: Dot.Doc side of the One Tree integration
+
+**Files:**
+- Create: `database/migrations/2026_09_08_000001_create_shared_files_tree_tables.php` (guarded `objects`, `files`, `folders` exactly matching Dot.Files' columns plus `objects.uuid` unique, `files.mime_type` nullable, `files.owner_id` nullable), `database/migrations/2026_09_08_000002_drop_document_folders_after_adoption.php` (drops `documents.folder_id` and Dot.Doc's `folders` only when the adopt command has marked completion in `cache`/a `settings` row — see command), `app/Files/FilesService.php`, `app/Files/UniqueName.php`, `app/Models/Files/{Obj,File,Folder}.php` (morph map `file|folder|document` registered in `AppServiceProvider`), `app/Policies/ObjPolicy.php`, `app/Console/Commands/AdoptFilesTree.php` (`dot:files:adopt-tree {--dry-run}`), `app/Livewire/Files/Navigator.php` + view, `app/Http/Controllers/FileViewController.php` (signed inline view for team files on the `files` disk), `config/filesystems.php` `files` disk (`FILES_DISK`, `FILES_ROOT`), `resources/js/files/tree.js` (expand/collapse, drag-to-move with keyboard fallback)
+- Modify: `app/Models/Document.php` (`node()`, `folder()` via node parent), `app/Documents/DocumentStore.php` (`create()` registers the document in the tree under the given parent or the team/personal root), `app/Livewire/Documents/Index.php` + view (two-pane workspace, breadcrumbs, New folder/document/Upload/Import, selection dock), `app/Http/Controllers/Auth/EcosystemAuthController.php` (safe `redirect`), `app/Http/Controllers/DocumentExportController.php` ("Save to Dot.Files" writes the export through `FilesService` + `files` disk), `resources/views/livewire/documents/editor.blade.php` (location chip + Move in dock)
+- Tests: `tests/Feature/Files/{FilesServiceTest,ObjPolicyTest,AdoptFilesTreeTest,NavigatorTest,HandoffRedirectTest,FileViewTest}.php`
+
+**Interfaces:** `FilesService::root(Team): Obj`; `children(Obj): Collection`; `createFolder(Obj $parent, string $name, User $actor): Obj`; `registerDocument(Document, Obj $parent): Obj`; `moveObject(Obj, Obj $parent, User): Obj`; `renameObject(Obj, string, User): Obj`; `deleteObject(Obj, User): void`; `UniqueName::for(Obj $parent, string $name): string`. Every method takes the team from the parent object, never from `currentTeam`.
+
+**Acceptance:** creating a folder in Dot.Doc inserts `objects`+`folders` rows a Dot.Files instance on the same DB lists; creating a document in that folder inserts an `objects` row with `objectable_type='document'`; personal documents live under the personal-team root; adopt command migrates existing folders/documents idempotently with a dry run; handoff `redirect` rejects absolute URLs; signed view URL expires; Impeccable prints nothing for the index in night and day.
+
+### Task 15: Dot.Files side (repo `/Users/sakhilebhayi/Dot/Dot.Files`, branch `feature/dot-doc-integration`)
+
+**Files:** guard the three domain migrations with `Schema::hasTable`; new migration adding `objects.uuid` unique, `files.mime_type`, `files.owner_id`; `app/Providers/AppServiceProvider.php` morph alias `'document' => App\Models\Document::class` with a minimal read-only `App\Models\Document` (table `documents`, `uuid`, `title`, `team_id`, `owner_id`); copied `app/Files/FilesService.php` + `UniqueName.php`; `FileBrowser::createFolder`/`updatedUpload` call the service; document rows rendered with "Open in Dot.Doc" (handoff to `DOT_DOCS_URL/auth/ecosystem?token=…&redirect=/documents/{uuid}/edit`); "New document" action (handoff to `/documents/create?parent={objUuid}`); `FileController::view` signed inline route `files.view`; `EcosystemAuthController` safe `redirect`; `.env.example` gains `DOT_DOCS_URL`, `FILES_DISK`, `FILES_ROOT`; tests for the service, morph rendering, handoff redirect, signed view.
+
+**Acceptance:** with both apps on one database and one `FILES_ROOT`, a folder made in either app is listed in both; a document created from Dot.Files opens in Dot.Doc signed in; a PDF uploaded in Dot.Files previews inside Dot.Doc via the signed route.
