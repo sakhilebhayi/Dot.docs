@@ -1,5 +1,5 @@
 import { CALLOUT_TONES } from '../extensions/callout';
-import { isInCaption } from '../extensions/figure';
+import { blockInsert } from '../guards';
 import { referenceTargets } from '../outline';
 import { openList } from '../ui/list';
 
@@ -15,19 +15,17 @@ import { openList } from '../ui/list';
  */
 
 /**
- * A block insert refuses to run inside a figure caption. `caption` holds
- * inline content only, so inserting a block there splits the figure in two
- * and the media loses the label the writer just typed.
+ * `blockInsert()` (from ../guards) refuses to run inside a figure caption:
+ * `caption` holds inline content only, so inserting a block there splits the
+ * figure in two and the media loses the label the writer just typed.
+ *
+ * EVERY block insert in the application goes through this registry — the
+ * palette, the slash menu and the Blade toolbar buttons all call
+ * `window.DotDoc.run(editor, name)` rather than the editor's own commands, and
+ * the image picker in index.js wraps itself in the same guard. A path that
+ * calls `editor.chain()...insertTable()` directly is a path that can split a
+ * figure, which is why the toolbar does not.
  */
-function blockInsert(run) {
-    return (editor, params = {}) => {
-        if (isInCaption(editor)) {
-            return false;
-        }
-
-        return run(editor, params);
-    };
-}
 
 /** Hand a command off to the host page (the Blade/Livewire bridge). */
 function host(editor, name, params = {}) {
@@ -129,20 +127,23 @@ export const commands = [
         name: 'image',
         title: 'Image',
         group: 'insert',
-        run: (editor) => editor.dotdoc?.pickImage?.() ?? false,
+        // `image` is a block node, so the picker is a block insert like any
+        // other. (pickImage() re-checks the guard itself, because the file
+        // dialog is asynchronous and the selection can move while it is open.)
+        run: blockInsert((editor) => editor.dotdoc?.pickImage?.() ?? false),
     },
     {
         name: 'figure',
         title: 'Figure (image or table with caption)',
         group: 'insert',
-        run: (editor, params = {}) => {
+        run: blockInsert((editor, params = {}) => {
             if (editor.chain().focus().wrapInFigure(params.kind || null).run()) {
                 return editor.commands.focusCaption();
             }
 
             // Nothing to wrap yet — collect an image and wrap that instead.
             return editor.dotdoc?.pickImage?.({ figure: true }) ?? false;
-        },
+        }),
     },
     {
         name: 'caption',

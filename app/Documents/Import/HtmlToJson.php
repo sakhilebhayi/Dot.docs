@@ -36,7 +36,15 @@ class HtmlToJson
 
         $doc = ['type' => 'doc', 'content' => $content];
 
-        return (new DocumentSchema)->ensureIds($doc);
+        // normalise() after ensureIds(): HTML routinely carries structurally
+        // thin nodes (an empty <table>, a <ul> with no <li>, an <li> that
+        // opens with a nested list) which DocumentSchema::validate() accepts
+        // but ProseMirror's content expressions do not — and the editor runs
+        // with enableContentCheck, so one of them opens the whole document
+        // read-only.
+        $schema = new DocumentSchema;
+
+        return $schema->normalise($schema->ensureIds($doc));
     }
 
     private function convertBlockNode(DOMNode $node): ?array

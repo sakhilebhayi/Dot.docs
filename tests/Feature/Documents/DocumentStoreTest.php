@@ -3,6 +3,8 @@
 namespace Tests\Feature\Documents;
 
 use App\Documents\DocumentStore;
+use App\Documents\Import\HtmlToJson;
+use App\Documents\Schema\DocumentSchema;
 use App\Livewire\Documents\Editor;
 use App\Models\Document;
 use App\Models\User;
@@ -110,5 +112,62 @@ class DocumentStoreTest extends TestCase
         $this->assertSame(4, $doc->content_json['content'][2]['attrs']['count']);
         $this->assertStringNotContainsString('evil.example', $doc->content);
         $this->assertStringContainsString('style="--cols:4"', $doc->content);
+    }
+
+    public function test_a_legacy_html_document_converts_to_json_the_editors_content_check_accepts(): void
+    {
+        // The shape a legacy blob actually has: an empty <table> and a <ul>
+        // with no <li>. DocumentSchema::validate() is happy with both, but
+        // ProseMirror's content expressions (`table` is `tableRow+`,
+        // `bulletList` is `listItem+`) are not — and the editor is built with
+        // `enableContentCheck: true`, so before the repairs such a document
+        // opened READ-ONLY with autosave off.
+        $json = app(HtmlToJson::class)->convert('<p>a</p><table></table><ul></ul>');
+
+        $types = [];
+        (new DocumentSchema)->walk($json, function (array $node) use (&$types): void {
+            $types[] = $node['type'] ?? '';
+        });
+
+        $this->assertSame(['doc', 'paragraph', 'text'], $types);
+        $this->assertSame([], (new DocumentSchema)->validate($json));
+
+        // And through the store, which is how the editor page reads it.
+        $user = User::factory()->create();
+        $doc = Document::factory()->for($user, 'owner')->create([
+            'content' => '<p>a</p><table></table><ul></ul>',
+            'content_json' => null,
+        ]);
+
+        $opened = app(DocumentStore::class)->json($doc);
+
+        $this->assertSame(['paragraph'], array_column($opened['content'], 'type'));
+    }
+
+    public function test_a_stored_document_with_thin_legacy_nodes_is_repaired_on_the_way_to_the_editor(): void
+    {
+        $user = User::factory()->create();
+        // Written before the repairs existed: an empty list, and a list item
+        // whose first child is not a paragraph.
+        $doc = Document::factory()->for($user, 'owner')->create(['content_json' => [
+            'type' => 'doc',
+            'content' => [
+                ['type' => 'paragraph', 'attrs' => ['id' => 'p0p0p0p0'], 'content' => []],
+                ['type' => 'orderedList', 'attrs' => ['id' => 'o0o0o0o0'], 'content' => []],
+                ['type' => 'bulletList', 'attrs' => ['id' => 'b0b0b0b0'], 'content' => [
+                    ['type' => 'listItem', 'attrs' => ['id' => 'l0l0l0l0'], 'content' => [
+                        ['type' => 'codeBlock', 'attrs' => ['id' => 'k0k0k0k0'], 'content' => []],
+                    ]],
+                ]],
+            ],
+        ]]);
+
+        $opened = app(DocumentStore::class)->json($doc);
+
+        $this->assertSame(['paragraph', 'bulletList'], array_column($opened['content'], 'type'));
+        $this->assertSame(
+            ['paragraph', 'codeBlock'],
+            array_column($opened['content'][1]['content'][0]['content'], 'type')
+        );
     }
 }

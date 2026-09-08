@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { contentErrors, isContentValid } from '../../resources/js/editor/validation.js';
+import { contentErrors, isContentValid, isEmptyDocument } from '../../resources/js/editor/validation.js';
 
 // The names the editor bundle actually registers, trimmed to what these
 // cases need. `textStyle` is in the list because DocumentSchema::MARKS has
@@ -71,4 +71,48 @@ test('a schema given as a ProseMirror-style object of names is accepted', () => 
 test('with no schema, only structural problems are reported', () => {
     assert.deepEqual(contentErrors(doc({ type: 'anything' }), {}), []);
     assert.deepEqual(contentErrors(doc({ notAType: true }), {}), ['Node has no type']);
+});
+
+// `doc` is `block+`, so ProseMirror cannot return a document with no children:
+// HTML it drops entirely (a lone <script>, a stray <div>) comes back as ONE
+// EMPTY PARAGRAPH. An AI "replace" that accepted that would erase the document.
+test('a document of empty paragraphs is empty however many there are', () => {
+    assert.equal(isEmptyDocument({ type: 'doc', content: [{ type: 'paragraph' }] }), true);
+    assert.equal(isEmptyDocument({ type: 'doc', content: [{ type: 'paragraph', content: [] }, { type: 'paragraph' }] }), true);
+    assert.equal(
+        isEmptyDocument({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '   \n ' }] }] }),
+        true
+    );
+});
+
+test('no content at all, or no document at all, is empty', () => {
+    assert.equal(isEmptyDocument({ type: 'doc', content: [] }), true);
+    assert.equal(isEmptyDocument({ type: 'doc' }), true);
+    assert.equal(isEmptyDocument(null), true);
+    assert.equal(isEmptyDocument('<p>a</p>'), true);
+});
+
+test('any real text makes a document non-empty, however deep', () => {
+    assert.equal(isEmptyDocument({ type: 'doc', content: [{ type: 'heading', content: [{ type: 'text', text: 'Hi' }] }] }), false);
+    assert.equal(
+        isEmptyDocument({
+            type: 'doc',
+            content: [
+                {
+                    type: 'bulletList',
+                    content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x' }] }] }],
+                },
+            ],
+        }),
+        false
+    );
+});
+
+test('nodes that speak without text count as content', () => {
+    assert.equal(isEmptyDocument({ type: 'doc', content: [{ type: 'image', attrs: { src: '/storage/a.png' } }] }), false);
+    assert.equal(isEmptyDocument({ type: 'doc', content: [{ type: 'pageBreak' }] }), false);
+    assert.equal(
+        isEmptyDocument({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'crossRef', attrs: { targetId: 'h1' } }] }] }),
+        false
+    );
 });

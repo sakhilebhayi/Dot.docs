@@ -71,12 +71,20 @@ class Editor extends Component
     }
 
     /**
-     * @return bool whether the document was stored. The editor bridge awaits
-     *              this ($wire actions resolve with the return value) and
-     *              keeps the offline draft when it is false, so a rejected
-     *              save cannot quietly lose the writer's work.
+     * @return array{ok:bool,version:int} whether the document was stored, and
+     *                                    the version it is now at. $wire
+     *                                    actions resolve with the return
+     *                                    value, so the editor bridge awaits
+     *                                    both: it keeps the offline draft when
+     *                                    `ok` is false (a rejected save must
+     *                                    not quietly lose the writer's work)
+     *                                    and stamps `version` onto the draft
+     *                                    as its `baseVersion`, which is what
+     *                                    decides on the next load whether the
+     *                                    draft is still restorable or somebody
+     *                                    else has saved since.
      */
-    public function saveContent(array $content): bool
+    public function saveContent(array $content): array
     {
         $this->authorize('update', $this->document);
 
@@ -88,7 +96,7 @@ class Editor extends Component
             $this->addError('content', $e->getMessage());
             $this->saved = false;
 
-            return false;
+            return ['ok' => false, 'version' => $this->document->version];
         }
         $this->contentJson = $this->document->content_json;
         $this->saved = true;
@@ -100,7 +108,7 @@ class Editor extends Component
         }
         app(PresenceService::class)->heartbeat($this->document, Auth::user());
 
-        return true;
+        return ['ok' => true, 'version' => $this->document->version];
     }
 
     /**

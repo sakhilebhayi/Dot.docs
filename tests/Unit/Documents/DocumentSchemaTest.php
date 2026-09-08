@@ -144,6 +144,156 @@ class DocumentSchemaTest extends TestCase
         $this->assertArrayNotHasKey('align', $out['content'][0]['content'][0]['attrs']);
     }
 
+    public function test_normalise_drops_structurally_empty_containers(): void
+    {
+        // ProseMirror content expressions: `table` is `tableRow+`,
+        // `bulletList`/`orderedList`/`taskList` need at least one item. An
+        // empty one is not a thin document, it is an INVALID one, and with
+        // enableContentCheck the editor refuses to open it.
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'attrs' => ['id' => 'aaaaaaaa'], 'content' => [['type' => 'text', 'text' => 'keep']]],
+            ['type' => 'table', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => []],
+            ['type' => 'bulletList', 'attrs' => ['id' => 'cccccccc'], 'content' => []],
+            ['type' => 'orderedList', 'attrs' => ['id' => 'dddddddd'], 'content' => []],
+            ['type' => 'taskList', 'attrs' => ['id' => 'eeeeeeee'], 'content' => []],
+            ['type' => 'table', 'attrs' => ['id' => 'ffffffff'], 'content' => [
+                ['type' => 'tableRow', 'attrs' => ['id' => 'gggggggg'], 'content' => []],
+            ]],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $this->assertSame(['paragraph'], array_column($out['content'], 'type'));
+    }
+
+    public function test_normalise_gives_an_empty_container_a_paragraph_child(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'bulletList', 'attrs' => ['id' => 'aaaaaaaa'], 'content' => [
+                ['type' => 'listItem', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => []],
+            ]],
+            ['type' => 'blockquote', 'attrs' => ['id' => 'cccccccc'], 'content' => []],
+            ['type' => 'callout', 'attrs' => ['id' => 'dddddddd', 'tone' => 'note'], 'content' => []],
+            ['type' => 'table', 'attrs' => ['id' => 'eeeeeeee'], 'content' => [
+                ['type' => 'tableRow', 'attrs' => ['id' => 'ffffffff'], 'content' => [
+                    ['type' => 'tableHeader', 'attrs' => ['id' => 'gggggggg'], 'content' => []],
+                    ['type' => 'tableCell', 'attrs' => ['id' => 'hhhhhhhh'], 'content' => []],
+                ]],
+            ]],
+            ['type' => 'taskList', 'attrs' => ['id' => 'iiiiiiii'], 'content' => [
+                ['type' => 'taskItem', 'attrs' => ['id' => 'jjjjjjjj'], 'content' => []],
+            ]],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $listItem = $out['content'][0]['content'][0];
+        $this->assertSame('paragraph', $listItem['content'][0]['type']);
+        $this->assertTrue(BlockId::isValid($listItem['content'][0]['attrs']['id']));
+        $this->assertSame('paragraph', $out['content'][1]['content'][0]['type']);
+        $this->assertSame('paragraph', $out['content'][2]['content'][0]['type']);
+        $this->assertSame('paragraph', $out['content'][3]['content'][0]['content'][0]['content'][0]['type']);
+        $this->assertSame('paragraph', $out['content'][3]['content'][0]['content'][1]['content'][0]['type']);
+        $this->assertSame('paragraph', $out['content'][4]['content'][0]['content'][0]['type']);
+    }
+
+    public function test_normalise_gives_a_list_item_whose_first_child_is_not_a_paragraph_one(): void
+    {
+        // `listItem` is `paragraph block*` — a list item that opens with a
+        // nested list violates the expression and fails the content check.
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'bulletList', 'attrs' => ['id' => 'aaaaaaaa'], 'content' => [
+                ['type' => 'listItem', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => [
+                    ['type' => 'bulletList', 'attrs' => ['id' => 'cccccccc'], 'content' => [
+                        ['type' => 'listItem', 'attrs' => ['id' => 'dddddddd'], 'content' => [
+                            ['type' => 'paragraph', 'attrs' => ['id' => 'eeeeeeee'], 'content' => [['type' => 'text', 'text' => 'deep']]],
+                        ]],
+                    ]],
+                ]],
+            ]],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $children = $out['content'][0]['content'][0]['content'];
+        $this->assertSame(['paragraph', 'bulletList'], array_column($children, 'type'));
+        $this->assertTrue(BlockId::isValid($children[0]['attrs']['id']));
+    }
+
+    public function test_normalise_makes_columns_children_match_the_count(): void
+    {
+        $column = fn (string $id, string $text) => ['type' => 'column', 'attrs' => ['id' => $id], 'content' => [
+            ['type' => 'paragraph', 'attrs' => ['id' => $id.'p'], 'content' => [['type' => 'text', 'text' => $text]]],
+        ]];
+
+        // Three columns declared as two: the third column's blocks are merged
+        // into the last kept column rather than thrown away.
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'columns', 'attrs' => ['id' => 'aaaaaaaa', 'count' => 2], 'content' => [
+                $column('bbbbbbb1', 'one'), $column('bbbbbbb2', 'two'), $column('bbbbbbb3', 'three'),
+            ]],
+            // One column declared as three: padded with empty columns.
+            ['type' => 'columns', 'attrs' => ['id' => 'cccccccc', 'count' => 3], 'content' => [
+                $column('ddddddd1', 'only'),
+            ]],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $merged = $out['content'][0];
+        $this->assertCount(2, $merged['content']);
+        $this->assertSame(['column', 'column'], array_column($merged['content'], 'type'));
+        $this->assertSame(2, count($merged['content'][1]['content']));
+        $this->assertSame('three', $merged['content'][1]['content'][1]['content'][0]['text']);
+
+        $padded = $out['content'][1];
+        $this->assertCount(3, $padded['content']);
+        $this->assertSame('paragraph', $padded['content'][2]['content'][0]['type']);
+        $this->assertTrue(BlockId::isValid($padded['content'][2]['attrs']['id']));
+    }
+
+    public function test_normalise_repairs_or_drops_a_figure_that_is_not_media_plus_caption(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            // Media with no caption: the caption is added, the picture kept.
+            ['type' => 'figure', 'attrs' => ['id' => 'aaaaaaaa', 'kind' => 'image'], 'content' => [
+                ['type' => 'image', 'attrs' => ['id' => 'bbbbbbbb', 'src' => '/storage/a.png']],
+            ]],
+            // Nothing a figure can be built around: dropped outright.
+            ['type' => 'figure', 'attrs' => ['id' => 'cccccccc', 'kind' => 'image'], 'content' => [
+                ['type' => 'paragraph', 'attrs' => ['id' => 'dddddddd'], 'content' => []],
+            ]],
+            ['type' => 'figure', 'attrs' => ['id' => 'eeeeeeee', 'kind' => 'image'], 'content' => []],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $this->assertCount(1, $out['content']);
+        $this->assertSame(['image', 'caption'], array_column($out['content'][0]['content'], 'type'));
+        $this->assertTrue(BlockId::isValid($out['content'][0]['content'][1]['attrs']['id']));
+    }
+
+    public function test_normalise_survives_non_array_content(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'columns', 'attrs' => ['id' => 'aaaaaaaa'], 'content' => 'nonsense'],
+            ['type' => 'paragraph', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => ['not-an-array-node']],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $this->assertSame(2, (new DocumentSchema)->normalise($doc)['content'][0]['attrs']['count']);
+        $this->assertSame([], $out['content'][1]['content']);
+    }
+
+    public function test_normalise_gives_an_empty_document_a_paragraph(): void
+    {
+        $out = (new DocumentSchema)->normalise(['type' => 'doc', 'content' => []]);
+
+        $this->assertSame('paragraph', $out['content'][0]['type']);
+        $this->assertTrue(BlockId::isValid($out['content'][0]['attrs']['id']));
+    }
+
     public function test_validate_rejects_unknown_mark_type(): void
     {
         $schema = new DocumentSchema;

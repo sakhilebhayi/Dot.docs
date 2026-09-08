@@ -1,13 +1,18 @@
 /**
  * Offline document draft manager.
  * Persists editor content to IndexedDB so work is not lost when offline.
- * Call saveDraft(docUuid, json) on every autosave debounce, where `json` is
- * the serialised Dot.Doc document.
- * Call loadDraft(docUuid) on editor init to restore any unsaved draft; it
- * returns `{json, savedAt}` so the caller can compare the draft against the
- * server's own updated_at and only offer a draft that is actually NEWER —
- * otherwise a stale local copy is offered over (and can overwrite) content
- * someone else has since saved.
+ * Call saveDraft(docUuid, json, baseVersion) on every keystroke, where `json`
+ * is the serialised Dot.Doc document and `baseVersion` is the document
+ * `version` the last successful save returned (seeded from the server at
+ * mount).
+ * Call loadDraft(docUuid) on editor init to decide whether to restore; it
+ * returns `{json, savedAt, baseVersion}`.
+ *
+ * Recency is decided by VERSION, never by time. `savedAt` comes off the
+ * browser's own clock and `updated_at` off the server's, so a client whose
+ * clock runs slow would discard real offline work — a draft is restorable only
+ * while `baseVersion === document.version`, i.e. nobody has saved since it was
+ * written. `savedAt` is kept for diagnostics only.
  */
 
 const DB_NAME    = 'dotdocs-offline';
@@ -30,14 +35,20 @@ function openDb() {
     });
 }
 
-export async function saveDraft(docUuid, json) {
+export async function saveDraft(docUuid, json, baseVersion = null) {
     try {
         const db = await openDb();
         await new Promise((resolve, reject) => {
             const tx = db.transaction(STORE_NAME, 'readwrite');
             // `html` is written alongside `json` only so a draft saved by an
             // older build of this page still reads back.
-            tx.objectStore(STORE_NAME).put({ docUuid, json, html: json, savedAt: Date.now() });
+            tx.objectStore(STORE_NAME).put({
+                docUuid,
+                json,
+                html: json,
+                savedAt: Date.now(),
+                baseVersion: Number.isFinite(baseVersion) ? baseVersion : null,
+            });
             tx.oncomplete = resolve;
             tx.onerror    = () => reject(tx.error);
         });
@@ -45,7 +56,7 @@ export async function saveDraft(docUuid, json) {
 }
 
 /**
- * @returns {Promise<{json: string, savedAt: number}|null>}
+ * @returns {Promise<{json: string, savedAt: number, baseVersion: number|null}|null>}
  */
 export async function loadDraft(docUuid) {
     try {
@@ -56,7 +67,18 @@ export async function loadDraft(docUuid) {
             req.onsuccess = () => {
                 const row = req.result;
                 const json = row?.json ?? row?.html ?? null;
-                resolve(json === null ? null : { json, savedAt: Number(row.savedAt) || 0 });
+                const baseVersion = Number(row?.baseVersion);
+                resolve(
+                    json === null
+                        ? null
+                        : {
+                              json,
+                              savedAt: Number(row.savedAt) || 0,
+                              // A draft written before versions were recorded
+                              // has no base and is never auto-restorable.
+                              baseVersion: Number.isFinite(baseVersion) && row.baseVersion !== null ? baseVersion : null,
+                          }
+                );
             };
             req.onerror   = () => reject(req.error);
         });

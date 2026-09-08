@@ -99,3 +99,60 @@ export function contentErrors(json, schema = {}) {
 export function isContentValid(json, schema = {}) {
     return contentErrors(json, schema).length === 0;
 }
+
+/**
+ * Nodes that carry meaning with no text of their own. A document made only of
+ * these is not empty; a document made only of empty paragraphs is.
+ */
+const STANDALONE_NODES = new Set([
+    'image',
+    'table',
+    'toc',
+    'pageBreak',
+    'sectionBreak',
+    'horizontalRule',
+    'crossRef',
+    'variable',
+]);
+
+/**
+ * True when a parsed document would say nothing.
+ *
+ * `doc` is `block+`, so ProseMirror never hands back a document with zero
+ * children: HTML it cannot parse at all (a lone `<script>`, a stray `<div>`)
+ * comes back as ONE EMPTY PARAGRAPH. Replacing a real document with that would
+ * erase it, which is exactly what an AI "replace" must never be allowed to do,
+ * so `content.length === 0` is not the test — this is.
+ *
+ * @param {unknown} json
+ * @returns {boolean}
+ */
+export function isEmptyDocument(json) {
+    if (!json || typeof json !== 'object' || !Array.isArray(json.content) || json.content.length === 0) {
+        return true;
+    }
+
+    let meaningful = false;
+    const walk = (node) => {
+        if (meaningful || !node || typeof node !== 'object') {
+            return;
+        }
+        if (node.type === 'text' && typeof node.text === 'string' && node.text.trim() !== '') {
+            meaningful = true;
+
+            return;
+        }
+        if (STANDALONE_NODES.has(node.type)) {
+            meaningful = true;
+
+            return;
+        }
+        if (Array.isArray(node.content)) {
+            node.content.forEach(walk);
+        }
+    };
+
+    json.content.forEach(walk);
+
+    return !meaningful;
+}

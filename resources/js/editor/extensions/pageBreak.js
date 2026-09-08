@@ -1,5 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core';
-import { isInCaption } from './figure';
+import { isInCaption } from '../guards';
 
 /**
  * `pageBreak` from DocumentSchema. On the canvas it is a dashed rule with a

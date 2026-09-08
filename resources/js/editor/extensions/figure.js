@@ -5,13 +5,54 @@ import { base62 } from './blockId';
 
 export const figureRepairKey = new PluginKey('dotdocFigureRepair');
 
+// The caption guard lives in ../guards so it stays dependency-free (node --test
+// runs it) and so every insert path — registry, palette, slash menu, toolbar,
+// keyboard shortcut, image picker — can reach it without importing @tiptap.
+export { blockInsert, isInCaption } from '../guards';
+
 /**
- * True when the selection sits inside a figure caption. A caption holds
- * inline content only, so inserting a block there splits the figure and the
- * media loses its label — every block-inserting command checks this first.
+ * The span of the document these transactions actually touched, in positions
+ * in the NEW document, or null when nothing changed.
+ *
+ * Without this the repair scan below walks the entire document on every
+ * keystroke. A figure that overlaps the changed span is still visited, because
+ * `nodesBetween` visits the ancestors of a range as well as its contents.
  */
-export function isInCaption(editor) {
-    return !!editor?.isActive?.('caption');
+function changedRange(transactions, doc) {
+    let from = Infinity;
+    let to = -Infinity;
+
+    transactions.forEach((transaction, index) => {
+        if (!transaction.docChanged) {
+            return;
+        }
+
+        transaction.mapping.maps.forEach((stepMap, step) => {
+            stepMap.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+                // Forward through the rest of this transaction's steps...
+                const rest = transaction.mapping.slice(step + 1);
+                let start = rest.map(newStart, -1);
+                let end = rest.map(newEnd, 1);
+
+                // ...and through every transaction applied after it.
+                for (let later = index + 1; later < transactions.length; later += 1) {
+                    start = transactions[later].mapping.map(start, -1);
+                    end = transactions[later].mapping.map(end, 1);
+                }
+
+                from = Math.min(from, start);
+                to = Math.max(to, end);
+            });
+        });
+    });
+
+    if (from > to) {
+        return null;
+    }
+
+    // One position of slack each way: a deletion collapses to a single point,
+    // and the figure that owns it starts just outside.
+    return [Math.max(0, from - 1), Math.min(doc.content.size, to + 1)];
 }
 
 /**
@@ -183,12 +224,16 @@ export const Figure = Node.create({
             new Plugin({
                 key: figureRepairKey,
                 appendTransaction: (transactions, _oldState, newState) => {
-                    if (!transactions.some((transaction) => transaction.docChanged)) {
+                    const range = changedRange(transactions, newState.doc);
+                    if (range === null) {
                         return null;
                     }
 
+                    // Only the span the transactions touched: typing in a
+                    // 200-page document must not re-walk all of it looking for
+                    // a figure nobody went near.
                     const broken = [];
-                    newState.doc.descendants((node, pos) => {
+                    newState.doc.nodesBetween(range[0], range[1], (node, pos) => {
                         if (node.type.name !== 'figure') {
                             return true;
                         }

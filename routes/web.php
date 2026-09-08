@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\EcosystemAuthController;
+use App\Http\Controllers\DocumentAutosaveController;
 use App\Http\Controllers\DocumentExportController;
 use App\Http\Controllers\DocumentImageController;
 use App\Http\Controllers\DocumentImportController;
@@ -104,6 +105,13 @@ Route::middleware([
     // Image uploads inside documents
     Route::post('/documents/{uuid}/images', [DocumentImageController::class, 'store'])
         ->name('documents.images.store');
+
+    // Last-chance autosave. The editor flushes its pending document here with
+    // navigator.sendBeacon() on pagehide, where a Livewire request cannot be
+    // issued at all (CommitBus defers on a 5 ms timer the unloading page never
+    // runs). See App\Http\Controllers\DocumentAutosaveController.
+    Route::post('/documents/{uuid}/autosave', [DocumentAutosaveController::class, 'store'])
+        ->name('documents.autosave');
 
     // Export
     Route::get('/documents/{uuid}/export/{format}', [DocumentExportController::class, 'export'])

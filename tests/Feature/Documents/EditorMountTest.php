@@ -100,8 +100,17 @@ class EditorMountTest extends TestCase
                     ['type' => 'image', 'attrs' => ['id' => BlockId::generate(), 'src' => '/storage/x.png']],
                     ['type' => 'caption', 'attrs' => ['id' => BlockId::generate()], 'content' => [['type' => 'text', 'text' => 'Yield by region']]],
                 ]],
+                // A real table, with a row and a cell: `table` is `tableRow+`,
+                // so DocumentSchema::normalise() drops an empty one (it is
+                // what makes the editor's content check fail the document).
                 ['type' => 'figure', 'attrs' => ['id' => $tableId, 'kind' => 'table'], 'content' => [
-                    ['type' => 'table', 'attrs' => ['id' => BlockId::generate()], 'content' => []],
+                    ['type' => 'table', 'attrs' => ['id' => BlockId::generate()], 'content' => [
+                        ['type' => 'tableRow', 'attrs' => ['id' => BlockId::generate()], 'content' => [
+                            ['type' => 'tableCell', 'attrs' => ['id' => BlockId::generate()], 'content' => [
+                                ['type' => 'paragraph', 'attrs' => ['id' => BlockId::generate()], 'content' => []],
+                            ]],
+                        ]],
+                    ]],
                     ['type' => 'caption', 'attrs' => ['id' => BlockId::generate()], 'content' => []],
                 ]],
             ],
@@ -148,18 +157,40 @@ class EditorMountTest extends TestCase
         $doc = app(DocumentStore::class)->create($user, 'Rejected');
         $version = $doc->version;
 
-        // saveContent() returns a bool because $wire actions resolve with the
-        // PHP return value: the bridge keeps the offline draft when it is
-        // false, so a rejected save cannot silently lose the writer's work.
+        // saveContent() returns ['ok' => bool, 'version' => int] because $wire
+        // actions resolve with the PHP return value: the bridge keeps the
+        // offline draft when `ok` is false (so a rejected save cannot silently
+        // lose the writer's work) and stamps `version` onto the draft it does
+        // keep, which is what the next load's restore decision reads.
         Livewire::actingAs($user)
             ->test(Editor::class, ['uuid' => $doc->uuid])
             ->call('saveContent', ['type' => 'doc', 'content' => [
                 ['type' => 'mermaidDiagram', 'attrs' => ['id' => BlockId::generate()]],
             ]])
-            ->assertReturned(false)
+            ->assertReturned(['ok' => false, 'version' => $version])
             ->assertHasErrors('content')
             ->assertSee('Not saved');
 
         $this->assertSame($version, $doc->fresh()->version);
+    }
+
+    public function test_an_accepted_save_returns_the_new_version_for_the_draft_base(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Versioned');
+
+        // The offline draft records this number as its baseVersion. On the
+        // next load the draft is offered only while it still matches the
+        // document's version - if it is lower, somebody else has saved since
+        // and restoring would overwrite them.
+        Livewire::actingAs($user)
+            ->test(Editor::class, ['uuid' => $doc->uuid])
+            ->call('saveContent', ['type' => 'doc', 'content' => [
+                ['type' => 'paragraph', 'attrs' => ['id' => BlockId::generate()], 'content' => [['type' => 'text', 'text' => 'Typed']]],
+            ]])
+            ->assertReturned(['ok' => true, 'version' => $doc->version + 1]);
+
+        $this->assertSame($doc->version + 1, $doc->fresh()->version);
     }
 }

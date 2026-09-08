@@ -7,12 +7,17 @@
         typingTimeout: null,
         isOffline: !navigator.onLine,
         docUuid: '{{ $document->uuid }}',
-        // When the server last stored this document, in epoch ms. An offline
-        // draft older than this is a leftover from a previous session and is
-        // never offered: restoring it would overwrite whatever has been saved
-        // since, possibly by somebody else.
-        updatedAt: Date.parse('{{ $document->updated_at->toIso8601String() }}') || 0,
+        // The document version this page was rendered from, and the version
+        // the last successful save reported. Draft recency is decided by
+        // VERSION, never by a clock: `savedAt` comes off the browser and
+        // `updated_at` off the server, so a client whose clock runs slow would
+        // throw away real offline work. A draft is restorable only while its
+        // baseVersion still equals the document's version - i.e. nobody has
+        // saved since it was written.
+        documentVersion: {{ $document->version }},
+        baseVersion: {{ $document->version }},
         selection: { blockId: null, type: null },
+        aiError: '',
         tick: 0,
 
         // The editor is NEVER stored in Alpine's reactive data: a reactivity
@@ -57,6 +62,9 @@
                 content: @js($contentJson),
                 vars: @js($document->variables ?? []),
                 uploadUrl: '{{ route('documents.images.store', $document->uuid) }}',
+                // The pagehide/destroy flush POSTs here with navigator.sendBeacon:
+                // Livewire cannot issue a request during unload at all.
+                autosaveUrl: '{{ route('documents.autosave', $document->uuid) }}',
                 csrfToken: document.querySelector('meta[name=csrf-token]').content,
                 onChange: (json) => this.persist(json),
                 onSelection: (s) => { this.selection = s; this.tick++; },
@@ -73,22 +81,27 @@
                 this.tick++;
                 clearTimeout(this.typingTimeout);
                 this.typingTimeout = setTimeout(() => { this.isTyping = false; }, 1000);
-                if (window.offlineDraft) {
-                    window.offlineDraft.saveDraft(this.docUuid, JSON.stringify(editor.getJSON()));
+                // Never write a draft in fail-closed mode: what the editor is
+                // holding then is not the document.
+                if (window.offlineDraft && handle.autosaves !== false) {
+                    window.offlineDraft.saveDraft(this.docUuid, JSON.stringify(editor.getJSON()), this.baseVersion);
                 }
             });
 
             this.refreshOutline();
-            this.restoreDraftIfNewer();
+            this.restoreDraftIfRestorable();
             this.setupEcho();
 
             // Online / offline events (dispatched by offline.js initOfflineSupport)
             window.addEventListener('app-offline', () => { this.isOffline = true; });
             window.addEventListener('app-online',  () => {
                 this.isOffline = false;
-                // Flush current draft to server now that we're back online
+                // Flush the current document now that we are back online. The
+                // draft is NOT cleared here: persist() clears it itself, and
+                // only once the save has actually stored what the editor is
+                // holding. Clearing it alongside an un-awaited save was how a
+                // failed reconnect save lost the offline work outright.
                 this.persist(editor.getJSON());
-                if (window.offlineDraft) window.offlineDraft.clearDraft(this.docUuid);
             });
 
             // Heartbeat every 60 seconds to keep presence alive
@@ -106,14 +119,43 @@
         // rejected save (DocumentSchema validation) is visible here. On a
         // reject the offline draft is KEPT — it is the only remaining copy of
         // what the writer typed — and the error renders in the status area.
+        // saveContent() answers {ok, version}: `version` becomes the base the
+        // next draft is written against.
         persist(json) {
-            return @this.saveContent(json).then((stored) => {
-                if (stored && window.offlineDraft) {
-                    window.offlineDraft.clearDraft(this.docUuid);
+            const handle = window.DotDoc?.get(this.$refs.editorEl);
+            // Fail-closed (the content check refused the document): the editor
+            // is read-only and must not write anything back.
+            if (handle && handle.autosaves === false) return Promise.resolve();
+
+            // What is being SENT, captured now. Saves resolve out of order, so
+            // an older one must not be allowed to clear a draft that protects
+            // newer keystrokes.
+            const snapshot = JSON.stringify(json);
+
+            return @this.saveContent(json).then((result) => {
+                if (result && Number.isFinite(result.version)) {
+                    this.baseVersion = result.version;
+                }
+                if (result && result.ok) {
+                    this.clearDraftIfSettled(snapshot);
                 }
 
                 return this.refreshOutline();
             });
+        },
+
+        // Drop the offline draft only when the document the server just
+        // stored is still exactly what the editor holds AND nothing further
+        // is queued. Anything else means the draft is still the only copy of
+        // something.
+        clearDraftIfSettled(snapshot) {
+            if (!window.offlineDraft) return;
+            const handle = window.DotDoc?.get(this.$refs.editorEl);
+            if (!handle || handle.autosaves === false) return;
+            if (handle.pending) return;
+            if (JSON.stringify(handle.editor.getJSON()) !== snapshot) return;
+
+            window.offlineDraft.clearDraft(this.docUuid);
         },
 
         // Numbering rules live in the document style, so the server owns them.
@@ -135,28 +177,62 @@
             }
         },
 
-        async restoreDraftIfNewer() {
+        // loadDraft returns {json, savedAt, baseVersion}. A draft is offered
+        // only when it was written against THIS version of the document —
+        // if the version has moved on, somebody else has saved since and
+        // restoring the draft would overwrite them.
+        async restoreDraftIfRestorable() {
             if (!window.offlineDraft) return;
+            const handle = window.DotDoc?.get(this.$refs.editorEl);
+            // Fail-closed: the editor is read-only and holds something that is
+            // not the document, so neither restore a draft nor delete one.
+            if (!handle || handle.autosaves === false) return;
+            const editor = handle.editor;
+
             try {
-                const editor = this.ed();
                 const draft = await window.offlineDraft.loadDraft(this.docUuid);
-                if (!draft || !editor) return;
-                // loadDraft returns {json, savedAt}. Only a draft written
-                // AFTER the server's own updated_at is worth offering; an
-                // older one is stale and restoring it would overwrite newer
-                // server content, so it is simply dropped.
-                if (!(draft.savedAt > this.updatedAt)) {
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    return;
-                }
+                if (!draft) return;
+
                 const parsed = JSON.parse(draft.json);
-                if (!parsed || parsed.type !== 'doc') return;
-                if (JSON.stringify(parsed) === JSON.stringify(editor.getJSON())) {
+                if (!parsed || parsed.type !== 'doc' || draft.baseVersion === null) {
                     window.offlineDraft.clearDraft(this.docUuid);
                     return;
                 }
-                if (confirm('An unsaved offline draft newer than the saved document was found. Restore it?')) {
-                    editor.commands.setContent(parsed);
+
+                if (draft.baseVersion < this.documentVersion) {
+                    // Not restorable, but not this page's to destroy either.
+                    // Park it under a stale- key so it can be recovered by hand.
+                    await window.offlineDraft.saveDraft('stale-' + this.docUuid, draft.json, draft.baseVersion);
+                    window.offlineDraft.clearDraft(this.docUuid);
+                    console.info(
+                        '[Dot.Doc] An offline draft based on v' + draft.baseVersion +
+                        ' was kept as stale-' + this.docUuid + ': the document is now at v' +
+                        this.documentVersion + ', so restoring it would overwrite a newer save.'
+                    );
+                    return;
+                }
+
+                if (draft.baseVersion > this.documentVersion) {
+                    window.offlineDraft.clearDraft(this.docUuid);
+                    return;
+                }
+
+                // Same version. Outline::apply() stamps toc.entries and
+                // crossRef.label into the stored document, so those come off
+                // both sides or every load would look like a difference.
+                if (!window.DotDoc.documentsDiffer(parsed, editor.getJSON())) {
+                    window.offlineDraft.clearDraft(this.docUuid);
+                    return;
+                }
+
+                if (confirm('An unsaved offline draft of this document was found. Restore it?')) {
+                    try {
+                        editor.commands.setContent(parsed, { errorOnInvalidContent: true });
+                    } catch (_) {
+                        // Unopenable: keep the draft rather than lose it.
+                        console.info('[Dot.Doc] The offline draft could not be applied and has been kept.');
+                        return;
+                    }
                 }
                 window.offlineDraft.clearDraft(this.docUuid);
             } catch (_) {}
@@ -184,8 +260,10 @@
                     // document straight back, keeps the change out of the
                     // local undo stack, and refuses JSON this editor cannot
                     // parse instead of blanking the page.
-                    if (!handle || !handle.applyRemote(e.json)) return;
-                    // The server now holds newer content than any draft.
+                    if (!handle || handle.autosaves === false || !handle.applyRemote(e.json)) return;
+                    if (Number.isFinite(e.version)) this.baseVersion = e.version;
+                    // The server now holds newer content than any draft, and
+                    // what the draft protected has just been superseded.
                     if (window.offlineDraft) window.offlineDraft.clearDraft(this.docUuid);
                     this.tick++;
                     this.refreshOutline();
@@ -220,17 +298,37 @@
             }
         },
 
-        // Apply AI result to the editor
+        // Apply an AI result to the editor.
+        //
+        // The payload is raw model HTML. It NEVER goes to setContent()
+        // directly: with enableContentCheck on, one tag this schema does not
+        // know throws, and the throw comes out of an Alpine handler with
+        // nothing to catch it — the writer sees a broken page. applyHtml()
+        // parses it, checks it against the live schema, and returns false
+        // (document untouched) when it cannot be used.
         applyAiContent(type, content) {
-            const editor = this.ed();
-            if (!editor) return;
-            if (type === 'replace') {
-                editor.commands.setContent(content);
-            } else {
-                editor.commands.focus('end');
-                editor.commands.insertContent(content);
+            const handle = window.DotDoc?.get(this.$refs.editorEl);
+            if (!handle) return;
+
+            if (!handle.applyHtml(content, { mode: type === 'replace' ? 'replace' : 'insert' })) {
+                this.aiError = 'That AI result could not be applied — the document is unchanged.';
+                return;
             }
-            this.persist(editor.getJSON());
+
+            this.aiError = '';
+            this.tick++;
+            handle.flush();
+        },
+
+        // An accepted suggestion is a document the server has already stored,
+        // so it arrives as JSON and goes in the same way a collaborator's
+        // update does: validated, outside the undo stack, and refused rather
+        // than blanking the page.
+        applySuggestion(content) {
+            const handle = window.DotDoc?.get(this.$refs.editorEl);
+            if (!handle || !handle.applyRemote(content)) return;
+            this.tick++;
+            this.refreshOutline();
         },
 
         // Insert voice-transcribed text at current cursor position
@@ -244,7 +342,7 @@
     x-init="init()"
     x-destroy="destroy()"
     @ai-apply.window="applyAiContent('replace', $event.detail.content)"
-    @suggestion-accepted.window="if (ed()) { ed().commands.setContent($event.detail.content); refreshOutline(); }"
+    @suggestion-accepted.window="applySuggestion($event.detail.content)"
     @voice-transcript.window="insertVoiceText($event.detail.text)"
     @style-changed.window="document.getElementById('doc-style').textContent = $event.detail.css; refreshOutline()"
     @keydown.ctrl.shift.k.window.prevent="$dispatch('open-ai-palette')"
@@ -301,24 +399,24 @@
         <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
 
         @foreach([1,2,3] as $h)
-            <button @click="ed().chain().focus().toggleHeading({ level: {{ $h }} }).run()"
+            <button @click="window.DotDoc.run(ed(), 'heading.{{ $h }}')"
                     :class="ed()?.isActive('heading', { level: {{ $h }} }) ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                     class="p-1.5 rounded transition text-xs font-bold">H{{ $h }}</button>
         @endforeach
 
         <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
 
-        <button @click="ed().chain().focus().toggleBulletList().run()"
+        <button @click="window.DotDoc.run(ed(), 'list.bullet')"
                 :class="ed()?.isActive('bulletList') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                 class="p-1.5 rounded transition text-sm">• List</button>
 
-        <button @click="ed().chain().focus().toggleOrderedList().run()"
+        <button @click="window.DotDoc.run(ed(), 'list.ordered')"
                 :class="ed()?.isActive('orderedList') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                 class="p-1.5 rounded transition text-sm">1. List</button>
 
         <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
 
-        <button @click="ed().chain().focus().toggleBlockquote().run()"
+        <button @click="window.DotDoc.run(ed(), 'quote')"
                 :class="ed()?.isActive('blockquote') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                 class="p-1.5 rounded transition text-sm" title="Blockquote">"</button>
 
@@ -326,12 +424,17 @@
                 :class="ed()?.isActive('code') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
                 class="p-1.5 rounded transition text-xs font-mono" title="Inline code">&lt;/&gt;</button>
 
-        <button @click="ed().chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()"
+        {{-- Through the registry, never editor.chain() directly: the registry
+             wraps every block insert in the caption guard, so this cannot
+             split a figure away from its media. --}}
+        <button @click="window.DotDoc.run(ed(), 'table')"
                 class="p-1.5 rounded transition text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" title="Insert Table">⊞ Table</button>
 
         {{-- Image upload --}}
         <label class="p-1.5 rounded transition text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 cursor-pointer" title="Insert Image">
             🖼
+            {{-- uploadImage() re-checks the caption guard at the moment it
+                 inserts, because the file dialog is asynchronous. --}}
             <input type="file" accept="image/*" class="hidden"
                    @change="ed().uploadImage($event.target.files[0]); $event.target.value = ''" />
         </label>
@@ -407,6 +510,9 @@
                      visible: the editor keeps typing over content the server
                      never accepted, and the offline draft is deliberately
                      kept as the only remaining copy. --}}
+                <span x-show="aiError" x-cloak x-text="aiError" @click="aiError = ''"
+                      class="flex items-center gap-1 px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded font-medium cursor-pointer"
+                      title="Click to dismiss"></span>
                 @error('content')
                     <span class="flex items-center gap-1 px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded font-medium"
                           title="{{ $message }}">
