@@ -1,5 +1,18 @@
 import { Node, mergeAttributes } from '@tiptap/core';
-import { TextSelection } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { figureMediaIsBlank } from '../attrs';
+import { base62 } from './blockId';
+
+export const figureRepairKey = new PluginKey('dotdocFigureRepair');
+
+/**
+ * True when the selection sits inside a figure caption. A caption holds
+ * inline content only, so inserting a block there splits the figure and the
+ * media loses its label — every block-inserting command checks this first.
+ */
+export function isInCaption(editor) {
+    return !!editor?.isActive?.('caption');
+}
 
 /**
  * `caption` from DocumentSchema — inline content only. The "Figure 3" /
@@ -41,7 +54,14 @@ export const Figure = Node.create({
         return {
             kind: {
                 default: 'image',
-                parseHTML: (element) => element.getAttribute('data-kind') || 'image',
+                // HtmlRenderer::renderFigure() emits no data-kind, only
+                // `class="figure figure-{kind}"` — read that too or every
+                // table figure comes back as an image and renumbers on the
+                // wrong counter.
+                parseHTML: (element) =>
+                    element.getAttribute('data-kind') ||
+                    (element.getAttribute('class') || '').match(/(?:^|\s)figure-([\w-]+)(?:\s|$)/)?.[1] ||
+                    'image',
                 renderHTML: (attributes) => ({
                     'data-kind': attributes.kind,
                     class: `figure figure-${attributes.kind}`,
@@ -88,7 +108,10 @@ export const Figure = Node.create({
                     if (!target) {
                         return false;
                     }
-                    if (target.node.type.name === 'image' && $isInFigure(state, target.pos)) {
+                    // Any target already inside a figure — a table just as
+                    // much as an image — would otherwise be wrapped a second
+                    // time, nesting figures and breaking the numbering.
+                    if ($isInFigure(state, target.pos)) {
                         return false;
                     }
 
@@ -146,11 +169,76 @@ export const Figure = Node.create({
                 },
         };
     },
+
+    /**
+     * Deleting the picture out of a figure does not delete the figure:
+     * `(image | table) caption` requires a media child, so ProseMirror
+     * refills the hole with an empty `image{src: null}` and the writer is
+     * left with a numbered, captioned figure showing nothing. Repair it in
+     * the same history step — the caption's words are kept as a paragraph,
+     * an empty caption takes the figure with it.
+     */
+    addProseMirrorPlugins() {
+        return [
+            new Plugin({
+                key: figureRepairKey,
+                appendTransaction: (transactions, _oldState, newState) => {
+                    if (!transactions.some((transaction) => transaction.docChanged)) {
+                        return null;
+                    }
+
+                    const broken = [];
+                    newState.doc.descendants((node, pos) => {
+                        if (node.type.name !== 'figure') {
+                            return true;
+                        }
+                        if (figureMediaIsBlank(node.firstChild)) {
+                            broken.push({ node, pos });
+                        }
+
+                        return false;
+                    });
+
+                    if (!broken.length) {
+                        return null;
+                    }
+
+                    const tr = newState.tr;
+                    // Back to front: an earlier replacement would shift every
+                    // position after it.
+                    broken.reverse().forEach(({ node, pos }) => {
+                        const caption = node.lastChild;
+                        const keepsText = caption?.type.name === 'caption' && caption.content.size > 0;
+
+                        if (keepsText) {
+                            tr.replaceWith(
+                                pos,
+                                pos + node.nodeSize,
+                                newState.schema.nodes.paragraph.create({ id: base62(8) }, caption.content)
+                            );
+
+                            return;
+                        }
+
+                        tr.delete(pos, pos + node.nodeSize);
+                    });
+
+                    return tr.docChanged ? tr : null;
+                },
+            }),
+        ];
+    },
 });
 
-/** True when the node at `pos` already sits inside a figure. */
+/** True when the node at `pos` already has a figure anywhere above it. */
 function $isInFigure(state, pos) {
     const $pos = state.doc.resolve(pos);
 
-    return $pos.parent.type.name === 'figure';
+    for (let depth = $pos.depth; depth >= 0; depth--) {
+        if ($pos.node(depth).type.name === 'figure') {
+            return true;
+        }
+    }
+
+    return false;
 }

@@ -28,7 +28,7 @@ class DocumentStore
 
     public function create(User $owner, string $title, ?array $json = null, array $attrs = []): Document
     {
-        $json = $this->schema->ensureIds($json ?? DocumentSchema::empty());
+        $json = $this->schema->normalise($this->schema->ensureIds($json ?? DocumentSchema::empty()));
         $doc = new Document(array_merge(['title' => $title, 'owner_id' => $owner->id, 'team_id' => $owner->currentTeam?->id, 'version' => 1, 'style_key' => 'report'], $attrs));
         $this->fill($doc, $json);
         $doc->save();
@@ -48,7 +48,10 @@ class DocumentStore
     /** @param array{version?:string,label?:string|null} $opts */
     public function save(Document $doc, array $json, User $actor, array $opts = []): Document
     {
-        $json = $this->schema->ensureIds($json);
+        // normalise() before validate(): style-bearing attrs (align, column
+        // count) are clamped on the way in so a bad value never reaches the
+        // renderers or the next editor to open the document.
+        $json = $this->schema->normalise($this->schema->ensureIds($json));
         $errors = $this->schema->validate($json);
         if ($errors !== []) {
             throw new InvalidArgumentException(implode('; ', $errors));

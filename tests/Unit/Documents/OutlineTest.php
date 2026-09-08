@@ -113,4 +113,26 @@ class OutlineTest extends TestCase
         $this->assertSame('1.1', $r->numbers['T1T1T1T1']);
         $this->assertSame('2.1', $r->numbers['F3F3F3F3']);
     }
+
+    public function test_figure_and_table_entries_carry_their_caption_text(): void
+    {
+        // The cross-reference picker has nothing to show for a figure but
+        // its number and its caption, so the caption travels with the entry.
+        $doc = ['type' => 'doc', 'content' => [
+            $this->fig('F1F1F1F1'),
+            $this->fig('T1T1T1T1', 'table'),
+            ['type' => 'figure', 'attrs' => ['id' => 'F2F2F2F2', 'kind' => 'image'], 'content' => [
+                ['type' => 'image', 'attrs' => ['id' => 'F2F2F2F2i', 'src' => '/storage/y.png']],
+                ['type' => 'caption', 'attrs' => ['id' => 'F2F2F2F2c'], 'content' => []],
+            ]],
+        ]];
+
+        $r = (new Outline)->build($doc);
+
+        $this->assertSame([
+            ['id' => 'F1F1F1F1', 'number' => '1', 'text' => 'Cap'],
+            ['id' => 'F2F2F2F2', 'number' => '2', 'text' => ''],
+        ], $r->figures);
+        $this->assertSame([['id' => 'T1T1T1T1', 'number' => '1', 'text' => 'Cap']], $r->tables);
+    }
 }

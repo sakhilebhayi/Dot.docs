@@ -4,6 +4,19 @@ import { Node, mergeAttributes } from '@tiptap/core';
 export const CALLOUT_TONES = ['note', 'warning', 'success', 'danger'];
 
 /**
+ * The tone in `class="callout callout-{tone}"`, which is all
+ * HtmlRenderer::renderCallout() emits — it writes no `data-tone`, so parsing
+ * the server's own HTML has to read the class or every callout comes back a
+ * note.
+ */
+export function toneFromClass(className) {
+    const match = String(className || '').match(/(?:^|\s)callout-([a-z]+)(?:\s|$)/i);
+    const tone = (match?.[1] || '').toLowerCase();
+
+    return CALLOUT_TONES.includes(tone) ? tone : null;
+}
+
+/**
  * `callout{tone}` from DocumentSchema. The tone label ("NOTE", "WARNING", …)
  * is drawn by the stylesheet's ::before, never stored as content.
  */
@@ -22,8 +35,11 @@ export const Callout = Node.create({
                 default: 'note',
                 parseHTML: (element) => {
                     const tone = (element.getAttribute('data-tone') || '').toLowerCase();
+                    if (CALLOUT_TONES.includes(tone)) {
+                        return tone;
+                    }
 
-                    return CALLOUT_TONES.includes(tone) ? tone : 'note';
+                    return toneFromClass(element.getAttribute('class')) ?? 'note';
                 },
                 renderHTML: (attributes) => {
                     const tone = CALLOUT_TONES.includes(attributes.tone) ? attributes.tone : 'note';

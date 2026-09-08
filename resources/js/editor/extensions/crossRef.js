@@ -1,4 +1,6 @@
 import { Node, mergeAttributes } from '@tiptap/core';
+import { asText } from '../attrs';
+import { scrollToBlock } from '../dom';
 import { crossRefLabel, onOutlineChange } from '../outline';
 
 /**
@@ -48,7 +50,9 @@ export const CrossRef = Node.create({
         return [
             'a',
             mergeAttributes(HTMLAttributes, { class: 'xref' }),
-            crossRefLabel(node.attrs),
+            // A DOM-spec child must be a string; attrs.label comes from
+            // stored JSON and could be anything.
+            asText(crossRefLabel(node.attrs), '?'),
         ];
     },
 
@@ -58,18 +62,15 @@ export const CrossRef = Node.create({
             dom.contentEditable = 'false';
 
             const render = () => {
-                const label = crossRefLabel(node.attrs);
+                const label = asText(crossRefLabel(node.attrs), '?');
                 dom.className = label === '?' ? 'xref xref-broken' : 'xref';
-                dom.href = node.attrs.targetId ? `#${node.attrs.targetId}` : '#';
+                dom.href = node.attrs.targetId ? `#${asText(node.attrs.targetId)}` : '#';
                 dom.textContent = label;
             };
 
             dom.addEventListener('click', (event) => {
                 event.preventDefault();
-                const target = document.querySelector(`[data-id="${node.attrs.targetId}"]`);
-                if (target) {
-                    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                }
+                scrollToBlock(node.attrs.targetId);
             });
 
             render();

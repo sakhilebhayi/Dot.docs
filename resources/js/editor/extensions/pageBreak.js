@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core';
+import { isInCaption } from './figure';
 
 /**
  * `pageBreak` from DocumentSchema. On the canvas it is a dashed rule with a
@@ -49,9 +50,11 @@ export const PageBreak = Node.create({
     addKeyboardShortcuts() {
         return {
             // Ctrl/Cmd+Enter, as in Word. Inside a code block Mod-Enter
-            // belongs to CodeBlock's "exit code" binding, so defer to it.
+            // belongs to CodeBlock's "exit code" binding, so defer to it,
+            // and inside a figure caption a block insert would split the
+            // figure away from its media.
             'Mod-Enter': () => {
-                if (this.editor.isActive('codeBlock')) {
+                if (this.editor.isActive('codeBlock') || isInCaption(this.editor)) {
                     return false;
                 }
 

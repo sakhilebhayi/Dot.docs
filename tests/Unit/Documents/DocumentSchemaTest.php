@@ -93,6 +93,57 @@ class DocumentSchemaTest extends TestCase
         $this->assertSame(6, $schema->wordCount($doc));
     }
 
+    public function test_normalise_keeps_only_whitelisted_alignments(): void
+    {
+        // align is interpolated into a `style` attribute by HtmlRenderer and
+        // by the editor's renderHTML. Echo payloads reach both without ever
+        // passing through parseHTML, so a bad value must never persist.
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'attrs' => ['id' => 'aaaaaaaa', 'align' => 'center'], 'content' => []],
+            ['type' => 'paragraph', 'attrs' => ['id' => 'bbbbbbbb', 'align' => 'RIGHT'], 'content' => []],
+            ['type' => 'heading', 'attrs' => ['id' => 'cccccccc', 'level' => 1, 'align' => 'justify'], 'content' => []],
+            ['type' => 'paragraph', 'attrs' => ['id' => 'dddddddd', 'align' => 'left; background: url(https://evil.example/x)'], 'content' => []],
+            ['type' => 'heading', 'attrs' => ['id' => 'eeeeeeee', 'level' => 2, 'align' => ['left']], 'content' => []],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $this->assertSame('center', $out['content'][0]['attrs']['align']);
+        $this->assertSame('right', $out['content'][1]['attrs']['align']);
+        $this->assertSame('justify', $out['content'][2]['attrs']['align']);
+        $this->assertArrayNotHasKey('align', $out['content'][3]['attrs']);
+        $this->assertArrayNotHasKey('align', $out['content'][4]['attrs']);
+    }
+
+    public function test_normalise_clamps_column_count_to_two_through_four(): void
+    {
+        $columns = fn (string $id, mixed $count) => ['type' => 'columns', 'attrs' => ['id' => $id, 'count' => $count], 'content' => []];
+        $doc = ['type' => 'doc', 'content' => [
+            $columns('aaaaaaaa', 3),
+            $columns('bbbbbbbb', 99),
+            $columns('cccccccc', 1),
+            $columns('dddddddd', '2; background: red'),
+            $columns('eeeeeeee', '4'),
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $this->assertSame([3, 4, 2, 2, 4], array_column(array_column($out['content'], 'attrs'), 'count'));
+    }
+
+    public function test_normalise_reaches_nested_blocks(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'callout', 'attrs' => ['id' => 'aaaaaaaa', 'tone' => 'note'], 'content' => [
+                ['type' => 'paragraph', 'attrs' => ['id' => 'bbbbbbbb', 'align' => 'evil"><script>'], 'content' => []],
+            ]],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $this->assertArrayNotHasKey('align', $out['content'][0]['content'][0]['attrs']);
+    }
+
     public function test_validate_rejects_unknown_mark_type(): void
     {
         $schema = new DocumentSchema;

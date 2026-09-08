@@ -189,4 +189,44 @@ class HtmlRenderTest extends TestCase
         $html = (new HtmlRenderer)->render($doc, RenderContext::editor());
         $this->assertStringContainsString('src="/images/a.png"', $html);
     }
+
+    public function test_alignment_is_whitelisted_on_paragraphs_and_headings(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'attrs' => ['id' => 'p1p1p1p1', 'align' => 'center'], 'content' => [['type' => 'text', 'text' => 'Centred']]],
+            ['type' => 'heading', 'attrs' => ['id' => 'h1h1h1h1', 'level' => 2, 'align' => 'right'], 'content' => [['type' => 'text', 'text' => 'Right']]],
+            // Attrs reach the renderer straight from stored JSON, which an
+            // API client or an Echo payload can have written.
+            ['type' => 'paragraph', 'attrs' => ['id' => 'p2p2p2p2', 'align' => 'left; background: url(https://evil.example/x)'], 'content' => []],
+            ['type' => 'heading', 'attrs' => ['id' => 'h2h2h2h2', 'level' => 3, 'align' => 'x"><script>alert(1)</script>'], 'content' => []],
+        ]];
+
+        $html = (new HtmlRenderer)->render($doc, RenderContext::share());
+
+        $this->assertStringContainsString('<p data-id="p1p1p1p1" style="text-align:center">', $html);
+        $this->assertStringContainsString('<h2 data-id="h1h1h1h1" style="text-align:right">', $html);
+        $this->assertStringContainsString('<p data-id="p2p2p2p2">', $html);
+        $this->assertStringContainsString('<h3 data-id="h2h2h2h2">', $html);
+        $this->assertStringNotContainsString('evil.example', $html);
+        $this->assertStringNotContainsString('alert(1)', $html);
+    }
+
+    public function test_column_count_is_clamped_before_it_reaches_the_style_attribute(): void
+    {
+        $columns = fn (string $id, mixed $count) => ['type' => 'columns', 'attrs' => ['id' => $id, 'count' => $count], 'content' => []];
+        $doc = ['type' => 'doc', 'content' => [
+            $columns('c1c1c1c1', 3),
+            $columns('c2c2c2c2', 99),
+            $columns('c3c3c3c3', 0),
+            $columns('c4c4c4c4', '2; position: fixed'),
+        ]];
+
+        $html = (new HtmlRenderer)->render($doc, RenderContext::share());
+
+        $this->assertStringContainsString('data-id="c1c1c1c1" style="--cols:3"', $html);
+        $this->assertStringContainsString('data-id="c2c2c2c2" style="--cols:4"', $html);
+        $this->assertStringContainsString('data-id="c3c3c3c3" style="--cols:2"', $html);
+        $this->assertStringContainsString('data-id="c4c4c4c4" style="--cols:2"', $html);
+        $this->assertStringNotContainsString('position: fixed', $html);
+    }
 }

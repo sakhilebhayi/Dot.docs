@@ -2,6 +2,8 @@
 
 namespace App\Documents\Render;
 
+use App\Documents\Schema\DocumentSchema;
+
 /**
  * Renders a Dot.Doc JSON document (see App\Documents\Schema\DocumentSchema)
  * into an HTML string for the editor, share, or print surface.
@@ -97,12 +99,27 @@ class HtmlRenderer
         return "<{$tag}{$attrs}></{$tag}>";
     }
 
-    private function renderParagraph(array $node, RenderContext $ctx): string
+    /**
+     * The `style` attribute for a node's alignment.
+     *
+     * Only the four values DocumentSchema::ALIGNMENTS lists are emitted:
+     * anything else would be arbitrary text inside a `style` attribute, and
+     * attrs reach this renderer straight from stored JSON (which an API
+     * client, an importer, or a legacy document can have written).
+     */
+    private function alignStyle(array $node): string
     {
         $align = $node['attrs']['align'] ?? null;
-        $style = $align ? ' style="text-align:'.$this->esc($align).'"' : '';
+        $align = is_string($align) ? strtolower(trim($align)) : null;
 
-        return '<p data-id="'.$this->id($node).'"'.$style.'>'.$this->renderChildren($node, $ctx).'</p>';
+        return in_array($align, DocumentSchema::ALIGNMENTS, true)
+            ? ' style="text-align:'.$align.'"'
+            : '';
+    }
+
+    private function renderParagraph(array $node, RenderContext $ctx): string
+    {
+        return '<p data-id="'.$this->id($node).'"'.$this->alignStyle($node).'>'.$this->renderChildren($node, $ctx).'</p>';
     }
 
     private function renderHeading(array $node, RenderContext $ctx): string
@@ -110,8 +127,9 @@ class HtmlRenderer
         $level = max(1, min(6, (int) ($node['attrs']['level'] ?? 1)));
         $id = $node['attrs']['id'] ?? '';
         $num = isset($ctx->numbers[$id]) ? '<span class="num">'.$this->esc($ctx->numbers[$id]).'</span>' : '';
+        $style = $this->alignStyle($node);
 
-        return "<h{$level} data-id=\"{$this->esc($id)}\">{$num}".$this->renderChildren($node, $ctx)."</h{$level}>";
+        return "<h{$level} data-id=\"{$this->esc($id)}\"{$style}>{$num}".$this->renderChildren($node, $ctx)."</h{$level}>";
     }
 
     private function renderOrderedList(array $node, RenderContext $ctx): string
@@ -250,9 +268,15 @@ class HtmlRenderer
     private function renderColumns(array $node, RenderContext $ctx): string
     {
         $count = $node['attrs']['count'] ?? count($node['content'] ?? []);
+        // Clamped, not just escaped: the value lands inside a `style`
+        // attribute and CssBuilder's grid only makes sense for 2-4 tracks,
+        // which is also what the node's content expression (`column{2,4}`)
+        // allows.
+        $count = is_numeric($count) ? (int) $count : DocumentSchema::MIN_COLUMNS;
+        $count = max(DocumentSchema::MIN_COLUMNS, min(DocumentSchema::MAX_COLUMNS, $count));
         $inner = $this->renderChildren($node, $ctx);
 
-        return '<div class="columns" data-id="'.$this->id($node).'" style="--cols:'.$this->esc($count).'">'.$inner.'</div>';
+        return '<div class="columns" data-id="'.$this->id($node).'" style="--cols:'.$count.'">'.$inner.'</div>';
     }
 
     private function renderCrossRef(array $node, RenderContext $ctx): string

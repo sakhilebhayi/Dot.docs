@@ -1,7 +1,6 @@
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
-import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
@@ -16,9 +15,11 @@ import { CrossRef } from './extensions/crossRef';
 import { DocAttrs } from './extensions/docAttrs';
 import { Caption, Figure } from './extensions/figure';
 import { HeadingNumbered } from './extensions/headingNumbered';
+import { DocImage } from './extensions/image';
 import { PageBreak } from './extensions/pageBreak';
 import { SectionBreak } from './extensions/sectionBreak';
 import { Align } from './extensions/textAlign';
+import { DocTextStyle } from './extensions/textStyle';
 import { Toc } from './extensions/toc';
 import { Variable } from './extensions/variable';
 import { commands, run as runCommand } from './commands/registry';
@@ -27,6 +28,7 @@ import { installBubble } from './ui/bubble';
 import { installPalette, openPalette } from './ui/palette';
 import { SlashMenu } from './ui/slash';
 import { closeList } from './ui/list';
+import { isContentValid } from './validation';
 import { clearDraft, loadDraft, saveDraft } from '../offline';
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
@@ -52,7 +54,11 @@ function buildExtensions(opts) {
         Subscript,
         Superscript,
         Align.configure({ types: ['heading', 'paragraph'] }),
-        Image.configure({ inline: false, allowBase64: false }),
+        // Registered even though nothing writes it yet: DocumentSchema::MARKS
+        // accepts textStyle and HtmlRenderer prints it, and a mark the editor
+        // does not know turns the whole document into an empty doc on open.
+        DocTextStyle,
+        DocImage.configure({ inline: false, allowBase64: false }),
         Placeholder.configure({ placeholder: 'Start writing, or press / for commands…' }),
         Table.configure({ resizable: true }),
         TableRow,
@@ -117,31 +123,36 @@ function mount(element, opts = {}) {
 
     let saveTimer = null;
     let lastSaved = JSON.stringify(opts.content ?? null);
+    let dirty = false;
+    let autosave = true;
+    let contentError = null;
 
     const editor = new Editor({
         element,
         extensions: buildExtensions(opts),
         content: opts.content,
+        // Without this, TipTap's createNodeFromContent SWALLOWS a schema
+        // error and hands back an empty doc: the document opens blank and
+        // the first keystroke autosaves that blankness over the real
+        // content. With it, the parse failure arrives here instead and the
+        // editor is put in read-only mode before it can destroy anything.
+        enableContentCheck: true,
+        onContentError: ({ error }) => {
+            // Fires from inside this constructor, before `editor` exists —
+            // record it and fail closed once the instance is in hand.
+            contentError = error;
+        },
         editorProps: {
             attributes: { class: 'paper' },
         },
-        onUpdate: ({ editor: instance }) => {
-            if (typeof opts.onChange !== 'function') {
+        onUpdate: () => {
+            if (typeof opts.onChange !== 'function' || !autosave) {
                 return;
             }
 
+            dirty = true;
             clearTimeout(saveTimer);
-            saveTimer = setTimeout(() => {
-                const json = instance.getJSON();
-                const serialised = JSON.stringify(json);
-                // Plugin housekeeping (trailing paragraph, id backfill) can
-                // fire onUpdate without changing anything a save would store.
-                if (serialised === lastSaved) {
-                    return;
-                }
-                lastSaved = serialised;
-                opts.onChange(json);
-            }, AUTOSAVE_DEBOUNCE_MS);
+            saveTimer = setTimeout(flushSave, AUTOSAVE_DEBOUNCE_MS);
         },
         onSelectionUpdate: ({ editor: instance }) => {
             const info = selectionInfo(instance);
@@ -153,6 +164,72 @@ function mount(element, opts = {}) {
             }
         },
     });
+
+    /**
+     * Send the pending document now instead of at the end of the debounce.
+     * Called by the timer, by destroy() and by pagehide — the last words
+     * typed before a navigation are otherwise still sitting in the timer
+     * when the page goes away.
+     *
+     * @returns {boolean} whether anything was actually sent
+     */
+    function flushSave() {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+
+        if (!dirty || !autosave || typeof opts.onChange !== 'function' || editor.isDestroyed) {
+            return false;
+        }
+        dirty = false;
+
+        const json = editor.getJSON();
+        const serialised = JSON.stringify(json);
+        // Plugin housekeeping (trailing paragraph, id backfill) can fire
+        // onUpdate without changing anything a save would store.
+        if (serialised === lastSaved) {
+            return false;
+        }
+        lastSaved = serialised;
+        opts.onChange(json);
+
+        return true;
+    }
+
+    /**
+     * The document cannot be represented by this editor's schema. Show it,
+     * stop editing, and — above all — stop autosaving, because what the
+     * editor is holding is not the document.
+     */
+    function failClosed(reason) {
+        autosave = false;
+        dirty = false;
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        editor.setEditable(false);
+
+        const banner = document.createElement('div');
+        banner.className = 'dotdoc-content-error';
+        banner.setAttribute('role', 'alert');
+        banner.textContent =
+            'This document contains content this editor cannot open. It is shown read-only and will not be saved from here.';
+        element.insertBefore(banner, element.firstChild);
+
+        if (typeof opts.onContentError === 'function') {
+            opts.onContentError(reason);
+        }
+    }
+
+    /** The node and mark names this editor actually registered. */
+    function schemaNames() {
+        return {
+            nodes: Object.keys(editor.schema.nodes),
+            marks: Object.keys(editor.schema.marks),
+        };
+    }
+
+    if (contentError || (opts.content && !isContentValid(opts.content, schemaNames()))) {
+        failClosed(contentError ?? new Error('Document contains nodes or marks this editor does not register'));
+    }
 
     /** Host hooks the extensions and the registry read off the editor. */
     editor.dotdoc = {
@@ -219,11 +296,95 @@ function mount(element, opts = {}) {
     const teardownPalette = installPalette(editor);
     const teardownBubble = installBubble(editor);
 
+    // The debounce is 1200 ms; a click on a link can beat it. pagehide (not
+    // unload — a page restored from the back/forward cache never fires
+    // unload) is the last point at which the document can still be read.
+    // NOTE: the flushed Livewire request is fire-and-forget at this stage
+    // and the browser may cancel it, which is why the Blade bridge ALSO
+    // keeps the offline draft — that is what actually guarantees recovery.
+    const onPageHide = () => flushSave();
+    window.addEventListener('pagehide', onPageHide);
+
     const handle = {
         editor,
+
         run: (name, params = {}) => runCommand(editor, name, params),
-        destroy: () => {
+
+        /** Whether autosave is live (false once the content check has failed). */
+        get autosaves() {
+            return autosave;
+        },
+
+        /** Send any pending document immediately. */
+        flush: flushSave,
+
+        /**
+         * Apply a document that arrived over Echo from another editor.
+         *
+         * Not `setContent()`: that lands in the undo stack (a collaborator's
+         * paragraph becomes something YOU can undo), fires onUpdate, and
+         * races the pending autosave — the local debounce would then send
+         * the pre-merge document straight back and clobber the change.
+         *
+         * @returns {boolean} whether the update was applied
+         */
+        applyRemote: (json) => {
+            if (!json || editor.isDestroyed) {
+                return false;
+            }
+
+            // Whatever was typed locally is superseded by this document;
+            // letting the timer fire afterwards would overwrite it.
             clearTimeout(saveTimer);
+            saveTimer = null;
+            dirty = false;
+
+            if (!isContentValid(json, schemaNames())) {
+                return false;
+            }
+
+            const anchor = editor.state.selection.anchor;
+
+            let applied = false;
+            try {
+                applied = editor
+                    .chain()
+                    .command(({ tr }) => {
+                        tr.setMeta('addToHistory', false);
+
+                        return true;
+                    })
+                    .setContent(json, { emitUpdate: false, errorOnInvalidContent: true })
+                    .run();
+            } catch (_) {
+                // A document this editor cannot parse: leave what is on
+                // screen alone rather than blanking it.
+                return false;
+            }
+
+            if (!applied) {
+                return false;
+            }
+
+            lastSaved = JSON.stringify(json);
+
+            // Best effort: the anchor is a position in the OLD document, so
+            // it can be out of range or land somewhere odd in the new one.
+            try {
+                editor.commands.setTextSelection(Math.min(anchor, editor.state.doc.content.size));
+            } catch (_) {
+                // Nothing to do — the caret stays where ProseMirror put it.
+            }
+
+            return true;
+        },
+
+        destroy: () => {
+            // Flush BEFORE tearing down: the last keystrokes are otherwise
+            // still inside the debounce when the editor goes away.
+            flushSave();
+            clearTimeout(saveTimer);
+            window.removeEventListener('pagehide', onPageHide);
             closeList();
             teardownPalette();
             teardownBubble();

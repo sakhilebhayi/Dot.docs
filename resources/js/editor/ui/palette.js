@@ -43,6 +43,33 @@ export function openPalette(editor) {
 }
 
 /**
+ * Whether Cmd/Ctrl+K belongs to the palette right now.
+ *
+ * The listener is on `window` (in capture), so without this the chord is
+ * stolen from every other field on the page — most visibly the document
+ * title input in the toolbar, where ⌘K would open the palette instead of
+ * doing whatever the browser or the field does. The palette's own input is
+ * the exception: it lives inside the overlay and ⌘K there closes it.
+ */
+function paletteOwnsChord(editor, target) {
+    if (!(target instanceof HTMLElement)) {
+        // No element (or a non-DOM event target): treat it as the page.
+        return true;
+    }
+    if (target.closest('.dotdoc-overlay')) {
+        return true;
+    }
+
+    const editable = target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+    if (!editable) {
+        return true;
+    }
+
+    // A contenteditable inside the editor IS the editor.
+    return !!editor?.view?.dom && (editable === editor.view.dom || editor.view.dom.contains(editable));
+}
+
+/**
  * Bind Cmd/Ctrl+K to the palette. The AI palette on the same page listens on
  * Cmd/Ctrl+Shift+K so the two do not fight over one chord.
  *
@@ -57,6 +84,9 @@ export function installPalette(editor) {
             return;
         }
         if (!editor || editor.isDestroyed) {
+            return;
+        }
+        if (!paletteOwnsChord(editor, event.target)) {
             return;
         }
 

@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core';
+import { normaliseColumnCount } from '../attrs';
 
 /** `column` from DocumentSchema — one track of a `columns` block. */
 export const Column = Node.create({
@@ -21,6 +22,10 @@ export const Column = Node.create({
  * `columns{count}` from DocumentSchema. Between two and four columns —
  * HtmlRenderer emits `style="--cols:N"` and CssBuilder turns that into a
  * grid, so `count` and the number of child columns must agree.
+ *
+ * `count` is clamped to 2–4 wherever it is read or written: it is
+ * interpolated into a `style` attribute, and JSON applied by an Echo
+ * broadcast never passes through parseHTML.
  */
 export const Columns = Node.create({
     name: 'columns',
@@ -35,11 +40,26 @@ export const Columns = Node.create({
         return {
             count: {
                 default: 2,
-                parseHTML: (element) => Number(element.getAttribute('data-count')) || 2,
-                renderHTML: (attributes) => ({
-                    'data-count': attributes.count,
-                    style: `--cols:${attributes.count}`,
-                }),
+                // HtmlRenderer::renderColumns() emits only `style="--cols:N"`,
+                // the editor's own renderHTML also writes `data-count`; read
+                // either so an HTML round trip keeps the track count.
+                parseHTML: (element) => {
+                    const candidates = [
+                        element.getAttribute('data-count'),
+                        element.style?.getPropertyValue('--cols'),
+                        element.children.length,
+                    ];
+                    const found = candidates.find(
+                        (value) => value !== null && value !== undefined && String(value).trim() !== ''
+                    );
+
+                    return normaliseColumnCount(found);
+                },
+                renderHTML: (attributes) => {
+                    const count = normaliseColumnCount(attributes.count);
+
+                    return { 'data-count': String(count), style: `--cols:${count}` };
+                },
             },
         };
     },
@@ -57,7 +77,7 @@ export const Columns = Node.create({
             insertColumns:
                 (count = 2) =>
                 ({ commands }) => {
-                    const columns = Math.min(4, Math.max(2, Number(count) || 2));
+                    const columns = normaliseColumnCount(count);
 
                     return commands.insertContent({
                         type: this.name,

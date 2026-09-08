@@ -1,4 +1,5 @@
 import { CALLOUT_TONES } from '../extensions/callout';
+import { isInCaption } from '../extensions/figure';
 import { referenceTargets } from '../outline';
 import { openList } from '../ui/list';
 
@@ -12,6 +13,21 @@ import { openList } from '../ui/list';
  * they are hidden from the slash menu and delegate through
  * `editor.dotdoc.onCommand(name, params)`.
  */
+
+/**
+ * A block insert refuses to run inside a figure caption. `caption` holds
+ * inline content only, so inserting a block there splits the figure in two
+ * and the media loses the label the writer just typed.
+ */
+function blockInsert(run) {
+    return (editor, params = {}) => {
+        if (isInCaption(editor)) {
+            return false;
+        }
+
+        return run(editor, params);
+    };
+}
 
 /** Hand a command off to the host page (the Blade/Livewire bridge). */
 function host(editor, name, params = {}) {
@@ -43,14 +59,14 @@ const callout = (tone) => ({
     name: `callout.${tone}`,
     title: `Callout — ${tone.charAt(0).toUpperCase()}${tone.slice(1)}`,
     group: 'layout',
-    run: (editor) => editor.chain().focus().toggleCallout(tone).run(),
+    run: blockInsert((editor) => editor.chain().focus().toggleCallout(tone).run()),
 });
 
 const columns = (count) => ({
     name: `columns.${count}`,
     title: `${count} columns`,
     group: 'layout',
-    run: (editor) => editor.chain().focus().insertColumns(count).run(),
+    run: blockInsert((editor) => editor.chain().focus().insertColumns(count).run()),
 });
 
 export const commands = [
@@ -105,8 +121,9 @@ export const commands = [
         name: 'table',
         title: 'Table 3×3',
         group: 'insert',
-        run: (editor) =>
-            editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+        run: blockInsert((editor) =>
+            editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+        ),
     },
     {
         name: 'image',
@@ -137,7 +154,9 @@ export const commands = [
         name: 'toc',
         title: 'Table of contents',
         group: 'insert',
-        run: (editor, params = {}) => editor.chain().focus().insertToc(params.depth || 3).run(),
+        run: blockInsert((editor, params = {}) =>
+            editor.chain().focus().insertToc(params.depth || 3).run()
+        ),
     },
     {
         name: 'crossRef',
@@ -155,11 +174,11 @@ export const commands = [
 
             openList({
                 title: 'Insert cross-reference',
-                placeholder: 'Search headings…',
-                empty: 'No numbered headings yet',
+                placeholder: 'Search headings, figures and tables…',
+                empty: 'Nothing numbered to reference yet',
                 items: targets.map((target) => ({
                     key: target.id,
-                    title: target.text || '(untitled)',
+                    title: target.title || target.text || '(untitled)',
                     hint: target.number,
                     targetId: target.id,
                     kind: target.kind,
@@ -207,18 +226,38 @@ export const commands = [
         title: 'Page break',
         group: 'layout',
         shortcut: 'Mod-Enter',
-        run: (editor) => editor.chain().focus().insertPageBreak().run(),
+        run: blockInsert((editor) => editor.chain().focus().insertPageBreak().run()),
     },
     {
         name: 'sectionBreak',
         title: 'Section break',
         group: 'layout',
-        run: (editor, params = {}) =>
-            editor.chain().focus().insertSectionBreak(params.setup || {}).run(),
+        run: blockInsert((editor, params = {}) =>
+            editor.chain().focus().insertSectionBreak(params.setup || {}).run()
+        ),
     },
     ...CALLOUT_TONES.map(callout),
     columns(2),
     columns(3),
+
+    {
+        // Foreword / Appendix headings sit in the table of contents but carry
+        // no number (Outline lists them with number ''). This is the only way
+        // to set attrs.numbered from the UI.
+        name: 'heading.numbered.toggle',
+        title: 'Toggle heading number',
+        group: 'text',
+        shortcut: 'Mod-Alt-N',
+        run: (editor) => {
+            if (!editor.isActive('heading')) {
+                return false;
+            }
+
+            const numbered = editor.getAttributes('heading').numbered !== false;
+
+            return editor.chain().focus().setHeadingNumbered(!numbered).run();
+        },
+    },
 
     align('left', 'Align left'),
     align('center', 'Align centre'),
@@ -245,16 +284,6 @@ export const commands = [
         group: 'system',
         shortcut: 'Mod-Shift-Z',
         run: (editor) => editor.chain().focus().redo().run(),
-    },
-    {
-        // The browser's own find bar cannot be opened from script, so this
-        // entry deliberately binds no key: Cmd/Ctrl+F is left to the browser
-        // and the host page is told, in case it wants its own find UI.
-        name: 'find',
-        title: 'Find in document',
-        group: 'system',
-        shortcut: 'Mod-F',
-        run: (editor) => host(editor, 'find'),
     },
     {
         name: 'export.pdf',

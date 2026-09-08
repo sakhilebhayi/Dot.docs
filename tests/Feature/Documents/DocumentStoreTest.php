@@ -87,4 +87,28 @@ class DocumentStoreTest extends TestCase
             ->call('saveContent', ['type' => 'doc', 'content' => [['type' => 'marquee']]])
             ->assertHasErrors('content');
     }
+
+    public function test_save_normalises_style_bearing_attrs_so_bad_values_never_persist(): void
+    {
+        $user = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Normalised');
+
+        $doc = app(DocumentStore::class)->save($doc, ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'attrs' => ['id' => 'p0p0p0p0', 'align' => 'left; background: url(https://evil.example/x)'], 'content' => [['type' => 'text', 'text' => 'Hi']]],
+            ['type' => 'paragraph', 'attrs' => ['id' => 'p1p1p1p1', 'align' => 'CENTER'], 'content' => []],
+            ['type' => 'columns', 'attrs' => ['id' => 'c0c0c0c0', 'count' => 99], 'content' => [
+                ['type' => 'column', 'attrs' => ['id' => 'c1c1c1c1'], 'content' => [['type' => 'paragraph', 'attrs' => ['id' => 'c2c2c2c2'], 'content' => []]]],
+                ['type' => 'column', 'attrs' => ['id' => 'c3c3c3c3'], 'content' => [['type' => 'paragraph', 'attrs' => ['id' => 'c4c4c4c4'], 'content' => []]]],
+            ]],
+        ]], $user);
+
+        // Both attrs land inside a `style` attribute in HtmlRenderer and in
+        // the editor's own renderHTML, and a document travels between the two
+        // as JSON over Echo without ever passing through parseHTML.
+        $this->assertArrayNotHasKey('align', $doc->content_json['content'][0]['attrs']);
+        $this->assertSame('center', $doc->content_json['content'][1]['attrs']['align']);
+        $this->assertSame(4, $doc->content_json['content'][2]['attrs']['count']);
+        $this->assertStringNotContainsString('evil.example', $doc->content);
+        $this->assertStringContainsString('style="--cols:4"', $doc->content);
+    }
 }

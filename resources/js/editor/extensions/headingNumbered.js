@@ -77,6 +77,23 @@ export const HeadingNumbered = Heading.extend({
         };
     },
 
+    addKeyboardShortcuts() {
+        return {
+            ...(this.parent?.() || {}),
+            // Foreword / Appendix: keep the heading in the table of
+            // contents, drop its number.
+            'Mod-Alt-n': () => {
+                if (!this.editor.isActive('heading')) {
+                    return false;
+                }
+
+                const numbered = this.editor.getAttributes('heading').numbered !== false;
+
+                return this.editor.commands.setHeadingNumbered(!numbered);
+            },
+        };
+    },
+
     addProseMirrorPlugins() {
         const editor = this.editor;
 

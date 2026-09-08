@@ -70,16 +70,25 @@ class Editor extends Component
         $this->loadPendingSuggestions();
     }
 
-    public function saveContent(array $content): void
+    /**
+     * @return bool whether the document was stored. The editor bridge awaits
+     *              this ($wire actions resolve with the return value) and
+     *              keeps the offline draft when it is false, so a rejected
+     *              save cannot quietly lose the writer's work.
+     */
+    public function saveContent(array $content): bool
     {
         $this->authorize('update', $this->document);
+
+        $this->resetErrorBag('content');
 
         try {
             $this->document = app(DocumentStore::class)->save($this->document, $content, Auth::user());
         } catch (InvalidArgumentException $e) {
             $this->addError('content', $e->getMessage());
+            $this->saved = false;
 
-            return;
+            return false;
         }
         $this->contentJson = $this->document->content_json;
         $this->saved = true;
@@ -90,6 +99,8 @@ class Editor extends Component
             // Broadcasting unavailable — continue without real-time sync
         }
         app(PresenceService::class)->heartbeat($this->document, Auth::user());
+
+        return true;
     }
 
     /**
@@ -98,14 +109,32 @@ class Editor extends Component
      * depends on the style's numbering tokens - see .ai/rules/styles.md), so
      * the editor asks for it after every save instead of computing its own.
      *
-     * @return array{numbers: array<string,string>, toc: list<array{id:string,level:int,text:string,number:string}>}
+     * `figures` and `tables` are what the cross-reference picker offers
+     * besides headings - a figure or a table is referenced by its number and
+     * found by its caption, so both travel together.
+     *
+     * @return array{
+     *     numbers: array<string,string>,
+     *     toc: list<array{id:string,level:int,text:string,number:string}>,
+     *     figures: list<array{id:string,number:string,text:string}>,
+     *     tables: list<array{id:string,number:string,text:string}>,
+     * }
      */
     public function outline(): array
     {
+        // Called straight from JS on every save round trip, so it carries its
+        // own authorisation rather than trusting mount()'s.
+        $this->authorize('view', $this->document);
+
         $style = $this->document->resolvedStyle() ?? DocumentStyle::resolve('report');
         $result = app(Outline::class)->build($this->document->content_json ?? [], $style?->tokens['numbering'] ?? []);
 
-        return ['numbers' => $result->numbers, 'toc' => $result->toc];
+        return [
+            'numbers' => $result->numbers,
+            'toc' => $result->toc,
+            'figures' => $result->figures,
+            'tables' => $result->tables,
+        ];
     }
 
     /**

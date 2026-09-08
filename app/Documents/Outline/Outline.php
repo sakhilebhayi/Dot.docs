@@ -72,7 +72,10 @@ class Outline
                     : $this->nextFigureNumber($figureCounters, $rules['figures'], $chapter);
                 $result->numbers[$id] = $number;
                 $result->kinds[$id] = $kind === 'table' ? 'table' : 'figure';
-                $entry = ['id' => $id, 'number' => $number];
+                // The caption is the only human-readable name a figure has -
+                // the cross-reference picker lists "Figure 2 - Yield by
+                // region" with it, and has nothing to show without it.
+                $entry = ['id' => $id, 'number' => $number, 'text' => $this->captionText($node, $schema)];
                 if ($kind === 'table') {
                     $result->tables[] = $entry;
                 } else {
@@ -98,6 +101,18 @@ class Outline
         $result->broken = array_values(array_unique($result->broken));
 
         return $result;
+    }
+
+    /** The caption text of a figure node, or '' when it has none yet. */
+    private function captionText(array $figure, DocumentSchema $schema): string
+    {
+        foreach ($figure['content'] ?? [] as $child) {
+            if (is_array($child) && ($child['type'] ?? '') === 'caption') {
+                return trim($schema->plainText($child));
+            }
+        }
+
+        return '';
     }
 
     public function apply(array $doc, OutlineResult $result): array

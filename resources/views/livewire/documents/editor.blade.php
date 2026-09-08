@@ -7,6 +7,11 @@
         typingTimeout: null,
         isOffline: !navigator.onLine,
         docUuid: '{{ $document->uuid }}',
+        // When the server last stored this document, in epoch ms. An offline
+        // draft older than this is a leftover from a previous session and is
+        // never offered: restoring it would overwrite whatever has been saved
+        // since, possibly by somebody else.
+        updatedAt: Date.parse('{{ $document->updated_at->toIso8601String() }}') || 0,
         selection: { blockId: null, type: null },
         tick: 0,
 
@@ -48,7 +53,7 @@
             // selection bubble; this component only bridges it to Livewire.
             // mount() is idempotent per element, so a second Alpine instance
             // gets the same editor rather than a second one over the same DOM.
-            const editor = window.DotDoc.mount(host, {
+            const handle = window.DotDoc.mount(host, {
                 content: @js($contentJson),
                 vars: @js($document->variables ?? []),
                 uploadUrl: '{{ route('documents.images.store', $document->uuid) }}',
@@ -56,7 +61,8 @@
                 onChange: (json) => this.persist(json),
                 onSelection: (s) => { this.selection = s; this.tick++; },
                 onCommand: (name, params) => this.hostCommand(name, params),
-            }).editor;
+            });
+            const editor = handle.editor;
 
             if (!this.owns) return;
 
@@ -96,8 +102,18 @@
             });
         },
 
+        // $wire actions resolve with the PHP method's return value, so a
+        // rejected save (DocumentSchema validation) is visible here. On a
+        // reject the offline draft is KEPT — it is the only remaining copy of
+        // what the writer typed — and the error renders in the status area.
         persist(json) {
-            return @this.saveContent(json).then(() => this.refreshOutline());
+            return @this.saveContent(json).then((stored) => {
+                if (stored && window.offlineDraft) {
+                    window.offlineDraft.clearDraft(this.docUuid);
+                }
+
+                return this.refreshOutline();
+            });
         },
 
         // Numbering rules live in the document style, so the server owns them.
@@ -116,9 +132,6 @@
                 @this.setStyle(params.key);
             } else if (name === 'comment') {
                 if (!@this.commentSidebarOpen) @this.toggleCommentSidebar();
-            } else if (name === 'find') {
-                // The browser's own find bar cannot be opened from script.
-                window.dispatchEvent(new CustomEvent('dotdoc-find', { detail: params }));
             }
         },
 
@@ -128,10 +141,21 @@
                 const editor = this.ed();
                 const draft = await window.offlineDraft.loadDraft(this.docUuid);
                 if (!draft || !editor) return;
-                const parsed = JSON.parse(draft);
+                // loadDraft returns {json, savedAt}. Only a draft written
+                // AFTER the server's own updated_at is worth offering; an
+                // older one is stale and restoring it would overwrite newer
+                // server content, so it is simply dropped.
+                if (!(draft.savedAt > this.updatedAt)) {
+                    window.offlineDraft.clearDraft(this.docUuid);
+                    return;
+                }
+                const parsed = JSON.parse(draft.json);
                 if (!parsed || parsed.type !== 'doc') return;
-                if (JSON.stringify(parsed) === JSON.stringify(editor.getJSON())) return;
-                if (confirm('An unsaved offline draft was found. Restore it?')) {
+                if (JSON.stringify(parsed) === JSON.stringify(editor.getJSON())) {
+                    window.offlineDraft.clearDraft(this.docUuid);
+                    return;
+                }
+                if (confirm('An unsaved offline draft newer than the saved document was found. Restore it?')) {
                     editor.commands.setContent(parsed);
                 }
                 window.offlineDraft.clearDraft(this.docUuid);
@@ -152,15 +176,19 @@
                     console.log(user.name + ' left');
                 })
                 .listen('.document.updated', (e) => {
-                    // Only apply remote updates if from another user
-                    const editor = this.ed();
-                    if (editor && e.editor.id !== {{ auth()->id() }}) {
-                        const currentPos = editor.state.selection.anchor;
-                        editor.commands.setContent(e.json ?? e.content, { emitUpdate: false });
-                        // Try to restore cursor position
-                        try { editor.commands.setTextSelection(currentPos); } catch(_) {}
-                        this.refreshOutline();
-                    }
+                    // Only apply remote updates if from another user.
+                    if (e.editor?.id === {{ auth()->id() }}) return;
+                    const handle = window.DotDoc?.get(this.$refs.editorEl);
+                    // applyRemote (not setContent) cancels the pending
+                    // autosave that would otherwise send the pre-merge
+                    // document straight back, keeps the change out of the
+                    // local undo stack, and refuses JSON this editor cannot
+                    // parse instead of blanking the page.
+                    if (!handle || !handle.applyRemote(e.json)) return;
+                    // The server now holds newer content than any draft.
+                    if (window.offlineDraft) window.offlineDraft.clearDraft(this.docUuid);
+                    this.tick++;
+                    this.refreshOutline();
                 })
                 .listen('.user.joined', (e) => {
                     @this.heartbeat();
@@ -375,9 +403,20 @@
                     editing
                 </span>
                 <span wire:loading wire:target="saveContent,saveTitle" class="animate-pulse">Saving…</span>
-                <span wire:loading.remove wire:target="saveContent,saveTitle" x-show="!isTyping && !isOffline" class="text-green-500">
-                    @if($saved) ✓ Saved @endif
-                </span>
+                {{-- A rejected save (DocumentSchema validation) must be
+                     visible: the editor keeps typing over content the server
+                     never accepted, and the offline draft is deliberately
+                     kept as the only remaining copy. --}}
+                @error('content')
+                    <span class="flex items-center gap-1 px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded font-medium"
+                          title="{{ $message }}">
+                        ⚠ Not saved — {{ \Illuminate\Support\Str::limit($message, 60) }}
+                    </span>
+                @else
+                    <span wire:loading.remove wire:target="saveContent,saveTitle" x-show="!isTyping && !isOffline" class="text-green-500">
+                        @if($saved) ✓ Saved @endif
+                    </span>
+                @enderror
             </div>
 
             {{-- Last edited by --}}

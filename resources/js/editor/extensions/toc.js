@@ -1,4 +1,6 @@
 import { Node, mergeAttributes } from '@tiptap/core';
+import { asText } from '../attrs';
+import { scrollToBlock } from '../dom';
 import { onOutlineChange, outline } from '../outline';
 
 /**
@@ -76,20 +78,17 @@ export const Toc = Node.create({
                     item.className = `toc-level-${entry.level || 1}`;
 
                     const link = document.createElement('a');
-                    link.href = `#${entry.id}`;
+                    link.href = `#${asText(entry.id)}`;
                     link.addEventListener('click', (event) => {
                         event.preventDefault();
-                        const target = document.querySelector(`[data-id="${entry.id}"]`);
-                        if (target) {
-                            target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                        }
+                        scrollToBlock(entry.id);
                     });
 
                     const num = document.createElement('span');
                     num.className = 'num';
-                    num.textContent = entry.number || '';
+                    num.textContent = asText(entry.number);
                     link.appendChild(num);
-                    link.appendChild(document.createTextNode(entry.text || ''));
+                    link.appendChild(document.createTextNode(asText(entry.text)));
 
                     item.appendChild(link);
                     list.appendChild(item);

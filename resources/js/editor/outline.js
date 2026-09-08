@@ -14,16 +14,27 @@
 
 const listeners = new Set();
 
-/** @type {{numbers: Record<string,string>, toc: Array<{id:string,level:number,text:string,number:string}>}} */
+/**
+ * @type {{
+ *   numbers: Record<string,string>,
+ *   toc: Array<{id:string,level:number,text:string,number:string}>,
+ *   figures: Array<{id:string,number:string,text:string}>,
+ *   tables: Array<{id:string,number:string,text:string}>,
+ * }}
+ */
 export const outline = {
     numbers: {},
     toc: [],
+    figures: [],
+    tables: [],
 };
 
 /** Replace the outline and notify every subscriber. */
 export function setOutline(next) {
     outline.numbers = (next && next.numbers) || {};
     outline.toc = (next && next.toc) || [];
+    outline.figures = (next && next.figures) || [];
+    outline.tables = (next && next.tables) || [];
 
     listeners.forEach((fn) => {
         try {
@@ -59,15 +70,43 @@ export function crossRefLabel(attrs = {}) {
     return attrs.label || '?';
 }
 
-/** Headings and figures the cross-reference picker can point at. */
+/**
+ * Everything the cross-reference picker can point at: numbered headings,
+ * then figures, then tables. A figure has no heading text of its own, so its
+ * caption is what the writer searches for — the row reads "Figure 2 — Yield
+ * by region", or just "Table 1" while the caption is still empty.
+ */
 export function referenceTargets() {
-    return outline.toc
+    const headings = outline.toc
         .filter((entry) => entry.number !== '')
         .map((entry) => ({
             id: entry.id,
             kind: 'heading',
             number: entry.number,
             text: entry.text || '',
+            title: entry.text || '(untitled)',
             level: entry.level,
         }));
+
+    const media = (entries, kind, prefix) =>
+        (entries || [])
+            .filter((entry) => entry && entry.id)
+            .map((entry) => {
+                const text = entry.text || '';
+                const number = entry.number || '';
+
+                return {
+                    id: entry.id,
+                    kind,
+                    number,
+                    text,
+                    title: text ? `${prefix} ${number} — ${text}` : `${prefix} ${number}`,
+                };
+            });
+
+    return [
+        ...headings,
+        ...media(outline.figures, 'figure', 'Figure'),
+        ...media(outline.tables, 'table', 'Table'),
+    ];
 }

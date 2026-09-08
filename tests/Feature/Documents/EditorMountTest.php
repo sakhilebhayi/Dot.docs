@@ -7,6 +7,7 @@ use App\Documents\Schema\BlockId;
 use App\Livewire\Documents\Editor;
 use App\Models\User;
 use Database\Seeders\DocumentStyleSeeder;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -84,5 +85,81 @@ class EditorMountTest extends TestCase
         $this->assertSame('1.1', $outline['numbers'][$subId]);
         $this->assertSame(['1', '1.1'], array_column($outline['toc'], 'number'));
         $this->assertSame(['Overview', 'Detail'], array_column($outline['toc'], 'text'));
+    }
+
+    public function test_outline_lists_figures_and_tables_with_their_caption_text(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $figureId = BlockId::generate();
+        $tableId = BlockId::generate();
+        $doc = app(DocumentStore::class)->create($user, 'Referenced', [
+            'type' => 'doc',
+            'content' => [
+                ['type' => 'figure', 'attrs' => ['id' => $figureId, 'kind' => 'image'], 'content' => [
+                    ['type' => 'image', 'attrs' => ['id' => BlockId::generate(), 'src' => '/storage/x.png']],
+                    ['type' => 'caption', 'attrs' => ['id' => BlockId::generate()], 'content' => [['type' => 'text', 'text' => 'Yield by region']]],
+                ]],
+                ['type' => 'figure', 'attrs' => ['id' => $tableId, 'kind' => 'table'], 'content' => [
+                    ['type' => 'table', 'attrs' => ['id' => BlockId::generate()], 'content' => []],
+                    ['type' => 'caption', 'attrs' => ['id' => BlockId::generate()], 'content' => []],
+                ]],
+            ],
+        ]);
+
+        $outline = Livewire::actingAs($user)
+            ->test(Editor::class, ['uuid' => $doc->uuid])
+            ->instance()
+            ->outline();
+
+        // The cross-reference picker offers figures and tables beside
+        // headings; without these keys it could only list headings.
+        $this->assertArrayHasKey('figures', $outline);
+        $this->assertArrayHasKey('tables', $outline);
+        $this->assertSame([['id' => $figureId, 'number' => '1', 'text' => 'Yield by region']], $outline['figures']);
+        $this->assertSame([['id' => $tableId, 'number' => '1', 'text' => '']], $outline['tables']);
+    }
+
+    public function test_outline_authorises_view_on_every_call_not_only_at_mount(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Private');
+
+        $component = Livewire::actingAs($user)
+            ->test(Editor::class, ['uuid' => $doc->uuid])
+            ->instance();
+        $this->assertArrayHasKey('numbers', $component->outline());
+
+        // Livewire hydrates a component from its snapshot on every later
+        // request WITHOUT re-running mount(), and the editor's JS calls
+        // outline() directly after every save - so it authorises for itself.
+        $stranger = User::factory()->withPersonalTeam()->create();
+        $this->actingAs($stranger);
+
+        $this->expectException(AuthorizationException::class);
+        $component->outline();
+    }
+
+    public function test_a_rejected_save_is_reported_to_the_browser_and_shown_on_the_page(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Rejected');
+        $version = $doc->version;
+
+        // saveContent() returns a bool because $wire actions resolve with the
+        // PHP return value: the bridge keeps the offline draft when it is
+        // false, so a rejected save cannot silently lose the writer's work.
+        Livewire::actingAs($user)
+            ->test(Editor::class, ['uuid' => $doc->uuid])
+            ->call('saveContent', ['type' => 'doc', 'content' => [
+                ['type' => 'mermaidDiagram', 'attrs' => ['id' => BlockId::generate()]],
+            ]])
+            ->assertReturned(false)
+            ->assertHasErrors('content')
+            ->assertSee('Not saved');
+
+        $this->assertSame($version, $doc->fresh()->version);
     }
 }

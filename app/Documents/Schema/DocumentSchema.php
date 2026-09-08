@@ -54,6 +54,64 @@ class DocumentSchema
         return $node;
     }
 
+    /** Alignments HtmlRenderer will put in a `style` attribute. */
+    public const ALIGNMENTS = ['left', 'center', 'right', 'justify'];
+
+    public const MIN_COLUMNS = 2;
+
+    public const MAX_COLUMNS = 4;
+
+    /**
+     * Clean the attributes that end up inside a `style` attribute before they
+     * are stored.
+     *
+     * `paragraph`/`heading`.align and `columns`.count are interpolated into
+     * CSS by HtmlRenderer and by the editor's own renderHTML. The renderers
+     * whitelist them too, but a document saved through the API, restored from
+     * a version, or broadcast between two editors would otherwise carry the
+     * bad value around for ever — normalise once, on the way in, so it never
+     * persists.
+     */
+    public function normalise(array $doc): array
+    {
+        $doc['content'] = array_map(
+            fn ($n) => $this->normaliseNode(is_array($n) ? $n : []),
+            is_array($doc['content'] ?? null) ? $doc['content'] : []
+        );
+
+        return $doc;
+    }
+
+    private function normaliseNode(array $node): array
+    {
+        $type = $node['type'] ?? '';
+
+        if (($type === 'paragraph' || $type === 'heading') && array_key_exists('align', $node['attrs'] ?? [])) {
+            $align = $node['attrs']['align'];
+            $align = is_string($align) ? strtolower(trim($align)) : null;
+            if (in_array($align, self::ALIGNMENTS, true)) {
+                $node['attrs']['align'] = $align;
+            } else {
+                unset($node['attrs']['align']);
+            }
+        }
+
+        if ($type === 'columns') {
+            $count = $node['attrs']['count'] ?? count($node['content'] ?? []);
+            $count = is_numeric($count) ? (int) $count : self::MIN_COLUMNS;
+            $node['attrs']['count'] = max(self::MIN_COLUMNS, min(self::MAX_COLUMNS, $count));
+        }
+
+        if (isset($node['content']) && is_array($node['content'])) {
+            $node['content'] = array_map(
+                fn ($c) => $this->normaliseNode(is_array($c) ? $c : []),
+                $node['content']
+            );
+        }
+
+        return $node;
+    }
+
     /** @return list<string> */
     public function validate(array $doc): array
     {

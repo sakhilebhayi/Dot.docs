@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core';
+import { asText } from '../attrs';
 
 /**
  * `variable{key}` from DocumentSchema — an inline atom (no attrs.id) that
@@ -38,10 +39,15 @@ export const Variable = Node.create({
     },
 
     renderHTML({ node, HTMLAttributes }) {
+        const key = asText(node.attrs.key);
+        const value = this.options.vars?.[key];
+
         return [
             'span',
             mergeAttributes(HTMLAttributes, { class: 'variable-chip' }),
-            this.options.vars?.[node.attrs.key] ?? `{{${node.attrs.key}}}`,
+            // A DOM-spec child must be a string; a document's variables are
+            // free-form JSON and a number (or an object) would throw here.
+            value === undefined ? `{{${key}}}` : asText(value, `{{${key}}}`),
         ];
     },
 
@@ -49,11 +55,12 @@ export const Variable = Node.create({
         return ({ node, extension }) => {
             const dom = document.createElement('span');
             dom.contentEditable = 'false';
-            const value = extension.options.vars?.[node.attrs.key];
+            const key = asText(node.attrs.key);
+            const value = extension.options.vars?.[key];
             dom.className = value === undefined ? 'variable-chip variable-chip-unset' : 'variable-chip';
-            dom.setAttribute('data-key', node.attrs.key);
-            dom.title = `Variable: ${node.attrs.key}`;
-            dom.textContent = value === undefined ? `{{${node.attrs.key}}}` : String(value);
+            dom.setAttribute('data-key', key);
+            dom.title = `Variable: ${key}`;
+            dom.textContent = value === undefined ? `{{${key}}}` : asText(value, `{{${key}}}`);
 
             return { dom, ignoreMutation: () => true };
         };

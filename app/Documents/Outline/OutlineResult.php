@@ -21,10 +21,10 @@ class OutlineResult
     /** @var list<array{id:string,level:int,text:string,number:string}> */
     public array $headings = [];
 
-    /** @var list<array{id:string,number:string}> */
+    /** @var list<array{id:string,number:string,text:string}> */
     public array $figures = [];
 
-    /** @var list<array{id:string,number:string}> */
+    /** @var list<array{id:string,number:string,text:string}> */
     public array $tables = [];
 
     /** @var list<string> */

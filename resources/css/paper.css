@@ -28,7 +28,26 @@
     padding: 32px 16px 96px;
     min-height: 100%;
     display: flex;
+    /* The read-only banner below is a full-width sibling of the paper. */
+    flex-wrap: wrap;
     justify-content: center;
+}
+
+/*
+ * Shown when mount() refuses a document its schema cannot represent. The
+ * editor is read-only and autosave is off at that point, so this banner is
+ * the only sign the writer gets that what they see is not the whole file.
+ */
+.desk .dotdoc-content-error {
+    flex: 0 0 100%;
+    order: -1;
+    margin: 0 0 20px;
+    padding: 12px 16px;
+    border-radius: 6px;
+    background: #7f1d1d;
+    color: #fee2e2;
+    font: 500 13px/1.5 ui-sans-serif, system-ui, sans-serif;
+    text-align: center;
 }
 
 .desk .paper {
