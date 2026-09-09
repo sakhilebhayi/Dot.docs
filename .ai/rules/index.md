@@ -10,3 +10,4 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Documents/Outline/** | .ai/rules/outline.md |
 | app/Print/** | .ai/rules/print.md |
 | app/Styles/** | .ai/rules/styles.md |
+| resources/views/** | .ai/rules/views.md |
