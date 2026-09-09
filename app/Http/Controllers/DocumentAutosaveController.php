@@ -30,14 +30,22 @@ class DocumentAutosaveController extends Controller
         $document = Document::where('uuid', $uuid)->firstOrFail();
         Gate::authorize('update', $document);
 
-        $validated = $request->validate([
+        $request->validate([
             'content' => ['required', 'array'],
             'content.type' => ['required', 'string', 'in:doc'],
             'content.content' => ['sometimes', 'array'],
+            'content.attrs' => ['sometimes', 'array'],
         ]);
 
         try {
-            $document = $store->save($document, $validated['content'], Auth::user(), ['version' => 'none']);
+            // The RAW input, never `validated()`. validate() returns only the
+            // keys it was given rules for, so saving the validated array threw
+            // `content.attrs` (schema/style/vars) away and ensureIds() then
+            // re-stamped its defaults on every navigation away — the document's
+            // style and variables reset themselves behind the writer's back.
+            // Rules here are a shape check; DocumentSchema::validate(), run
+            // inside DocumentStore::save(), is what actually vets the content.
+            $document = $store->save($document, $request->input('content'), Auth::user(), ['version' => 'none']);
         } catch (InvalidArgumentException $e) {
             // DocumentSchema::validate() refused it — an unknown node type, or
             // a block with no valid id. Report it as a validation failure so

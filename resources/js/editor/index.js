@@ -24,14 +24,14 @@ import { Toc } from './extensions/toc';
 import { Variable } from './extensions/variable';
 import { commands, run as runCommand } from './commands/registry';
 import { documentsDiffer, stripDerived } from './derived';
-import { blockInsert, isInCaption } from './guards';
+import { blockInsert, blockInsertPosition, isInCaption } from './guards';
 import { outline, setOutline } from './outline';
 import { installBubble } from './ui/bubble';
 import { installPalette, openPalette } from './ui/palette';
 import { SlashMenu } from './ui/slash';
 import { closeList } from './ui/list';
 import { isContentValid, isEmptyDocument } from './validation';
-import { clearDraft, loadDraft, saveDraft } from '../offline';
+import { clearDraft, loadDraft, parkStaleDraft, purgeStaleDrafts, saveDraft } from '../offline';
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 
@@ -288,12 +288,52 @@ function mount(element, opts = {}) {
     };
 
     /**
+     * Put the caret in the caption of the figure just inserted at `from`.
+     *
+     * insertContentAt() leaves the selection AFTER the content it inserted,
+     * so `focusCaption()` (which walks the selection's ancestors) has no
+     * figure to find. The scan is bounded: the figure starts at `from` and a
+     * figure is a picture plus a caption, never more.
+     */
+    function focusInsertedCaption(from) {
+        const { doc } = editor.state;
+        const start = Math.max(0, Math.min(from, doc.content.size));
+        let captionPos = null;
+
+        doc.nodesBetween(start, Math.min(doc.content.size, start + 120), (node, pos) => {
+            if (captionPos !== null) {
+                return false;
+            }
+            if (node.type.name === 'caption') {
+                captionPos = pos + 1;
+
+                return false;
+            }
+
+            return true;
+        });
+
+        if (captionPos !== null) {
+            try {
+                editor.commands.setTextSelection(captionPos);
+            } catch (_) {
+                // The caption is there either way; the caret can stay put.
+            }
+        }
+    }
+
+    /**
      * Upload one file and insert it as an image (optionally as a figure).
      *
      * `image` is a block node, so this is a block insert and passes the same
-     * caption guard as every registry command — the file dialog is
-     * asynchronous, so the check has to happen again HERE, when the image is
-     * actually inserted, not only when the picker was opened.
+     * caption guard as every registry command — twice. Once here, and once
+     * AFTER the upload resolves, because both the file dialog and the request
+     * are asynchronous and the writer can click into a figure caption while
+     * they are in flight. Inserting against the selection at that later
+     * moment splits the figure: a torn caption, a phantom `image{src: null}`
+     * figure and an orphan image. So the position asked for is captured now,
+     * mapped forward through every transaction that lands meanwhile, and
+     * re-checked by blockInsertPosition() at the moment of the insert.
      */
     async function uploadImage(file, { figure = false } = {}) {
         if (!file || !opts.uploadUrl || isInCaption(editor)) {
@@ -302,6 +342,12 @@ function mount(element, opts = {}) {
 
         const body = new FormData();
         body.append('image', file);
+
+        let requested = editor.state.selection.from;
+        const track = ({ transaction }) => {
+            requested = transaction.mapping.map(requested);
+        };
+        editor.on('transaction', track);
 
         try {
             const response = await fetch(opts.uploadUrl, {
@@ -313,16 +359,41 @@ function mount(element, opts = {}) {
                 return false;
             }
             const { url } = await response.json();
-            editor.chain().focus().setImage({ src: url }).run();
+            if (editor.isDestroyed) {
+                return false;
+            }
+
+            // The guard, run again, here: `requested` is where the writer
+            // asked for the picture, and this is the nearest position outside
+            // any figure it has since drifted into.
+            const at = blockInsertPosition(editor, requested);
+            if (at === null) {
+                return false;
+            }
+
+            // Inserted at an explicit position rather than at the selection —
+            // the selection is exactly the thing that cannot be trusted here.
+            const content = figure
+                ? {
+                      type: 'figure',
+                      attrs: { kind: 'image' },
+                      content: [{ type: 'image', attrs: { src: url } }, { type: 'caption' }],
+                  }
+                : { type: 'image', attrs: { src: url } };
+
+            if (!editor.chain().focus().insertContentAt(at, content).run()) {
+                return false;
+            }
 
             if (figure) {
-                editor.chain().focus().wrapInFigure('image').run();
-                editor.commands.focusCaption();
+                focusInsertedCaption(at);
             }
 
             return true;
         } catch (_) {
             return false;
+        } finally {
+            editor.off('transaction', track);
         }
     }
 
@@ -559,6 +630,9 @@ export const DotDoc = {
 window.DotDoc = DotDoc;
 
 // Offline draft helpers the Blade bridge calls (kept from the pre-JSON editor).
-window.offlineDraft = { saveDraft, loadDraft, clearDraft };
+// parkStaleDraft() is how a draft that cannot be restored is kept instead of
+// deleted; purgeStaleDrafts() (also run on app boot) is what stops those
+// parked drafts accumulating in IndexedDB for ever.
+window.offlineDraft = { saveDraft, loadDraft, clearDraft, parkStaleDraft, purgeStaleDrafts };
 
 export default DotDoc;

@@ -114,7 +114,11 @@ class DocumentSchema
 
     /**
      * Normalise a list of child nodes, dropping anything that is not an array
-     * and anything a repair decided to remove.
+     * and splicing in whatever each repair returned.
+     *
+     * A repair answers with a LIST, not a node: it can drop a node (an empty
+     * list), keep it, or — as normaliseFigure() does — return the repaired
+     * node followed by the children it had to lift out of it.
      *
      * @return list<array>
      */
@@ -122,8 +126,10 @@ class DocumentSchema
     {
         $out = [];
         foreach (is_array($content) ? $content : [] as $child) {
-            $repaired = is_array($child) ? $this->normaliseNode($child) : null;
-            if ($repaired !== null) {
+            if (! is_array($child)) {
+                continue;
+            }
+            foreach ($this->normaliseNode($child) as $repaired) {
                 $out[] = $repaired;
             }
         }
@@ -136,8 +142,12 @@ class DocumentSchema
         return ['type' => 'paragraph', 'attrs' => ['id' => BlockId::generate()], 'content' => []];
     }
 
-    /** @return array|null null when the node cannot be repaired and must be dropped */
-    private function normaliseNode(array $node): ?array
+    /**
+     * @return list<array> the node's replacement: empty when it must be
+     *                     dropped, one node normally, or the node followed by
+     *                     children lifted out of it (see normaliseFigure()).
+     */
+    private function normaliseNode(array $node): array
     {
         $type = $node['type'] ?? '';
 
@@ -158,19 +168,19 @@ class DocumentSchema
         $children = is_array($node['content'] ?? null) ? $node['content'] : [];
 
         if ($children === [] && in_array($type, self::DROP_WHEN_EMPTY, true)) {
-            return null;
+            return [];
         }
 
         if ($children === [] && in_array($type, self::FILL_WHEN_EMPTY, true)) {
             $node['content'] = [$this->emptyParagraph()];
 
-            return $node;
+            return [$node];
         }
 
         if (in_array($type, self::PARAGRAPH_FIRST, true) && ($children[0]['type'] ?? '') !== 'paragraph') {
             $node['content'] = [$this->emptyParagraph(), ...$children];
 
-            return $node;
+            return [$node];
         }
 
         if ($type === 'figure') {
@@ -178,39 +188,71 @@ class DocumentSchema
         }
 
         if ($type === 'columns') {
-            return $this->normaliseColumns($node, $children);
+            return [$this->normaliseColumns($node, $children)];
         }
 
-        return $node;
+        return [$node];
     }
 
     /**
      * `figure` is `(image | table) caption` — exactly two children, in that
-     * order. Anything else is repaired around the media if there is media to
-     * repair around, and dropped when there is not.
+     * order. The first media child and the first caption stay inside it;
+     * every OTHER child is lifted out and placed immediately after the
+     * figure. Keeping only the first two and discarding the rest silently
+     * deleted the writer's second picture, which is a worse outcome than a
+     * figure followed by a loose image.
+     *
+     * A lifted `caption` becomes a paragraph: `caption` is inline-only and
+     * legal only inside a figure, so it cannot stand on its own. A figure
+     * with no media at all is not a figure — it is replaced by whatever it
+     * was holding, rather than deleted with its contents.
      *
      * @param  list<array>  $children
+     * @return list<array> the figure (when it survives) followed by the lifted siblings
      */
-    private function normaliseFigure(array $node, array $children): ?array
+    private function normaliseFigure(array $node, array $children): array
     {
         $media = null;
         $caption = null;
+        $lifted = [];
         foreach ($children as $child) {
             $childType = $child['type'] ?? '';
             if ($media === null && ($childType === 'image' || $childType === 'table')) {
                 $media = $child;
             } elseif ($caption === null && $childType === 'caption') {
                 $caption = $child;
+            } else {
+                $lifted[] = $childType === 'caption' ? $this->captionAsParagraph($child) : $child;
             }
         }
 
+        $lifted = array_values(array_filter($lifted));
+
         if ($media === null) {
-            return null;
+            return array_values(array_filter([
+                $caption === null ? null : $this->captionAsParagraph($caption),
+                ...$lifted,
+            ]));
         }
 
         $node['content'] = [$media, $caption ?? ['type' => 'caption', 'attrs' => ['id' => BlockId::generate()], 'content' => []]];
 
-        return $node;
+        return [$node, ...$lifted];
+    }
+
+    /**
+     * A caption's words as a paragraph, or null when it held none. Carries a
+     * fresh id, because validate() runs after normalise() and the caption's
+     * own id may still be in use elsewhere in the document.
+     */
+    private function captionAsParagraph(array $caption): ?array
+    {
+        $content = is_array($caption['content'] ?? null) ? $caption['content'] : [];
+        if ($content === []) {
+            return null;
+        }
+
+        return ['type' => 'paragraph', 'attrs' => ['id' => BlockId::generate()], 'content' => $content];
     }
 
     /**

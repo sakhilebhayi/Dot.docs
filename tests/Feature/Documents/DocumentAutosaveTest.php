@@ -53,6 +53,29 @@ class DocumentAutosaveTest extends TestCase
         $this->assertSame('Last words', $doc->content_json['content'][0]['content'][0]['text']);
     }
 
+    public function test_a_beacon_post_keeps_the_documents_doc_attrs(): void
+    {
+        // $request->validate() returns ONLY the keys it was given rules for,
+        // so validating `content.type`/`content.content` and then saving the
+        // validated array silently dropped `content.attrs` - and ensureIds()
+        // re-stamped schema/style/vars defaults on every navigation away.
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $content = $this->docJson('Attrs survive');
+        $content['attrs'] = ['schema' => 1, 'style' => 'legal', 'vars' => ['client' => 'Acme']];
+
+        $this->actingAs($user)
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $content])
+            ->assertOk();
+
+        $doc->refresh();
+        $this->assertSame(
+            ['schema' => 1, 'style' => 'legal', 'vars' => ['client' => 'Acme']],
+            $doc->content_json['attrs']
+        );
+    }
+
     public function test_the_beacon_save_cuts_no_version_snapshot(): void
     {
         // ['version' => 'none']: the writer navigating away is not a moment

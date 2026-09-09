@@ -39,3 +39,48 @@ export function blockInsert(run) {
         return run(editor, params);
     };
 }
+
+/**
+ * Where a block captured at `pos` may safely be inserted NOW.
+ *
+ * `isInCaption()` answers for the selection at the moment it is called, which
+ * is not good enough for anything asynchronous: an upload takes as long as it
+ * takes, and the writer can put the caret in a figure caption while it is in
+ * flight. Insert against the selection at that later moment and the figure is
+ * split — a torn caption, a phantom `image{src: null}` figure, an orphan
+ * image. So the position the writer asked for is mapped forward through the
+ * transactions that landed meanwhile and re-checked HERE, at insert time.
+ *
+ * Returns that position when it is still in open document flow, or the
+ * position immediately AFTER the enclosing figure when it has drifted inside
+ * one (a figure is `(image | table) caption`; nothing else may go in it), or
+ * null when there is no document to insert into.
+ *
+ * @param {object} editor
+ * @param {number} pos a position in the CURRENT document
+ * @returns {number|null}
+ */
+export function blockInsertPosition(editor, pos) {
+    const doc = editor?.state?.doc;
+    if (!doc) {
+        return null;
+    }
+
+    const size = doc.content?.size ?? 0;
+    const at = Math.max(0, Math.min(Number.isFinite(pos) ? pos : 0, size));
+
+    let $pos = null;
+    try {
+        $pos = doc.resolve(at);
+    } catch (_) {
+        return null;
+    }
+
+    for (let depth = $pos.depth; depth > 0; depth--) {
+        if ($pos.node(depth)?.type?.name === 'figure') {
+            return $pos.after(depth);
+        }
+    }
+
+    return at;
+}

@@ -201,8 +201,10 @@
 
                 if (draft.baseVersion < this.documentVersion) {
                     // Not restorable, but not this page's to destroy either.
-                    // Park it under a stale- key so it can be recovered by hand.
-                    await window.offlineDraft.saveDraft('stale-' + this.docUuid, draft.json, draft.baseVersion);
+                    // Park it under a stale- key so it can be recovered by
+                    // hand; parkStaleDraft() stamps parkedAt, and the sweep on
+                    // the next app boot collects it after 7 days.
+                    await window.offlineDraft.parkStaleDraft(this.docUuid, draft.json, draft.baseVersion);
                     window.offlineDraft.clearDraft(this.docUuid);
                     console.info(
                         '[Dot.Doc] An offline draft based on v' + draft.baseVersion +
@@ -225,14 +227,26 @@
                     return;
                 }
 
-                if (confirm('An unsaved offline draft of this document was found. Restore it?')) {
-                    try {
-                        editor.commands.setContent(parsed, { errorOnInvalidContent: true });
-                    } catch (_) {
-                        // Unopenable: keep the draft rather than lose it.
-                        console.info('[Dot.Doc] The offline draft could not be applied and has been kept.');
-                        return;
-                    }
+                if (!confirm('An unsaved offline draft of this document was found. Restore it?')) {
+                    // Declining is not the same as discarding, and this is a
+                    // single confirm() with no undo behind it. Park the draft
+                    // rather than delete it, so a mis-click stays recoverable
+                    // for the 7 days the sweep leaves it alone.
+                    await window.offlineDraft.parkStaleDraft(this.docUuid, draft.json, draft.baseVersion);
+                    window.offlineDraft.clearDraft(this.docUuid);
+                    console.info(
+                        '[Dot.Doc] The offline draft was not restored. It was kept as stale-' +
+                        this.docUuid + ' and will be removed after 7 days.'
+                    );
+                    return;
+                }
+
+                try {
+                    editor.commands.setContent(parsed, { errorOnInvalidContent: true });
+                } catch (_) {
+                    // Unopenable: keep the draft rather than lose it.
+                    console.info('[Dot.Doc] The offline draft could not be applied and has been kept.');
+                    return;
                 }
                 window.offlineDraft.clearDraft(this.docUuid);
             } catch (_) {}
@@ -326,7 +340,21 @@
         // than blanking the page.
         applySuggestion(content) {
             const handle = window.DotDoc?.get(this.$refs.editorEl);
-            if (!handle || !handle.applyRemote(content)) return;
+            if (!handle) return;
+            // The same fail-closed gate the Echo listener has. In that mode
+            // the content check refused the document: the editor is read-only
+            // and what it is showing is not the document, so merging an
+            // accepted suggestion into the view would show the writer a
+            // document that exists nowhere.
+            if (handle.autosaves === false) {
+                this.aiError = 'This document is open read-only, so the accepted suggestion was not applied here. Reload the page once the content problem is fixed.';
+                return;
+            }
+            if (!handle.applyRemote(content)) {
+                this.aiError = 'That suggestion could not be applied — the document is unchanged.';
+                return;
+            }
+            this.aiError = '';
             this.tick++;
             this.refreshOutline();
         },

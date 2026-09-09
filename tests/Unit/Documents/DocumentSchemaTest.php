@@ -252,25 +252,60 @@ class DocumentSchemaTest extends TestCase
         $this->assertTrue(BlockId::isValid($padded['content'][2]['attrs']['id']));
     }
 
-    public function test_normalise_repairs_or_drops_a_figure_that_is_not_media_plus_caption(): void
+    public function test_normalise_repairs_a_figure_that_is_not_media_plus_caption_without_losing_its_content(): void
     {
         $doc = ['type' => 'doc', 'content' => [
             // Media with no caption: the caption is added, the picture kept.
             ['type' => 'figure', 'attrs' => ['id' => 'aaaaaaaa', 'kind' => 'image'], 'content' => [
                 ['type' => 'image', 'attrs' => ['id' => 'bbbbbbbb', 'src' => '/storage/a.png']],
             ]],
-            // Nothing a figure can be built around: dropped outright.
+            // Nothing a figure can be built around. The figure goes; what it
+            // was holding is the writer's and is lifted out in its place.
             ['type' => 'figure', 'attrs' => ['id' => 'cccccccc', 'kind' => 'image'], 'content' => [
                 ['type' => 'paragraph', 'attrs' => ['id' => 'dddddddd'], 'content' => []],
+                ['type' => 'caption', 'attrs' => ['id' => 'gggggggg'], 'content' => [['type' => 'text', 'text' => 'Orphan']]],
             ]],
+            // Held nothing at all: nothing to lift, nothing left.
             ['type' => 'figure', 'attrs' => ['id' => 'eeeeeeee', 'kind' => 'image'], 'content' => []],
         ]];
 
         $out = (new DocumentSchema)->normalise($doc);
 
-        $this->assertCount(1, $out['content']);
+        $this->assertSame(['figure', 'paragraph', 'paragraph'], array_column($out['content'], 'type'));
         $this->assertSame(['image', 'caption'], array_column($out['content'][0]['content'], 'type'));
         $this->assertTrue(BlockId::isValid($out['content'][0]['content'][1]['attrs']['id']));
+        // The caption came first out of the figure, then the loose paragraph.
+        $this->assertSame('Orphan', $out['content'][1]['content'][0]['text']);
+        $this->assertSame('dddddddd', $out['content'][2]['attrs']['id']);
+    }
+
+    public function test_normalise_lifts_a_figures_extra_children_out_instead_of_dropping_them(): void
+    {
+        // `figure` is `(image | table) caption` - exactly two children - but
+        // the second picture is the writer's, not ours to delete. It is lifted
+        // out as a sibling immediately after the figure.
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'figure', 'attrs' => ['id' => 'aaaaaaaa', 'kind' => 'image'], 'content' => [
+                ['type' => 'image', 'attrs' => ['id' => 'bbbbbbbb', 'src' => '/storage/one.png']],
+                ['type' => 'image', 'attrs' => ['id' => 'cccccccc', 'src' => '/storage/two.png']],
+                ['type' => 'caption', 'attrs' => ['id' => 'dddddddd'], 'content' => [['type' => 'text', 'text' => 'First']]],
+                ['type' => 'caption', 'attrs' => ['id' => 'eeeeeeee'], 'content' => [['type' => 'text', 'text' => 'Second']]],
+            ]],
+            ['type' => 'paragraph', 'attrs' => ['id' => 'ffffffff'], 'content' => []],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $this->assertSame(['figure', 'image', 'paragraph', 'paragraph'], array_column($out['content'], 'type'));
+        $this->assertSame(['image', 'caption'], array_column($out['content'][0]['content'], 'type'));
+        $this->assertSame('/storage/one.png', $out['content'][0]['content'][0]['attrs']['src']);
+        $this->assertSame('First', $out['content'][0]['content'][1]['content'][0]['text']);
+        // The second image kept its own id and its src; the extra caption
+        // became a paragraph carrying the words that were in it.
+        $this->assertSame('/storage/two.png', $out['content'][1]['attrs']['src']);
+        $this->assertSame('cccccccc', $out['content'][1]['attrs']['id']);
+        $this->assertSame('Second', $out['content'][2]['content'][0]['text']);
+        $this->assertTrue(BlockId::isValid($out['content'][2]['attrs']['id']));
     }
 
     public function test_normalise_survives_non_array_content(): void
