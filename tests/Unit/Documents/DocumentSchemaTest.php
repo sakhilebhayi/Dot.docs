@@ -308,6 +308,94 @@ class DocumentSchemaTest extends TestCase
         $this->assertTrue(BlockId::isValid($out['content'][2]['attrs']['id']));
     }
 
+    public function test_normalise_lifts_a_figures_column_child_as_a_paragraph_of_its_text(): void
+    {
+        // `column` is legal only inside `columns`. Lifting it out of a figure
+        // unconverted would leave a node ProseMirror's content check refuses
+        // at `doc`'s top level - the editor's content check would then open
+        // the whole document read-only. It is converted to a paragraph
+        // carrying its own plain text instead, keeping its own block id.
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'figure', 'attrs' => ['id' => 'aaaaaaaa', 'kind' => 'image'], 'content' => [
+                ['type' => 'column', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => [
+                    ['type' => 'paragraph', 'attrs' => ['id' => 'cccccccc'], 'content' => [['type' => 'text', 'text' => 'Stranded']]],
+                ]],
+            ]],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $this->assertSame(['paragraph'], array_column($out['content'], 'type'));
+        $this->assertSame('Stranded', $out['content'][0]['content'][0]['text']);
+        $this->assertSame('bbbbbbbb', $out['content'][0]['attrs']['id']);
+    }
+
+    public function test_normalise_lifts_a_figures_table_row_child_as_a_paragraph_of_its_cell_text(): void
+    {
+        // `tableRow` is legal only inside `table`; same rule as `column`.
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'figure', 'attrs' => ['id' => 'aaaaaaaa', 'kind' => 'image'], 'content' => [
+                ['type' => 'tableRow', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => [
+                    ['type' => 'tableCell', 'attrs' => ['id' => 'cccccccc'], 'content' => [
+                        ['type' => 'paragraph', 'attrs' => ['id' => 'dddddddd'], 'content' => [['type' => 'text', 'text' => 'Cell text']]],
+                    ]],
+                ]],
+            ]],
+        ]];
+
+        $out = (new DocumentSchema)->normalise($doc);
+
+        $this->assertSame(['paragraph'], array_column($out['content'], 'type'));
+        $this->assertSame('Cell text', $out['content'][0]['content'][0]['text']);
+        $this->assertSame('bbbbbbbb', $out['content'][0]['attrs']['id']);
+    }
+
+    public function test_normalise_of_a_repaired_figure_is_idempotent(): void
+    {
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'figure', 'attrs' => ['id' => 'aaaaaaaa', 'kind' => 'image'], 'content' => [
+                ['type' => 'column', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => [
+                    ['type' => 'paragraph', 'attrs' => ['id' => 'cccccccc'], 'content' => [['type' => 'text', 'text' => 'Stranded']]],
+                ]],
+                ['type' => 'tableRow', 'attrs' => ['id' => 'dddddddd'], 'content' => [
+                    ['type' => 'tableCell', 'attrs' => ['id' => 'eeeeeeee'], 'content' => [
+                        ['type' => 'paragraph', 'attrs' => ['id' => 'ffffffff'], 'content' => [['type' => 'text', 'text' => 'Cell']]],
+                    ]],
+                ]],
+            ]],
+        ]];
+        $schema = new DocumentSchema;
+
+        $once = $schema->normalise($doc);
+        $twice = $schema->normalise($once);
+
+        $this->assertSame($once, $twice);
+    }
+
+    public function test_ensure_ids_treats_non_array_attrs_as_empty(): void
+    {
+        $schema = new DocumentSchema;
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'attrs' => 'boom', 'content' => []],
+        ]];
+
+        $out = $schema->ensureIds($doc);
+
+        $this->assertTrue(BlockId::isValid($out['content'][0]['attrs']['id']));
+    }
+
+    public function test_normalise_treats_non_array_attrs_as_empty(): void
+    {
+        $schema = new DocumentSchema;
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'attrs' => 'boom', 'content' => []],
+        ]];
+
+        $out = $schema->normalise($doc);
+
+        $this->assertSame([], $out['content'][0]['attrs']);
+    }
+
     public function test_normalise_survives_non_array_content(): void
     {
         $doc = ['type' => 'doc', 'content' => [

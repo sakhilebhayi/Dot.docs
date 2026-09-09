@@ -122,6 +122,25 @@ class DocumentAutosaveTest extends TestCase
             ->assertJsonValidationErrors('content');
     }
 
+    public function test_a_block_with_non_array_attrs_never_causes_a_server_error(): void
+    {
+        // A block whose `attrs` is not an array reached DocumentSchema's
+        // internals unguarded and threw a TypeError (array_merge()/
+        // array_key_exists() against a string) - a 500, not a validation
+        // failure. The nested value isn't covered by the controller's shape
+        // rules (those only check `content.attrs`, the document-level one),
+        // so this exercises DocumentSchema's own defenses.
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $response = $this->actingAs($user)
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => ['type' => 'doc', 'content' => [
+                ['type' => 'paragraph', 'attrs' => 'boom', 'content' => []],
+            ]]]);
+
+        $this->assertContains($response->status(), [200, 422]);
+    }
+
     public function test_another_user_cannot_autosave_the_document(): void
     {
         $owner = User::factory()->withPersonalTeam()->create();

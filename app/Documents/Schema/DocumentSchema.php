@@ -38,14 +38,18 @@ class DocumentSchema
     private function ensureNodeIds(array $node, array &$seen): array
     {
         if (in_array($node['type'] ?? '', self::BLOCKS, true)) {
-            $id = $node['attrs']['id'] ?? null;
+            // `attrs` normally comes straight off the wire; a payload that
+            // sends a scalar there (e.g. `"boom"`) used to reach array_merge()
+            // below and throw a TypeError instead of failing validation.
+            $attrs = is_array($node['attrs'] ?? null) ? $node['attrs'] : [];
+            $id = $attrs['id'] ?? null;
             if (! BlockId::isValid($id) || isset($seen[$id])) {
                 do {
                     $id = BlockId::generate();
                 } while (isset($seen[$id]));
             }
             $seen[$id] = true;
-            $node['attrs'] = array_merge($node['attrs'] ?? [], ['id' => $id]);
+            $node['attrs'] = array_merge($attrs, ['id' => $id]);
         }
         if (isset($node['content']) && is_array($node['content'])) {
             $node['content'] = array_map(fn ($c) => $this->ensureNodeIds($c, $seen), $node['content']);
@@ -79,6 +83,19 @@ class DocumentSchema
 
     /** `listItem`/`taskItem` are `paragraph block*` — the FIRST child must be a paragraph. */
     private const PARAGRAPH_FIRST = ['listItem', 'taskItem'];
+
+    /**
+     * Types `doc` and `column` accept as direct children — both are `block+`
+     * (the same "block" group the editor's schema uses). A node of any other
+     * type (`column`, `tableRow`, `tableCell`, `tableHeader`, `listItem`,
+     * `taskItem`, `caption`: legal only inside one specific parent) cannot
+     * stand there unconverted — see liftToBlock().
+     */
+    private const TOP_LEVEL_BLOCKS = [
+        'paragraph', 'heading', 'bulletList', 'orderedList', 'taskList',
+        'blockquote', 'codeBlock', 'horizontalRule', 'image', 'figure',
+        'table', 'toc', 'pageBreak', 'sectionBreak', 'callout', 'columns',
+    ];
 
     /**
      * Clean the attributes that end up inside a `style` attribute, and repair
@@ -151,6 +168,15 @@ class DocumentSchema
     {
         $type = $node['type'] ?? '';
 
+        // Same guard as ensureNodeIds(): a block whose `attrs` came off the
+        // wire as a scalar must not reach array_key_exists()/normaliseColumns()
+        // below as anything but an empty array. normalise() also runs alone,
+        // without ensureIds() first, on the read path (DocumentStore::json()),
+        // so it cannot rely on ensureIds() having already repaired this.
+        if (in_array($type, self::BLOCKS, true) && ! is_array($node['attrs'] ?? null)) {
+            $node['attrs'] = [];
+        }
+
         if (($type === 'paragraph' || $type === 'heading') && array_key_exists('align', $node['attrs'] ?? [])) {
             $align = $node['attrs']['align'];
             $align = is_string($align) ? strtolower(trim($align)) : null;
@@ -202,10 +228,14 @@ class DocumentSchema
      * deleted the writer's second picture, which is a worse outcome than a
      * figure followed by a loose image.
      *
-     * A lifted `caption` becomes a paragraph: `caption` is inline-only and
-     * legal only inside a figure, so it cannot stand on its own. A figure
-     * with no media at all is not a figure — it is replaced by whatever it
-     * was holding, rather than deleted with its contents.
+     * A lifted child that is itself valid at `doc`'s top level (an `image`,
+     * a second `figure`, and so on) is lifted unchanged. One that is not
+     * (`column`, `tableRow`, `tableCell`, `tableHeader`, `listItem`,
+     * `taskItem`, `caption` — content ProseMirror only allows inside one
+     * specific parent) cannot stand there either, so liftToBlock() converts
+     * it into a paragraph of its own plain text instead. A figure with no
+     * media at all is not a figure — it is replaced by whatever it was
+     * holding, rather than deleted with its contents.
      *
      * @param  list<array>  $children
      * @return list<array> the figure (when it survives) followed by the lifted siblings
@@ -222,17 +252,15 @@ class DocumentSchema
             } elseif ($caption === null && $childType === 'caption') {
                 $caption = $child;
             } else {
-                $lifted[] = $childType === 'caption' ? $this->captionAsParagraph($child) : $child;
+                array_push($lifted, ...$this->liftToBlock($child));
             }
         }
 
-        $lifted = array_values(array_filter($lifted));
-
         if ($media === null) {
-            return array_values(array_filter([
-                $caption === null ? null : $this->captionAsParagraph($caption),
+            return [
+                ...($caption === null ? [] : $this->liftToBlock($caption)),
                 ...$lifted,
-            ]));
+            ];
         }
 
         $node['content'] = [$media, $caption ?? ['type' => 'caption', 'attrs' => ['id' => BlockId::generate()], 'content' => []]];
@@ -241,18 +269,28 @@ class DocumentSchema
     }
 
     /**
-     * A caption's words as a paragraph, or null when it held none. Carries a
-     * fresh id, because validate() runs after normalise() and the caption's
-     * own id may still be in use elsewhere in the document.
+     * $node, ready to stand as a direct child of `doc` or `column` (both are
+     * `block+`): itself, when its type already belongs to that set, or a
+     * paragraph carrying its plain text (DocumentSchema::plainText())
+     * otherwise — dropped (empty list) when that text is empty. The node's
+     * own block id carries over: ensureIds() has already made it valid and
+     * document-unique before normalise() runs, so reusing it cannot create a
+     * duplicate.
+     *
+     * @return list<array>
      */
-    private function captionAsParagraph(array $caption): ?array
+    private function liftToBlock(array $node): array
     {
-        $content = is_array($caption['content'] ?? null) ? $caption['content'] : [];
-        if ($content === []) {
-            return null;
+        if (in_array($node['type'] ?? '', self::TOP_LEVEL_BLOCKS, true)) {
+            return [$node];
         }
 
-        return ['type' => 'paragraph', 'attrs' => ['id' => BlockId::generate()], 'content' => $content];
+        $text = $this->plainText($node);
+        if ($text === '') {
+            return [];
+        }
+
+        return [['type' => 'paragraph', 'attrs' => ['id' => $node['attrs']['id'] ?? BlockId::generate()], 'content' => [['type' => 'text', 'text' => $text]]]];
     }
 
     /**
@@ -281,7 +319,16 @@ class DocumentSchema
         $node['attrs']['count'] = $count;
 
         if ($loose !== []) {
-            $columns[] = ['type' => 'column', 'attrs' => ['id' => BlockId::generate()], 'content' => $loose];
+            // A loose child lands inside a `column`, which is `block+` just
+            // like `doc` — the same liftToBlock() rule applies.
+            $lifted = [];
+            foreach ($loose as $child) {
+                array_push($lifted, ...$this->liftToBlock($child));
+            }
+            // `column` is FILL_WHEN_EMPTY: every loose child converting to
+            // nothing (an empty-text node lifted away) must not leave it
+            // without the block content its own expression demands.
+            $columns[] = ['type' => 'column', 'attrs' => ['id' => BlockId::generate()], 'content' => $lifted === [] ? [$this->emptyParagraph()] : $lifted];
         }
 
         while (count($columns) > $count) {
