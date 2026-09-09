@@ -46,7 +46,7 @@ class ShellTest extends TestCase
     {
         $user = User::factory()->withPersonalTeam()->create();
 
-        foreach (['profile.show', 'api-tokens.index'] as $route) {
+        foreach (['profile.show', 'api-tokens.index', 'teams.create'] as $route) {
             $res = $this->actingAs($user)->get(route($route));
             $res->assertOk();
 

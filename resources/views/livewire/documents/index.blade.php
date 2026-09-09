@@ -1,4 +1,4 @@
-<div class="page">
+<div class="page" x-data="{ renameTrigger: null }">
     <div class="page-head">
         <div>
             <h1 class="page-title">Documents</h1>
@@ -77,6 +77,7 @@
                             {{ $folder->name }}
                         </button>
                         <button type="button" class="btn btn-quiet btn-sm"
+                                @click="renameTrigger = $el"
                                 wire:click="startRenamingFolder({{ $folder->id }})">
                             Rename
                         </button>
@@ -174,7 +175,8 @@
     @endif
 
     @if ($renamingFolderId)
-        <div class="scrim" wire:click.self="cancelRenamingFolder" role="dialog" aria-modal="true" aria-labelledby="rename-folder-title">
+        <div class="scrim" wire:click.self="cancelRenamingFolder" role="dialog" aria-modal="true" aria-labelledby="rename-folder-title"
+             x-on:keydown.escape.window="$wire.cancelRenamingFolder(); renameTrigger && renameTrigger.focus()">
             <div class="sheet">
                 <div class="sheet-head">
                     <h2 class="h-panel" id="rename-folder-title">Rename the folder</h2>

@@ -578,8 +578,9 @@
 
             {{-- Everything that acts on the whole document, in one menu, so the
                  bench never has to reflow. --}}
-            <div class="menu doc-tools-end" x-data="{ open: false }">
-                <button type="button" class="tool tool-mono" @click="open = !open"
+            <div class="menu doc-tools-end" x-data="{ open: false }"
+                 x-on:keydown.escape.window="if (open) { open = false; $refs.moreBtn.focus() }">
+                <button type="button" class="tool tool-mono" x-ref="moreBtn" @click="open = !open"
                         :aria-expanded="open ? 'true' : 'false'">More</button>
 
                 <div class="menu-list menu-list-wide" x-show="open" @click.outside="open = false" x-cloak>

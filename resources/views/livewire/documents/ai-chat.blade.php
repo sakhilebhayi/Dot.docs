@@ -11,7 +11,18 @@
         @endif
     </div>
 
-    <div class="dock-chat-turns">
+    {{-- Bounded scroll region: this is the only part of the dock that
+         scrolls on new turns, so "Quick passes" above stays put. The
+         MutationObserver is the same auto-scroll-to-latest behaviour the
+         assistant had as a floating pill, restored here against $refs.turns
+         instead of $refs.messages. --}}
+    <div class="dock-chat-turns" x-data x-ref="turns"
+         x-init="new MutationObserver(() => {
+             $refs.turns.scrollTo({
+                 top: $refs.turns.scrollHeight,
+                 behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+             });
+         }).observe($refs.turns, { childList: true, subtree: true })">
         @if (empty($history))
             <p class="empty-line">Ask anything about this document.</p>
         @endif

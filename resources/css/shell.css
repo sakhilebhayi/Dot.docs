@@ -731,6 +731,8 @@ button.ledger-row {
 }
 
 .dock-body {
+    display: flex;
+    flex-direction: column;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -738,6 +740,7 @@ button.ledger-row {
 }
 
 .dock-section {
+    flex: none;
     border-bottom: 1px solid var(--rule);
 }
 
@@ -1617,10 +1620,25 @@ button.ledger-row {
 .dock-chat {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
     border-top: 1px solid var(--rule);
 }
 
+.dock-chat > .dock-section-head,
+.dock-chat > .dock-chat-foot {
+    flex: none;
+}
+
+/* The turns list is the ONLY thing that scrolls: the same bounded-region
+   pattern as .comment-thread-list, so new turns never carry "Quick passes"
+   off screen with them. */
 .dock-chat-turns {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 0 var(--s4) var(--s3);
 }
 
