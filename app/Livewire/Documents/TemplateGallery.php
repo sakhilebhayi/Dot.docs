@@ -15,6 +15,15 @@ class TemplateGallery extends Component
 
     public string $activeCategory = 'all';
 
+    /**
+     * The navigator rail links to /documents?gallery=1, so the gallery has to
+     * be open on arrival - server-side, not after a JavaScript round trip.
+     */
+    public function mount(): void
+    {
+        $this->show = request()->boolean('gallery');
+    }
+
     #[On('open')]
     public function open(): void
     {

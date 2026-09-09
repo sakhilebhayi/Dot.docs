@@ -1,5 +1,1 @@
-<div class="hidden sm:block">
-    <div class="py-8">
-        <div class="border-t border-gray-200"></div>
-    </div>
-</div>
+<div style="height:1px;background:var(--rule);margin:var(--s5) 0"></div>

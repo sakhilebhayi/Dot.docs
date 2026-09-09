@@ -25,7 +25,7 @@ class DailyDigestNotification extends Notification implements ShouldQueue
     {
         $plural = $this->unreadCount !== 1 ? 's' : '';
         $mail = (new MailMessage)
-            ->subject('Your Dot.docs daily digest')
+            ->subject('Your Dot.Doc daily digest')
             ->greeting('Hello '.$notifiable->name.'!')
             ->line('You have **'.$this->unreadCount.' unread notification'.$plural.'** since yesterday.');
 

@@ -14,7 +14,7 @@ use Tests\TestCase;
 /**
  * Dot.Finance (HasUserScope) and Dot.Notify (HasTeamScope) both apply a
  * single-column Eloquent global scope so a forgotten where() can never leak
- * another tenant's rows. Dot.docs was evaluated for the same pattern and
+ * another tenant's rows. Dot.Doc was evaluated for the same pattern and
  * deliberately did NOT get it: `team_id` is nullable on every candidate
  * model (documents, document_templates, document_slash_commands) and real
  * access is multi-path — owner OR team OR named collaborator OR public

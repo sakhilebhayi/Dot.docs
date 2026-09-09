@@ -219,6 +219,7 @@ class DocumentSettings extends Component
     public function render()
     {
         return view('livewire.documents.document-settings')
-            ->layout('layouts.app');
+            ->layout('layouts.app')
+            ->title('Settings for '.$this->document->title);
     }
 }

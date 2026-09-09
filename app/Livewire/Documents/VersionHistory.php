@@ -118,6 +118,6 @@ class VersionHistory extends Component
         return view('livewire.documents.version-history', [
             'versions' => $versions,
             'previewVersion' => $previewVersion,
-        ])->layout('layouts.app');
+        ])->layout('layouts.app')->title('Versions of '.$this->document->title);
     }
 }

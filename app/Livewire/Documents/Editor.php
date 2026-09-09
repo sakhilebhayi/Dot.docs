@@ -281,6 +281,6 @@ class Editor extends Component
             // JSON) but a heading number is decoration only, with nothing to
             // fall back to.
             'outline' => $this->outline(),
-        ]);
+        ])->title($this->document->title);
     }
 }

@@ -13,7 +13,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // The shell's night/day switch is written by resources/js/shell.js and
+        // read back server-side in layouts/app.blade.php so a day-mode reload
+        // never flashes night. An encrypted cookie would come back null there.
+        $middleware->encryptCookies(except: ['theme']);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

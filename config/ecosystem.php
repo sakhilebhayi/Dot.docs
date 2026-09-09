@@ -42,7 +42,7 @@ return [
         'sheet' => ['name' => 'Dot.Sheet', 'url' => env('DOT_SHEET_URL', 'https://sheet.infodot.app'), 'icon' => 'table_chart', 'accent' => '#e3ab1f', 'active' => true],
         'tasks' => ['name' => 'Dot.Tasks', 'url' => env('DOT_TASKS_URL', 'https://tasks.infodot.app'), 'icon' => 'task_alt', 'accent' => '#f2a803', 'active' => true],
         'tutor' => ['name' => 'Dot.Tutor', 'url' => env('DOT_TUTOR_URL', 'https://tutor.infodot.app'), 'icon' => 'school', 'accent' => '#f1c62e', 'active' => true],
-        'docs' => ['name' => 'Dot.docs', 'url' => env('DOT_DOCS_URL', 'https://docs.infodot.app'), 'icon' => 'description', 'accent' => '#f1c62e', 'active' => true],
+        'docs' => ['name' => 'Dot.Doc', 'url' => env('DOT_DOCS_URL', 'https://docs.infodot.app'), 'icon' => 'description', 'accent' => '#f1c62e', 'active' => true],
     ],
 
     /*

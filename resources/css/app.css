@@ -1,7 +1,11 @@
+/*
+ * The shell's tokens and chrome primitives come first: Tailwind's preflight
+ * only ever touches bare element selectors, and every shell rule that matters
+ * is a class, so importing here (the position PostCSS requires) is safe. The
+ * paper surface stays its own Vite entry so it keeps loading after Tailwind.
+ */
+@import './shell.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-[x-cloak] {
-    display: none;
-}

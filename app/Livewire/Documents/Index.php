@@ -36,6 +36,11 @@ class Index extends Component
     {
         $this->folderId = request()->integer('folder') ?: null;
         $this->tagId = request()->integer('tag') ?: null;
+
+        // The navigator rail links straight to a filter (Shared with me), so
+        // the query string seeds it once at mount.
+        $filter = (string) request()->query('filter', 'all');
+        $this->filter = in_array($filter, ['all', 'mine', 'shared', 'team'], true) ? $filter : 'all';
     }
 
     public function updatingSearch(): void
@@ -197,6 +202,7 @@ class Index extends Component
     public function render()
     {
         return view('livewire.documents.index')
-            ->layout('layouts.app');
+            ->layout('layouts.app')
+            ->title('Documents');
     }
 }

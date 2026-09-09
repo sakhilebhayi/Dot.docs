@@ -114,6 +114,7 @@ class ShareManager extends Component
     public function render()
     {
         return view('livewire.documents.share-manager')
-            ->layout('layouts.app');
+            ->layout('layouts.app')
+            ->title('Sharing for '.$this->document->title);
     }
 }

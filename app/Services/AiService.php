@@ -212,7 +212,7 @@ class AiService
     public function chat(string $message, string $documentHtml, array $history = []): string
     {
         $docText = $this->sanitizer->toPlainText($documentHtml);
-        $systemPrompt = "You are an AI assistant embedded in Dot.docs, a document editor. The user is asking questions or requesting help about the following document:\n\n{$docText}\n\nBe helpful, accurate, and concise.";
+        $systemPrompt = "You are an AI assistant embedded in Dot.Doc, a document editor. The user is asking questions or requesting help about the following document:\n\n{$docText}\n\nBe helpful, accurate, and concise.";
 
         $messages = [['role' => 'system', 'content' => $systemPrompt]];
 

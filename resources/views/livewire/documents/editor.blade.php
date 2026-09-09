@@ -2,7 +2,7 @@
     x-data="{
         owns: false,
         echo: null,
-        heartbeatInterval: null,
+        heartbeatTimer: null,
         isTyping: false,
         typingTimeout: null,
         isOffline: !navigator.onLine,
@@ -104,10 +104,17 @@
                 this.persist(editor.getJSON());
             });
 
-            // Heartbeat every 60 seconds to keep presence alive
-            this.heartbeatInterval = setInterval(() => {
-                @this.heartbeat();
-            }, 60000);
+            // Heartbeat every 60 seconds to keep presence alive. It
+            // re-arms itself with setTimeout rather than running on a repeating
+            // timer, so a slow round trip cannot stack beats on top of each
+            // other, and destroy() only ever has one handle to clear.
+            const beat = () => {
+                this.heartbeatTimer = setTimeout(() => {
+                    @this.heartbeat();
+                    beat();
+                }, 60000);
+            };
+            beat();
 
             // Notify server when tab/window is closed
             window.addEventListener('beforeunload', () => {
@@ -294,7 +301,7 @@
         },
 
         destroy() {
-            clearInterval(this.heartbeatInterval);
+            clearTimeout(this.heartbeatTimer);
             clearTimeout(this.typingTimeout);
             // Echo.join() hands back the CHANNEL, which has no leave() of its
             // own — leaving is done on the Echo instance, by name. Calling
@@ -375,7 +382,7 @@
     @style-changed.window="document.getElementById('doc-style').textContent = $event.detail.css; refreshOutline()"
     @keydown.ctrl.shift.k.window.prevent="$dispatch('open-ai-palette')"
     @keydown.meta.shift.k.window.prevent="$dispatch('open-ai-palette')"
-    class="flex flex-col h-screen bg-gray-50 dark:bg-gray-900"
+    class="editor"
 >
     <style id="doc-style">{!! $styleCss !!}</style>
 
@@ -389,338 +396,236 @@
          @open-ai-palette.window="Livewire.dispatchTo('documents.ai-assistant', 'open-palette')"
          @open-save-as-template.window="Livewire.dispatchTo('documents.save-as-template', 'open')"
          class="hidden"></div>
+    {{-- ── Toolbar ──────────────────────────────────────────────────────
+         Every structural insert goes through window.DotDoc.run(), never
+         editor.chain(): the registry wraps each one in the caption guard, so a
+         toolbar button cannot split a figure from its media.
+         See .ai/rules/editor.md. --}}
+    <div class="doc-toolbar">
+        <label class="sr-only" for="doc-title">Document title</label>
+        <input id="doc-title"
+               wire:model.blur="title"
+               wire:change="saveTitle"
+               type="text"
+               class="doc-title-field"
+               placeholder="Untitled" />
 
-    {{-- Toolbar --}}
-    <div class="sticky top-0 z-10 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 flex items-center gap-1 flex-wrap">
-        {{-- Title in toolbar --}}
-        <div class="flex-1 min-w-0 mr-4">
-            <input wire:model.blur="title"
-                   wire:change="saveTitle"
-                   type="text"
-                   class="w-full text-lg font-semibold bg-transparent border-none focus:ring-0 text-gray-900 dark:text-white truncate p-0"
-                   placeholder="Untitled" />
-        </div>
+        <span class="tool-sep" aria-hidden="true"></span>
 
-        {{-- Style switcher (Task 9 restyles this) --}}
-        <select wire:change="setStyle($event.target.value)"
-                class="text-xs border border-gray-300 rounded px-1 py-1 bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white mr-2"
-                title="Document style">
-            @foreach(\App\Styles\StyleEngine::systemKeys() as $styleKey)
+        <label class="sr-only" for="doc-style-picker">Document style</label>
+        <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="field field-mono"
+                style="width:auto;padding:5px var(--s2)">
+            @foreach (\App\Styles\StyleEngine::systemKeys() as $styleKey)
                 <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
             @endforeach
         </select>
         @error('style')
-            <span class="text-xs text-red-500 mr-2">{{ $message }}</span>
+            <span class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</span>
         @enderror
 
-        <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
+        <span class="tool-sep" aria-hidden="true"></span>
 
-        {{-- Format buttons --}}
-        <button @click="ed().chain().focus().toggleBold().run()" title="Bold"
-                :class="ed()?.isActive('bold') ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
-                class="p-1.5 rounded transition text-sm font-bold">B</button>
+        <button type="button" class="tool" style="font-weight:700" title="Bold" aria-label="Bold"
+                :class="ed()?.isActive('bold') ? 'tool is-on' : 'tool'"
+                @click="ed().chain().focus().toggleBold().run()">B</button>
 
-        <button @click="ed().chain().focus().toggleItalic().run()" title="Italic"
-                :class="ed()?.isActive('italic') ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
-                class="p-1.5 rounded transition text-sm italic">I</button>
+        <button type="button" class="tool" style="font-style:italic" title="Italic" aria-label="Italic"
+                :class="ed()?.isActive('italic') ? 'tool is-on' : 'tool'"
+                @click="ed().chain().focus().toggleItalic().run()">I</button>
 
-        <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
+        <span class="tool-sep" aria-hidden="true"></span>
 
-        @foreach([1,2,3] as $h)
-            <button @click="window.DotDoc.run(ed(), 'heading.{{ $h }}')"
-                    :class="ed()?.isActive('heading', { level: {{ $h }} }) ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
-                    class="p-1.5 rounded transition text-xs font-bold">H{{ $h }}</button>
+        @foreach ([1, 2, 3] as $h)
+            <button type="button" class="tool tool-mono" title="Heading {{ $h }}" aria-label="Heading {{ $h }}"
+                    :class="ed()?.isActive('heading', { level: {{ $h }} }) ? 'tool tool-mono is-on' : 'tool tool-mono'"
+                    @click="window.DotDoc.run(ed(), 'heading.{{ $h }}')">H{{ $h }}</button>
         @endforeach
 
-        <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
+        <span class="tool-sep" aria-hidden="true"></span>
 
-        <button @click="window.DotDoc.run(ed(), 'list.bullet')"
-                :class="ed()?.isActive('bulletList') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
-                class="p-1.5 rounded transition text-sm">• List</button>
+        <button type="button" class="tool tool-mono" title="Bulleted list" aria-label="Bulleted list"
+                :class="ed()?.isActive('bulletList') ? 'tool tool-mono is-on' : 'tool tool-mono'"
+                @click="window.DotDoc.run(ed(), 'list.bullet')">List</button>
 
-        <button @click="window.DotDoc.run(ed(), 'list.ordered')"
-                :class="ed()?.isActive('orderedList') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
-                class="p-1.5 rounded transition text-sm">1. List</button>
+        <button type="button" class="tool tool-mono" title="Numbered list" aria-label="Numbered list"
+                :class="ed()?.isActive('orderedList') ? 'tool tool-mono is-on' : 'tool tool-mono'"
+                @click="window.DotDoc.run(ed(), 'list.ordered')">1.</button>
 
-        <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
+        <button type="button" class="tool tool-mono" title="Blockquote" aria-label="Blockquote"
+                :class="ed()?.isActive('blockquote') ? 'tool tool-mono is-on' : 'tool tool-mono'"
+                @click="window.DotDoc.run(ed(), 'quote')">Quote</button>
 
-        <button @click="window.DotDoc.run(ed(), 'quote')"
-                :class="ed()?.isActive('blockquote') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
-                class="p-1.5 rounded transition text-sm" title="Blockquote">"</button>
+        <button type="button" class="tool tool-mono" title="Inline code" aria-label="Inline code"
+                :class="ed()?.isActive('code') ? 'tool tool-mono is-on' : 'tool tool-mono'"
+                @click="ed().chain().focus().toggleCode().run()">Code</button>
 
-        <button @click="ed().chain().focus().toggleCode().run()"
-                :class="ed()?.isActive('code') ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
-                class="p-1.5 rounded transition text-xs font-mono" title="Inline code">&lt;/&gt;</button>
+        <button type="button" class="tool tool-mono" title="Insert a table" aria-label="Insert a table"
+                @click="window.DotDoc.run(ed(), 'table')">Table</button>
 
-        {{-- Through the registry, never editor.chain() directly: the registry
-             wraps every block insert in the caption guard, so this cannot
-             split a figure away from its media. --}}
-        <button @click="window.DotDoc.run(ed(), 'table')"
-                class="p-1.5 rounded transition text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" title="Insert Table">⊞ Table</button>
-
-        {{-- Image upload --}}
-        <label class="p-1.5 rounded transition text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 cursor-pointer" title="Insert Image">
-            🖼
-            {{-- uploadImage() re-checks the caption guard at the moment it
-                 inserts, because the file dialog is asynchronous. --}}
-            <input type="file" accept="image/*" class="hidden"
+        {{-- uploadImage() re-checks the caption guard at the moment it inserts,
+             because the file dialog is asynchronous. --}}
+        <label class="tool tool-mono" style="display:inline-flex;align-items:center" title="Insert an image">
+            Image
+            <input type="file" accept="image/*" class="sr-only"
                    @change="ed().uploadImage($event.target.files[0]); $event.target.value = ''" />
         </label>
 
-        <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
+        <span class="tool-sep" aria-hidden="true"></span>
 
         {{-- Everything structural (TOC, figure, cross-reference, callout,
              columns, breaks, variables) lives in the command registry, which
              the palette and the slash menu both list. --}}
-        <button @click="window.DotDoc.openPalette(ed())"
-                title="Commands (⌘K) — or type / in the document"
-                class="p-1.5 rounded transition text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 flex items-center gap-1">
-            ⌘K <span class="hidden sm:inline">Commands</span>
-        </button>
+        <button type="button" class="tool tool-mono" title="Commands — or type / in the document"
+                @click="window.DotDoc.openPalette(ed())">&#8984;K Commands</button>
 
-        <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
+        <button type="button" class="tool tool-mono" title="Undo" aria-label="Undo"
+                @click="ed().chain().focus().undo().run()">Undo</button>
+        <button type="button" class="tool tool-mono" title="Redo" aria-label="Redo"
+                @click="ed().chain().focus().redo().run()">Redo</button>
 
-        <button @click="ed().chain().focus().undo().run()" title="Undo"
-                class="p-1.5 rounded transition text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700">↩</button>
-        <button @click="ed().chain().focus().redo().run()" title="Redo"
-                class="p-1.5 rounded transition text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700">↪</button>
-
-        <span class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></span>
-
-        {{-- Voice Typing --}}
-        <div x-data="voiceTyping" x-init="init()" class="relative">
-            <button @click="toggle()"
-                    :title="listening ? 'Stop voice typing' : 'Start voice typing (Web Speech API)'"
-                    :class="listening ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 animate-pulse' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
-                    class="p-1.5 rounded transition text-sm flex items-center gap-1"
-                    x-show="supported">
-                🎤 <span class="text-xs hidden sm:inline" x-text="listening ? 'Listening…' : 'Voice'"></span>
-            </button>
-            <span x-show="!supported" class="hidden" title="Speech recognition not supported in this browser"></span>
+        <div x-data="voiceTyping" x-init="init()">
+            <button type="button" class="tool tool-mono" x-show="supported" @click="toggle()"
+                    :class="listening ? 'tool tool-mono is-on' : 'tool tool-mono'"
+                    :title="listening ? 'Stop voice typing' : 'Start voice typing'"
+                    x-text="listening ? 'Listening' : 'Voice'">Voice</button>
         </div>
 
-        {{-- Right side: presence + status + nav --}}
-        <div class="ml-auto flex items-center gap-3">
-            {{-- Active user avatars --}}
-            @if(count($activeUsers) > 0)
-                <div class="flex items-center -space-x-1.5">
-                    @foreach(array_slice($activeUsers, 0, 4) as $member)
-                        <div title="{{ $member['name'] }}"
-                             class="w-7 h-7 rounded-full border-2 border-white dark:border-gray-800 overflow-hidden bg-indigo-500 flex items-center justify-center text-white text-xs font-bold">
-                            @if(!empty($member['avatar']))
-                                <img src="{{ $member['avatar'] }}" alt="{{ $member['name'] }}" class="w-full h-full object-cover" />
+        {{-- ── Right side: presence, save state, actions ───────────────── --}}
+        <div class="doc-status">
+            @if (count($activeUsers) > 0)
+                <div class="presence" aria-label="People here now">
+                    @foreach (array_slice($activeUsers, 0, 4) as $member)
+                        <span class="presence-face" title="{{ $member['name'] }}">
+                            @if (! empty($member['avatar']))
+                                <img src="{{ $member['avatar'] }}" alt="{{ $member['name'] }}" />
                             @else
                                 {{ strtoupper(substr($member['name'], 0, 1)) }}
                             @endif
-                        </div>
+                        </span>
                     @endforeach
-                    @if(count($activeUsers) > 4)
-                        <div class="w-7 h-7 rounded-full border-2 border-white dark:border-gray-800 bg-gray-400 flex items-center justify-center text-white text-xs font-bold">
-                            +{{ count($activeUsers) - 4 }}
-                        </div>
+                    @if (count($activeUsers) > 4)
+                        <span class="presence-face">+{{ count($activeUsers) - 4 }}</span>
                     @endif
                 </div>
             @endif
 
-            {{-- Typing / save indicator --}}
-            <div class="flex items-center gap-1 text-xs text-gray-400">
-                <span x-show="isOffline"
-                      class="flex items-center gap-1 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded font-medium"
-                      title="You are offline. Edits are saved locally and will sync when back online.">
-                    ⚠ Offline
+            {{-- State is a lamp AND a word, never colour alone. A rejected save
+                 has to be visible: the writer keeps typing over content the
+                 server never accepted, and the offline draft is deliberately
+                 kept as the only remaining copy. --}}
+            <span class="status-item" style="border-right:0" aria-live="polite">
+                <span x-show="isOffline" class="toolbar" style="gap:var(--s2)"
+                      title="Edits are saved in this browser and sync when you are back online.">
+                    <span class="lamp lamp-signal" aria-hidden="true"></span>
+                    <span class="readout">Offline</span>
                 </span>
-                <span x-show="isTyping && !isOffline" class="flex items-center gap-1">
-                    <span class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse"></span>
-                    editing
+                <span x-show="isTyping && !isOffline" class="toolbar" style="gap:var(--s2)">
+                    <span class="lamp lamp-marker" aria-hidden="true"></span>
+                    <span class="readout">Editing</span>
                 </span>
-                <span wire:loading wire:target="saveContent,saveTitle" class="animate-pulse">Saving…</span>
-                {{-- A rejected save (DocumentSchema validation) must be
-                     visible: the editor keeps typing over content the server
-                     never accepted, and the offline draft is deliberately
-                     kept as the only remaining copy. --}}
-                <span x-show="aiError" x-cloak x-text="aiError" @click="aiError = ''"
-                      class="flex items-center gap-1 px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded font-medium cursor-pointer"
-                      title="Click to dismiss"></span>
+                <span wire:loading wire:target="saveContent,saveTitle" class="toolbar" style="gap:var(--s2)">
+                    <span class="lamp lamp-signal" aria-hidden="true"></span>
+                    <span class="readout">Saving</span>
+                </span>
+                <span x-show="aiError" x-cloak @click="aiError = ''" class="toolbar" style="gap:var(--s2);cursor:pointer"
+                      title="Click to dismiss">
+                    <span class="lamp lamp-danger" aria-hidden="true"></span>
+                    <span class="readout" x-text="aiError"></span>
+                </span>
                 @error('content')
-                    <span class="flex items-center gap-1 px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded font-medium"
-                          title="{{ $message }}">
-                        ⚠ Not saved — {{ \Illuminate\Support\Str::limit($message, 60) }}
+                    <span class="toolbar" style="gap:var(--s2)" title="{{ $message }}">
+                        <span class="lamp lamp-danger" aria-hidden="true"></span>
+                        <span class="readout">Not saved — {{ \Illuminate\Support\Str::limit($message, 60) }}</span>
                     </span>
                 @else
-                    <span wire:loading.remove wire:target="saveContent,saveTitle" x-show="!isTyping && !isOffline" class="text-green-500">
-                        @if($saved) ✓ Saved @endif
+                    <span wire:loading.remove wire:target="saveContent,saveTitle" x-show="!isTyping && !isOffline"
+                          class="toolbar" style="gap:var(--s2)">
+                        <span class="lamp lamp-good" aria-hidden="true"></span>
+                        <span class="readout">@if ($saved) Saved @else Ready @endif</span>
                     </span>
                 @enderror
-            </div>
-
-            {{-- Last edited by --}}
-            <span class="text-xs text-gray-400 hidden lg:block">
-                v{{ $document->version }}
-                · edited {{ $document->updated_at->diffForHumans() }}
             </span>
 
-            {{-- AI Quick Actions --}}
-            <span class="w-px h-5 bg-gray-300 dark:bg-gray-600"></span>
-            <button @click="$dispatch('open-ai-palette')"
-                    class="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium flex items-center gap-1 px-1.5 py-1 rounded hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
-                    title="AI Command Palette (Ctrl+Shift+K)">
-                ✨ AI <kbd class="text-[9px] bg-gray-100 dark:bg-gray-700 rounded px-1 ml-0.5">⇧⌘K</kbd>
+            <span class="readout" title="Last edited {{ $document->updated_at->diffForHumans() }}">
+                <x-shell.figure :value="$document->version" :width="4" prefix="v" label="Version" />
+            </span>
+
+            <span class="tool-sep" aria-hidden="true"></span>
+
+            <button type="button" class="tool tool-mono" @click="$dispatch('open-ai-palette')"
+                    title="Ask the assistant (Ctrl+Shift+K)">Assistant</button>
+
+            <button type="button" class="tool tool-mono {{ $suggestionMode ? 'is-on' : '' }}"
+                    wire:click="toggleSuggestionMode"
+                    title="{{ $suggestionMode ? 'Leave suggesting mode' : 'Enter suggesting mode (track changes)' }}">
+                {{ $suggestionMode ? 'Suggesting' : 'Editing' }}
             </button>
-            <div x-data="{ open: false }" class="relative">
-                <button @click="open = !open"
-                        class="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 px-1 rounded hover:bg-indigo-50 dark:hover:bg-indigo-900/30">
-                    ▾
-                </button>
-                <div x-show="open" @click.outside="open = false" x-cloak
-                     class="absolute right-0 mt-1 w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 py-1 text-xs">
-                    <button @click="open=false; $wire.dispatchTo('documents.ai-assistant', 'ai-action', { action: 'summarize' })"
-                            class="w-full text-left px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-                        📝 Summarize
-                    </button>
-                    <button @click="open=false; $wire.dispatchTo('documents.ai-assistant', 'ai-action', { action: 'grammar' })"
-                            class="w-full text-left px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-                        ✅ Fix Grammar
-                    </button>
-                    <button @click="open=false; $wire.dispatchTo('documents.ai-assistant', 'ai-action', { action: 'continue' })"
-                            class="w-full text-left px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-                        ✍️ Continue Writing
-                    </button>
-                    <button @click="open=false; $wire.dispatchTo('documents.ai-assistant', 'ai-action', { action: 'outline' })"
-                            class="w-full text-left px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-                        🗂️ Generate Outline
-                    </button>
-                    <div class="border-t border-gray-100 dark:border-gray-700 my-1"></div>
-                    <button @click="open=false; $wire.dispatchTo('documents.ai-assistant', 'ai-action', { action: 'tone', param: 'formal' })"
-                            class="w-full text-left px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-                        🎩 Formal Tone
-                    </button>
-                    <button @click="open=false; $wire.dispatchTo('documents.ai-assistant', 'ai-action', { action: 'tone', param: 'casual' })"
-                            class="w-full text-left px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-                        😊 Casual Tone
-                    </button>
-                    <button @click="open=false; $wire.dispatchTo('documents.ai-assistant', 'ai-action', { action: 'tone', param: 'concise' })"
-                            class="w-full text-left px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-                        ⚡ Concise Tone
-                    </button>
+
+            <button type="button" class="tool tool-mono {{ $commentSidebarOpen ? 'is-on' : '' }}"
+                    wire:click="toggleCommentSidebar">Comments</button>
+
+            <div class="menu" x-data="{ open: false }">
+                <button type="button" class="tool tool-mono" @click="open = !open" :aria-expanded="open ? 'true' : 'false'">Export</button>
+                <div class="menu-list" x-show="open" @click.outside="open = false" x-cloak>
+                    <a href="{{ route('documents.export', [$document->uuid, 'pdf']) }}">PDF</a>
+                    <a href="{{ route('documents.export', [$document->uuid, 'word']) }}">Word (.docx)</a>
+                    <a href="{{ route('documents.export', [$document->uuid, 'html']) }}">HTML</a>
+                    <a href="{{ route('documents.export', [$document->uuid, 'markdown']) }}">Markdown</a>
                 </div>
             </div>
 
-            <a href="{{ route('documents.share', $document->uuid) }}"
-               class="text-xs text-indigo-600 hover:underline">Share</a>
-
-            {{-- Suggestion mode toggle --}}
-            <span class="w-px h-5 bg-gray-300 dark:bg-gray-600"></span>
-            <button wire:click="toggleSuggestionMode"
-                    class="text-xs px-2 py-1 rounded transition {{ $suggestionMode ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 font-semibold' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700' }}"
-                    title="{{ $suggestionMode ? 'Exit suggesting mode (track changes)' : 'Enter suggesting mode (track changes)' }}">
-                ✏️ {{ $suggestionMode ? 'Suggesting' : 'Editing' }}
-            </button>
-
-            {{-- Comments sidebar toggle --}}
-            <button wire:click="toggleCommentSidebar"
-                    class="text-xs px-2 py-1 rounded transition {{ $commentSidebarOpen ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 font-semibold' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700' }}"
-                    title="{{ $commentSidebarOpen ? 'Close comments' : 'Open comments' }}">
-                💬 Comments
-            </button>
-            <a href="{{ route('documents.history', $document->uuid) }}"
-               class="text-xs text-gray-500 hover:underline">History</a>
-
-            {{-- Export dropdown --}}
-            <div x-data="{ open: false }" class="relative">
-                <button @click="open = !open"
-                        class="text-xs text-gray-500 hover:underline flex items-center gap-0.5">
-                    Export ▾
-                </button>
-                <div x-show="open" @click.outside="open = false" x-cloak
-                     class="absolute right-0 mt-1 w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 py-1 text-xs">
-                    <a href="{{ route('documents.export', [$document->uuid, 'pdf']) }}"
-                       class="block px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">PDF</a>
-                    <a href="{{ route('documents.export', [$document->uuid, 'word']) }}"
-                       class="block px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">Word (.docx)</a>
-                    <a href="{{ route('documents.export', [$document->uuid, 'html']) }}"
-                       class="block px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">HTML</a>
-                    <a href="{{ route('documents.export', [$document->uuid, 'markdown']) }}"
-                       class="block px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">Markdown</a>
-                </div>
-            </div>
-
-            {{-- Import --}}
-            <div x-data="{ open: false }" class="relative">
-                <button @click="open = !open"
-                        class="text-xs text-gray-500 hover:underline flex items-center gap-0.5">
-                    Import ▾
-                </button>
-                <div x-show="open" @click.outside="open = false" x-cloak
-                     class="absolute right-0 mt-1 w-52 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-50 p-3 text-xs">
+            <div class="menu" x-data="{ open: false }">
+                <button type="button" class="tool tool-mono" @click="open = !open" :aria-expanded="open ? 'true' : 'false'">Import</button>
+                <div class="menu-list" x-show="open" @click.outside="open = false" x-cloak style="padding:var(--s3);min-width:260px">
                     <form action="{{ route('documents.import', $document->uuid) }}" method="POST" enctype="multipart/form-data">
                         @csrf
-                        <label class="block text-gray-600 dark:text-gray-400 mb-1">Upload .docx or .md file</label>
-                        <input type="file" name="file" accept=".docx,.md,.markdown,.txt"
-                               class="block w-full text-xs border border-gray-300 rounded p-1 mb-2 dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-                        <button type="submit"
-                                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded px-2 py-1 text-xs">
-                            Import
-                        </button>
+                        <label class="field-label" for="doc-import">Upload a .docx or .md file</label>
+                        <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
+                        <button type="submit" class="btn btn-primary" style="margin-top:var(--s3);width:100%">Import it</button>
                     </form>
                 </div>
             </div>
 
-            <a href="{{ route('documents.settings', $document->uuid) }}"
-               class="text-xs text-gray-500 hover:underline">Settings</a>
-            <button @click="$dispatch('open-save-as-template')"
-                    class="text-xs text-gray-500 hover:underline hidden sm:block"
-                    title="Save this document as a reusable template">
-                📄 Template
-            </button>
-            <a href="{{ route('documents.index') }}"
-               class="text-xs text-gray-500 hover:underline">← All Docs</a>
+            <button type="button" class="tool tool-mono" @click="$dispatch('open-save-as-template')"
+                    title="Save this document as a reusable template">Template</button>
         </div>
     </div>
 
-    {{-- Pending suggestions panel (track changes) --}}
-    @if(count($pendingSuggestions) > 0)
-        <div class="bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800 px-4 py-2">
-            <div class="max-w-4xl mx-auto">
-                <p class="text-xs font-semibold text-amber-700 dark:text-amber-400 mb-1.5">
-                    {{ count($pendingSuggestions) }} pending suggestion{{ count($pendingSuggestions) !== 1 ? 's' : '' }}
-                </p>
-                <div class="flex flex-col gap-1.5">
-                    @foreach($pendingSuggestions as $suggestion)
-                        <div class="flex items-center gap-2 text-xs bg-white dark:bg-gray-800 rounded border border-amber-200 dark:border-amber-700 px-3 py-1.5">
-                            <span class="font-medium text-gray-700 dark:text-gray-300">{{ $suggestion['user'] }}</span>
-                            <span class="text-gray-400">·</span>
-                            <span class="text-gray-400">{{ $suggestion['created_at'] }}</span>
-                            <span class="text-gray-400">·</span>
-                            <span class="flex-1 truncate text-gray-600 dark:text-gray-400 italic">{{ $suggestion['excerpt'] }}</span>
-                            <button wire:click="acceptSuggestion({{ $suggestion['id'] }})"
-                                    class="flex-shrink-0 px-2 py-0.5 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded hover:bg-green-200 dark:hover:bg-green-900/50 transition font-medium">
-                                Accept
-                            </button>
-                            <button wire:click="rejectSuggestion({{ $suggestion['id'] }})"
-                                    class="flex-shrink-0 px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition font-medium">
-                                Reject
-                            </button>
-                        </div>
-                    @endforeach
-                </div>
+    {{-- Pending suggestions: the assistant's ink, still in marker. --}}
+    @if (count($pendingSuggestions) > 0)
+        <section class="panel" aria-labelledby="pending-suggestions" style="border-left:0;border-right:0;border-top:0">
+            <div class="panel-head">
+                <h2 class="section-title" id="pending-suggestions">
+                    Waiting for you — <x-shell.figure :value="count($pendingSuggestions)" :width="2" label="Suggestions waiting" />
+                </h2>
+                <span class="readout">Marker becomes graphite once accepted</span>
             </div>
-        </div>
+            <ul class="ledger">
+                @foreach ($pendingSuggestions as $suggestion)
+                    <li class="ledger-row">
+                        <span class="lamp lamp-marker" aria-hidden="true"></span>
+                        <span class="ledger-key">
+                            {{ $suggestion['excerpt'] }}
+                            <span class="ledger-sub">{{ $suggestion['user'] }} · {{ $suggestion['created_at'] }}</span>
+                        </span>
+                        <button type="button" class="btn btn-sm" wire:click="acceptSuggestion({{ $suggestion['id'] }})">Accept</button>
+                        <button type="button" class="btn btn-sm" wire:click="rejectSuggestion({{ $suggestion['id'] }})">Drop</button>
+                    </li>
+                @endforeach
+            </ul>
+        </section>
     @endif
 
-    {{-- Editor area (with optional comment sidebar) --}}
-    <div class="flex flex-1 overflow-hidden">
-        {{-- Main editor. wire:ignore keeps Livewire's DOM morph out of the
-             ProseMirror subtree, which it did not render and must not diff. --}}
-        <div class="flex-1 overflow-auto">
-            {{-- data-outline seeds the numbering before the first save round
-                 trip; it rides on the wire:ignore'd host so a Livewire morph
-                 never rewrites it. --}}
+    <div class="editor-row">
+        {{-- wire:ignore keeps Livewire's DOM morph out of the ProseMirror
+             subtree, which it did not render and must not diff. data-outline
+             seeds the numbering before the first save round trip. --}}
+        <div class="editor-main">
             <div x-ref="editorEl" wire:ignore class="desk" data-outline="{{ json_encode($outline) }}"></div>
         </div>
 
-        {{-- Comment sidebar --}}
-        @if($commentSidebarOpen)
-            <div class="w-80 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-800">
+        @if ($commentSidebarOpen)
+            <div class="editor-side">
                 @livewire('documents.comment-thread', ['document' => $document], key('comment-thread'))
             </div>
         @endif

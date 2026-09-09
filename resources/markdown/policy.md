@@ -1,10 +1,10 @@
 _Last updated: 7 August 2026_
 
-This Privacy Policy explains how **BluePin Inc** ("BluePin", "we", "us", "our"), the company responsible for Dot.docs, collects, uses, stores, and shares personal information when you use Dot.docs and the wider Dot Ecosystem it connects to. It is written to align with South Africa's **Protection of Personal Information Act 4 of 2013 ("POPIA")**.
+This Privacy Policy explains how **BluePin Inc** ("BluePin", "we", "us", "our"), the company responsible for Dot.Doc, collects, uses, stores, and shares personal information when you use Dot.Doc and the wider Dot Ecosystem it connects to. It is written to align with South Africa's **Protection of Personal Information Act 4 of 2013 ("POPIA")**.
 
 ## 1. Who we are
 
-BluePin Inc is the responsible party for the personal information Dot.docs processes. Our Information Officer can be reached at privacy@infodot.co.za for any question, request, or concern about your personal information.
+BluePin Inc is the responsible party for the personal information Dot.Doc processes. Our Information Officer can be reached at privacy@infodot.co.za for any question, request, or concern about your personal information.
 
 ## 2. What we collect
 
@@ -28,11 +28,11 @@ We process personal information to:
 - let you sign in once and move between connected Dot Ecosystem platforms without re-entering your credentials;
 - store, edit, and let you collaborate on documents in real time;
 - generate AI-assisted writing suggestions when you request them; and
-- keep Dot.docs secure and prevent abuse.
+- keep Dot.Doc secure and prevent abuse.
 
 ## 4. Ecosystem single sign-on
 
-When you use another Dot Ecosystem platform to sign in to Dot.docs (or vice versa), a short-lived, single-use authentication token confirms who you are without exposing your password to the connected platform.
+When you use another Dot Ecosystem platform to sign in to Dot.Doc (or vice versa), a short-lived, single-use authentication token confirms who you are without exposing your password to the connected platform.
 
 ## 5. Who can see your documents
 
@@ -60,7 +60,7 @@ To exercise any of these rights, contact privacy@infodot.co.za.
 
 ## 9. Cookies
 
-Dot.docs uses a session cookie to keep you signed in. See our Cookie Policy for details.
+Dot.Doc uses a session cookie to keep you signed in. See our Cookie Policy for details.
 
 ## 10. Changes to this Policy
 

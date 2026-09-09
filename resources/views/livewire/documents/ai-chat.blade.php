@@ -1,69 +1,46 @@
 <div>
-    {{-- Chat toggle button --}}
-    <button wire:click="toggle"
-            class="fixed bottom-6 right-6 z-50 w-12 h-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg flex items-center justify-center text-xl"
-            title="AI Chat">
-        @if($open) ✕ @else ✨ @endif
+    {{-- The assistant's own dock-corner tab. No colour tell: it is a square nib
+         plus a word, on the same raised desk tone as the rest of the chrome. --}}
+    <button type="button" wire:click="toggle" class="btn assistant-tab"
+            aria-expanded="{{ $open ? 'true' : 'false' }}">
+        <span class="lamp lamp-marker" aria-hidden="true"></span>
+        {{ $open ? 'Close the assistant' : 'Ask the assistant' }}
     </button>
 
-    {{-- Chat panel --}}
-    @if($open)
-        <div class="fixed bottom-20 right-6 z-50 w-80 flex flex-col bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700"
-             style="height: 420px;">
-
-            {{-- Header --}}
-            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                <div class="flex items-center gap-2">
-                    <span class="text-indigo-500">✨</span>
-                    <span class="text-sm font-semibold text-gray-900 dark:text-white">AI Assistant</span>
-                </div>
-                <button wire:click="clearHistory" class="text-xs text-gray-400 hover:text-gray-600">Clear</button>
+    @if ($open)
+        <div class="assistant-panel" role="dialog" aria-label="Assistant chat">
+            <div class="sheet-head">
+                <h2 class="section-title">Assistant</h2>
+                <button type="button" class="btn btn-quiet btn-sm" wire:click="clearHistory">Clear the thread</button>
             </div>
 
-            {{-- Messages --}}
-            <div class="flex-1 overflow-y-auto p-3 space-y-3"
-                 x-data x-ref="messages"
+            <div class="sheet-body" x-data x-ref="messages"
                  x-init="new MutationObserver(() => { $refs.messages.scrollTop = $refs.messages.scrollHeight; }).observe($refs.messages, { childList: true, subtree: true })">
-                @if(empty($history))
-                    <div class="text-xs text-gray-400 text-center mt-6">
-                        Ask me anything about this document.
-                    </div>
+                @if (empty($history))
+                    <p class="empty-line">Ask anything about this document.</p>
                 @endif
-                @foreach($history as $turn)
-                    <div class="flex {{ $turn['role'] === 'user' ? 'justify-end' : 'justify-start' }}">
-                        <div class="max-w-[85%] rounded-lg px-3 py-2 text-xs
-                            {{ $turn['role'] === 'user'
-                                ? 'bg-indigo-600 text-white'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200' }}">
-                            {!! nl2br(e($turn['content'])) !!}
-                        </div>
+
+                @foreach ($history as $turn)
+                    <div class="turn {{ $turn['role'] === 'user' ? 'turn-you' : 'turn-marker' }}">
+                        <span class="field-label">{{ $turn['role'] === 'user' ? 'You' : 'Assistant' }}</span>
+                        <p style="margin:0">{!! nl2br(e($turn['content'])) !!}</p>
                     </div>
                 @endforeach
-                @if($loading)
-                    <div class="flex justify-start">
-                        <div class="bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2">
-                            <span class="flex gap-1">
-                                <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay:0ms"></span>
-                                <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay:150ms"></span>
-                                <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay:300ms"></span>
-                            </span>
-                        </div>
-                    </div>
+
+                @if ($loading)
+                    <p class="toolbar" aria-live="polite">
+                        <span class="lamp lamp-signal" aria-hidden="true"></span>
+                        <span class="readout">Thinking</span>
+                    </p>
                 @endif
             </div>
 
-            {{-- Input --}}
-            <div class="px-3 py-2 border-t border-gray-200 dark:border-gray-700">
-                <div class="flex gap-2">
-                    <input wire:model="message"
-                           wire:keydown.enter="send"
-                           type="text"
-                           placeholder="Ask something…"
-                           class="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-1 focus:ring-indigo-500 focus:outline-none" />
-                    <button wire:click="send"
-                            class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs">
-                        Send
-                    </button>
+            <div class="sheet-foot" style="display:block">
+                <label class="sr-only" for="assistant-message">Your question</label>
+                <div class="toolbar">
+                    <input id="assistant-message" wire:model="message" wire:keydown.enter="send" type="text"
+                           class="field" style="flex:1 1 auto" placeholder="What should I look at?" />
+                    <button type="button" class="btn btn-primary" wire:click="send">Send</button>
                 </div>
             </div>
         </div>

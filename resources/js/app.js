@@ -1,4 +1,5 @@
 import './bootstrap';
+import './shell';
 import './editor/index';
 import _ from 'lodash';
 import { initOfflineSupport } from './offline';

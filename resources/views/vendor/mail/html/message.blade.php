@@ -4,7 +4,7 @@
 <x-mail::header :url="config('app.url')">
 {{-- config('app.name') is stale ("Laravel") in this environment's .env — hardcoded here so the
 branded theme doesn't inherit that mismatch. See wiki.md changelog for the known gap. --}}
-<img src="{{ asset('images/logo-light.png') }}" class="logo" alt="Dot.docs">
+<img src="{{ asset('images/logo-light.png') }}" class="logo" alt="Dot.Doc">
 </x-mail::header>
 </x-slot:header>
 
@@ -23,7 +23,7 @@ branded theme doesn't inherit that mismatch. See wiki.md changelog for the known
 {{-- Footer --}}
 <x-slot:footer>
 <x-mail::footer>
-&copy; {{ date('Y') }} Dot.docs. {{ __('All rights reserved.') }}<br>
+&copy; {{ date('Y') }} Dot.Doc. {{ __('All rights reserved.') }}<br>
 {{ __('Real-time collaborative documents.') }}
 </x-mail::footer>
 </x-slot:footer>

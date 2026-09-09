@@ -1,0 +1,1254 @@
+/*
+ * Dot.Doc shell — "Two Inks on a Desk".
+ *
+ * The chrome around the paper: tokens, the three-region grid (rail / desk /
+ * dock) with its status line, and the ledger primitives every inner page is
+ * built from. Everything INSIDE .paper belongs to the Document Style CSS
+ * (<style id="doc-style">, App\Styles\CssBuilder) — do not style document
+ * content from here.
+ *
+ * Token names are fixed by docs/superpowers/specs/2026-09-07-dot-doc-platform-
+ * design.md §7. Night is the default (html.dark); day is :root. Nothing in the
+ * chrome carries a shadow and nothing has a radius above 4px: the paper is the
+ * only raised object in the product.
+ */
+
+:root {
+    /* Day */
+    --desk: #e9e6df;
+    --desk-raised: #f2f0ea;
+    --rule: #d5d1c7;
+    --paper: #ffffff;
+    --paper-shadow: rgba(30, 25, 15, 0.18);
+    --text: #1e1f22;
+    --text-2: #5d5e5a;
+    --ink: #1f2023;
+    --marker: #0f766e;
+    --marker-bg: #0f766e14;
+    --signal: #8a6d05;
+    --good: #2f7043;
+    --danger: #a9352d;
+
+    /* Type — chrome sans, mono figures, ratio >= 1.25 a step */
+    --font-chrome: 'Atkinson Hyperlegible Next', 'Atkinson Hyperlegible', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, 'SFMono-Regular', monospace;
+    --t-micro: 12px;
+    --t-body: 15px;
+    --t-lede: 19px;
+    --t-title: 24px;
+    --t-display: 31px;
+
+    /* Space — uneven on purpose, so grouping reads */
+    --s1: 4px;
+    --s2: 8px;
+    --s3: 12px;
+    --s4: 20px;
+    --s5: 32px;
+    --s6: 52px;
+
+    /* Structure */
+    --rail-w: 260px;
+    --rail-w-collapsed: 56px;
+    --dock-w: 360px;
+    --status-h: 36px;
+
+    /* Motion */
+    --ai-in: 180ms;
+    --ink-settle: 240ms;
+    --chrome-move: 140ms;
+}
+
+html.dark {
+    /* Night (default) */
+    --desk: #14161a;
+    --desk-raised: #1b1e24;
+    --rule: #2a2f38;
+    --paper: #fbfaf7;
+    --paper-shadow: rgba(0, 0, 0, 0.55);
+    --text: #e6e4de;
+    --text-2: #9a9a94;
+    --ink: #1f2023;
+    --marker: #0f766e;
+    --marker-bg: #0f766e14;
+    --signal: #f1c62e;
+    --good: #3f8f5a;
+    --danger: #c9463d;
+}
+
+/* ── Ground ──────────────────────────────────────────────────────────── */
+
+html,
+body {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    background: var(--desk);
+    color: var(--text);
+    font-family: var(--font-chrome);
+    font-size: var(--t-body);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Tailwind's preflight is emitted after this file and resets `body` to
+ * `line-height: inherit`, so the shell's own leading is set on the containers
+ * (a class always beats a bare element selector).
+ */
+.shell,
+.scrim {
+    line-height: 1.55;
+}
+
+[x-cloak] {
+    display: none !important;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--text);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+.skip-link {
+    position: absolute;
+    left: var(--s3);
+    top: -100px;
+    z-index: 200;
+    padding: var(--s2) var(--s3);
+    background: var(--desk-raised);
+    border: 1px solid var(--rule);
+    color: var(--text);
+    font-size: var(--t-body);
+    text-decoration: none;
+}
+
+.skip-link:focus {
+    top: var(--s3);
+}
+
+/* ── Shell grid ──────────────────────────────────────────────────────── */
+
+.shell {
+    display: grid;
+    grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--dock-w);
+    grid-template-rows: var(--status-h) minmax(0, 1fr);
+    grid-template-areas:
+        'status status status'
+        'rail   desk   dock';
+    height: 100dvh;
+    background: var(--desk);
+}
+
+.shell[data-rail='collapsed'] {
+    --rail-w: var(--rail-w-collapsed);
+}
+
+.shell[data-dock='hidden'] {
+    --dock-w: 0px;
+}
+
+.shell[data-dock='hidden'] .dock {
+    display: none;
+}
+
+/* ── Status line ─────────────────────────────────────────────────────── */
+
+.status-line {
+    grid-area: status;
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    min-width: 0;
+    background: var(--desk-raised);
+    border-bottom: 1px solid var(--rule);
+    overflow: hidden;
+}
+
+.status-brand,
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: 0 var(--s3);
+    border-right: 1px solid var(--rule);
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.06em;
+    color: var(--text);
+}
+
+.status-brand {
+    font-weight: 700;
+    letter-spacing: 0.14em;
+}
+
+.status-item-key {
+    color: var(--text-2);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.status-spacer {
+    flex: 1 1 auto;
+    min-width: var(--s3);
+}
+
+.status-action {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: 0 var(--s3);
+    border: 0;
+    border-left: 1px solid var(--rule);
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background var(--chrome-move) ease;
+}
+
+.status-action:hover {
+    background: var(--desk);
+}
+
+/* ── Lamp + readout ──────────────────────────────────────────────────── */
+
+.lamp {
+    display: inline-block;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    background: var(--text-2);
+}
+
+.lamp-good {
+    background: var(--good);
+}
+
+.lamp-signal {
+    background: var(--signal);
+}
+
+.lamp-danger {
+    background: var(--danger);
+}
+
+.lamp-marker {
+    background: var(--marker);
+}
+
+.lamp-idle {
+    /* A hairline ring, drawn as a border rather than an inset shadow: the paper
+       is the only element in the product allowed a box-shadow of any kind. */
+    background: transparent;
+    border: 1px solid var(--text-2);
+}
+
+.readout {
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.06em;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+
+.readout-lg {
+    font-size: var(--t-title);
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+}
+
+/*
+ * A padding zero is decoration on a real figure. It is aria-hidden and the
+ * true value rides in an .sr-only sibling, so the contrast gate does not
+ * apply to it — it is the single deliberate exception.
+ */
+.readout .ghost {
+    color: color-mix(in srgb, var(--text-2) 36%, transparent);
+}
+
+/* ── Rail ────────────────────────────────────────────────────────────── */
+
+.rail {
+    grid-area: rail;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--desk-raised);
+    border-right: 1px solid var(--rule);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.rail-group {
+    padding: var(--s3) 0 var(--s4);
+    border-bottom: 1px solid var(--rule);
+}
+
+.rail-group:last-child {
+    border-bottom: 0;
+}
+
+.rail-label {
+    padding: 0 var(--s3) var(--s2);
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-2);
+}
+
+.rail-item {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    width: 100%;
+    padding: 9px var(--s3) 9px 10px;
+    border: 0;
+    border-left: 2px solid transparent;
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--t-body);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background var(--chrome-move) ease, color var(--chrome-move) ease;
+}
+
+.rail-item:hover {
+    background: var(--desk);
+    color: var(--text);
+}
+
+.rail-item.is-current {
+    border-left-color: var(--text);
+    color: var(--text);
+    font-weight: 700;
+}
+
+.rail-item-note {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    color: var(--text-2);
+}
+
+.rail-title {
+    padding: 0 var(--s3) var(--s2);
+    font-size: var(--t-body);
+    font-weight: 700;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.shell[data-rail='collapsed'] .rail-label,
+.shell[data-rail='collapsed'] .rail-title,
+.shell[data-rail='collapsed'] .rail-item-note,
+.shell[data-rail='collapsed'] .rail-item-text {
+    display: none;
+}
+
+.shell[data-rail='collapsed'] .rail-item {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+}
+
+.rail-initial {
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: inherit;
+}
+
+.rail-foot {
+    margin-top: auto;
+    padding: var(--s3);
+    border-top: 1px solid var(--rule);
+}
+
+/* ── Desk (the scrolling canvas) ─────────────────────────────────────── */
+
+.desk-region {
+    grid-area: desk;
+    min-width: 0;
+    overflow: auto;
+    background: var(--desk);
+}
+
+.page {
+    max-width: 1080px;
+    margin: 0;
+    padding: var(--s5) var(--s5) var(--s6);
+}
+
+.page-narrow {
+    max-width: 760px;
+}
+
+.page-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--s4);
+    margin-bottom: var(--s5);
+}
+
+.page-title {
+    margin: 0;
+    font-size: var(--t-display);
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    color: var(--text);
+}
+
+.page-lede {
+    margin: var(--s2) 0 0;
+    max-width: 62ch;
+    font-size: var(--t-body);
+    color: var(--text-2);
+}
+
+.section-title {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-2);
+}
+
+.h-panel {
+    margin: 0;
+    font-size: var(--t-lede);
+    font-weight: 700;
+    line-height: 1.3;
+    color: var(--text);
+}
+
+/* ── Panels and ledgers (shared edges; never a card) ─────────────────── */
+
+.panel {
+    background: var(--desk-raised);
+    border: 1px solid var(--rule);
+    border-radius: 0;
+}
+
+.panel + .panel {
+    border-top: 0;
+}
+
+.panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    padding: var(--s3) var(--s4);
+    border-bottom: 1px solid var(--rule);
+}
+
+.panel-body {
+    padding: var(--s4);
+}
+
+.panel-body > * + * {
+    margin-top: var(--s4);
+}
+
+.ledger {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ledger-row {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s3) var(--s4);
+    border-top: 1px solid var(--rule);
+    color: var(--text);
+    text-decoration: none;
+    transition: background var(--chrome-move) ease;
+}
+
+.ledger > .ledger-row:first-child {
+    border-top: 0;
+}
+
+a.ledger-row:hover,
+button.ledger-row:hover {
+    background: var(--desk);
+}
+
+button.ledger-row {
+    width: 100%;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ledger-key {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ledger-sub {
+    display: block;
+    font-size: var(--t-micro);
+    color: var(--text-2);
+    letter-spacing: 0.02em;
+    white-space: normal;
+}
+
+.ledger-val {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-2);
+    white-space: nowrap;
+}
+
+/* ── Dock ────────────────────────────────────────────────────────────── */
+
+.dock {
+    grid-area: dock;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--desk-raised);
+    border-left: 1px solid var(--rule);
+    overflow: hidden;
+}
+
+.dock-tabs {
+    display: flex;
+    flex: none;
+    border-bottom: 1px solid var(--rule);
+}
+
+.dock-tab {
+    flex: 1 1 0;
+    padding: var(--s3) var(--s2);
+    border: 0;
+    border-right: 1px solid var(--rule);
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color var(--chrome-move) ease, background var(--chrome-move) ease;
+}
+
+.dock-tab:last-child {
+    border-right: 0;
+}
+
+.dock-tab:hover {
+    background: var(--desk);
+    color: var(--text);
+}
+
+.dock-tab[aria-selected='true'] {
+    border-bottom-color: var(--text);
+    color: var(--text);
+    font-weight: 500;
+}
+
+.dock-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.dock-section {
+    border-bottom: 1px solid var(--rule);
+}
+
+.dock-section-head {
+    padding: var(--s4) var(--s4) var(--s2);
+}
+
+.dock-section-body {
+    padding: 0 var(--s4) var(--s4);
+}
+
+.dock-section-body > * + * {
+    margin-top: var(--s3);
+}
+
+/* ── Empty states: one sentence, one action ──────────────────────────── */
+
+.empty {
+    padding: var(--s5) var(--s4);
+}
+
+.empty-line {
+    margin: 0 0 var(--s3);
+    max-width: 46ch;
+    color: var(--text-2);
+}
+
+/* ── Controls ────────────────────────────────────────────────────────── */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: 8px var(--s3);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: var(--desk);
+    color: var(--text);
+    font-family: var(--font-chrome);
+    font-size: var(--t-body);
+    line-height: 1.4;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background var(--chrome-move) ease, border-color var(--chrome-move) ease;
+}
+
+.btn:hover {
+    border-color: var(--text-2);
+}
+
+.btn:disabled {
+    cursor: not-allowed;
+    color: var(--text-2);
+}
+
+.btn-primary {
+    background: var(--text);
+    border-color: var(--text);
+    color: var(--desk-raised);
+    font-weight: 700;
+}
+
+.btn-primary:hover {
+    background: var(--text-2);
+    border-color: var(--text-2);
+}
+
+.btn-quiet {
+    background: transparent;
+    border-color: transparent;
+}
+
+.btn-quiet:hover {
+    background: var(--desk);
+    border-color: var(--rule);
+}
+
+.btn-sm {
+    padding: 5px var(--s2);
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.06em;
+}
+
+.link {
+    color: var(--text);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+}
+
+.link:hover {
+    text-decoration-thickness: 2px;
+}
+
+.field-row + .field-row {
+    margin-top: var(--s4);
+}
+
+.field-label {
+    display: block;
+    margin-bottom: var(--s2);
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-2);
+}
+
+.field {
+    width: 100%;
+    padding: 8px var(--s3);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: var(--desk);
+    color: var(--text);
+    font-family: var(--font-chrome);
+    font-size: var(--t-body);
+    line-height: 1.5;
+}
+
+.field:focus {
+    border-color: var(--text-2);
+    outline: 2px solid var(--text);
+    outline-offset: 1px;
+}
+
+.field::placeholder {
+    color: var(--text-2);
+}
+
+.field-mono {
+    font-family: var(--font-mono);
+}
+
+.field-error {
+    margin: var(--s2) 0 0;
+    font-size: var(--t-micro);
+    color: var(--text);
+}
+
+.field-hint {
+    margin: var(--s2) 0 0;
+    max-width: 62ch;
+    font-size: var(--t-micro);
+    color: var(--text-2);
+}
+
+.field-check {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    color: var(--text);
+}
+
+.field-check input {
+    margin-top: 3px;
+    accent-color: var(--text);
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    flex-wrap: wrap;
+}
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 3px var(--s2);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: var(--desk);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.04em;
+    cursor: pointer;
+}
+
+.tag[aria-pressed='true'] {
+    background: var(--text);
+    border-color: var(--text);
+    color: var(--desk-raised);
+}
+
+.note {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s3) var(--s4);
+    border: 1px solid var(--rule);
+    background: var(--desk);
+    color: var(--text);
+    font-size: var(--t-body);
+}
+
+/* ── Sheets (modal dialogs) ──────────────────────────────────────────── */
+
+.scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: color-mix(in srgb, var(--desk) 72%, transparent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--s4);
+}
+
+.sheet {
+    width: min(560px, 100%);
+    max-height: 84vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--desk-raised);
+    border: 1px solid var(--rule);
+    border-radius: 0;
+}
+
+.sheet-wide {
+    width: min(900px, 100%);
+}
+
+.sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    padding: var(--s3) var(--s4);
+    border-bottom: 1px solid var(--rule);
+}
+
+.sheet-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--s4);
+}
+
+.sheet-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--s2);
+    padding: var(--s3) var(--s4);
+    border-top: 1px solid var(--rule);
+}
+
+/* ── Two inks ────────────────────────────────────────────────────────── */
+
+.ink-marker {
+    color: var(--marker);
+    background: var(--marker-bg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .ink-marker {
+        animation: ink-in var(--ai-in) ease-out both;
+    }
+
+    .ink-settled {
+        transition: color var(--ink-settle) ease, background-color var(--ink-settle) ease;
+    }
+}
+
+@keyframes ink-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* ── Narrow viewports: the dock stacks under the desk ────────────────── */
+
+@media (max-width: 1180px) {
+    .shell {
+        grid-template-columns: var(--rail-w) minmax(0, 1fr);
+        grid-template-areas:
+            'status status'
+            'rail   desk';
+    }
+
+    .dock {
+        display: none;
+    }
+}
+
+@media (max-width: 720px) {
+    .shell {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: var(--status-h) auto minmax(0, 1fr);
+        grid-template-areas:
+            'status'
+            'rail'
+            'desk';
+        height: auto;
+        min-height: 100dvh;
+    }
+
+    .rail {
+        border-right: 0;
+        border-bottom: 1px solid var(--rule);
+    }
+
+    .page {
+        padding: var(--s4) var(--s3) var(--s5);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ── Figures, rail outline, account block ────────────────────────────── */
+
+.figure {
+    white-space: nowrap;
+}
+
+.rail-outline {
+    list-style: none;
+    margin: 0 0 var(--s2);
+    padding: 0;
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+.rail-outline-empty {
+    padding: 0 var(--s3) var(--s2);
+    font-size: var(--t-micro);
+    color: var(--text-2);
+}
+
+.rail-outline-item {
+    font-size: var(--t-micro);
+    font-family: var(--font-mono);
+    letter-spacing: 0.02em;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rail-outline-l2 {
+    padding-left: var(--s4);
+}
+
+.rail-outline-l3 {
+    padding-left: var(--s5);
+}
+
+.rail-account {
+    display: block;
+}
+
+.rail-account form {
+    margin: 0;
+}
+
+/* ── Controls, continued ─────────────────────────────────────────────── */
+
+.btn-danger {
+    border-color: var(--danger);
+}
+
+.btn-danger:hover {
+    background: var(--desk-raised);
+    border-color: var(--danger);
+}
+
+.field-box {
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    background: var(--desk);
+    accent-color: var(--text);
+}
+
+/* ── Editor page ─────────────────────────────────────────────────────── */
+
+.editor {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    line-height: 1.55;
+}
+
+.doc-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    flex-wrap: wrap;
+    padding: var(--s2) var(--s3);
+    background: var(--desk-raised);
+    border-bottom: 1px solid var(--rule);
+}
+
+.doc-title-field {
+    flex: 1 1 260px;
+    min-width: 0;
+    padding: 4px 0;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-chrome);
+    font-size: var(--t-lede);
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.doc-title-field:hover,
+.doc-title-field:focus {
+    border-bottom-color: var(--rule);
+}
+
+.tool {
+    min-width: 30px;
+    height: 30px;
+    padding: 0 var(--s2);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-chrome);
+    font-size: var(--t-body);
+    line-height: 1;
+    cursor: pointer;
+    transition: background var(--chrome-move) ease;
+}
+
+.tool:hover {
+    background: var(--desk);
+    border-color: var(--rule);
+}
+
+.tool.is-on {
+    background: var(--text);
+    border-color: var(--text);
+    color: var(--desk-raised);
+}
+
+.tool-mono {
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.04em;
+}
+
+.tool-sep {
+    width: 1px;
+    align-self: stretch;
+    margin: 0 var(--s1);
+    background: var(--rule);
+}
+
+.doc-status {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    margin-left: auto;
+    flex-wrap: wrap;
+}
+
+.editor-row {
+    display: flex;
+    align-items: stretch;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.editor-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.editor-side {
+    flex: 0 0 320px;
+    border-left: 1px solid var(--rule);
+    background: var(--desk-raised);
+}
+
+.presence {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+}
+
+.presence-face {
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--rule);
+    background: var(--desk);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.presence-face img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.menu {
+    position: relative;
+}
+
+.menu-list {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 40;
+    min-width: 200px;
+    background: var(--desk-raised);
+    border: 1px solid var(--rule);
+}
+
+.menu-list a,
+.menu-list button {
+    display: block;
+    width: 100%;
+    padding: var(--s2) var(--s3);
+    border: 0;
+    border-top: 1px solid var(--rule);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: var(--t-body);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.menu-list > :first-child {
+    border-top: 0;
+}
+
+.menu-list a:hover,
+.menu-list button:hover {
+    background: var(--desk);
+}
+
+/* ── Grids used by the ledger pages ──────────────────────────────────── */
+
+.stack > * + * {
+    margin-top: var(--s4);
+}
+
+.stack-tight > * + * {
+    margin-top: var(--s2);
+}
+
+.split {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    flex-wrap: wrap;
+}
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--s4);
+}
+
+.grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--s4);
+}
+
+@media (max-width: 900px) {
+    .grid-2,
+    .grid-4 {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* ── The assistant ───────────────────────────────────────────────────── */
+
+.assistant-tab {
+    position: fixed;
+    right: var(--s4);
+    bottom: var(--s4);
+    z-index: 50;
+    background: var(--desk-raised);
+}
+
+.assistant-panel {
+    position: fixed;
+    right: var(--s4);
+    bottom: 64px;
+    z-index: 50;
+    width: min(360px, calc(100vw - 40px));
+    height: 440px;
+    display: flex;
+    flex-direction: column;
+    background: var(--desk-raised);
+    border: 1px solid var(--rule);
+}
+
+.turn {
+    padding: var(--s2) 0;
+    border-top: 1px solid var(--rule);
+}
+
+.turn:first-child {
+    border-top: 0;
+}
+
+.turn-marker p {
+    color: var(--marker);
+    background: var(--marker-bg);
+}
+
+.ai-result {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    max-height: 42vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--desk-raised);
+    border-top: 1px solid var(--rule);
+}
+
+.ai-result-body {
+    overflow-y: auto;
+    padding: var(--s4);
+    max-width: 72ch;
+}

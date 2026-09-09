@@ -1,157 +1,122 @@
-<div class="flex flex-col h-full">
+<div class="stack-tight" style="display:flex;flex-direction:column;min-height:100%">
 
-    {{-- Header + filter tabs --}}
-    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-        <div class="flex items-center gap-2">
-            <span class="text-sm font-semibold text-gray-900 dark:text-white">Comments</span>
-            @if($totalOpen > 0)
-                <span class="text-xs bg-indigo-100 text-indigo-700 rounded-full px-1.5">{{ $totalOpen }}</span>
+    <div class="panel-head">
+        <h2 class="section-title">
+            Comments
+            @if ($totalOpen > 0)
+                — <x-shell.figure :value="$totalOpen" :width="2" label="Open comments" /> open
             @endif
-        </div>
-        <div class="flex gap-1 text-xs">
-            @foreach(['open' => 'Open', 'resolved' => 'Resolved', 'all' => 'All'] as $val => $label)
-                <button wire:click="$set('filter', '{{ $val }}')"
-                        class="px-2 py-0.5 rounded {{ $filter === $val ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-                    {{ $label }}
-                </button>
+        </h2>
+        <div class="toolbar" role="group" aria-label="Comment filter">
+            @foreach (['open' => 'Open', 'resolved' => 'Resolved', 'all' => 'All'] as $val => $label)
+                <button type="button" class="tag" wire:click="$set('filter', '{{ $val }}')"
+                        aria-pressed="{{ $filter === $val ? 'true' : 'false' }}">{{ $label }}</button>
             @endforeach
         </div>
     </div>
 
-    {{-- Comment list --}}
-    <div class="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
-        @forelse($comments as $comment)
-            <div class="p-4 {{ $comment->isResolved() ? 'opacity-60' : '' }}" wire:key="comment-{{ $comment->id }}">
-
-                {{-- Selected text anchor --}}
-                @if($comment->selection_text)
-                    <div class="text-xs bg-amber-50 border-l-2 border-amber-400 text-amber-700 px-2 py-1 mb-2 rounded-r italic truncate">
-                        "{{ $comment->selection_text }}"
-                    </div>
+    <ul class="ledger" style="flex:1 1 auto">
+        @forelse ($comments as $comment)
+            <li class="ledger-row" style="display:block" wire:key="comment-{{ $comment->id }}">
+                @if ($comment->selection_text)
+                    <p class="field-hint" style="border-left:2px solid var(--rule);padding-left:var(--s2);margin:0 0 var(--s2)">
+                        &ldquo;{{ Str::limit($comment->selection_text, 90) }}&rdquo;
+                    </p>
                 @endif
 
-                {{-- Author + time --}}
-                <div class="flex items-center gap-2 mb-1.5">
-                    <div class="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-white text-[10px] font-bold overflow-hidden">
-                        @if($comment->user->profile_photo_path)
-                            <img src="{{ $comment->user->profile_photo_url }}" class="w-full h-full object-cover" />
-                        @else
-                            {{ strtoupper(substr($comment->user->name, 0, 1)) }}
-                        @endif
-                    </div>
-                    <span class="text-xs font-medium text-gray-800 dark:text-gray-200">{{ $comment->user->name }}</span>
-                    <span class="text-xs text-gray-400">{{ $comment->created_at->diffForHumans() }}</span>
-                    @if($comment->isResolved())
-                        <span class="text-[10px] bg-green-100 text-green-700 px-1 rounded ml-auto">Resolved</span>
+                <div class="split" style="gap:var(--s2)">
+                    <span class="ledger-key" style="flex:1 1 auto">
+                        {{ $comment->user->name }}
+                        <span class="ledger-sub">{{ $comment->created_at->diffForHumans() }}</span>
+                    </span>
+                    @if ($comment->isResolved())
+                        <x-shell.lamp tone="good" word="Resolved" style="padding:0;border-right:0" />
                     @endif
                 </div>
 
-                {{-- Content with @mention highlight --}}
-                <p class="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-line">
-                    {!! preg_replace('/@(\w+)/', '<span class="text-indigo-600 font-medium">@$1</span>', e($comment->content)) !!}
+                <p style="margin:var(--s2) 0 0;white-space:pre-line">
+                    {!! preg_replace('/@(\w+)/', '<span class="ink-marker">@$1</span>', e($comment->content)) !!}
                 </p>
 
-                {{-- Actions --}}
-                <div class="flex items-center gap-3 mt-2">
-                    <button wire:click="startReply({{ $comment->id }})"
-                            class="text-xs text-gray-400 hover:text-indigo-600">Reply</button>
-
-                    @if(!$comment->isResolved())
-                        <button wire:click="resolve({{ $comment->id }})"
-                                class="text-xs text-gray-400 hover:text-green-600">✓ Resolve</button>
+                <div class="toolbar" style="margin-top:var(--s2)">
+                    <button type="button" class="btn btn-quiet btn-sm" wire:click="startReply({{ $comment->id }})">Reply</button>
+                    @if (! $comment->isResolved())
+                        <button type="button" class="btn btn-quiet btn-sm" wire:click="resolve({{ $comment->id }})">Resolve</button>
                     @else
-                        <button wire:click="reopen({{ $comment->id }})"
-                                class="text-xs text-gray-400 hover:text-amber-600">↩ Reopen</button>
+                        <button type="button" class="btn btn-quiet btn-sm" wire:click="reopen({{ $comment->id }})">Reopen</button>
                     @endif
-
-                    @if($comment->user_id === auth()->id())
-                        <button wire:click="delete({{ $comment->id }})"
-                                wire:confirm="Delete this comment?"
-                                class="text-xs text-gray-400 hover:text-red-500 ml-auto">Delete</button>
+                    @if ($comment->user_id === auth()->id())
+                        <button type="button" class="btn btn-quiet btn-sm" wire:click="delete({{ $comment->id }})"
+                                wire:confirm="Delete this comment?">Delete</button>
                     @endif
                 </div>
 
-                {{-- Replies --}}
-                @if($comment->replies->isNotEmpty())
-                    <div class="ml-4 mt-3 space-y-3 border-l-2 border-gray-100 dark:border-gray-700 pl-3">
-                        @foreach($comment->replies as $reply)
-                            <div wire:key="reply-{{ $reply->id }}">
-                                <div class="flex items-center gap-2 mb-0.5">
-                                    <div class="w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center text-white text-[9px] font-bold overflow-hidden">
-                                        @if($reply->user->profile_photo_path)
-                                            <img src="{{ $reply->user->profile_photo_url }}" class="w-full h-full object-cover" />
-                                        @else
-                                            {{ strtoupper(substr($reply->user->name, 0, 1)) }}
-                                        @endif
-                                    </div>
-                                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">{{ $reply->user->name }}</span>
-                                    <span class="text-xs text-gray-400">{{ $reply->created_at->diffForHumans() }}</span>
-                                </div>
-                                <p class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-line">
-                                    {!! preg_replace('/@(\w+)/', '<span class="text-indigo-600 font-medium">@$1</span>', e($reply->content)) !!}
+                @if ($comment->replies->isNotEmpty())
+                    <ul class="ledger" style="margin-top:var(--s3);border-left:1px solid var(--rule);padding-left:var(--s3)">
+                        @foreach ($comment->replies as $reply)
+                            <li style="padding:var(--s2) 0" wire:key="reply-{{ $reply->id }}">
+                                <span class="ledger-key">
+                                    {{ $reply->user->name }}
+                                    <span class="ledger-sub">{{ $reply->created_at->diffForHumans() }}</span>
+                                </span>
+                                <p style="margin:var(--s1) 0 0;white-space:pre-line">
+                                    {!! preg_replace('/@(\w+)/', '<span class="ink-marker">@$1</span>', e($reply->content)) !!}
                                 </p>
-                                @if($reply->user_id === auth()->id())
-                                    <button wire:click="delete({{ $reply->id }})"
-                                            wire:confirm="Delete this reply?"
-                                            class="text-[11px] text-gray-400 hover:text-red-500 mt-0.5">Delete</button>
+                                @if ($reply->user_id === auth()->id())
+                                    <button type="button" class="btn btn-quiet btn-sm" wire:click="delete({{ $reply->id }})"
+                                            wire:confirm="Delete this reply?">Delete</button>
                                 @endif
-                            </div>
+                            </li>
                         @endforeach
-                    </div>
+                    </ul>
                 @endif
 
-                {{-- Inline reply form --}}
-                @if($replyingTo === $comment->id)
-                    <div class="mt-3 ml-4" x-data="{ content: @entangle('replyContent') }">
-                        <textarea wire:model="replyContent"
-                                  rows="2"
-                                  placeholder="Reply… use @name to mention"
-                                  class="w-full text-xs border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-1 focus:ring-indigo-500 resize-none"></textarea>
-                        <div class="flex gap-2 mt-1.5">
-                            <button wire:click="postReply"
-                                    class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded">Post</button>
-                            <button wire:click="cancelReply"
-                                    class="text-xs text-gray-500 hover:underline">Cancel</button>
+                @if ($replyingTo === $comment->id)
+                    <div style="margin-top:var(--s3)">
+                        <label class="sr-only" for="reply-{{ $comment->id }}">Your reply</label>
+                        <textarea id="reply-{{ $comment->id }}" wire:model="replyContent" rows="2" class="field"
+                                  placeholder="Type @ to mention somebody"></textarea>
+                        <div class="toolbar" style="margin-top:var(--s2)">
+                            <button type="button" class="btn btn-sm btn-primary" wire:click="postReply">Post the reply</button>
+                            <button type="button" class="btn btn-sm" wire:click="cancelReply">Cancel</button>
                         </div>
                     </div>
                 @endif
-            </div>
+            </li>
         @empty
-            <div class="p-6 text-center text-sm text-gray-400">
-                @if($filter === 'open') No open comments. @elseif($filter === 'resolved') No resolved comments. @else No comments yet. @endif
-            </div>
+            <li class="empty">
+                <p class="empty-line">
+                    @if ($filter === 'open')
+                        Nothing is open on this document.
+                    @elseif ($filter === 'resolved')
+                        Nothing has been resolved yet.
+                    @else
+                        No comments on this document yet.
+                    @endif
+                </p>
+                <button type="button" class="btn" wire:click="$set('filter', 'all')">Show every comment</button>
+            </li>
         @endforelse
-    </div>
+    </ul>
 
-    {{-- New comment form --}}
-    <div class="p-4 border-t border-gray-200 dark:border-gray-700">
+    <div class="panel-head" style="border-bottom:0;border-top:1px solid var(--rule);display:block">
         <div x-data="mentionInput(@entangle('newComment'), (q) => $wire.searchMentions(q))">
-            <textarea x-model="value"
-                      @input="handleInput($event)"
-                      @keydown.enter.ctrl.prevent="$wire.postComment()"
-                      rows="3"
-                      placeholder="Add a comment… @mention a collaborator (Ctrl+Enter to post)"
-                      class="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-1 focus:ring-indigo-500 resize-none"></textarea>
+            <label class="field-label" for="new-comment">Add a comment</label>
+            <textarea id="new-comment" x-model="value" @input="handleInput($event)"
+                      @keydown.enter.ctrl.prevent="$wire.postComment()" rows="3" class="field"
+                      placeholder="Type @ to mention a collaborator"></textarea>
 
-            {{-- Mention dropdown --}}
-            @if(count($mentionResults) > 0)
-                <ul class="absolute z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg text-sm">
-                    @foreach($mentionResults as $u)
-                        <li x-on:click="insertMention('{{ $u['name'] }}')"
-                            class="px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
-                            {{ $u['name'] }}
-                        </li>
+            @if (count($mentionResults) > 0)
+                <ul class="menu-list" style="position:static;margin-top:var(--s2)">
+                    @foreach ($mentionResults as $u)
+                        <li><button type="button" x-on:click="insertMention('{{ $u['name'] }}')">{{ $u['name'] }}</button></li>
                     @endforeach
                 </ul>
             @endif
         </div>
-        <div class="flex items-center justify-between mt-2">
-            <span class="text-xs text-gray-400">Ctrl+Enter to post</span>
-            <button wire:click="postComment"
-                    wire:loading.attr="disabled"
-                    class="text-xs bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-1.5 rounded">
-                Post
-            </button>
+        <div class="split" style="margin-top:var(--s2)">
+            <span class="readout">Ctrl + Enter posts it</span>
+            <button type="button" class="btn btn-primary" wire:click="postComment" wire:loading.attr="disabled">Post</button>
         </div>
     </div>
 </div>
