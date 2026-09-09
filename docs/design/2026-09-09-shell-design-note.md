@@ -56,3 +56,65 @@ off under `prefers-reduced-motion: reduce`.
 - Material Symbols and emoji as icons — words, or a hairline inline SVG.
 - The pulsing live dot: colour-plus-animation with no word, and a detector
   anti-pattern. A static nib and the word replace it.
+
+---
+
+## Fix round 1 (2026-09-09) — the bench, the ruled column, the filled rail
+
+`frontend-design` was re-invoked on two questions the review opened: the
+editor toolbar (finding 15) and the dead desk / rail void (finding 25).
+
+### The bench — one row that never reflows
+
+*Structure is information.* The toolbar was three ragged rows because it held
+two different kinds of thing in one undifferentiated strip. They are separated
+now, and the separation is the design:
+
+- **`.doc-head`** — the document's own slug: title, style, who else is here,
+  the state lamp, the version. Facts about the document.
+- **`.doc-tools`** — the bench: the twelve controls a writer reaches for
+  *mid-sentence*, milled into compartments by the same `1px var(--rule)`
+  hairline that separates every other region of the shell. B / I │ H1 H2 H3
+  List 1. Quote │ Table Image │ ⌘K │ Undo Redo.
+- **More** — everything that acts on the *whole document* (assistant,
+  suggesting mode, comments, inline code, voice, export, import, template),
+  pushed to the end of the bench behind one hairline.
+
+The split is what makes the row fit. At 1280px the desk is only ~660px wide —
+the rail takes 260, the dock 360 — so a bench holding all nineteen controls
+could not physically hold one line. Rather than fold clusters at runtime (a
+`ResizeObserver` moving DOM nodes fights Livewire's morph, and duplicating
+buttons into the menu is worse), the bench is a **curated set** and everything
+structural lives in the ⌘K palette, which already lists 35 commands. A single
+container query tightens the compartments below 780px of desk; measured, the
+row is one line with zero overflow at both 1280 and 1440.
+
+Two smaller corrections came with it: the style picker was the one *boxed*
+control among borderless tools and is a `.tool-select` now (it draws its edge
+only on hover/focus), and the orphan presence chip moved up into the slug row
+where it belongs, beside the people-facing facts.
+
+*Boldness is already spent on the status line, so the bench stays deliberately
+unmemorable.* No icons were introduced; the words stayed.
+
+### The page column is ruled, not centred
+
+Centring the 1080px column would have left two dead margins instead of one, and
+"centre it" is the answer any brief would get. The column stays **left-anchored
+— a ledger is read from its left edge, and the rail's hairline is what anchors
+it — and the desk to its right is RULED**: `.page` ends in the same
+`1px var(--rule)` seam every other region of the shell ends in, running the full
+height of the desk. The empty area then reads as the desk's margin rather than
+as an unfinished layout. The rule is drawn by a container query on the desk
+(not the viewport, because the rail and the dock both eat into it) so it only
+appears once there is actually desk to the right of it, and never doubles up
+against the dock's own edge.
+
+### The rail ends where its list ends
+
+The 190px void came from `margin-top: auto` on `.rail-foot` pushing the account
+block to the bottom of a column whose content stopped short. The groups now sit
+in a `.rail-scroll` region that absorbs the leftover and scrolls; the account
+block is a pinned `.rail-foot`. The groups are seam to seam, and the rail ends
+where the list ends. Notifications, which were a 320px dropdown clipped on both
+axes inside that 260px scroll container, open as a sheet.

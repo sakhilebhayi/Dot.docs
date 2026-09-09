@@ -12,8 +12,44 @@ Structure rules, all enforced by eye and by the detector: rails and dock SHARE E
 
 Full-page Livewire views still render exactly ONE root element and editor.blade.php keeps <style id="doc-style"> as its FIRST CHILD - see .ai/rules/livewire.md. Inside .paper nothing is styled from here: that belongs to the Document Style CSS (App\Styles\CssBuilder).
 
+## Readouts and lamps inside inverted surfaces INHERIT their colour
+`.readout`, `.lamp-word`, `.ledger-sub`, `.ledger-val`, `.field-hint`, `.figure`
+and `.status-item-key` each pin a colour token measured against `--desk` /
+`--desk-raised`. Put one inside a surface that INVERTS - `.btn-primary`,
+`.tool.is-on`, `.tag[aria-pressed='true']`, `.dotdoc-panel-row.is-active`, or
+anything marked `.inverted` - and that pinned colour lands on top of `--text`:
+1.00:1. That is exactly how the dock's flagship CTA shipped with an invisible
+`⇧⌘K` and the palette's active row with a 2.2:1 hint. The rule is written once,
+in resources/css/shell.css ("INVERTED SURFACES") and mirrored in paper.css for
+the palette row: inside an inverted surface every one of those classes takes
+`color: inherit`, a `.lamp` is painted from `currentColor` (`.lamp-idle` keeps
+its ring as a `currentColor` border), and `.ghost` is mixed out of
+`currentColor` rather than `--text-2`. Adding a new inverted surface means
+adding it to BOTH `:is(...)` lists, and adding a new self-coloured class means
+adding it to the inner list.
+
+## Contrast is measured on RENDERED PAIRS, not on token pairs
+`node scripts/design/contrast-dom.mjs` is the gate, and it must print ALL PASS.
+A token table - every text token against `--desk` and `--desk-raised` - cannot
+see either failure above, because neither is a token pair: both are one rule's
+colour landing on another rule's fill. The script therefore models the cascade
+for the one question that matters: it reads `:root` (day) and `html.dark`
+(night) into two token maps, parses every rule in shell.css and paper.css
+(expanding `:is(a, b) c` into the selectors it stands for, and splitting
+selector lists on TOP-LEVEL commas only - a naive `split(',')` cuts `:is()`
+lists in half and then silently matches nothing), and for each declared
+{ink inside surface} pair resolves the WINNING declaration: a descendant rule
+`<surface> <ink>` beats the bare `<ink>` rule, `inherit`/`currentColor` resolve
+to the surface's own `color`, and `color-mix(... N%, transparent)` is
+composited over what is behind it. Text floor 4.5:1, indicators 3:1; the
+ghosted padding zero in `<x-shell.figure>` is the single EXEMPT row (aria-hidden
+with the true value in an `.sr-only` sibling). Adding a surface or an ink means
+adding it to `GROUND` / `INKS` / `INVERTED` in that script. Prove the harness is
+live with `--canary`, which deletes the inverted-surface rule and must report
+failures.
+
 GATE before calling a shell change done, both modes:
 1. Render each inner page to public/__design/<page>-<night|day>.html from a THROWAWAY PHPUnit test (call $this->withVite() - Tests\TestCase disables Vite globally), inline resources/css/shell.css + paper.css, and SUBSTITUTE every var(--token) with the literal that mode resolves it to. The detector does not resolve custom properties, so an un-substituted file scans as an empty page and reports nothing. Do NOT inline the built Tailwind bundle: it is compiled from every view in the project and reports rules the page never renders.
 2. `node /Users/sakhilebhayi/Dot/impeccable/cli/bin/cli.js detect public/__design/<file>.html` must print nothing for every page x mode. Canary it (drop `Inter` into --font-chrome) to prove the run is not vacuous. URL/browser-mode scanning needs puppeteer, which this project does not carry.
-3. Measure contrast with a script, not by eye: every text token >= 4.5:1 against --desk and --desk-raised in BOTH modes, every lamp tone >= 3:1. The one allowed exception is the ghosted padding zero in <x-shell.figure>, which is aria-hidden with the real value in .sr-only.
+3. `node scripts/design/contrast-dom.mjs` prints ALL PASS (see above), and `--canary` proves it is not vacuous. Measuring by eye, or measuring token pairs only, does not count.
 4. Delete the throwaway test and public/__design/ before committing; neither is ever committed.
