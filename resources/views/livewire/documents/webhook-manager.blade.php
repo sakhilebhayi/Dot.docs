@@ -22,7 +22,7 @@
                                     {{ implode(', ', $webhook->events) }} — nothing has been sent to it yet.
                                 </span>
                             </span>
-                            <x-shell.lamp tone="signal" word="Pending" style="padding:0;border-right:0" />
+                            <x-shell.lamp tone="signal" word="Pending" />
                         </div>
 
                         @if ($rejectingWebhookId === $webhook->id)
@@ -47,8 +47,11 @@
     @endif
 
     @if ($reviewedWebhooks->isEmpty() && $pendingWebhooks->isEmpty())
+        {{-- One sentence and one action: the action jumps to the form below,
+             which is the only thing you can do from here. --}}
         <div class="empty" style="padding:var(--s4) 0">
             <p class="empty-line">No endpoint is listening to this document.</p>
+            <a href="#hook-url" class="btn btn-primary">Add an endpoint</a>
         </div>
     @elseif ($reviewedWebhooks->isNotEmpty())
         <section aria-labelledby="hook-list">
@@ -66,7 +69,7 @@
                         </span>
 
                         @if ($webhook->status === 'rejected')
-                            <x-shell.lamp tone="danger" word="Rejected" style="padding:0;border-right:0" />
+                            <x-shell.lamp tone="danger" word="Rejected" />
                         @else
                             <button type="button" class="btn btn-sm" wire:click="toggleWebhook({{ $webhook->id }})">
                                 <span class="lamp {{ $webhook->status === 'active' ? 'lamp-good' : 'lamp-idle' }}" aria-hidden="true"></span>

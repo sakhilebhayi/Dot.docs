@@ -146,12 +146,23 @@ body {
 .shell {
     display: grid;
     grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--dock-w);
-    grid-template-rows: var(--status-h) minmax(0, 1fr);
+    grid-template-rows: var(--status-h) auto minmax(0, 1fr);
     grid-template-areas:
         'status status status'
+        'banner banner banner'
         'rail   desk   dock';
     height: 100dvh;
     background: var(--desk);
+}
+
+/*
+ * The flash banner used to sit OUTSIDE the 100dvh grid, which pushed the shell
+ * down the page and gave the document a second scrollbar the moment a flash
+ * fired. It is a row of the grid now; the row collapses to 0 when there is no
+ * message, because the banner hides itself with display:none.
+ */
+.shell-banner {
+    grid-area: banner;
 }
 
 .shell[data-rail='collapsed'] {
@@ -264,12 +275,64 @@ body {
     border: 1px solid var(--text-2);
 }
 
+/*
+ * <x-shell.lamp> renders a BARE lamp + word. It carries no padding and no
+ * hairline of its own, so it drops into a ledger row, a toolbar or a button
+ * without ten call sites overriding it inline. The status line asks for
+ * variant="status", which is the only place the compartment padding belongs.
+ */
+.lamp-word {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.06em;
+    color: var(--text);
+    white-space: nowrap;
+}
+
 .readout {
     font-family: var(--font-mono);
     font-size: var(--t-micro);
     letter-spacing: 0.06em;
     font-variant-numeric: tabular-nums;
     color: var(--text);
+}
+
+/*
+ * INVERTED SURFACES.
+ *
+ * .readout, .lamp-word, .ledger-sub and .field-hint all pin their own colour
+ * to a token measured against --desk / --desk-raised. Put one inside a surface
+ * that inverts (a primary button, a pressed tag, an active tool, the palette's
+ * active row) and that pinned colour lands on top of --text: 1.00:1, which is
+ * exactly what happened to the "⇧⌘K" readout in the dock's CTA — it rendered
+ * as blank padding. Anything that carries its own colour has to INHERIT inside
+ * an inverted surface, and a lamp has to be painted from currentColor, because
+ * the tone tokens are unreadable on --text too.
+ *
+ * The same rule lives in paper.css for .dotdoc-panel-row.is-active. Both are
+ * checked by scripts/design/contrast-dom.mjs, which measures rendered pairs
+ * (rule x rule), not tokens.
+ */
+:is(.inverted, .btn-primary, .tool.is-on, .tag[aria-pressed='true'])
+    :is(.readout, .lamp-word, .ledger-sub, .ledger-val, .field-hint, .figure, .status-item-key) {
+    color: inherit;
+}
+
+/* The padding zero stays a ghost, but of the ink it is actually sitting on. */
+:is(.inverted, .btn-primary, .tool.is-on, .tag[aria-pressed='true']) .readout .ghost {
+    color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+:is(.inverted, .btn-primary, .tool.is-on, .tag[aria-pressed='true']) .lamp {
+    background: currentColor;
+}
+
+:is(.inverted, .btn-primary, .tool.is-on, .tag[aria-pressed='true']) .lamp-idle {
+    background: transparent;
+    border-color: currentColor;
 }
 
 .readout-lg {
@@ -296,6 +359,19 @@ body {
     min-width: 0;
     background: var(--desk-raised);
     border-right: 1px solid var(--rule);
+    overflow: hidden;
+}
+
+/*
+ * The navigator's groups scroll; the account block is pinned to the foot. The
+ * leftover height is absorbed HERE rather than by a margin-top:auto on the
+ * foot, which is what opened the 190px void between the last nav group and the
+ * user block. The groups now sit in contact, seam to seam, and the rail ends
+ * where the list ends.
+ */
+.rail-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
 }
@@ -307,6 +383,10 @@ body {
 
 .rail-group:last-child {
     border-bottom: 0;
+}
+
+.rail-label-sub {
+    padding-top: var(--s3);
 }
 
 .rail-label {
@@ -384,9 +464,27 @@ body {
 }
 
 .rail-foot {
-    margin-top: auto;
-    padding: var(--s3);
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
     border-top: 1px solid var(--rule);
+}
+
+.rail-foot .rail-item {
+    padding: 0;
+    border-left-width: 0;
+    color: var(--text);
+}
+
+.rail-foot .rail-item:hover {
+    background: transparent;
+}
+
+.shell[data-rail='collapsed'] .rail-foot {
+    flex-direction: column;
+    align-items: stretch;
 }
 
 /* ── Desk (the scrolling canvas) ─────────────────────────────────────── */
@@ -396,12 +494,31 @@ body {
     min-width: 0;
     overflow: auto;
     background: var(--desk);
+    /* So .page can ask how much desk there actually is, rather than guessing
+       from the viewport (the rail and the dock both eat into it). */
+    container-type: inline-size;
 }
 
+/*
+ * The page column is left-anchored, not centred: a ledger is read from its
+ * left edge, and the rail's hairline is what anchors it. What was dead desk to
+ * its right is now RULED — the column ends in the same 1px seam every other
+ * region of the shell ends in, so the empty area reads as the desk's margin
+ * rather than as an unfinished layout. The rule only appears once there is
+ * actually desk to the right of it (container query on the desk, not the
+ * viewport, because the rail and the dock both eat into it).
+ */
 .page {
     max-width: 1080px;
+    min-height: 100%;
     margin: 0;
     padding: var(--s5) var(--s5) var(--s6);
+}
+
+@container (min-width: 1140px) {
+    .page {
+        border-right: 1px solid var(--rule);
+    }
 }
 
 .page-narrow {
@@ -479,6 +596,21 @@ body {
     margin-top: var(--s4);
 }
 
+/* The closing row of a panel: the same compartment as .panel-head, hairline on
+   top instead of underneath. Three views were writing this inline. */
+.panel-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    padding: var(--s3) var(--s4);
+    border-top: 1px solid var(--rule);
+}
+
+.panel-foot-block {
+    display: block;
+}
+
 .ledger {
     list-style: none;
     margin: 0;
@@ -539,6 +671,14 @@ button.ledger-row {
     font-variant-numeric: tabular-nums;
     color: var(--text-2);
     white-space: nowrap;
+}
+
+/* Figures in a ledger stack into ONE right-hand column, whatever else the row
+   carries in front of them. */
+.ledger-figure {
+    flex: none;
+    min-width: 5ch;
+    text-align: right;
 }
 
 /* ── Dock ────────────────────────────────────────────────────────────── */
@@ -758,6 +898,39 @@ button.ledger-row {
     accent-color: var(--text);
 }
 
+/*
+ * A face is a plate on the desk, not a floating avatar bubble: a square with
+ * the same hairline every other compartment has. No border-radius above 4px
+ * exists in this chrome, which rules the circular avatar out.
+ */
+.face-plate {
+    flex: none;
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    background: var(--desk) center / cover no-repeat;
+}
+
+.face-plate-sm {
+    width: 24px;
+    height: 24px;
+}
+
+.face-plate img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* A single-choice ledger: the chosen row carries a lamp AND the word, so the
+   choice survives greyscale. */
+.role-list .ledger-row {
+    align-items: flex-start;
+}
+
 .toolbar {
     display: flex;
     align-items: center;
@@ -833,6 +1006,15 @@ button.ledger-row {
     border-bottom: 1px solid var(--rule);
 }
 
+.sheet-head > .h-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.sheet-body > * + * {
+    margin-top: var(--s4);
+}
+
 .sheet-body {
     flex: 1 1 auto;
     min-height: 0;
@@ -849,6 +1031,24 @@ button.ledger-row {
 }
 
 /* ── Two inks ────────────────────────────────────────────────────────── */
+
+/*
+ * Marker is the MACHINE's ink and nothing else. A person's @mention is not the
+ * assistant writing, so it is graphite in a mono chip — the same shape as any
+ * other named figure in the chrome. Spending marker on a human read as though
+ * the AI had written the comment.
+ */
+.mention {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    letter-spacing: 0.02em;
+    padding: 0 var(--s1);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    background: var(--desk);
+    color: var(--text);
+    white-space: nowrap;
+}
 
 .ink-marker {
     color: var(--marker);
@@ -882,6 +1082,7 @@ button.ledger-row {
         grid-template-columns: var(--rail-w) minmax(0, 1fr);
         grid-template-areas:
             'status status'
+            'banner banner'
             'rail   desk';
     }
 
@@ -893,21 +1094,50 @@ button.ledger-row {
 @media (max-width: 720px) {
     .shell {
         grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: var(--status-h) auto minmax(0, 1fr);
+        grid-template-rows: var(--status-h) auto auto minmax(0, 1fr);
         grid-template-areas:
             'status'
+            'banner'
             'rail'
             'desk';
         height: auto;
         min-height: 100dvh;
     }
 
+    /* Stacked: the rail is a band, not a column, so it grows with its list
+       instead of clipping, and the editor goes back to min-height. */
     .rail {
         border-right: 0;
         border-bottom: 1px solid var(--rule);
+        overflow: visible;
+    }
+
+    .rail-scroll {
+        overflow-y: visible;
+    }
+
+    .editor {
+        height: auto;
+        min-height: 100%;
+    }
+
+    .editor-main {
+        overflow-y: visible;
+    }
+
+    .editor-row {
+        flex-wrap: wrap;
+    }
+
+    .editor-side {
+        flex: 1 1 100%;
+        overflow: visible;
+        border-left: 0;
+        border-top: 1px solid var(--rule);
     }
 
     .page {
+        min-height: 0;
         padding: var(--s4) var(--s3) var(--s5);
     }
 }
@@ -991,28 +1221,112 @@ button.ledger-row {
 
 /* ── Editor page ─────────────────────────────────────────────────────── */
 
+/*
+ * The editor page fills the desk exactly (height, not min-height) so the two
+ * columns underneath it can own their own scrollbars: the paper in
+ * .editor-main, the comment thread in .editor-side. Overlays (palette, slash
+ * menu, selection bubble) are appended to document.body by the editor bundle
+ * and positioned from viewport rects, so none of this moves them.
+ */
 .editor {
     display: flex;
     flex-direction: column;
-    min-height: 100%;
+    height: 100%;
+    min-height: 0;
     line-height: 1.55;
 }
 
+/*
+ * THE BENCH (two rows, and neither of them wraps).
+ *
+ * Row 1, .doc-head, is the document's own slug: title, style, who else is here,
+ * the state lamp, the version. Facts.
+ * Row 2, .doc-tools, is the bench: the twelve things a writer reaches for
+ * mid-sentence, milled into compartments by the same hairline that separates
+ * every other region of the shell. Everything that acts on the DOCUMENT rather
+ * than on the text under the cursor (assistant, suggesting mode, comments,
+ * export, import, template) lives in the "More" menu at the end of the bench,
+ * and everything structural is in the ⌘K palette. That split is what lets the
+ * row hold its single line at 1280px, where the desk is only ~660px wide.
+ *
+ * Both rows are `flex-wrap: nowrap`; only the title is allowed to shrink.
+ */
 .doc-toolbar {
     position: sticky;
     top: 0;
     z-index: 20;
-    display: flex;
-    align-items: center;
-    gap: var(--s2);
-    flex-wrap: wrap;
-    padding: var(--s2) var(--s3);
     background: var(--desk-raised);
     border-bottom: 1px solid var(--rule);
 }
 
+.doc-head,
+.doc-tools {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    flex-wrap: nowrap;
+    min-width: 0;
+    padding: var(--s1) var(--s3);
+}
+
+.doc-head {
+    gap: var(--s3);
+    padding-top: var(--s2);
+    border-bottom: 1px solid var(--rule);
+}
+
+.doc-head > * {
+    flex: none;
+}
+
+.doc-cluster {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    flex: none;
+}
+
+.doc-cluster + .doc-cluster {
+    margin-left: var(--s1);
+    padding-left: var(--s2);
+    border-left: 1px solid var(--rule);
+}
+
+.doc-tools-end {
+    margin-left: auto;
+    padding-left: var(--s2);
+    border-left: 1px solid var(--rule);
+}
+
+/*
+ * At 1280px the desk is only ~660px wide (the rail takes 260, the dock 360),
+ * which is 19px short of the roomy bench. The compartments tighten rather than
+ * wrap: the row is one line at every width the dock is visible at. Below that
+ * the bench scrolls sideways instead of spilling.
+ */
+@container (max-width: 780px) {
+    .doc-tools {
+        padding-left: var(--s2);
+        padding-right: var(--s2);
+    }
+
+    .doc-tools .tool {
+        padding: 0 5px;
+    }
+
+    .doc-cluster + .doc-cluster {
+        margin-left: 0;
+    }
+}
+
+@container (max-width: 620px) {
+    .doc-tools {
+        overflow-x: auto;
+    }
+}
+
 .doc-title-field {
-    flex: 1 1 260px;
+    flex: 1 1 auto;
     min-width: 0;
     padding: 4px 0;
     border: 0;
@@ -1030,10 +1344,31 @@ button.ledger-row {
     border-bottom-color: var(--rule);
 }
 
-.tool {
-    min-width: 30px;
-    height: 30px;
+/* The style picker was the one boxed control among borderless tools. It is a
+   tool now, and only draws its edge when you go near it. */
+.tool-select {
+    height: 28px;
     padding: 0 var(--s2);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.06em;
+    cursor: pointer;
+}
+
+.tool-select:hover,
+.tool-select:focus {
+    border-color: var(--rule);
+    background: var(--desk);
+}
+
+.tool {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 6px;
     border: 1px solid transparent;
     border-radius: 3px;
     background: transparent;
@@ -1041,6 +1376,7 @@ button.ledger-row {
     font-family: var(--font-chrome);
     font-size: var(--t-body);
     line-height: 1;
+    white-space: nowrap;
     cursor: pointer;
     transition: background var(--chrome-move) ease;
 }
@@ -1074,7 +1410,8 @@ button.ledger-row {
     align-items: center;
     gap: var(--s3);
     margin-left: auto;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    white-space: nowrap;
 }
 
 .editor-row {
@@ -1087,12 +1424,46 @@ button.ledger-row {
 .editor-main {
     flex: 1 1 auto;
     min-width: 0;
+    overflow-y: auto;
 }
 
+/*
+ * The comment sidebar scrolls on its own, the way the dock does: the column
+ * clips, the ledger inside it takes the leftover and scrolls. Without this the
+ * whole editor page grew with the thread and the paper scrolled away with it.
+ */
 .editor-side {
     flex: 0 0 320px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
     border-left: 1px solid var(--rule);
     background: var(--desk-raised);
+}
+
+.editor-side > * {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.comment-thread {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.comment-thread > .panel-head,
+.comment-thread > .panel-foot {
+    flex: none;
+}
+
+.comment-thread-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .presence {
@@ -1160,6 +1531,45 @@ button.ledger-row {
     background: var(--desk);
 }
 
+.menu-list button[aria-pressed='true'] {
+    font-weight: 700;
+}
+
+/* The bench's "More" menu: everything that acts on the whole document. */
+.menu-list-wide {
+    min-width: 264px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.menu-label {
+    display: block;
+    padding: var(--s2) var(--s3) var(--s1);
+    border-top: 1px solid var(--rule);
+    font-family: var(--font-mono);
+    font-size: var(--t-micro);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-2);
+}
+
+.menu-form {
+    padding: var(--s2) var(--s3) var(--s3);
+    border-top: 1px solid var(--rule);
+}
+
+.menu-form .btn {
+    width: 100%;
+    margin-top: var(--s2);
+    justify-content: center;
+}
+
+/* A <label> acting as a tool (the image picker wraps a hidden file input). */
+.tool-label {
+    display: inline-flex;
+    align-items: center;
+}
+
 /* ── Grids used by the ledger pages ──────────────────────────────────── */
 
 .stack > * + * {
@@ -1199,25 +1609,24 @@ button.ledger-row {
 
 /* ── The assistant ───────────────────────────────────────────────────── */
 
-.assistant-tab {
-    position: fixed;
-    right: var(--s4);
-    bottom: var(--s4);
-    z-index: 50;
-    background: var(--desk-raised);
-}
-
-.assistant-panel {
-    position: fixed;
-    right: var(--s4);
-    bottom: 64px;
-    z-index: 50;
-    width: min(360px, calc(100vw - 40px));
-    height: 440px;
+/*
+ * The assistant has no window of its own. It IS the bottom of the dock's
+ * Intelligence tab — the floating pill and the second fixed panel are gone,
+ * because nothing in this product floats except the paper.
+ */
+.dock-chat {
     display: flex;
     flex-direction: column;
-    background: var(--desk-raised);
-    border: 1px solid var(--rule);
+    border-top: 1px solid var(--rule);
+}
+
+.dock-chat-turns {
+    padding: 0 var(--s4) var(--s3);
+}
+
+.dock-chat-foot {
+    padding: var(--s3) var(--s4);
+    border-top: 1px solid var(--rule);
 }
 
 .turn {
@@ -1234,21 +1643,5 @@ button.ledger-row {
     background: var(--marker-bg);
 }
 
-.ai-result {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 45;
-    max-height: 42vh;
-    display: flex;
-    flex-direction: column;
-    background: var(--desk-raised);
-    border-top: 1px solid var(--rule);
-}
-
-.ai-result-body {
-    overflow-y: auto;
-    padding: var(--s4);
-    max-width: 72ch;
-}
+/* The assistant's result is a sheet now (a decision needs a dialog, not a
+   strip fixed over the desk), so it needs no surface of its own. */

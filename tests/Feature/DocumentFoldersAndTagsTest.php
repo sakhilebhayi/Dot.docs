@@ -127,6 +127,33 @@ class DocumentFoldersAndTagsTest extends TestCase
         $this->assertNull($document->fresh()->folder_id);
     }
 
+    /**
+     * Renaming used to run through the browser's native prompt() from an inline
+     * onclick - unstyled, untranslatable and untestable. It is a sheet now, so
+     * the rename is a state machine the component owns.
+     */
+    public function test_renaming_a_folder_runs_through_the_sheet_not_a_browser_prompt(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $folder = Folder::create(['owner_id' => $owner->id, 'team_id' => null, 'name' => 'Reports']);
+
+        $this->actingAs($owner);
+
+        Livewire::test(Index::class)
+            ->assertDontSee('prompt(', false)
+            ->call('startRenamingFolder', $folder->id)
+            ->assertSet('renamingFolderId', $folder->id)
+            ->assertSet('renameFolderName', 'Reports')
+            ->set('renameFolderName', '   ')
+            ->call('renameFolder')
+            ->assertHasErrors('renameFolderName')
+            ->set('renameFolderName', 'Quarterlies')
+            ->call('renameFolder')
+            ->assertSet('renamingFolderId', null);
+
+        $this->assertSame('Quarterlies', $folder->fresh()->name);
+    }
+
     public function test_an_outsider_cannot_delete_or_rename_someone_elses_folder(): void
     {
         $owner = User::factory()->withPersonalTeam()->create();
@@ -139,7 +166,16 @@ class DocumentFoldersAndTagsTest extends TestCase
             ->call('deleteFolder', $folder->id)
             ->assertForbidden();
 
+        Livewire::test(Index::class)
+            ->call('startRenamingFolder', $folder->id)
+            ->assertForbidden();
+
+        Livewire::test(Index::class)
+            ->call('renameFolder', $folder->id, 'Taken')
+            ->assertForbidden();
+
         $this->assertNotNull(Folder::find($folder->id));
+        $this->assertSame('Reports', $folder->fresh()->name);
     }
 
     public function test_owner_can_add_and_remove_tags_on_a_document(): void

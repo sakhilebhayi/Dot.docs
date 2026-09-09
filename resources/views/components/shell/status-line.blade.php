@@ -4,10 +4,26 @@
     and placed by grid-area, so Tab runs skip link -> rail -> paper -> dock
     before it ever reaches the theme toggle.
 
-    A page may replace the readouts with @section('status'); the default is the
-    save lamp, the document's version and word count, and the mode lamp.
+    THE STATE LAMP ONLY EVER REPORTS WHAT THE PAGE TOLD IT.
+
+    It does not follow Livewire's commit cycle: a search box, a filter chip and
+    a "mark read" button all commit, and reporting "Saved" for those on a page
+    that saves nothing was a lie the writer could not check. A page that owns a
+    document registers itself by setting `state-owner` on the item; only then
+    does resources/js/shell.js write Saving / Saved / Not saved into it, from
+    the `shell:save-state` window event the editor dispatches. Everywhere else
+    the word is the page's own, with an idle lamp, and nothing moves it.
+
+    A page may replace the readouts entirely with @section('status').
 --}}
-@props(['document' => null, 'theme' => 'dark'])
+@props(['document' => null, 'theme' => 'dark', 'state' => null])
+
+@php
+    // Only the editor owns a document, so only there does the lamp become a
+    // live save state. Everywhere else the word is stated once and stays put.
+    $isEditor = request()->routeIs('documents.edit');
+    $stateWord = $state ?? 'Ready';
+@endphp
 
 <header class="status-line" aria-label="Session status">
     <span class="status-brand">Dot.Doc</span>
@@ -15,9 +31,12 @@
     @hasSection('status')
         @yield('status')
     @else
-        <span class="status-item" id="shell-save" aria-live="polite">
-            <span class="lamp lamp-good" aria-hidden="true"></span>
-            <span class="readout" data-shell-save-word>Saved</span>
+        <span class="status-item lamp-word"
+              id="shell-save"
+              aria-live="polite"
+              @if ($isEditor) data-shell-save-owner @endif>
+            <span class="lamp lamp-idle" aria-hidden="true"></span>
+            <span data-shell-save-word>{{ $stateWord }}</span>
         </span>
 
         @if ($document)

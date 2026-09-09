@@ -12,7 +12,7 @@
             <h2 class="section-title" id="share-link">Public link</h2>
             <x-shell.lamp :tone="$document->is_public ? 'signal' : 'idle'"
                           :word="$document->is_public ? 'Published' : 'Private'"
-                          style="padding:0;border-right:0" />
+                          />
         </div>
 
         <div class="panel-body">

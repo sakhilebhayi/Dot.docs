@@ -1,4 +1,7 @@
-<div x-data="{ open: @entangle('open').live }" class="menu">
+{{-- The panel opens as a SHEET, not as a dropdown inside the rail: the rail is
+     260px wide and scrolls, so a 320px menu anchored inside it was clipped on
+     both axes. A sheet is position:fixed and escapes the rail entirely. --}}
+<div x-data="{ open: @entangle('open').live }">
     {{-- The count is a mono readout beside the word, not a coloured pip. --}}
     <button type="button" @click="$wire.toggle()" class="btn btn-quiet btn-sm"
             :aria-expanded="open ? 'true' : 'false'">
@@ -11,16 +14,19 @@
         @endif
     </button>
 
-    <div x-show="open" @click.outside="open = false; $wire.open = false" x-cloak
-         class="menu-list" style="width:320px;left:0;right:auto">
-        <div class="panel-head" style="border-bottom:1px solid var(--rule)">
-            <h3 class="section-title">Notifications</h3>
-            @if ($unreadCount > 0)
-                <button type="button" class="btn btn-quiet btn-sm" wire:click="markAllRead">Mark all read</button>
-            @endif
-        </div>
+    <div x-show="open" x-cloak class="scrim"
+         x-on:keydown.escape.window="open = false; $wire.open = false"
+         @click.self="open = false; $wire.open = false">
+        <div class="sheet" x-trap.inert.noscroll="open" role="dialog" aria-modal="true"
+             aria-labelledby="notifications-title" tabindex="-1">
+            <div class="sheet-head">
+                <h2 class="h-panel" id="notifications-title">Notifications</h2>
+                @if ($unreadCount > 0)
+                    <button type="button" class="btn btn-quiet btn-sm" wire:click="markAllRead">Mark all read</button>
+                @endif
+            </div>
 
-        <ul class="ledger" style="max-height:288px;overflow-y:auto">
+            <ul class="ledger sheet-body">
             @forelse ($notifications as $notification)
                 <li class="ledger-row">
                     <span class="lamp {{ $notification['read'] ? 'lamp-idle' : 'lamp-signal' }}" aria-hidden="true"></span>
@@ -43,7 +49,12 @@
                     <p class="empty-line">Nothing has come in yet.</p>
                 </li>
             @endforelse
-        </ul>
+            </ul>
+
+            <div class="sheet-foot">
+                <button type="button" class="btn" x-on:click="open = false; $wire.open = false">Close</button>
+            </div>
+        </div>
     </div>
 
     {{-- Real-time: listen on the private user channel for new notifications. --}}

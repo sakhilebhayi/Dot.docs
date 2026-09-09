@@ -63,7 +63,7 @@
                         </button>
 
                         @if ($version->version_number === $document->version)
-                            <x-shell.lamp tone="good" word="Current" style="padding:0;border-right:0" />
+                            <x-shell.lamp tone="good" word="Current" />
                         @else
                             <button type="button" class="btn btn-sm" wire:click="restore({{ $version->id }})"
                                     wire:confirm="Restore the document to v{{ $version->version_number }}? What is there now is kept as a new version.">
@@ -79,7 +79,7 @@
                 @endforelse
             </ul>
 
-            <div class="panel-head" style="border-bottom:0;border-top:1px solid var(--rule)">
+            <div class="panel-foot">
                 {{ $versions->links() }}
             </div>
         </section>

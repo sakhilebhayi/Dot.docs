@@ -39,10 +39,10 @@
     order: -1;
     margin: 0 0 20px;
     padding: 12px 16px;
-    border-radius: 6px;
+    border-radius: 4px;
     background: var(--danger);
     color: var(--paper);
-    font: 500 14px/1.5 var(--font-chrome);
+    font: 500 var(--t-body)/1.5 var(--font-chrome);
     text-align: center;
 }
 
@@ -120,8 +120,24 @@
     cursor: pointer;
 }
 
+/*
+ * A broken cross-reference is not signalled by colour: its label is already
+ * "?" rather than "Section 3", its underline goes from dotted to solid, and it
+ * carries a raised "!" so the difference survives greyscale and colour vision
+ * deficiency alike.
+ */
 .paper .xref-broken {
     color: var(--danger);
+    border-bottom-style: solid;
+}
+
+.paper .xref-broken::after {
+    content: '!';
+    font-family: var(--font-mono);
+    font-size: 0.75em;
+    vertical-align: super;
+    line-height: 1;
+    margin-left: 0.15em;
 }
 
 .paper .variable-chip {
@@ -201,14 +217,14 @@
     overflow: hidden;
     color: var(--text);
     font-family: var(--font-chrome);
-    font-size: 15px;
+    font-size: var(--t-body);
     line-height: 1.55;
 }
 
 .dotdoc-panel-title {
     padding: 12px 14px 0;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--t-micro);
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--text-2);
@@ -223,6 +239,17 @@
     font: inherit;
     padding: 12px 14px;
     outline: none;
+}
+
+/*
+ * outline:none removes the pointer-focus ring; a KEYBOARD focus still has to
+ * be visible, and it is drawn with the shell's ring so every focusable in the
+ * product looks the same.
+ */
+.dotdoc-panel-input:focus-visible,
+.dotdoc-bubble-input:focus-visible {
+    outline: 2px solid var(--text);
+    outline-offset: -2px;
 }
 
 .dotdoc-panel-list {
@@ -254,6 +281,17 @@
     color: var(--desk-raised);
 }
 
+/*
+ * Inverted surface: the hint pins --text-2, which lands on --text at 2.2:1 the
+ * moment the row goes active. Anything carrying its own colour inherits here.
+ * Same rule as shell.css's .btn-primary / .tool.is-on / pressed .tag block;
+ * both are measured by scripts/design/contrast-dom.mjs.
+ */
+.dotdoc-panel-row.is-active :is(.dotdoc-panel-hint, .dotdoc-panel-label),
+.dotdoc-bubble-btn.is-active :is(.dotdoc-panel-hint, .readout) {
+    color: inherit;
+}
+
 .dotdoc-panel-label {
     flex: 1;
     min-width: 0;
@@ -265,7 +303,7 @@
 .dotdoc-panel-hint {
     flex-shrink: 0;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--t-micro);
     color: var(--text-2);
 }
 
@@ -286,9 +324,17 @@
     border-radius: 0;
     color: var(--text);
     font-family: var(--font-chrome);
-    font-size: 15px;
+    font-size: var(--t-body);
 }
 
+/*
+ * The bubble is appended to <body> by the editor bundle, which hides it with
+ * the `hidden` property (bubble.js: `dom.hidden = true`). An author-level
+ * `display: flex` beats the UA sheet's `[hidden] { display: none }` whatever
+ * the specificity, so the hidden bubble stayed laid out at the end of the body
+ * flow and added ~74px of phantom page scroll under the 100dvh shell. The
+ * hidden state has to be honoured here.
+ */
 .dotdoc-bubble {
     position: absolute;
     z-index: 999;
@@ -299,6 +345,11 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+}
+
+.dotdoc-bubble[hidden],
+.dotdoc-bubble-row[hidden] {
+    display: none;
 }
 
 .dotdoc-bubble-row {
@@ -316,7 +367,7 @@
     background: transparent;
     color: var(--text);
     font-family: var(--font-chrome);
-    font-size: 15px;
+    font-size: var(--t-body);
     cursor: pointer;
 }
 
@@ -349,7 +400,7 @@
     background: var(--desk);
     color: var(--text);
     font-family: var(--font-chrome);
-    font-size: 13px;
+    font-size: var(--t-micro);
     padding: 0 8px;
     outline: none;
 }

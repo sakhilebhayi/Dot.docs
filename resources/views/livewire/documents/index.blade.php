@@ -77,7 +77,7 @@
                             {{ $folder->name }}
                         </button>
                         <button type="button" class="btn btn-quiet btn-sm"
-                                onclick="const name = prompt('Rename folder', '{{ addslashes($folder->name) }}'); if (name) $wire.renameFolder({{ $folder->id }}, name)">
+                                wire:click="startRenamingFolder({{ $folder->id }})">
                             Rename
                         </button>
                         <button type="button" class="btn btn-quiet btn-sm" wire:click="deleteFolder({{ $folder->id }})"
@@ -116,7 +116,7 @@
                                 <span class="ledger-sub">Edited {{ $doc->updated_at->diffForHumans() }}</span>
                             </span>
                             @if ($doc->is_public)
-                                <x-shell.lamp tone="signal" word="Public" style="padding:0;border-right:0" />
+                                <x-shell.lamp tone="signal" word="Public" />
                             @endif
                             <span class="ledger-val">
                                 <x-shell.figure :value="$doc->version" :width="4" prefix="v" label="Version" />
@@ -126,7 +126,7 @@
                 @endforeach
             </ul>
 
-            <div class="panel-head" style="border-bottom:0;border-top:1px solid var(--rule)">
+            <div class="panel-foot">
                 @if ($this->documents->hasMorePages())
                     <div x-data
                          x-init="
@@ -167,6 +167,31 @@
                     <div class="sheet-foot">
                         <button type="button" class="btn" wire:click="$set('showCreateModal', false)">Cancel</button>
                         <button type="submit" class="btn btn-primary">Create the document</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
+    @if ($renamingFolderId)
+        <div class="scrim" wire:click.self="cancelRenamingFolder" role="dialog" aria-modal="true" aria-labelledby="rename-folder-title">
+            <div class="sheet">
+                <div class="sheet-head">
+                    <h2 class="h-panel" id="rename-folder-title">Rename the folder</h2>
+                </div>
+                <form wire:submit="renameFolder">
+                    <div class="sheet-body">
+                        <div class="field-row">
+                            <label class="field-label" for="rename-folder-name">Folder name</label>
+                            <input id="rename-folder-name" wire:model="renameFolderName" type="text" class="field" autofocus />
+                            @error('renameFolderName')
+                                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                            @enderror
+                        </div>
+                    </div>
+                    <div class="sheet-foot">
+                        <button type="button" class="btn" wire:click="cancelRenamingFolder">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Rename it</button>
                     </div>
                 </form>
             </div>

@@ -1,4 +1,8 @@
-<div class="stack-tight" style="display:flex;flex-direction:column;min-height:100%">
+{{-- The thread owns its own scroll: the head and the composer are pinned, the
+     ledger between them takes the leftover and scrolls, exactly like the dock.
+     Without it thirty comments grew the editor page and scrolled the paper
+     away with them. --}}
+<div class="comment-thread">
 
     <div class="panel-head">
         <h2 class="section-title">
@@ -15,7 +19,7 @@
         </div>
     </div>
 
-    <ul class="ledger" style="flex:1 1 auto">
+    <ul class="ledger comment-thread-list">
         @forelse ($comments as $comment)
             <li class="ledger-row" style="display:block" wire:key="comment-{{ $comment->id }}">
                 @if ($comment->selection_text)
@@ -30,12 +34,12 @@
                         <span class="ledger-sub">{{ $comment->created_at->diffForHumans() }}</span>
                     </span>
                     @if ($comment->isResolved())
-                        <x-shell.lamp tone="good" word="Resolved" style="padding:0;border-right:0" />
+                        <x-shell.lamp tone="good" word="Resolved" />
                     @endif
                 </div>
 
                 <p style="margin:var(--s2) 0 0;white-space:pre-line">
-                    {!! preg_replace('/@(\w+)/', '<span class="ink-marker">@$1</span>', e($comment->content)) !!}
+                    {!! preg_replace('/@(\w+)/', '<span class="mention">@$1</span>', e($comment->content)) !!}
                 </p>
 
                 <div class="toolbar" style="margin-top:var(--s2)">
@@ -60,7 +64,7 @@
                                     <span class="ledger-sub">{{ $reply->created_at->diffForHumans() }}</span>
                                 </span>
                                 <p style="margin:var(--s1) 0 0;white-space:pre-line">
-                                    {!! preg_replace('/@(\w+)/', '<span class="ink-marker">@$1</span>', e($reply->content)) !!}
+                                    {!! preg_replace('/@(\w+)/', '<span class="mention">@$1</span>', e($reply->content)) !!}
                                 </p>
                                 @if ($reply->user_id === auth()->id())
                                     <button type="button" class="btn btn-quiet btn-sm" wire:click="delete({{ $reply->id }})"
@@ -99,7 +103,7 @@
         @endforelse
     </ul>
 
-    <div class="panel-head" style="border-bottom:0;border-top:1px solid var(--rule);display:block">
+    <div class="panel-foot panel-foot-block">
         <div x-data="mentionInput(@entangle('newComment'), (q) => $wire.searchMentions(q))">
             <label class="field-label" for="new-comment">Add a comment</label>
             <textarea id="new-comment" x-model="value" @input="handleInput($event)"

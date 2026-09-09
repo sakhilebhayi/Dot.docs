@@ -3,6 +3,13 @@
     the machine has to say, "Data" is what the record says. Panels inside are
     ledgers - rows divided by hairlines - never cards.
 
+    The tabs follow the WAI-ARIA APG tabs pattern: roving tabindex, arrow keys,
+    Home/End, and every tab wired to its panel with aria-controls /
+    aria-labelledby. resources/js/shell.js drives the keyboard half.
+
+    The assistant lives HERE, at the foot of the Intelligence tab - it has no
+    window of its own. Nothing in this product floats except the paper.
+
     Alpine here is Livewire's bundled copy (the layout loads no second one).
 --}}
 @props(['document' => null])
@@ -12,19 +19,25 @@
     $isEditor = request()->routeIs('documents.edit');
 @endphp
 
-<aside class="dock" aria-label="Intelligence and data" x-data="{ tab: 'intelligence' }">
+<aside class="dock" aria-label="Intelligence and data" x-data="{ tab: 'intelligence' }" data-shell-tabs>
     <div class="dock-tabs" role="tablist" aria-label="Dock sections">
         <button type="button" class="dock-tab" role="tab"
+                id="dock-tab-intelligence"
+                aria-controls="dock-panel-intelligence"
                 :aria-selected="tab === 'intelligence' ? 'true' : 'false'"
                 aria-selected="true"
                 @click="tab = 'intelligence'">Intelligence</button>
         <button type="button" class="dock-tab" role="tab"
+                id="dock-tab-data"
+                aria-controls="dock-panel-data"
                 :aria-selected="tab === 'data' ? 'true' : 'false'"
                 aria-selected="false"
+                tabindex="-1"
                 @click="tab = 'data'">Data</button>
     </div>
 
-    <div class="dock-body" role="tabpanel" x-show="tab === 'intelligence'">
+    <div class="dock-body" role="tabpanel" id="dock-panel-intelligence"
+         aria-labelledby="dock-tab-intelligence" tabindex="0" x-show="tab === 'intelligence'">
         @if ($isEditor && $document)
             <section class="dock-section">
                 <div class="dock-section-head">
@@ -36,8 +49,11 @@
                         and only then becomes graphite.
                     </p>
                     <div class="toolbar" x-data>
+                        {{-- The shortcut inherits the button's ink: a .readout
+                             pins --text, which on an inverted fill is 1.00:1 —
+                             see the inverted-surface block in shell.css. --}}
                         <button type="button" class="btn btn-primary" @click="$dispatch('open-ai-palette')">
-                            Ask the assistant
+                            Open the command palette
                             <span class="readout" aria-hidden="true">&#8679;&#8984;K</span>
                         </button>
                     </div>
@@ -67,6 +83,11 @@
                     @endforeach
                 </ul>
             </section>
+
+            {{-- The assistant itself. It used to be a floating pill plus a
+                 second fixed panel over the desk; it is the bottom of this
+                 tab now. --}}
+            @livewire('documents.ai-chat', ['document' => $document], key('dock-ai-chat'))
         @else
             <div class="empty">
                 <p class="empty-line">The assistant works inside a document, alongside what you are writing.</p>
@@ -75,7 +96,8 @@
         @endif
     </div>
 
-    <div class="dock-body" role="tabpanel" x-show="tab === 'data'" x-cloak>
+    <div class="dock-body" role="tabpanel" id="dock-panel-data"
+         aria-labelledby="dock-tab-data" tabindex="0" x-show="tab === 'data'" x-cloak>
         @if ($document)
             <section class="dock-section">
                 <div class="dock-section-head">
@@ -115,12 +137,11 @@
                 </div>
                 <ul class="ledger">
                     <li class="ledger-row">
-                        <x-shell.lamp :tone="$document->is_public ? 'signal' : 'idle'"
-                                      :word="$document->is_public ? 'Public' : 'Private'"
-                                      style="padding:0;border-right:0" />
-                        <span class="ledger-val">
+                        <span class="ledger-key">
                             {{ $document->is_public ? 'Anyone with the link can read it' : 'Named people only' }}
                         </span>
+                        <x-shell.lamp :tone="$document->is_public ? 'signal' : 'idle'"
+                                      :word="$document->is_public ? 'Public' : 'Private'" />
                     </li>
                     <li class="ledger-row">
                         <span class="ledger-key">Collaborators</span>

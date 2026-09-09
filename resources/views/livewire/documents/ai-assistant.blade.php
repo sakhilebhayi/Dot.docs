@@ -36,17 +36,24 @@
     @endif
 
     {{-- The result arrives in marker: the assistant's ink is visibly its own
-         until a person accepts it into the document. --}}
+         until a person accepts it into the document. It is a SHEET, not a strip
+         fixed over the desk — it asks for a decision, and nothing in this
+         product floats except the paper. --}}
     @if ($showResult)
-        <div class="ai-result" role="region" aria-label="Assistant result">
-            <div class="sheet-head">
-                <span class="lamp lamp-marker" aria-hidden="true"></span>
-                <h2 class="section-title" style="flex:1 1 auto">In marker — {{ ucfirst($action) }}</h2>
-                <button type="button" class="btn btn-primary" wire:click="applyResult">Accept it into the document</button>
-                <button type="button" class="btn" wire:click="dismissResult">Drop it</button>
-            </div>
-            <div class="ai-result-body ink-marker">
-                {!! $result !!}
+        <div class="scrim" role="dialog" aria-modal="true" aria-labelledby="ai-result-title"
+             x-data x-trap.inert.noscroll="true">
+            <div class="sheet sheet-wide">
+                <div class="sheet-head">
+                    <span class="lamp lamp-marker" aria-hidden="true"></span>
+                    <h2 class="h-panel" id="ai-result-title">In marker — {{ ucfirst($action) }}</h2>
+                </div>
+                <div class="sheet-body ink-marker">
+                    {!! $result !!}
+                </div>
+                <div class="sheet-foot">
+                    <button type="button" class="btn" wire:click="dismissResult">Drop it</button>
+                    <button type="button" class="btn btn-primary" wire:click="applyResult">Accept it into the document</button>
+                </div>
             </div>
         </div>
     @endif

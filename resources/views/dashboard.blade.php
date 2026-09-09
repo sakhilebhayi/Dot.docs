@@ -25,7 +25,7 @@
                         Documents you own
                         <span class="ledger-sub">Everything authored under this account.</span>
                     </span>
-                    <span class="readout readout-lg">
+                    <span class="readout readout-lg ledger-figure">
                         <x-shell.figure :value="$myDocs" :width="3" label="Documents you own" />
                     </span>
                 </li>
@@ -34,7 +34,7 @@
                         Shared with you
                         <span class="ledger-sub">Documents somebody added you to.</span>
                     </span>
-                    <span class="readout readout-lg">
+                    <span class="readout readout-lg ledger-figure">
                         <x-shell.figure :value="$sharedDocs" :width="3" label="Shared with you" />
                     </span>
                 </li>
@@ -43,19 +43,21 @@
                         Published
                         <span class="ledger-sub">Readable by anyone holding the link.</span>
                     </span>
-                    <span class="readout readout-lg">
+                    <span class="readout readout-lg ledger-figure">
                         <x-shell.figure :value="$publicDocs" :width="3" label="Published" />
                     </span>
                 </li>
                 <li class="ledger-row">
-                    <x-shell.lamp :tone="$aiSuggestions > 0 ? 'signal' : 'idle'"
-                                  :word="$aiSuggestions > 0 ? 'Needs you' : 'Clear'"
-                                  style="padding:0;border-right:0" />
                     <span class="ledger-key">
                         Suggestions in marker
                         <span class="ledger-sub">The assistant's ink, still waiting to be accepted or dropped.</span>
                     </span>
-                    <span class="readout readout-lg">
+                    {{-- The lamp sits AFTER the label, like every other state
+                         word in the product, so the four figures stay in one
+                         right-hand column. --}}
+                    <x-shell.lamp :tone="$aiSuggestions > 0 ? 'signal' : 'idle'"
+                                  :word="$aiSuggestions > 0 ? 'Needs you' : 'Clear'" />
+                    <span class="readout readout-lg ledger-figure">
                         <x-shell.figure :value="$aiSuggestions" :width="3" label="Suggestions waiting" />
                     </span>
                 </li>
@@ -83,7 +85,7 @@
                                     <span class="ledger-sub">Edited {{ $doc->updated_at->diffForHumans() }}</span>
                                 </span>
                                 @if ($doc->is_public)
-                                    <x-shell.lamp tone="signal" word="Public" style="padding:0;border-right:0" />
+                                    <x-shell.lamp tone="signal" word="Public" />
                                 @endif
                                 @if ($doc->collaborators->count() > 0)
                                     <span class="ledger-val">

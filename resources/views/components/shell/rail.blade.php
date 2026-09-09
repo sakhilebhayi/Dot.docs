@@ -12,6 +12,11 @@
 @endphp
 
 <aside class="rail" aria-label="Navigator">
+    {{-- The groups scroll; the account block below is pinned to the foot. The
+         leftover height is absorbed by this scroll region rather than by a
+         margin-top:auto on the foot, which is what opened the void between the
+         last nav group and the user block. --}}
+    <div class="rail-scroll">
     <nav class="rail-group" aria-label="Workspace">
         <div class="rail-label">Workspace</div>
 
@@ -63,8 +68,8 @@
             @if ($isEditor)
                 {{-- Built from the headings already on the paper by shell.js;
                      it reads the DOM and never touches the editor bundle. --}}
-                <div class="rail-label" style="padding-top:var(--s3)">Outline</div>
-                <ol class="rail-outline" data-shell-outline aria-live="polite">
+                <div class="rail-label rail-label-sub">Outline</div>
+                <ol class="rail-outline" data-shell-outline aria-live="polite" aria-busy="false">
                     <li class="rail-outline-empty">Headings appear here as you write them.</li>
                 </ol>
             @endif
@@ -95,13 +100,16 @@
         </nav>
     @endif
 
-    @auth
-        <div class="rail-group">
-            @livewire('navigation-menu')
-        </div>
+        @auth
+            <div class="rail-group">
+                @livewire('navigation-menu')
+            </div>
+        @endauth
+    </div>
 
+    @auth
         <div class="rail-foot">
-            <span class="rail-item" style="border-left-width:0;padding-left:0">
+            <span class="rail-item">
                 <span class="rail-initial" aria-hidden="true">{{ strtoupper(mb_substr($user->name, 0, 2)) }}</span>
                 <span class="rail-item-text">
                     {{ $user->name }}

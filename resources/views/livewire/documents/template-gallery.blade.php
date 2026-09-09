@@ -34,7 +34,7 @@
                                     </span>
                                     <span class="ledger-val">{{ ucfirst($template->category) }}</span>
                                     @if ($template->is_global)
-                                        <x-shell.lamp tone="good" word="Built in" style="padding:0;border-right:0" />
+                                        <x-shell.lamp tone="good" word="Built in" />
                                     @endif
                                     <button type="button" class="btn btn-sm btn-primary"
                                             wire:click="useTemplate({{ $template->id }})" wire:loading.attr="disabled">

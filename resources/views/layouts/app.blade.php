@@ -42,13 +42,30 @@
 <body>
     <a href="#desk" class="skip-link">Skip to the document</a>
 
-    <x-banner />
-
     <div class="shell" data-shell>
+        {{-- The flash banner is a ROW of the grid, not a sibling above it:
+             outside the 100dvh grid it pushed the shell down and gave the
+             document a second scrollbar the moment a flash fired. --}}
+        <div class="shell-banner">
+            <x-banner />
+        </div>
+
         <x-shell.rail :document="$shellDocument" />
 
         <main id="desk" class="desk-region" tabindex="-1">
-            {{ $slot }}
+            {{-- Jetstream's pages (profile, teams, API tokens) pass their
+                 heading through the `header` slot. The shell renders it as the
+                 page's one <h1>, so those pages are not headless inside it. --}}
+            @isset($header)
+                <div class="page">
+                    <div class="page-head">
+                        <h1 class="page-title">{{ $header }}</h1>
+                    </div>
+                    {{ $slot }}
+                </div>
+            @else
+                {{ $slot }}
+            @endisset
         </main>
 
         <x-shell.dock :document="$shellDocument" />

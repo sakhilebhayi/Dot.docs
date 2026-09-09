@@ -30,6 +30,11 @@ class Index extends Component
 
     public string $newFolderName = '';
 
+    /** The folder being renamed, or null when the rename sheet is closed. */
+    public ?int $renamingFolderId = null;
+
+    public string $renameFolderName = '';
+
     public int $perPage = 12;
 
     public function mount(): void
@@ -178,15 +183,44 @@ class Index extends Component
         $this->newFolderName = '';
     }
 
-    public function renameFolder(int $folderId, string $name): void
+    /**
+     * Open the rename sheet. The old view called the browser's native prompt()
+     * from an inline onclick, which is unstyled, untranslatable and untestable.
+     */
+    public function startRenamingFolder(int $folderId): void
     {
         $folder = Folder::findOrFail($folderId);
         $this->authorize('update', $folder);
 
-        $name = trim($name);
-        if ($name !== '') {
-            $folder->update(['name' => $name]);
+        $this->renamingFolderId = $folder->id;
+        $this->renameFolderName = $folder->name;
+    }
+
+    public function cancelRenamingFolder(): void
+    {
+        $this->renamingFolderId = null;
+        $this->renameFolderName = '';
+    }
+
+    public function renameFolder(?int $folderId = null, ?string $name = null): void
+    {
+        $folderId ??= $this->renamingFolderId;
+        if ($folderId === null) {
+            return;
         }
+
+        $folder = Folder::findOrFail($folderId);
+        $this->authorize('update', $folder);
+
+        $name = trim($name ?? $this->renameFolderName);
+        if ($name === '') {
+            $this->addError('renameFolderName', 'Give the folder a name.');
+
+            return;
+        }
+
+        $folder->update(['name' => $name]);
+        $this->cancelRenamingFolder();
     }
 
     public function deleteFolder(int $folderId): void
