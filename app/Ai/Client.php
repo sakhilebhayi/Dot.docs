@@ -28,6 +28,18 @@ use Throwable;
  */
 class Client
 {
+    /**
+     * Some provider exceptions embed the model's raw response text in their
+     * message - Prism\Prism\Exceptions\PrismStructuredDecodingException does
+     * this by design ("Structured object could not be decoded. Received:
+     * {$responseText}"), and structured() is used for operations whose input
+     * is document content, so that response text can itself be document
+     * content. The cap in attemptChain()'s catch applies to EVERY exception
+     * message, not just this one class, so no future exception type can
+     * leak unbounded content into the shared application log.
+     */
+    private const MAX_LOGGED_EXCEPTION_MESSAGE_LENGTH = 200;
+
     public function __construct(private Usage $usage) {}
 
     /**
@@ -182,11 +194,14 @@ class Client
      *
      * Two things happen on the way down that the success path does not need:
      * every failed leg leaves a `Log::warning` naming the provider, the model
-     * and the reason (nothing from the prompt), and a chain that runs out
-     * still writes its `ai_model_usage` row before rethrowing. "Every call is
-     * accounted for" has to include the calls that never reached a model -
-     * otherwise a total provider outage is the one event usage reporting
-     * cannot see.
+     * and the reason (nothing from the prompt, and the exception message is
+     * capped at MAX_LOGGED_EXCEPTION_MESSAGE_LENGTH so a provider exception
+     * that embeds raw response text - document content included - can never
+     * write more than that into the shared application log), and a chain
+     * that runs out still writes its `ai_model_usage` row before rethrowing.
+     * "Every call is accounted for" has to include the calls that never
+     * reached a model - otherwise a total provider outage is the one event
+     * usage reporting cannot see.
      *
      * @param  list<array{0:string,1:string}>  $chain
      * @param  callable(string,string):AiResult  $call
@@ -212,7 +227,7 @@ class Client
                     'leg' => $index + 1,
                     'legs' => count($chain),
                     'exception' => $e::class,
-                    'message' => $e->getMessage(),
+                    'message' => Str::limit($e->getMessage(), self::MAX_LOGGED_EXCEPTION_MESSAGE_LENGTH),
                 ]);
             }
         }

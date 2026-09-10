@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Prism\Prism\Exceptions\PrismStructuredDecodingException;
 use Tests\TestCase;
 use Throwable;
 
@@ -143,6 +144,58 @@ class ClientFailoverTest extends TestCase
         $this->assertSame('openai', $logged[1]['provider']);
         $this->assertSame('gpt-4o', $logged[1]['model']);
         $this->assertNotEmpty($logged[0]['message']);
+    }
+
+    /**
+     * Prism\Prism\Exceptions\PrismStructuredDecodingException embeds the
+     * model's ENTIRE raw response text in its message ("Structured object
+     * could not be decoded. Received: {$responseText}"). Client::structured()
+     * is used for Phase 2 operations whose output is derived from document
+     * content, so a real malformed response is simulated here (Ollama's
+     * structured handler decodes straight from `message.content` with no
+     * intermediate tool-call step, so an invalid-JSON reply throws this
+     * exact exception with the reply text embedded) to prove the logged
+     * message is capped rather than writing that content into the shared
+     * application log.
+     */
+    public function test_a_long_exception_message_is_capped_before_being_logged(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        $documentDerivedText = str_repeat('leaked document content ', 20);
+
+        config([
+            'ai.provider' => 'ollama',
+            'ai.models.draft' => 'llama3.3',
+            'ai.failover' => [],
+        ]);
+
+        Http::preventStrayRequests();
+        Http::fake(['*' => Http::response([
+            'message' => ['content' => $documentDerivedText],
+            'done_reason' => 'stop',
+            'prompt_eval_count' => 5,
+            'eval_count' => 5,
+        ], 200)]);
+
+        $logged = [];
+
+        Log::listen(function ($message) use (&$logged) {
+            if ($message->level === 'warning') {
+                $logged[] = $message->context;
+            }
+        });
+
+        try {
+            app(Client::class)->structured('draft', 'S', 'U', ['type' => 'object'], ['operation' => 'findings']);
+        } catch (Throwable) {
+            // expected
+        }
+
+        $this->assertCount(1, $logged);
+        $this->assertSame(PrismStructuredDecodingException::class, $logged[0]['exception']);
+        $this->assertLessThanOrEqual(203, strlen($logged[0]['message']), 'The message must be capped, not the full response.');
+        $this->assertStringNotContainsString($documentDerivedText, $logged[0]['message']);
     }
 
     public function test_structured_exhaustion_is_accounted_for_too(): void
