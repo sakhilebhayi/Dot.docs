@@ -77,7 +77,7 @@ Route::post('/shared/{uuid}', function (string $uuid, Request $request) {
     $document->recordView();
 
     return view('documents.shared', compact('document'));
-})->name('documents.shared.unlock');
+})->middleware('throttle:published-unlock')->name('documents.shared.unlock');
 
 // The published page. Same access rules as /shared/{uuid} above, on a name
 // the writer chose - see App\Http\Controllers\PublishedDocumentController.
@@ -87,6 +87,7 @@ Route::get('/d/{slug}', [PublishedDocumentController::class, 'show'])
 
 Route::post('/d/{slug}', [PublishedDocumentController::class, 'unlock'])
     ->where('slug', '[a-z0-9-]+')
+    ->middleware('throttle:published-unlock')
     ->name('documents.published.unlock');
 
 Route::middleware([

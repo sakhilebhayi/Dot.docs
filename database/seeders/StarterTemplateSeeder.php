@@ -31,7 +31,7 @@ class StarterTemplateSeeder extends Seeder
         [
             'file' => 'monthly-production-report.md',
             'name' => 'Monthly production report',
-            'category' => 'general',
+            'category' => 'report',
             'description' => 'Production against target for a mine or plant, with grade, safety and the next period\'s commitments.',
             'style_key' => 'mining',
             // Wide production tables read badly down a portrait page.
@@ -40,7 +40,7 @@ class StarterTemplateSeeder extends Seeder
         [
             'file' => 'safety-incident-report.md',
             'name' => 'Safety incident report',
-            'category' => 'general',
+            'category' => 'report',
             'description' => 'A mining safety incident write-up: details, description, immediate actions, preliminary root cause and sign-off.',
             'style_key' => 'government',
             'page_setup' => ['size' => 'A4', 'orientation' => 'portrait'],
@@ -48,7 +48,7 @@ class StarterTemplateSeeder extends Seeder
         [
             'file' => 'board-memorandum.md',
             'name' => 'Board memorandum',
-            'category' => 'general',
+            'category' => 'report',
             'description' => 'Purpose, background, discussion, financial implications, recommendation and the decision the board is asked to take.',
             'style_key' => 'executive',
             'page_setup' => ['size' => 'A4', 'orientation' => 'portrait'],

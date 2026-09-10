@@ -161,6 +161,25 @@ class TemplatesAndSharingTest extends TestCase
         $this->assertNull($doc->fresh()->slug);
     }
 
+    public function test_deleting_a_document_frees_its_slug_for_reuse(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = Document::factory()->for($user, 'owner')->create(['slug' => 'reusable-slug']);
+
+        $doc->delete();
+
+        $this->assertNull(Document::withTrashed()->findOrFail($doc->id)->slug);
+
+        $other = Document::factory()->for($user, 'owner')->create();
+        Livewire::actingAs($user)->test(ShareManager::class, ['uuid' => $other->uuid])
+            ->set('slug', 'reusable-slug')
+            ->call('saveSlug')
+            ->assertHasNoErrors();
+
+        $this->assertSame('reusable-slug', $other->fresh()->slug);
+    }
+
     public function test_an_expired_published_link_is_gone_and_is_not_counted(): void
     {
         $this->seed(DocumentStyleSeeder::class);
@@ -229,5 +248,41 @@ class TemplatesAndSharingTest extends TestCase
 
         $this->get('/shared/'.$doc->uuid)->assertOk()->assertSee($doc->title);
         $this->assertSame(1, $doc->fresh()->view_count);
+    }
+
+    public function test_the_eleventh_password_attempt_on_a_published_link_is_throttled(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = Document::factory()->for($user, 'owner')->create([
+            'is_public' => true,
+            'slug' => 'guess-me',
+            'share_password' => Hash::make('open-sesame'),
+        ]);
+
+        for ($i = 0; $i < 10; $i++) {
+            $this->post('/d/guess-me', ['password' => 'wrong'])->assertSessionHasErrors('password');
+        }
+
+        // The 11th guess within the minute is throttled, not answered.
+        $this->post('/d/guess-me', ['password' => 'wrong'])->assertStatus(429);
+        $this->assertSame(0, $doc->fresh()->view_count);
+    }
+
+    public function test_the_eleventh_password_attempt_on_a_uuid_share_link_is_throttled(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = Document::factory()->for($user, 'owner')->create([
+            'is_public' => true,
+            'share_password' => Hash::make('open-sesame'),
+        ]);
+
+        for ($i = 0; $i < 10; $i++) {
+            $this->post('/shared/'.$doc->uuid, ['password' => 'wrong'])->assertSessionHasErrors('password');
+        }
+
+        $this->post('/shared/'.$doc->uuid, ['password' => 'wrong'])->assertStatus(429);
+        $this->assertSame(0, $doc->fresh()->view_count);
     }
 }

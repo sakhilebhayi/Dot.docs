@@ -39,20 +39,13 @@ class DocumentStore
     /**
      * The document as Dot.Doc JSON, ready for the editor.
      *
-     * normalise() runs on the way out as well as on the way in: a legacy HTML
-     * blob converts to structurally thin nodes (an empty `<table>`, a `<ul>`
-     * with no `<li>`) that DocumentSchema::validate() accepts but ProseMirror's
-     * content expressions reject — and the editor is built with
-     * `enableContentCheck: true`, so such a document would open READ-ONLY.
-     * Documents stored before those repairs existed go through it too.
+     * See App\Documents\Import\HtmlToJson::fromStored() for the JSON-or-
+     * legacy-HTML fallback and why normalise() runs on both branches -
+     * DocumentTemplate::contentJson() shares the same helper.
      */
     public function json(Document $doc): array
     {
-        if (is_array($doc->content_json) && ($doc->content_json['type'] ?? null) === 'doc') {
-            return $this->schema->normalise($doc->content_json);
-        }
-
-        return $this->schema->normalise($this->legacy->convert($doc->content ?? ''));
+        return $this->legacy->fromStored($doc->content_json, $doc->content, $this->schema);
     }
 
     /** @param array{version?:string,label?:string|null} $opts */

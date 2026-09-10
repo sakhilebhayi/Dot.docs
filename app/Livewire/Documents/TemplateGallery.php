@@ -37,7 +37,7 @@ class TemplateGallery extends Component
     #[Computed]
     public function categories(): array
     {
-        return ['all', 'resume', 'proposal', 'notes', 'blog', 'general'];
+        return ['all', 'resume', 'proposal', 'notes', 'blog', 'general', 'report'];
     }
 
     #[Computed]

@@ -25,7 +25,7 @@ class SaveAsTemplate extends Component
 
     public bool $shareWithTeam = false;
 
-    public array $categories = ['general', 'resume', 'proposal', 'notes', 'blog'];
+    public array $categories = ['general', 'resume', 'proposal', 'notes', 'blog', 'report'];
 
     public function mount(Document $document): void
     {
@@ -44,7 +44,7 @@ class SaveAsTemplate extends Component
 
         $this->validate([
             'name' => 'required|string|max:255',
-            'category' => 'required|in:general,resume,proposal,notes,blog',
+            'category' => 'required|in:general,resume,proposal,notes,blog,report',
             'description' => 'nullable|string|max:500',
         ]);
 

@@ -62,6 +62,8 @@ Word has no linked numbering definition in what this writer emits, so a numbered
 
 The pass belongs to `MarkdownImporter`, not to `HtmlToJson`: an imported `.html`/`.htm` file and every legacy `content` blob reach `HtmlToJson` too, and there those characters mean themselves. The re-run of `ensureIds()` afterwards is load-bearing - a `toc` is a BLOCK and must carry an id - and `normalise()` keeps the contract in the next section.
 
+**`VariableTagger` never splits code.** A `codeBlock`'s content model is `text*` - no inline atoms - so `tagNode()` returns a `codeBlock` unchanged rather than recursing into it: HtmlToJson already hands it one plain-text child straight from the DOM node's `textContent`, and splitting `{{ key }}` inside it into `[text, variable, text]` would violate that content model - `DocumentSchema::validate()`/`normalise()` do not catch this, so it opens the editor read-only per the failsafe above, silently. The same escape applies to a text node carrying a `code` mark (an inline `` `{{ key }}` `` span): `splitText()` returns it unchanged, because an author documenting the convention inside a code span means the literal characters, not a variable to resolve. Both are fenced code / inline code being SHOWN, never variables to substitute. Covered by `ImportExportTest::test_variable_syntax_stays_literal_inside_code`.
+
 The three starter templates under `resources/templates/*.md` are authored against exactly this: the .md file on disk is the editable source and `StarterTemplateSeeder` imports it (asserting `DocumentSchema::validate()` comes back empty) rather than storing hand-written JSON.
 
 ## Every importer returns JSON that has already passed ensureIds + normalise

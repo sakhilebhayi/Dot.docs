@@ -63,6 +63,14 @@ final class VariableTagger
             return $this->splitText($node);
         }
 
+        if (($node['type'] ?? '') === 'codeBlock') {
+            // A code block's content model is `text*` — no inline atoms.
+            // Its text is code being shown, never a variable to resolve, so
+            // it is not even recursed into: HtmlToJson already hands it a
+            // single text child straight from $node->textContent.
+            return [$node];
+        }
+
         if ($this->isTocMarker($node)) {
             $attrs = is_array($node['attrs'] ?? null) ? $node['attrs'] : [];
             // The paragraph's own block id is reused when it has one; a toc
@@ -107,6 +115,15 @@ final class VariableTagger
         $text = $node['text'] ?? '';
         if (! is_string($text) || ! str_contains($text, '{{')) {
             return [$node];
+        }
+
+        // An inline code span (`` `{{ key }}` ``) is literal, e.g. an author
+        // documenting the convention itself — splitting it would also stamp
+        // marks onto a `variable` node HtmlRenderer::renderVariable() drops.
+        foreach (is_array($node['marks'] ?? null) ? $node['marks'] : [] as $mark) {
+            if (is_array($mark) && ($mark['type'] ?? null) === 'code') {
+                return [$node];
+            }
         }
 
         if (preg_match_all(self::KEY, $text, $matches, PREG_OFFSET_CAPTURE) === 0) {

@@ -40,6 +40,31 @@ class ImportExportTest extends TestCase
         $this->assertStringContainsString('| a | b |', $out);
     }
 
+    public function test_variable_syntax_stays_literal_inside_code(): void
+    {
+        // `{{ key }}` inside a fenced code block or an inline code span is an
+        // author documenting the convention, not a variable to resolve.
+        // VariableTagger must not descend into a codeBlock's `text*` content
+        // model (splitting it in would violate ProseMirror's content
+        // expression and open the document read-only) or split a text node
+        // that carries a `code` mark.
+        $md = "```\n{{ example_key }}\n```\n\nSee `{{ key }}` for the syntax.\n";
+        $json = (new MarkdownImporter)->import($md);
+        $this->assertSame([], (new DocumentSchema)->validate($json));
+
+        $codeBlock = $json['content'][0];
+        $this->assertSame('codeBlock', $codeBlock['type']);
+        $this->assertSame([['type' => 'text', 'text' => "{{ example_key }}\n"]], $codeBlock['content']);
+
+        $paragraph = $json['content'][1];
+        $this->assertSame('paragraph', $paragraph['type']);
+        $this->assertNotContains('variable', array_column($paragraph['content'], 'type'));
+
+        $inlineCode = $paragraph['content'][1];
+        $this->assertSame('{{ key }}', $inlineCode['text']);
+        $this->assertSame([['type' => 'code']], $inlineCode['marks']);
+    }
+
     public function test_docx_export_keeps_structure_and_reimports(): void
     {
         $this->seed(DocumentStyleSeeder::class);

@@ -59,6 +59,30 @@ class HtmlToJson
         return $schema->normalise($schema->ensureIds($doc));
     }
 
+    /**
+     * Content as Dot.Doc JSON, whichever column actually holds it.
+     *
+     * `App\Models\Document` and `App\Models\DocumentTemplate` both carry a
+     * `content_json` column and a legacy `content` HTML column, and both
+     * read them back through this same fallback: the JSON column when it
+     * already holds a `doc` node, the legacy HTML converted otherwise.
+     * `normalise()` runs on both branches — a stored `content_json` can
+     * predate a repair `normalise()` now makes, and `convert()`'s own output
+     * can too — so a document or template read through here never opens the
+     * editor read-only (see .ai/rules/app.md).
+     *
+     * @param  array<string,mixed>|null  $contentJson
+     * @return array<string,mixed>
+     */
+    public function fromStored(?array $contentJson, ?string $legacyHtml, DocumentSchema $schema): array
+    {
+        if (is_array($contentJson) && ($contentJson['type'] ?? null) === 'doc') {
+            return $schema->normalise($contentJson);
+        }
+
+        return $schema->normalise($this->convert($legacyHtml ?? ''));
+    }
+
     private function convertBlockNode(DOMNode $node): ?array
     {
         if ($node instanceof DOMText) {

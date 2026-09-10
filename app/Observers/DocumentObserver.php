@@ -29,6 +29,33 @@ class DocumentObserver
     public function deleted(Document $document): void
     {
         $this->bustDocumentCache($document);
+        $this->freeSlug($document);
+    }
+
+    /**
+     * A soft-deleted document must not permanently reserve its published
+     * address: `documents.slug` has a plain unique index, not one scoped to
+     * exclude `deleted_at`, so leaving the slug in place means a trashed
+     * document blocks every future document from ever claiming that name
+     * (and the ShareManager::saveSlug() "somebody has already taken that
+     * address" message would be actively misleading about who).
+     *
+     * Runs through the query builder rather than $document->update(): a
+     * mass-update Eloquent query does not fire model events, so this cannot
+     * recurse into `updated`/`deleted` again, and it works via
+     * `withTrashed()` because the row already carries `deleted_at` by the
+     * time this observer method runs. Restore does not bring the slug back
+     * - keeping that semantics simple is a deliberate choice, not an
+     * oversight.
+     */
+    private function freeSlug(Document $document): void
+    {
+        if ($document->slug === null) {
+            return;
+        }
+
+        Document::withTrashed()->whereKey($document->getKey())->update(['slug' => null]);
+        $document->slug = null;
     }
 
     private function bustDocumentCache(Document $document): void
