@@ -21,9 +21,14 @@ use Illuminate\Support\Facades\DB;
  * body text.
  *
  * The access predicate is DocumentPolicy::view() expressed as SQL: owner OR
- * named collaborator OR current team OR public. It must stay in step with
- * that policy - a search that returns a row the policy would refuse is a
- * disclosure, not a bug in the ranking.
+ * named collaborator OR CURRENT team OR public. It is deliberately NARROWER
+ * than the policy, not identical to it: DocumentPolicy::view() admits any team
+ * the user belongs to (`belongsToTeam`), while search is scoped to the team
+ * they are currently in, as the brief specifies. So a multi-team user will not
+ * find a document sitting in one of their other teams until they switch to it.
+ * The direction of the gap is the one that is safe - search never returns a row
+ * the policy would refuse, which would be a disclosure rather than a bug in the
+ * ranking. Widening it to `belongsToTeam` is a product decision, not a fix.
  */
 class DocumentSearch
 {

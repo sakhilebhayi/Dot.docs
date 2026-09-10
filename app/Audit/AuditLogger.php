@@ -71,6 +71,10 @@ class AuditLogger
      * runner is also "in console" while genuinely dispatching HTTP requests,
      * so it is excepted, otherwise nothing here would ever be covered.
      *
+     * `request()` always resolves - a Request is bound in every context,
+     * including the console - so there is no null branch to guard here; the
+     * console check above is the whole of the decision.
+     *
      * @param  callable(Request):(string|null)  $read
      */
     private function requestValue(callable $read): ?string
@@ -79,9 +83,7 @@ class AuditLogger
             return null;
         }
 
-        $request = request();
-
-        return $request ? $read($request) : null;
+        return $read(request());
     }
 
     private function clip(?string $value, int $length): ?string

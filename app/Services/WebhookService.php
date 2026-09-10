@@ -60,7 +60,16 @@ class WebhookService
             }
 
             try {
+                // withoutRedirecting() is part of the SSRF control, not a
+                // nicety: the guard above vets the URL we are about to call,
+                // and Guzzle would otherwise follow up to five hops from the
+                // response — unchecked — so a public target answering 302
+                // http://169.254.169.254/ would walk this app's own network
+                // context to the metadata endpoint. A webhook receiver has no
+                // legitimate reason to redirect; a 3xx is simply a failed
+                // delivery.
                 Http::withHeaders($headers)
+                    ->withoutRedirecting()
                     ->timeout(5)
                     ->post($webhook->url, $body);
             } catch (\Throwable $e) {

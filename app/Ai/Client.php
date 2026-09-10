@@ -2,9 +2,11 @@
 
 namespace App\Ai;
 
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Prism\Prism\Facades\Prism;
 use Prism\Prism\Schema\RawSchema;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -46,6 +48,8 @@ class Client
         [$result, $fallbackUsed] = $this->attemptChain(
             $this->chainFor($role),
             fn (string $provider, string $model): AiResult => $this->prismText($provider, $model, $system, $user, $opts),
+            $operation,
+            $opts,
         );
 
         $this->usage->record($result, $operation, $opts['document_id'] ?? null, $opts['user_id'] ?? null, $opts['team_id'] ?? null, $fallbackUsed);
@@ -80,6 +84,8 @@ class Client
         [$result, $fallbackUsed] = $this->attemptChain(
             $this->chainFor($role),
             fn (string $provider, string $model): AiResult => $this->prismStructured($provider, $model, $system, $user, $jsonSchema, $opts),
+            $operation,
+            $opts,
         );
 
         $this->usage->record($result, $operation, $opts['document_id'] ?? null, $opts['user_id'] ?? null, $opts['team_id'] ?? null, $fallbackUsed);
@@ -138,25 +144,32 @@ class Client
      * that repeats the model already tried is dropped - retrying the same
      * model against the same outage buys nothing.
      *
+     * The MODEL is the only thing read out of a `config('ai.failover')` leg.
+     * Legs are written `[provider, model]` for readability, but that provider
+     * literal is NOT trusted: it is re-derived with providerFor() exactly like
+     * the primary call, so repointing AI_MODEL_QUICK at another vendor can
+     * never send that model to the previous vendor's endpoint. A leg may
+     * therefore also be written as a bare model string.
+     *
      * @return list<array{0:string,1:string}>
      */
-    private function chainFor(string $role): array
+    public function chainFor(string $role): array
     {
         $model = $this->modelFor($role);
         $chain = [[$this->providerFor($model), $model]];
 
         foreach ((array) config('ai.failover', []) as $leg) {
-            if (! is_array($leg) || count($leg) < 2) {
-                continue;
-            }
-
-            [$provider, $fallbackModel] = [(string) $leg[0], (string) $leg[1]];
+            $fallbackModel = match (true) {
+                is_string($leg) => $leg,
+                is_array($leg) => (string) ($leg[1] ?? $leg['model'] ?? ''),
+                default => '',
+            };
 
             if ($fallbackModel === '' || $fallbackModel === $model) {
                 continue;
             }
 
-            $chain[] = [$provider, $fallbackModel];
+            $chain[] = [$this->providerFor($fallbackModel), $fallbackModel];
         }
 
         return $chain;
@@ -167,23 +180,57 @@ class Client
      * exception is rethrown - the caller sees a real failure, never a
      * silently empty answer.
      *
+     * Two things happen on the way down that the success path does not need:
+     * every failed leg leaves a `Log::warning` naming the provider, the model
+     * and the reason (nothing from the prompt), and a chain that runs out
+     * still writes its `ai_model_usage` row before rethrowing. "Every call is
+     * accounted for" has to include the calls that never reached a model -
+     * otherwise a total provider outage is the one event usage reporting
+     * cannot see.
+     *
      * @param  list<array{0:string,1:string}>  $chain
      * @param  callable(string,string):AiResult  $call
+     * @param  array{operation?:string,document_id?:int|null,user_id?:int|null,team_id?:int|null,max_tokens?:int}  $opts
      * @return array{0:AiResult,1:bool}
      */
-    private function attemptChain(array $chain, callable $call): array
+    private function attemptChain(array $chain, callable $call, string $operation, array $opts): array
     {
         $last = null;
+        $attempted = 0;
 
         foreach ($chain as $index => [$provider, $model]) {
+            $attempted++;
+
             try {
                 return [$call($provider, $model), $index > 0];
             } catch (Throwable $e) {
                 $last = $e;
+
+                Log::warning('AI provider leg failed', [
+                    'provider' => $provider,
+                    'model' => $model,
+                    'leg' => $index + 1,
+                    'legs' => count($chain),
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                ]);
             }
         }
 
-        throw $last ?? new \RuntimeException('No AI provider configured.');
+        [$provider, $model] = $chain === []
+            ? ['none', 'none']
+            : $chain[array_key_last($chain)];
+
+        $this->usage->record(
+            new AiResult(text: '', inputTokens: 0, outputTokens: 0, model: $model, provider: $provider, latencyMs: 0),
+            $operation,
+            $opts['document_id'] ?? null,
+            $opts['user_id'] ?? null,
+            $opts['team_id'] ?? null,
+            $attempted > 1,
+        );
+
+        throw $last ?? new RuntimeException('No AI provider configured.');
     }
 
     /** @param array{max_tokens?:int} $opts */

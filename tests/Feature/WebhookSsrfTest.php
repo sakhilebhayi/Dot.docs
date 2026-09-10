@@ -100,4 +100,42 @@ class WebhookSsrfTest extends TestCase
         $this->assertFalse(SsrfGuard::isSafeUrl('not a url'));
         $this->assertTrue(SsrfGuard::isSafeUrl('https://93.184.216.34/hook'));
     }
+
+    public function test_the_guard_rejects_cgnat_space(): void
+    {
+        // 100.64.0.0/10 is neither "private" nor "reserved" to filter_var(),
+        // but it is carrier-grade NAT: the range some hosts put their internal
+        // services and metadata endpoints on.
+        $this->assertFalse(SsrfGuard::isSafeUrl('http://100.64.0.1/hook'));
+        $this->assertFalse(SsrfGuard::isSafeUrl('http://100.100.100.200/latest/meta-data'));
+        $this->assertFalse(SsrfGuard::isSafeUrl('http://100.127.255.254/hook'));
+
+        // The neighbours either side of the block are ordinary public space.
+        $this->assertTrue(SsrfGuard::isSafeUrl('http://100.63.255.255/hook'));
+        $this->assertTrue(SsrfGuard::isSafeUrl('http://100.128.0.1/hook'));
+    }
+
+    /**
+     * The guard checks the URL it was given. A target that answers with a
+     * redirect to a private address would otherwise walk the app's own network
+     * context straight past it, so deliveries must not follow redirects at all.
+     */
+    public function test_a_webhook_target_cannot_redirect_the_delivery_to_a_private_address(): void
+    {
+        Http::fake([
+            'https://93.184.216.34/hook' => Http::response('', 302, [
+                'Location' => 'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+            ]),
+            '*' => Http::response('leaked', 200),
+        ]);
+
+        $owner = User::factory()->create();
+        $document = $this->document($owner);
+        $this->webhook($document, $owner, 'https://93.184.216.34/hook');
+
+        (new WebhookService)->fire($document, 'on_save');
+
+        Http::assertSentCount(1);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '169.254.169.254'));
+    }
 }
