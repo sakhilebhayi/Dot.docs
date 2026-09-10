@@ -84,4 +84,4 @@ $target = $fixtureDir.'/sample.docx';
 IOFactory::createWriter($word, 'Word2007')->save($target);
 unlink($pngPath);
 
-printf("wrote %s (%d bytes)%s", $target, filesize($target), PHP_EOL);
+printf('wrote %s (%d bytes)%s', $target, filesize($target), PHP_EOL);
