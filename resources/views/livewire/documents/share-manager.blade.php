@@ -33,7 +33,31 @@
                     <input id="share-url" type="text" value="{{ $publicLink }}" readonly class="field field-mono" />
                     <p class="field-hint">Copy it from the field above; it works for anyone, signed in or not.</p>
                 </div>
+            @endif
 
+            <form wire:submit="saveSlug" class="stack">
+                <div class="field-row">
+                    <label class="field-label" for="share-slug">A shorter address</label>
+                    <input id="share-slug" wire:model="slug" type="text" class="field field-mono"
+                           placeholder="august-production" />
+                    @error('slug')
+                        <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                    @enderror
+                    @if ($publishedLink)
+                        <p class="field-hint">
+                            {{ $publishedLink }}
+                            @unless ($document->is_public)
+                                — reserved, but nobody can open it until the link is published.
+                            @endunless
+                        </p>
+                    @else
+                        <p class="field-hint">Lower-case letters, digits and hyphens. Four characters or more.</p>
+                    @endif
+                </div>
+                <button type="submit" class="btn">Save the address</button>
+            </form>
+
+            @if ($document->is_public && $publicLink)
                 @if (session('status'))
                     <p class="note" role="status">
                         <span class="lamp lamp-good" aria-hidden="true"></span>

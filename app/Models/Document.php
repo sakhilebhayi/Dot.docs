@@ -112,6 +112,39 @@ class Document extends Model
     }
 
     /**
+     * The address to hand a reader, or null while the document is private.
+     *
+     * A slug is the published address (/d/{slug}) and the uuid link
+     * (/shared/{uuid}) is the fallback, but `is_public` gates BOTH: setting a
+     * slug reserves a name, it does not publish anything.
+     */
+    public function publicUrl(): ?string
+    {
+        if (! $this->is_public) {
+            return null;
+        }
+
+        return $this->slug
+            ? route('documents.published', $this->slug)
+            : route('documents.shared', $this->uuid);
+    }
+
+    /**
+     * Count one read of a public link.
+     *
+     * A read is not an edit, so the counter goes up through the QUERY
+     * BUILDER rather than through the model: an Eloquent update would stamp
+     * `updated_at` (the published page prints that date, and the document
+     * list orders by it) and would run DocumentObserver::updated(), which
+     * queries collaborators and busts caches on every single page view.
+     */
+    public function recordView(): void
+    {
+        static::whereKey($this->getKey())->toBase()->increment('view_count');
+        $this->view_count = (int) $this->view_count + 1;
+    }
+
+    /**
      * Return cached content for public documents (5-minute TTL).
      * Private documents are returned directly from the model.
      */

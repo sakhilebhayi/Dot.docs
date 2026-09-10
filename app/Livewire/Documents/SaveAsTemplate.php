@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Documents;
 
+use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\DocumentTemplate;
 use App\Services\HtmlSanitizer;
@@ -53,6 +54,14 @@ class SaveAsTemplate extends Component
             'name' => $this->name,
             'category' => $this->category,
             'description' => $this->description,
+            // JSON is the template's content from here on; the sanitised HTML
+            // stays beside it as the legacy column DocumentTemplate::contentJson()
+            // falls back to and the gallery previews. The style and page setup
+            // travel with it so a document made from the template looks like
+            // the one it was made from.
+            'content_json' => app(DocumentStore::class)->json($this->document),
+            'style_key' => $this->document->style_key ?: 'report',
+            'page_setup' => $this->document->page_setup,
             'content' => $sanitizer->clean($this->document->content ?? ''),
             'is_global' => false,
             'team_id' => $this->shareWithTeam ? auth()->user()->currentTeam?->id : null,

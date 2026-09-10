@@ -6,10 +6,16 @@ use App\Models\DocumentStyle;
 use Database\Seeders\DocumentStyleSeeder;
 
 /**
- * Turns one DocumentStyle's token array into a CSS string for either the
- * 'canvas' (editor, a fixed A4-shaped .paper) or 'print' (export/PDF, with
- * an at-page rule) surface. Every selector renders from CSS custom
- * properties set on .paper so a style switch is a single stylesheet swap.
+ * Turns one DocumentStyle's token array into a CSS string for one of three
+ * surfaces: 'canvas' (editor, a fixed A4-shaped .paper), 'print'
+ * (export/PDF, with an at-page rule) or 'share' (the published page at
+ * /d/{slug}). Every selector renders from CSS custom properties set on
+ * .paper so a style switch is a single stylesheet swap.
+ *
+ * 'share' is canvas with the editor's own chrome taken off: the reader gets
+ * the same A4-shaped paper, but a page break is a plain rule that actually
+ * breaks the page when the print button is pressed, not the editor's dashed
+ * line labelled "page break".
  *
  * Callouts always get a full hairline border plus a tone-coloured title
  * (never a thick single-side border) - a design constraint, not a token.
@@ -28,6 +34,9 @@ class CssBuilder
 
     /** @var array<string,mixed> The 'report' style's tokens - the fallback for every guarded value. */
     private array $fallback;
+
+    /** Modes that lay the content out on a fixed A4-shaped sheet. */
+    private const PAPER_MODES = ['canvas', 'share'];
 
     public function __construct(private DocumentStyle $style, private string $mode)
     {
@@ -102,7 +111,7 @@ class CssBuilder
             '--doc-muted' => TokenGuard::colour($colours['muted'] ?? null, $fb['colours']['muted']),
         ];
 
-        if ($this->mode === 'canvas') {
+        if (in_array($this->mode, self::PAPER_MODES, true)) {
             $vars['width'] = '210mm';
             $vars['min-height'] = '297mm';
             $vars['padding'] = $this->margins();
@@ -235,6 +244,13 @@ class CssBuilder
     {
         if ($this->mode === 'print') {
             return '.paper .page-break{page-break-after:always;border:none;height:0;margin:0}';
+        }
+
+        // A reader is not editing, so the break is a hairline rather than a
+        // labelled one - and it still breaks the page on the way to paper.
+        if ($this->mode === 'share') {
+            return '.paper .page-break{border-top:1px solid var(--doc-rule);height:0;margin:2em 0}'.
+                '@media print{.paper .page-break{page-break-after:always;border:none;margin:0}}';
         }
 
         return '.paper .page-break{border-top:1px dashed var(--doc-rule);text-align:center;margin:2em 0;position:relative}'.

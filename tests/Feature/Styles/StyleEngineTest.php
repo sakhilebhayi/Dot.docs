@@ -28,12 +28,12 @@ class StyleEngineTest extends TestCase
         }
     }
 
-    public function test_css_covers_every_node_in_both_modes(): void
+    public function test_css_covers_every_node_in_every_mode(): void
     {
         $this->seed(DocumentStyleSeeder::class);
         $engine = app(StyleEngine::class);
         foreach (DocumentStyle::all() as $style) {
-            foreach (['canvas', 'print'] as $mode) {
+            foreach (['canvas', 'print', 'share'] as $mode) {
                 $css = $engine->css($style, $mode);
                 foreach (['.paper h1', '.paper h2', '.paper p', '.paper .doc-table', '.paper figure', '.paper figcaption', '.paper .toc', '.paper .callout', '.paper .page-break', '.paper .num'] as $sel) {
                     $this->assertStringContainsString($sel, $css, "{$style->key}/{$mode} lacks {$sel}");

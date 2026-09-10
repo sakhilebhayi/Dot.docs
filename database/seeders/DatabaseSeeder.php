@@ -22,5 +22,6 @@ class DatabaseSeeder extends Seeder
 
         $this->call(DocumentTemplateSeeder::class);
         $this->call(DocumentStyleSeeder::class);
+        $this->call(StarterTemplateSeeder::class);
     }
 }

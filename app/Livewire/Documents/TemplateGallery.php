@@ -2,9 +2,8 @@
 
 namespace App\Livewire\Documents;
 
-use App\Models\Document;
+use App\Documents\DocumentStore;
 use App\Models\DocumentTemplate;
-use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -81,14 +80,17 @@ class TemplateGallery extends Component
             })
             ->firstOrFail();
 
-        $document = Document::create([
-            'uuid' => (string) Str::uuid(),
-            'title' => $template->name,
-            'content' => $template->content,
-            'owner_id' => $user->id,
-            'team_id' => $user->currentTeam?->id,
-            'version' => 1,
-        ]);
+        // Content goes in as JSON through DocumentStore, which renders the
+        // HTML, numbers the outline against the template's own style and
+        // fills search_text/word_count - see .ai/rules/app.md. The style and
+        // page setup travel with the content: a mining production report on
+        // the default portrait `report` style is not the template.
+        $attrs = ['style_key' => $template->style_key ?: 'report'];
+        if (is_array($template->page_setup) && $template->page_setup !== []) {
+            $attrs['page_setup'] = $template->page_setup;
+        }
+
+        $document = app(DocumentStore::class)->create($user, $template->name, $template->contentJson(), $attrs);
 
         $this->redirect(route('documents.edit', $document->uuid), navigate: true);
     }

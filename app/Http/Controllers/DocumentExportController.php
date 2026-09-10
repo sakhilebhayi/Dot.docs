@@ -5,8 +5,7 @@ namespace App\Http\Controllers;
 use App\Documents\DocumentStore;
 use App\Documents\Export\DocxExporter;
 use App\Documents\Export\MarkdownExporter;
-use App\Documents\Outline\Outline;
-use App\Documents\Render\HtmlRenderer;
+use App\Documents\Render\NumberedRender;
 use App\Documents\Render\RenderContext;
 use App\Models\Document;
 use App\Print\PrintRenderer;
@@ -36,8 +35,7 @@ class DocumentExportController extends Controller
     public function __construct(
         private DocumentStore $store,
         private StyleEngine $styles,
-        private Outline $outline,
-        private HtmlRenderer $renderer,
+        private NumberedRender $numbered,
         private DocxExporter $docx,
         private MarkdownExporter $markdown,
     ) {}
@@ -101,7 +99,7 @@ class DocumentExportController extends Controller
     private function exportHtml(Document $document, string $safeTitle): Response
     {
         $style = $this->styles->resolve($document);
-        $body = $this->renderer->render(...$this->numbered($document, RenderContext::share()));
+        $body = $this->numbered->html($document, RenderContext::share());
         $css = $this->styles->css($style, 'canvas');
         $title = e($document->title);
 
@@ -135,7 +133,7 @@ class DocumentExportController extends Controller
 
     private function exportMarkdown(Document $document, string $safeTitle): Response
     {
-        [$json] = $this->numbered($document, RenderContext::share());
+        [$json] = $this->numbered->prepare($document, RenderContext::share());
 
         $body = $this->markdown->export($json);
         $markdown = '# '.$document->title."\n".($body === '' ? '' : "\n".$body);
@@ -144,26 +142,5 @@ class DocumentExportController extends Controller
             'Content-Type' => 'text/markdown; charset=UTF-8',
             'Content-Disposition' => "attachment; filename=\"{$safeTitle}.md\"",
         ]);
-    }
-
-    /**
-     * The document's JSON with outline numbers/labels applied, plus a render
-     * context carrying the same numbering — the pair HtmlRenderer::render()
-     * takes, and the same build DocumentStore::fill() and PrintRenderer use.
-     *
-     * @return array{0:array<string,mixed>,1:RenderContext}
-     */
-    private function numbered(Document $document, RenderContext $ctx): array
-    {
-        $style = $this->styles->resolve($document);
-        $json = $this->store->json($document);
-        $result = $this->outline->build($json, $style->tokens['numbering'] ?? []);
-
-        $ctx->numbers = $result->numbers;
-        $ctx->kinds = $result->kinds;
-        $ctx->toc = $result->toc;
-        $ctx->vars = $document->variables ?? [];
-
-        return [$this->outline->apply($json, $result), $ctx];
     }
 }

@@ -5,6 +5,7 @@ use App\Http\Controllers\DocumentAutosaveController;
 use App\Http\Controllers\DocumentExportController;
 use App\Http\Controllers\DocumentImageController;
 use App\Http\Controllers\DocumentImportController;
+use App\Http\Controllers\PublishedDocumentController;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
 use App\Livewire\Documents\Index;
@@ -53,6 +54,8 @@ Route::get('/shared/{uuid}', function (string $uuid) {
         return view('documents.shared-password', compact('document'));
     }
 
+    $document->recordView();
+
     return view('documents.shared', compact('document'));
 })->name('documents.shared');
 
@@ -71,8 +74,20 @@ Route::post('/shared/{uuid}', function (string $uuid, Request $request) {
         return back()->withErrors(['password' => 'Incorrect password.']);
     }
 
+    $document->recordView();
+
     return view('documents.shared', compact('document'));
 })->name('documents.shared.unlock');
+
+// The published page. Same access rules as /shared/{uuid} above, on a name
+// the writer chose - see App\Http\Controllers\PublishedDocumentController.
+Route::get('/d/{slug}', [PublishedDocumentController::class, 'show'])
+    ->where('slug', '[a-z0-9-]+')
+    ->name('documents.published');
+
+Route::post('/d/{slug}', [PublishedDocumentController::class, 'unlock'])
+    ->where('slug', '[a-z0-9-]+')
+    ->name('documents.published.unlock');
 
 Route::middleware([
     'auth:sanctum',

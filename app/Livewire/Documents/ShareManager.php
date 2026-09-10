@@ -21,6 +21,15 @@ class ShareManager extends Component
 
     public string $publicLink = '';
 
+    /**
+     * The published address's name. Independent of `is_public`: a writer can
+     * reserve a slug while the document is still private, and publishing is
+     * what makes /d/{slug} answer.
+     */
+    public string $slug = '';
+
+    public string $publishedLink = '';
+
     // Share link options
     public string $sharePassword = '';
 
@@ -37,6 +46,39 @@ class ShareManager extends Component
             : '';
         $this->shareExpiresAt = $this->document->share_expires_at
             ? $this->document->share_expires_at->format('Y-m-d\TH:i')
+            : '';
+        $this->slug = $this->document->slug ?? '';
+        $this->showPasswordSet = (bool) $this->document->share_password;
+        $this->refreshPublishedLink();
+    }
+
+    public function saveSlug(): void
+    {
+        $this->authorize('update', $this->document);
+
+        $this->validate([
+            // Lower case, digits and hyphens only - the slug is the whole
+            // public address, so it has to survive being typed and pasted.
+            // The document's own id is excused from the unique rule, so
+            // re-saving an unchanged slug is not a collision with itself.
+            'slug' => ['nullable', 'regex:/^[a-z0-9-]{4,80}$/', 'unique:documents,slug,'.$this->document->id],
+        ], [
+            'slug.regex' => 'Use four to eighty lower-case letters, digits or hyphens.',
+            'slug.unique' => 'Somebody has already taken that address.',
+        ]);
+
+        $this->document->update(['slug' => $this->slug !== '' ? $this->slug : null]);
+        $this->document->refresh();
+        $this->refreshPublishedLink();
+        session()->flash('status', $this->document->slug
+            ? 'The address is saved.'
+            : 'The address is cleared.');
+    }
+
+    private function refreshPublishedLink(): void
+    {
+        $this->publishedLink = $this->document->slug
+            ? route('documents.published', $this->document->slug)
             : '';
     }
 
@@ -78,6 +120,7 @@ class ShareManager extends Component
         $this->publicLink = $this->document->is_public
             ? route('documents.shared', $this->document->uuid)
             : '';
+        $this->refreshPublishedLink();
     }
 
     public function saveShareOptions(): void
