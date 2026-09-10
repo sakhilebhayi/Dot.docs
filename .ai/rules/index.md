@@ -15,4 +15,5 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Livewire/Documents/TemplateGallery.php, app/Livewire/Documents/SaveAsTemplate.php, app/Livewire/Documents/ShareManager.php, app/Http/Controllers/PublishedDocumentController.php, app/Providers/AppServiceProvider.php, app/Observers/DocumentObserver.php, routes/web.php, resources/views/documents/published.blade.php, resources/views/documents/published-password.blade.php, resources/views/documents/shared-password.blade.php, resources/views/documents/_password-gate.blade.php | .ai/rules/publishing.md |
 | app/Search/** | .ai/rules/search.md |
 | app/Styles/** | .ai/rules/styles.md |
+| app/Services/WebhookService.php, app/Support/SsrfGuard.php | .ai/rules/support.md |
 | resources/views/** | .ai/rules/views.md |
