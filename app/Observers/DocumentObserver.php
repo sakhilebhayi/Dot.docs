@@ -2,6 +2,7 @@
 
 namespace App\Observers;
 
+use App\Files\FilesService;
 use App\Models\Document;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
@@ -30,6 +31,32 @@ class DocumentObserver
     {
         $this->bustDocumentCache($document);
         $this->freeSlug($document);
+    }
+
+    /**
+     * A document taken out of the trash needs somewhere to BE.
+     *
+     * FilesService::deleteObject() drops the tree row when it soft-deletes a
+     * document (that is what makes it leave the browser at once), so a
+     * restore has to file it again or the document would come back invisible
+     * - present in the database, listed by nothing. It lands at the team
+     * root rather than its old folder: the folder may not exist any more,
+     * and the root is the one place that always does.
+     */
+    public function restored(Document $document): void
+    {
+        $this->bustDocumentCache($document);
+
+        if ($document->node()->exists()) {
+            return;
+        }
+
+        $team = $document->team ?? $document->owner?->personalTeam();
+
+        if ($team !== null) {
+            $files = app(FilesService::class);
+            $files->registerDocument($document, $files->root($team));
+        }
     }
 
     /**

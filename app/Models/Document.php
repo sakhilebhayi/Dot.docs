@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Files\Folder;
+use App\Models\Files\Obj;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -22,7 +25,6 @@ class Document extends Model
         'content',
         'owner_id',
         'team_id',
-        'folder_id',
         'version',
         'is_public',
         'share_password',
@@ -61,9 +63,34 @@ class Document extends Model
         return $this->belongsTo(Team::class);
     }
 
-    public function folder(): BelongsTo
+    /**
+     * Where this document sits in the shared Dot.Files tree.
+     *
+     * The `objects` row is a POINTER - deleting or moving it never touches
+     * the document's own versions, sharing, comments or soft delete.
+     */
+    public function node(): MorphOne
     {
-        return $this->belongsTo(Folder::class);
+        return $this->morphOne(Obj::class, 'objectable');
+    }
+
+    /**
+     * The folder this document is filed in, or null while it has no tree
+     * row yet (a document created before adoption, or one whose node was
+     * deleted).
+     *
+     * Deliberately a plain accessor and NOT an Eloquent relation: the
+     * folder is two hops away through a polymorphic parent, which
+     * belongsTo cannot express. Every adopted document has one - a document
+     * at the top level sits under the team ROOT, which is itself a
+     * folder-typed node, so this returns that root's folder rather than null.
+     */
+    public function folder(): ?Folder
+    {
+        $parent = $this->node?->parent;
+        $objectable = $parent?->objectable;
+
+        return $objectable instanceof Folder ? $objectable : null;
     }
 
     public function tags(): BelongsToMany

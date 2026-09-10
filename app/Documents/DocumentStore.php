@@ -7,7 +7,9 @@ use App\Documents\Outline\Outline;
 use App\Documents\Render\HtmlRenderer;
 use App\Documents\Render\RenderContext;
 use App\Documents\Schema\DocumentSchema;
+use App\Files\FilesService;
 use App\Models\Document;
+use App\Models\Files\Obj;
 use App\Models\DocumentStyle;
 use App\Models\DocumentVersion;
 use App\Models\User;
@@ -26,12 +28,29 @@ class DocumentStore
         private HtmlToJson $legacy,
     ) {}
 
-    public function create(User $owner, string $title, ?array $json = null, array $attrs = []): Document
+    /**
+     * Create a document and file it in the shared Dot.Files tree.
+     *
+     * `$parent` is optional so every existing call site keeps working, but
+     * omitting it does NOT mean "unfiled": the document is registered under
+     * the owner's current-team (or personal-team) root, which is where the
+     * navigator shows a document nobody chose a folder for. The only case
+     * that skips registration is a user with no team at all - impossible
+     * through Jetstream's CreateNewUser, reachable only from a factory.
+     */
+    public function create(User $owner, string $title, ?array $json = null, array $attrs = [], ?Obj $parent = null): Document
     {
         $json = $this->schema->normalise($this->schema->ensureIds($json ?? DocumentSchema::empty()));
         $doc = new Document(array_merge(['title' => $title, 'owner_id' => $owner->id, 'team_id' => $owner->currentTeam?->id, 'version' => 1, 'style_key' => 'report'], $attrs));
         $this->fill($doc, $json);
         $doc->save();
+
+        $files = app(FilesService::class);
+        $parent ??= ($team = $owner->currentTeam ?? $owner->personalTeam()) ? $files->root($team) : null;
+
+        if ($parent !== null) {
+            $files->registerDocument($doc, $parent);
+        }
 
         return $doc;
     }
