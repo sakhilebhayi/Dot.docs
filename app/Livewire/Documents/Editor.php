@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Documents;
 
+use App\Audit\AuditLogger;
 use App\Documents\DocumentStore;
 use App\Documents\Import\HtmlToJson;
 use App\Documents\Outline\Outline;
@@ -68,6 +69,11 @@ class Editor extends Component
         }
 
         $this->loadPendingSuggestions();
+
+        // mount() runs once per page load, not on every Livewire round trip,
+        // so this is one row per opening of the document rather than one per
+        // keystroke. See .ai/rules/audit.md for the action vocabulary.
+        app(AuditLogger::class)->record('document.viewed', $this->document);
     }
 
     /**

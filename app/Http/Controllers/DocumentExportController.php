@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Audit\AuditLogger;
 use App\Documents\DocumentStore;
 use App\Documents\Export\DocxExporter;
 use App\Documents\Export\MarkdownExporter;
@@ -61,6 +62,8 @@ class DocumentExportController extends Controller
             'markdown' => $this->exportMarkdown($document, $safeTitle),
             default => abort(404, 'Unknown export format.'),
         };
+
+        app(AuditLogger::class)->record('document.exported', $document, ['format' => $format]);
 
         // Fire on_export webhooks (best-effort, after response is built)
         app(WebhookService::class)->fire($document, 'on_export', ['format' => $format]);

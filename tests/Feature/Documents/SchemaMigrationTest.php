@@ -56,16 +56,30 @@ class SchemaMigrationTest extends TestCase
         $this->assertFalse($log->timestamps);
     }
 
+    /**
+     * The refusal THROWS as of Task 12 - it used to return false, which was
+     * indistinguishable from a successful write to the caller.
+     */
     public function test_audit_log_refuses_updates_and_deletes(): void
     {
         $log = AuditLog::create(['actor_type' => 'user', 'actor_id' => 1, 'action' => 'document.viewed', 'subject_type' => Document::class, 'subject_id' => 1, 'context' => []]);
 
-        $updateResult = $log->update(['action' => 'document.deleted']);
-        $this->assertFalse($updateResult);
+        try {
+            $log->update(['action' => 'document.deleted']);
+            $this->fail('An audit row accepted an update.');
+        } catch (\LogicException $e) {
+            $this->assertSame('Audit rows are immutable', $e->getMessage());
+        }
+
         $this->assertSame('document.viewed', $log->fresh()->action);
 
-        $deleteResult = $log->delete();
-        $this->assertFalse($deleteResult);
+        try {
+            $log->delete();
+            $this->fail('An audit row accepted a delete.');
+        } catch (\LogicException $e) {
+            $this->assertSame('Audit rows are immutable', $e->getMessage());
+        }
+
         $this->assertNotNull(AuditLog::find($log->id));
     }
 

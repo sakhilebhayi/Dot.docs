@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Documents;
 
+use App\Audit\AuditLogger;
 use App\Models\Document;
 use App\Models\DocumentCollaborator;
 use App\Models\User;
@@ -70,6 +71,7 @@ class ShareManager extends Component
         $this->document->update(['slug' => $this->slug !== '' ? $this->slug : null]);
         $this->document->refresh();
         $this->refreshPublishedLink();
+        $this->auditShareChange(['slug' => $this->document->slug]);
         session()->flash('status', $this->document->slug
             ? 'The address is saved.'
             : 'The address is cleared.');
@@ -121,6 +123,7 @@ class ShareManager extends Component
             ? route('documents.shared', $this->document->uuid)
             : '';
         $this->refreshPublishedLink();
+        $this->auditShareChange(['is_public' => (bool) $this->document->is_public]);
     }
 
     public function saveShareOptions(): void
@@ -143,6 +146,10 @@ class ShareManager extends Component
         $this->document->refresh();
         $this->sharePassword = '';
         $this->showPasswordSet = (bool) $this->document->share_password;
+        $this->auditShareChange([
+            'expires_at' => $this->document->share_expires_at?->toIso8601String(),
+            'password_set' => $this->showPasswordSet,
+        ]);
         session()->flash('status', 'Share settings saved.');
     }
 
@@ -152,6 +159,20 @@ class ShareManager extends Component
         $this->document->update(['share_password' => null]);
         $this->document->refresh();
         $this->showPasswordSet = false;
+        $this->auditShareChange(['password_set' => false]);
+    }
+
+    /**
+     * One `share.updated` row per change to who can reach this document -
+     * is_public, the slug, the link password or its expiry. The context says
+     * WHAT the setting now is; it never carries the password itself, hashed
+     * or otherwise, because audit rows are read by every team admin.
+     *
+     * @param  array<string,mixed>  $context
+     */
+    private function auditShareChange(array $context): void
+    {
+        app(AuditLogger::class)->record('share.updated', $this->document, $context);
     }
 
     public function render()

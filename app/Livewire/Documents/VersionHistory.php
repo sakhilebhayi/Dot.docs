@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Documents;
 
+use App\Audit\AuditLogger;
 use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\DocumentVersion;
@@ -95,6 +96,10 @@ class VersionHistory extends Component
             ->findOrFail($versionId);
 
         $this->document = app(DocumentStore::class)->restore($this->document, $version, Auth::user());
+
+        app(AuditLogger::class)->record('version.restored', $this->document, [
+            'version_number' => $version->version_number,
+        ]);
 
         $this->dispatch('version-restored', content: $this->document->content);
         $this->previewId = null;

@@ -5,6 +5,7 @@ namespace App\Livewire\Documents;
 use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\Folder;
+use App\Search\DocumentSearch;
 use App\Services\TagRepository;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
@@ -13,6 +14,13 @@ use Livewire\Component;
 class Index extends Component
 {
     use AuthorizesRequests;
+
+    /**
+     * How many search hits the list will consider. DocumentSearch ranks and
+     * caps; the list then paginates within that window, so this is the depth
+     * of the result set a person can page through, not a page size.
+     */
+    private const SEARCH_LIMIT = 200;
 
     public string $search = '';
 
@@ -126,6 +134,8 @@ class Index extends Component
     public function documents()
     {
         $user = auth()->user();
+        $search = app(DocumentSearch::class);
+        $searching = $search->isSearchable($this->search);
 
         return Document::query()
             ->where(function ($q) use ($user) {
@@ -136,10 +146,17 @@ class Index extends Component
                     $q->orWhere('team_id', $user->currentTeam->id);
                 }
             })
-            ->when($this->search, fn ($q) => $q->where(function ($q) {
-                $q->where('title', 'like', '%'.$this->search.'%')
-                    ->orWhere('content', 'like', '%'.$this->search.'%');
-            }))
+            // A search of two characters or more goes through DocumentSearch,
+            // which is the tsvector query on pgsql and LIKE over
+            // title/search_text on sqlite. The old inline LIKE searched
+            // `content` - the rendered HTML - so a word split by a tag never
+            // matched and a tag name did. Anything shorter than two
+            // characters is not treated as a search at all: the list keeps
+            // its folder/filter/tag behaviour.
+            ->when($searching, fn ($q) => $q->whereIn(
+                'id',
+                $search->search($user, $this->search, self::SEARCH_LIMIT)->pluck('id'),
+            ))
             ->when($this->filter === 'mine', fn ($q) => $q->where('owner_id', $user->id))
             ->when($this->filter === 'shared', fn ($q) => $q->whereHas('collaborators', fn ($q) => $q->where('user_id', $user->id)))
             ->when($this->filter === 'team', fn ($q) => $user->currentTeam ? $q->where('team_id', $user->currentTeam->id) : $q)
@@ -147,7 +164,7 @@ class Index extends Component
             // A search or tag filter searches the whole space, not just
             // the current folder -- otherwise finding something means
             // already knowing which folder it's in.
-            ->when(! $this->search && ! $this->tagId, fn ($q) => $q->where('folder_id', $this->folderId))
+            ->when(! $searching && ! $this->tagId, fn ($q) => $q->where('folder_id', $this->folderId))
             ->latest()
             ->paginate($this->perPage);
     }

@@ -6,6 +6,13 @@ use Illuminate\Database\Eloquent\Model;
 
 class AiModelUsage extends Model
 {
+    /**
+     * The table is singular ("usage" is already a mass noun); Eloquent's
+     * pluraliser would otherwise look for `ai_model_usages`, which does not
+     * exist. Found the first time anything actually wrote a usage row.
+     */
+    protected $table = 'ai_model_usage';
+
     public $timestamps = false;
 
     protected $fillable = [

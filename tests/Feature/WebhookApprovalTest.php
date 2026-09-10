@@ -72,14 +72,18 @@ class WebhookApprovalTest extends TestCase
         DocumentWebhook::create([
             'document_id' => $document->id,
             'user_id' => $owner->id,
-            'url' => 'https://example.com/hook',
+            // An IP LITERAL, not a hostname: WebhookService::fire() now runs
+            // App\Support\SsrfGuard over the URL, and the guard resolves a
+            // hostname through DNS, which an offline test run cannot do.
+            // filter_var() validates a literal directly. See WebhookSsrfTest.
+            'url' => 'https://93.184.216.34/hook',
             'events' => ['on_save'],
             'status' => 'active',
         ]);
 
         (new WebhookService)->fire($document, 'on_save');
 
-        Http::assertSent(fn ($request) => $request->url() === 'https://example.com/hook');
+        Http::assertSent(fn ($request) => $request->url() === 'https://93.184.216.34/hook');
     }
 
     public function test_add_webhook_creates_a_pending_approval_webhook(): void
