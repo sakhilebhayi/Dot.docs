@@ -17,7 +17,6 @@
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
         "league/commonmark": "^2.8",
-        "league/html-to-markdown": "^5.1",
         "livewire/livewire": "^3.6.4",
         "openai-php/laravel": "^0.19.1",
         "phpoffice/phpword": "^1.1"
