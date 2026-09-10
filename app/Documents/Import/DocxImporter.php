@@ -11,6 +11,7 @@ use PhpOffice\PhpWord\Element\Link;
 use PhpOffice\PhpWord\Element\ListItem;
 use PhpOffice\PhpWord\Element\ListItemRun;
 use PhpOffice\PhpWord\Element\PageBreak;
+use PhpOffice\PhpWord\Element\PreserveText;
 use PhpOffice\PhpWord\Element\Row;
 use PhpOffice\PhpWord\Element\Table;
 use PhpOffice\PhpWord\Element\Text;
@@ -91,6 +92,7 @@ class DocxImporter
         /** @var array{type:string,key:string,items:list<array<string,mixed>>}|null $list */
         $list = null;
         $afterPageBreak = false;
+        $inToc = false;
 
         $flush = function () use (&$list, &$out): void {
             if ($list !== null) {
@@ -100,6 +102,22 @@ class DocxImporter
         };
 
         foreach ($elements as $element) {
+            if ($inToc) {
+                if ($this->isTocEntry($element)) {
+                    continue;
+                }
+                $inToc = false;
+            }
+
+            if ($element instanceof PreserveText && $this->tocDepth($element) !== null) {
+                $flush();
+                $out[] = ['type' => 'toc', 'attrs' => ['depth' => $this->tocDepth($element)]];
+                $inToc = true;
+                $afterPageBreak = false;
+
+                continue;
+            }
+
             if ($element instanceof ListItemRun || $element instanceof ListItem) {
                 $afterPageBreak = false;
                 $item = $this->listItem($element);
@@ -171,7 +189,7 @@ class DocxImporter
     private function listItem(ListItemRun|ListItem $element): array
     {
         $style = $element->getStyle();
-        $numStyleName = $style instanceof \PhpOffice\PhpWord\Style\ListItem ? (string) $style->getNumStyle() : '';
+        $numStyleName = $style instanceof Style\ListItem ? (string) $style->getNumStyle() : '';
         $ordered = $this->isOrderedNumbering($numStyleName, $style);
 
         $inline = $element instanceof ListItemRun
@@ -203,11 +221,11 @@ class DocxImporter
             }
         }
 
-        if ($style instanceof \PhpOffice\PhpWord\Style\ListItem) {
+        if ($style instanceof Style\ListItem) {
             return in_array($style->getListType(), [
-                \PhpOffice\PhpWord\Style\ListItem::TYPE_NUMBER,
-                \PhpOffice\PhpWord\Style\ListItem::TYPE_NUMBER_NESTED,
-                \PhpOffice\PhpWord\Style\ListItem::TYPE_ALPHANUM,
+                Style\ListItem::TYPE_NUMBER,
+                Style\ListItem::TYPE_NUMBER_NESTED,
+                Style\ListItem::TYPE_ALPHANUM,
             ], true);
         }
 
@@ -311,6 +329,61 @@ class DocxImporter
     }
 
     /**
+     * The heading depth of a Word TOC field, or null if this is not one.
+     *
+     * `DocxExporter` writes a `toc` node as a real `addTOC()` field, and
+     * PhpWord's reader hands the field-carrying paragraph back as a
+     * `PreserveText` holding the raw instruction ("{TOC \o 1-3 \h \z \u}").
+     * Reading it as a `toc` node again - rather than letting it and the
+     * cached entry paragraphs behind it fall through to convertUnknown() -
+     * is what stops a re-import from pasting a frozen copy of the table of
+     * contents into the body as ordinary paragraphs.
+     */
+    private function tocDepth(PreserveText $element): ?int
+    {
+        $text = $element->getText();
+        $text = is_array($text) ? implode('', array_filter($text, 'is_string')) : (string) $text;
+        if (preg_match('/\{\s*TOC\b/i', $text) !== 1) {
+            return null;
+        }
+
+        // \o "1-3" is Word's heading-level range; only its upper bound maps
+        // onto this schema's single `depth` attr.
+        return preg_match('/\\\\o\s*"?\d+-(\d+)"?/', $text, $m) === 1
+            ? max(1, min(9, (int) $m[1]))
+            : 3;
+    }
+
+    /**
+     * One of the cached entry paragraphs Word stores inside a TOC field: a
+     * text-only run carrying the tab that separates an entry from its page
+     * number, or the empty paragraph that closes the field. Requiring the
+     * tab is what keeps an ordinary paragraph sitting directly under a table
+     * of contents from being swallowed with it.
+     */
+    private function isTocEntry(AbstractElement $element): bool
+    {
+        if (! $element instanceof TextRun) {
+            return false;
+        }
+
+        $children = $element->getElements();
+        if ($children === []) {
+            return true;
+        }
+
+        $hasTab = false;
+        foreach ($children as $child) {
+            if (! $child instanceof Text) {
+                return false;
+            }
+            $hasTab = $hasTab || str_contains((string) $child->getText(), "\t");
+        }
+
+        return $hasTab;
+    }
+
+    /**
      * Extract an embedded image onto the public disk and reference it by the
      * `/storage/...` path HtmlRenderer accepts. An image PHPWord could read
      * but this app will not serve (anything outside IMAGE_EXTENSIONS) is
@@ -357,6 +430,11 @@ class DocxImporter
         $text = method_exists($element, 'getText') ? $element->getText() : null;
         if ($text instanceof TextRun) {
             return [$this->paragraph($this->inlineChildren($text))];
+        }
+        // PreserveText (a Word field, e.g. a header's "{PAGE}") hands back an
+        // array of chunks rather than a string.
+        if (is_array($text)) {
+            $text = implode('', array_filter($text, 'is_string'));
         }
         $text = $this->decode(is_scalar($text) ? (string) $text : '');
 

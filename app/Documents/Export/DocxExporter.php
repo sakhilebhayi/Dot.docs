@@ -10,6 +10,8 @@ use App\Print\PageSetup;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpWord\Element\AbstractContainer;
 use PhpOffice\PhpWord\Element\Cell;
+use PhpOffice\PhpWord\Element\Footer;
+use PhpOffice\PhpWord\Element\Header;
 use PhpOffice\PhpWord\Element\Section;
 use PhpOffice\PhpWord\Element\TextRun;
 use PhpOffice\PhpWord\IOFactory;
@@ -17,6 +19,7 @@ use PhpOffice\PhpWord\PhpWord;
 use PhpOffice\PhpWord\Shared\Converter;
 use PhpOffice\PhpWord\SimpleType\TblWidth;
 use PhpOffice\PhpWord\Style;
+use PhpOffice\PhpWord\Style\TOC;
 use Throwable;
 
 /**
@@ -50,6 +53,16 @@ class DocxExporter
     /** @var array<string,mixed> */
     private array $tokens = [];
 
+    /**
+     * Whether this document contains a `toc` node.
+     *
+     * PhpWord's TOC writer reads every registered Title back with
+     * `writeText($title->getText())`, which TypeErrors on the TextRun
+     * writeHeading() would rather use — so a document with a table of
+     * contents writes plain-string headings instead.
+     */
+    private bool $hasToc = false;
+
     public function __construct(
         private Outline $outline = new Outline,
         private DocumentSchema $schema = new DocumentSchema,
@@ -76,6 +89,7 @@ class DocxExporter
         $result = $this->outline->build($json, $this->tokens['numbering'] ?? []);
         $this->numbers = $result->numbers;
         $json = $this->outline->apply($json, $result);
+        $this->hasToc = $this->containsToc($json);
 
         $setup = PageSetup::fromDocument($doc, $style);
         $word = $this->newPhpWord();
@@ -103,12 +117,18 @@ class DocxExporter
         // Word's navigation pane, its TOC field, or DocxImporter — can tell
         // the paragraph was a heading.
         $headingColour = $this->colour('heading', '1F2023');
+        // headingCase is a style token the CSS surface applies as
+        // text-transform (see App\Styles\CssBuilder); Word's equivalent is
+        // the run-level allCaps property, so an upper-case style prints the
+        // same way in a .docx as it does on screen.
+        $allCaps = ($this->tokens['headingCase'] ?? 'none') === 'upper';
         foreach ([1 => 'h1', 2 => 'h2', 3 => 'h3', 4 => 'h3', 5 => 'h3', 6 => 'h3'] as $level => $token) {
             $word->addTitleStyle($level, [
                 'name' => $this->font('heading'),
                 'size' => $this->size($token, 14.0),
                 'bold' => true,
                 'color' => $headingColour,
+                'allCaps' => $allCaps,
             ], ['spaceBefore' => 240, 'spaceAfter' => 120, 'keepNext' => true]);
         }
 
@@ -170,7 +190,7 @@ class DocxExporter
     }
 
     /**
-     * @param  \PhpOffice\PhpWord\Element\Header|\PhpOffice\PhpWord\Element\Footer  $band
+     * @param  Header|Footer  $band
      * @param  array<string,mixed>  $font
      * @param  array<string,mixed>  $paragraph
      */
@@ -246,15 +266,50 @@ class DocxExporter
         // emit, so a numbered document that carried no number here would
         // export with its cross-references pointing at nothing.
         $number = $this->numbers[$node['attrs']['id'] ?? ''] ?? '';
-        $text = trim($this->schema->plainText($node));
-        $text = $number === '' ? $text : trim($number.' '.$text);
 
-        if ($container instanceof Section || $container instanceof Cell) {
-            $container->addTitle($text, $level);
+        if (! $container instanceof Section && ! $container instanceof Cell) {
+            $container->addText($this->escape($this->headingText($node, $number)), ['bold' => true, 'size' => $this->size('h3', 13.0)]);
 
             return;
         }
-        $container->addText($text, ['bold' => true, 'size' => $this->size('h3', 13.0)]);
+
+        if ($this->hasToc) {
+            $container->addTitle($this->escape($this->headingText($node, $number)), $level);
+
+            return;
+        }
+
+        // A DETACHED TextRun, not a plain string: PhpWord\Element\Title
+        // accepts either, and only the run keeps the heading's own
+        // italic/link marks that plainText() would flatten. The Word2007
+        // writer walks it with its normal Container writer, so hyperlink
+        // relation ids are still resolved at write time even though the run
+        // was never added to a container itself. Its TOC writer does NOT —
+        // see $hasToc.
+        $run = new TextRun;
+        if ($number !== '') {
+            $run->addText($number.' ');
+        }
+        $this->writeInline($node['content'] ?? [], $run);
+        $container->addTitle($run, $level);
+    }
+
+    private function headingText(array $node, string $number): string
+    {
+        return trim($number.' '.trim($this->schema->plainText($node)));
+    }
+
+    /** @param array<string,mixed> $json */
+    private function containsToc(array $json): bool
+    {
+        $found = false;
+        $this->schema->walk($json, function (array $node) use (&$found): void {
+            if (($node['type'] ?? '') === 'toc') {
+                $found = true;
+            }
+        });
+
+        return $found;
     }
 
     /** @param Section|Cell $container */
@@ -388,7 +443,7 @@ class DocxExporter
         $depth = (int) ($node['attrs']['depth'] ?? 3);
         $container->addTOC(
             ['name' => $this->font('heading'), 'size' => $this->size('body', 11.0)],
-            ['tabLeader' => \PhpOffice\PhpWord\Style\TOC::TAB_LEADER_DOT],
+            ['tabLeader' => TOC::TAB_LEADER_DOT],
             1,
             max(1, min(9, $depth))
         );
@@ -406,6 +461,12 @@ class DocxExporter
     {
         $src = $node['attrs']['src'] ?? null;
         if (! is_string($src) || ! str_starts_with($src, '/storage/')) {
+            return;
+        }
+        // A detached run (writeHeading's Title run) is not in the document's
+        // element tree, so an image added to it would never reach the media
+        // collection and would write a picture reference pointing at nothing.
+        if ($container->getPhpWord() === null) {
             return;
         }
         $path = Storage::disk('public')->path(substr($src, strlen('/storage/')));

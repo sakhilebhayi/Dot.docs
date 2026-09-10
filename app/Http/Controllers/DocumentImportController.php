@@ -3,22 +3,48 @@
 namespace App\Http\Controllers;
 
 use App\Documents\DocumentStore;
+use App\Documents\Import\DocxImporter;
 use App\Documents\Import\HtmlToJson;
+use App\Documents\Import\MarkdownImporter;
+use App\Documents\Import\PlainTextImporter;
 use App\Models\Document;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
-use League\CommonMark\CommonMarkConverter;
-use PhpOffice\PhpWord\Element\Text;
-use PhpOffice\PhpWord\Element\TextRun;
-use PhpOffice\PhpWord\Element\Title;
-use PhpOffice\PhpWord\IOFactory;
 
+/**
+ * Replaces a document's content with an uploaded file.
+ *
+ * The controller only picks an importer and hands the JSON it returns to
+ * DocumentStore::save() — every importer already returns schema-valid JSON
+ * (ensureIds + normalise, see .ai/rules/documents-io.md), and the store is
+ * the only writer of content/content_json/search_text/word_count
+ * (.ai/rules/app.md).
+ */
 class DocumentImportController extends Controller
 {
-    public function store(Request $request, string $uuid, DocumentStore $store, HtmlToJson $htmlToJson): RedirectResponse
-    {
+    /**
+     * Accepted upload extensions. `mimes:` validates the file's sniffed MIME
+     * against these, so an .exe renamed to .docx is rejected before any
+     * importer opens it.
+     *
+     * @var list<string>
+     */
+    private const EXTENSIONS = ['docx', 'md', 'markdown', 'html', 'htm', 'txt'];
+
+    /** 20 MB, in the kilobytes `max:` counts. */
+    private const MAX_KILOBYTES = 20480;
+
+    public function store(
+        Request $request,
+        string $uuid,
+        DocumentStore $store,
+        DocxImporter $docx,
+        MarkdownImporter $markdown,
+        HtmlToJson $html,
+        PlainTextImporter $plainText,
+    ): RedirectResponse {
         $document = Document::where('uuid', $uuid)->firstOrFail();
         Gate::authorize('update', $document);
 
@@ -26,64 +52,43 @@ class DocumentImportController extends Controller
             'file' => [
                 'required',
                 'file',
-                'max:10240', // 10 MB
-                'mimes:docx,md,txt,markdown',
+                'max:'.self::MAX_KILOBYTES,
+                'mimes:'.implode(',', self::EXTENSIONS),
             ],
         ]);
 
         $file = $request->file('file');
         $extension = strtolower($file->getClientOriginalExtension());
-        $originalName = $file->getClientOriginalName();
+        $path = (string) $file->getRealPath();
 
-        $content = match ($extension) {
-            'docx' => $this->parseDocx($file->getRealPath()),
-            'md', 'markdown','txt' => $this->parseMarkdown(file_get_contents($file->getRealPath())),
+        $json = match ($extension) {
+            // The document's own uuid keys the media directory, so pictures
+            // pulled out of the .docx land beside the document that owns
+            // them (storage/app/public/documents/{uuid}/) rather than in a
+            // directory nothing can attribute later.
+            'docx' => $docx->import($path, $document->uuid),
+            'md', 'markdown' => $markdown->import($this->read($path)),
+            'html', 'htm' => $html->convert($this->read($path)),
+            'txt' => $plainText->import($this->read($path)),
             default => abort(422, 'Unsupported file type.'),
         };
 
-        $json = $htmlToJson->convert($content);
-        $store->save($document, $json, Auth::user(), ['version' => 'named', 'label' => 'Imported '.$originalName]);
+        $store->save($document, $json, Auth::user(), [
+            'version' => 'named',
+            'label' => 'Imported '.$file->getClientOriginalName(),
+        ]);
 
         return redirect()
             ->route('documents.edit', $document->uuid)
             ->with('status', 'File imported successfully.');
     }
 
-    private function parseDocx(string $path): string
+    private function read(string $path): string
     {
-        $phpWord = IOFactory::load($path);
-        $sections = $phpWord->getSections();
-        $html = '';
+        $contents = @file_get_contents($path);
 
-        foreach ($sections as $section) {
-            foreach ($section->getElements() as $element) {
-                if ($element instanceof TextRun) {
-                    $line = '';
-                    foreach ($element->getElements() as $textEl) {
-                        if (method_exists($textEl, 'getText')) {
-                            $line .= htmlspecialchars($textEl->getText());
-                        }
-                    }
-                    $html .= "<p>{$line}</p>";
-                } elseif ($element instanceof Text) {
-                    $html .= '<p>'.htmlspecialchars($element->getText()).'</p>';
-                } elseif ($element instanceof Title) {
-                    $level = $element->getDepth() ?: 1;
-                    $html .= "<h{$level}>".htmlspecialchars($element->getText())."</h{$level}>";
-                }
-            }
-        }
+        abort_if($contents === false, 422, 'The uploaded file could not be read.');
 
-        return $html;
-    }
-
-    private function parseMarkdown(string $markdown): string
-    {
-        $converter = new CommonMarkConverter([
-            'html_input' => 'strip',
-            'allow_unsafe_links' => false,
-        ]);
-
-        return $converter->convert($markdown)->getContent();
+        return $contents;
     }
 }

@@ -2,22 +2,47 @@
 
 namespace App\Http\Controllers;
 
+use App\Documents\DocumentStore;
+use App\Documents\Export\DocxExporter;
+use App\Documents\Export\MarkdownExporter;
+use App\Documents\Outline\Outline;
+use App\Documents\Render\HtmlRenderer;
+use App\Documents\Render\RenderContext;
 use App\Models\Document;
 use App\Print\PrintRenderer;
 use App\Services\WebhookService;
+use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
-use League\HTMLToMarkdown\HtmlConverter;
-use PhpOffice\PhpWord\IOFactory;
-use PhpOffice\PhpWord\PhpWord;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
+/**
+ * Downloads a document as PDF, DOCX, standalone HTML or Markdown.
+ *
+ * Every format renders the SAME pipeline the editor and the PDF use — the
+ * stored JSON through Outline::build()/apply() so headings carry their
+ * numbers and cross-references their labels — and then differs only in the
+ * writer. See .ai/rules/documents-io.md for the node mapping each writer
+ * implements.
+ */
 class DocumentExportController extends Controller
 {
     use AuthorizesRequests;
 
-    public function export(string $uuid, string $format): Response|\Symfony\Component\HttpFoundation\Response
+    private const WORD_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+    public function __construct(
+        private DocumentStore $store,
+        private StyleEngine $styles,
+        private Outline $outline,
+        private HtmlRenderer $renderer,
+        private DocxExporter $docx,
+        private MarkdownExporter $markdown,
+    ) {}
+
+    public function export(string $uuid, string $format): SymfonyResponse
     {
         $document = Document::where('uuid', $uuid)->firstOrFail();
         $this->authorize('view', $document);
@@ -29,7 +54,7 @@ class DocumentExportController extends Controller
             abort(429, "Export limit reached. Try again in {$seconds} seconds.");
         }
 
-        $safeTitle = Str::slug($document->title ?: 'document');
+        $safeTitle = Str::slug($document->title ?: 'document') ?: 'document';
 
         $response = match ($format) {
             'pdf' => $this->exportPdf($document, $safeTitle),
@@ -45,7 +70,7 @@ class DocumentExportController extends Controller
         return $response;
     }
 
-    private function exportPdf(Document $document, string $safeTitle): \Symfony\Component\HttpFoundation\Response
+    private function exportPdf(Document $document, string $safeTitle): SymfonyResponse
     {
         $pdf = app(PrintRenderer::class)->pdf($document);
 
@@ -55,61 +80,52 @@ class DocumentExportController extends Controller
         ]);
     }
 
-    private function exportWord(Document $document, string $safeTitle): Response
+    /**
+     * DocxExporter writes a temp file rather than a string (PhpWord's writer
+     * only saves to a path), so the response streams it and deletes it once
+     * it has been sent.
+     */
+    private function exportWord(Document $document, string $safeTitle): SymfonyResponse
     {
-        $phpWord = new PhpWord;
-        $phpWord->setDefaultFontName('Arial');
-        $phpWord->setDefaultFontSize(12);
-
-        $section = $phpWord->addSection();
-
-        // Title
-        $section->addText(
-            $document->title,
-            ['bold' => true, 'size' => 20],
-            ['alignment' => 'center', 'spaceAfter' => 240]
+        $path = $this->docx->export(
+            $this->store->json($document),
+            $document,
+            $this->styles->resolve($document),
         );
 
-        // Strip HTML and split into paragraphs
-        $plain = strip_tags(str_replace(['</p>', '<br>', '<br/>'], "\n", $document->content ?? ''));
-        foreach (explode("\n", $plain) as $line) {
-            $line = trim($line);
-            if ($line !== '') {
-                $section->addText(htmlspecialchars($line));
-            } else {
-                $section->addTextBreak();
-            }
-        }
-
-        $tmpFile = tempnam(sys_get_temp_dir(), 'docx_');
-        $writer = IOFactory::createWriter($phpWord, 'Word2007');
-        $writer->save($tmpFile);
-
-        $content = file_get_contents($tmpFile);
-        unlink($tmpFile);
-
-        return response($content, 200, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'Content-Disposition' => "attachment; filename=\"{$safeTitle}.docx\"",
-        ]);
+        return response()
+            ->download($path, $safeTitle.'.docx', ['Content-Type' => self::WORD_MIME])
+            ->deleteFileAfterSend(true);
     }
 
     private function exportHtml(Document $document, string $safeTitle): Response
     {
+        $style = $this->styles->resolve($document);
+        $body = $this->renderer->render(...$this->numbered($document, RenderContext::share()));
+        $css = $this->styles->css($style, 'canvas');
+        $title = e($document->title);
+
         $html = <<<HTML
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>{$document->title}</title>
-<style>body{font-family:Georgia,serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6;}</style>
-</head>
-<body>
-<h1>{$document->title}</h1>
-{$document->content}
-</body>
-</html>
-HTML;
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{$title}</title>
+        <style>
+        body{background:#f5f3ee;margin:0;padding:32px 16px}
+        .paper{margin:0 auto;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+        {$css}
+        </style>
+        </head>
+        <body>
+        <div class="paper">
+        <h1>{$title}</h1>
+        {$body}
+        </div>
+        </body>
+        </html>
+        HTML;
 
         return response($html, 200, [
             'Content-Type' => 'text/html; charset=UTF-8',
@@ -119,16 +135,35 @@ HTML;
 
     private function exportMarkdown(Document $document, string $safeTitle): Response
     {
-        $converter = new HtmlConverter([
-            'strip_tags' => false,
-            'header_style' => 'atx',
-        ]);
+        [$json] = $this->numbered($document, RenderContext::share());
 
-        $markdown = "# {$document->title}\n\n".$converter->convert($document->content ?? '');
+        $body = $this->markdown->export($json);
+        $markdown = '# '.$document->title."\n".($body === '' ? '' : "\n".$body);
 
         return response($markdown, 200, [
             'Content-Type' => 'text/markdown; charset=UTF-8',
             'Content-Disposition' => "attachment; filename=\"{$safeTitle}.md\"",
         ]);
+    }
+
+    /**
+     * The document's JSON with outline numbers/labels applied, plus a render
+     * context carrying the same numbering — the pair HtmlRenderer::render()
+     * takes, and the same build DocumentStore::fill() and PrintRenderer use.
+     *
+     * @return array{0:array<string,mixed>,1:RenderContext}
+     */
+    private function numbered(Document $document, RenderContext $ctx): array
+    {
+        $style = $this->styles->resolve($document);
+        $json = $this->store->json($document);
+        $result = $this->outline->build($json, $style->tokens['numbering'] ?? []);
+
+        $ctx->numbers = $result->numbers;
+        $ctx->kinds = $result->kinds;
+        $ctx->toc = $result->toc;
+        $ctx->vars = $document->variables ?? [];
+
+        return [$this->outline->apply($json, $result), $ctx];
     }
 }

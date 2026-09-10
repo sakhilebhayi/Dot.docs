@@ -83,14 +83,18 @@ class ImportExportTest extends TestCase
             array_slice($json['content'], 0, 3)
         ));
 
-        // Inline marks survive the walk.
-        $marks = array_map(
-            fn (array $n): array => array_column($n['marks'] ?? [], 'type'),
-            $json['content'][3]['content']
-        );
+        // Inline marks survive the walk. The hyperlink run carries an
+        // underline mark as well as the link one, because that is how Word
+        // writes a hyperlink — as character formatting, not as link styling.
+        $runs = $json['content'][3]['content'];
+        $marks = array_map(fn (array $n): array => array_column($n['marks'] ?? [], 'type'), $runs);
         $this->assertContains(['bold'], $marks);
         $this->assertContains(['italic'], $marks);
-        $this->assertContains(['link'], $marks);
+        $this->assertContains(['underline', 'link'], $marks);
+
+        $link = $runs[array_search(['underline', 'link'], $marks, true)];
+        $this->assertSame('method note', $link['text']);
+        $this->assertSame('https://example.com/method', $link['marks'][1]['attrs']['href']);
 
         $this->assertCount(3, $json['content'][4]['content']);
         $this->assertCount(2, $json['content'][5]['content']);
@@ -177,5 +181,111 @@ class ImportExportTest extends TestCase
         $types = array_column($doc->content_json['content'], 'type');
         $this->assertSame(['heading', 'heading', 'heading', 'paragraph', 'bulletList', 'orderedList', 'table', 'image'], $types);
         $this->assertSame('Imported sample.docx', $doc->versions()->latest('id')->first()->label);
+    }
+
+    public function test_docx_export_round_trips_an_image_and_a_numbered_heading(): void
+    {
+        Storage::fake('public');
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->create();
+
+        // A 4x4 px PNG on the public disk, referenced exactly as
+        // DocumentImageController and DocxImporter reference one.
+        $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAADJEPnJAAAAFklEQVQI12P8//8/AzJgYkAD5AsAAIEcAyEZKm4nAAAAAElFTkSuQmCC');
+        Storage::disk('public')->put('documents/src/pic.png', $png);
+
+        $json = [
+            'type' => 'doc',
+            'attrs' => ['schema' => DocumentSchema::VERSION, 'style' => 'report', 'vars' => []],
+            'content' => [
+                ['type' => 'heading', 'attrs' => ['level' => 1], 'content' => [['type' => 'text', 'text' => 'Scope']]],
+                ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Body.']]],
+                ['type' => 'image', 'attrs' => ['src' => '/storage/documents/src/pic.png']],
+            ],
+        ];
+        $doc = app(DocumentStore::class)->save(app(DocumentStore::class)->create($user, 'Round trip'), $json, $user);
+
+        $path = (new DocxExporter)->export($doc->content_json, $doc, app(StyleEngine::class)->resolve($doc));
+        $back = (new DocxImporter)->import($path, 'reimported');
+        @unlink($path);
+
+        $this->assertSame([], (new DocumentSchema)->validate($back));
+        $this->assertSame(['heading', 'paragraph', 'image'], array_column($back['content'], 'type'));
+
+        // The 'report' style numbers headings, so the exported heading text
+        // carries its outline number as literal text (Word has no linked
+        // numbering definition this writer emits).
+        $this->assertSame('1 Scope', $this->schemaPlainText($back['content'][0]));
+
+        $src = $back['content'][2]['attrs']['src'];
+        $this->assertStringStartsWith('/storage/documents/reimported/', $src);
+        Storage::disk('public')->assertExists(ltrim(str_replace('/storage/', '', $src), '/'));
+        $this->assertSame($png, Storage::disk('public')->get(ltrim(str_replace('/storage/', '', $src), '/')));
+    }
+
+    public function test_docx_export_and_reimport_keeps_a_toc_as_a_toc_node(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->create();
+
+        $json = [
+            'type' => 'doc',
+            'attrs' => ['schema' => DocumentSchema::VERSION, 'style' => 'report', 'vars' => []],
+            'content' => [
+                ['type' => 'heading', 'attrs' => ['level' => 1], 'content' => [['type' => 'text', 'text' => 'Scope']]],
+                ['type' => 'toc', 'attrs' => ['depth' => 2]],
+                ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Body.']]],
+                ['type' => 'heading', 'attrs' => ['level' => 2], 'content' => [['type' => 'text', 'text' => 'Method']]],
+                ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'More.']]],
+            ],
+        ];
+        $doc = app(DocumentStore::class)->save(app(DocumentStore::class)->create($user, 'With TOC'), $json, $user);
+
+        $path = (new DocxExporter)->export($doc->content_json, $doc, app(StyleEngine::class)->resolve($doc));
+        $back = (new DocxImporter)->import($path);
+        @unlink($path);
+
+        // The Word TOC field comes back as one `toc` node — NOT as the frozen
+        // entry paragraphs Word caches inside the field.
+        $this->assertSame([], (new DocumentSchema)->validate($back));
+        $this->assertSame(
+            ['heading', 'toc', 'paragraph', 'heading', 'paragraph'],
+            array_column($back['content'], 'type')
+        );
+        $this->assertStringNotContainsString('1.1 Method', (new DocumentSchema)->plainText($back['content'][2]));
+    }
+
+    public function test_importing_an_html_file_writes_structured_json(): void
+    {
+        $user = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Page');
+
+        $file = UploadedFile::fake()->createWithContent(
+            'page.html',
+            '<h2>Method</h2><p>Some <strong>bold</strong> text.</p><ul><li>one</li><li>two</li></ul>'
+        );
+
+        $this->actingAs($user)
+            ->post(route('documents.import', $doc->uuid), ['file' => $file])
+            ->assertRedirect(route('documents.edit', $doc->uuid));
+
+        $doc->refresh();
+        $this->assertSame(['heading', 'paragraph', 'bulletList'], array_column($doc->content_json['content'], 'type'));
+        $this->assertSame(2, $doc->content_json['content'][0]['attrs']['level']);
+    }
+
+    public function test_import_rejects_an_unsupported_file_type(): void
+    {
+        $user = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Notes');
+
+        $this->actingAs($user)
+            ->post(route('documents.import', $doc->uuid), ['file' => UploadedFile::fake()->create('sheet.csv', 4, 'text/csv')])
+            ->assertSessionHasErrors('file');
+    }
+
+    private function schemaPlainText(array $node): string
+    {
+        return trim((new DocumentSchema)->plainText($node));
     }
 }
