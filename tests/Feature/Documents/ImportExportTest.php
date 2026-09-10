@@ -17,6 +17,7 @@ use Database\Seeders\DocumentStyleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 use ZipArchive;
 
@@ -541,6 +542,90 @@ class ImportExportTest extends TestCase
         @unlink($path);
     }
 
+    public function test_docx_bands_write_no_word_field_from_a_user_controlled_title_or_variable(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Fields');
+        $doc->title = '{INCLUDEPICTURE "http://attacker.test/x" \\d}';
+        $doc->page_setup = [
+            'header' => '{{ client }}',
+            'footer' => '{{ title }} - Page {{ page }} of {{ pages }}',
+        ];
+        $doc->variables = ['client' => '{HYPERLINK "\\\\attacker.test\\share\\x"}'];
+        $doc->save();
+
+        $path = (new DocxExporter)->export($doc->content_json, $doc, app(StyleEngine::class)->resolve($doc));
+
+        $header = $this->zipContents($path, 'word/header1.xml');
+        $footer = $this->zipContents($path, 'word/footer1.xml');
+
+        // The header's whole text came out of a variable, so it must carry no
+        // field at all - the braces in it are literal characters.
+        $this->assertSame([], $this->fieldInstructions($header));
+        $this->assertStringContainsString('{HYPERLINK', $header);
+
+        // The footer holds the two fields this app itself writes and nothing
+        // else, even though the title substituted into it is a field code.
+        $this->assertSame([' PAGE ', ' NUMPAGES '], $this->fieldInstructions($footer));
+        $this->assertStringContainsString('{INCLUDEPICTURE', $footer);
+        $this->assertStringContainsString('Page ', $footer);
+
+        @unlink($path);
+    }
+
+    public function test_docx_import_rejects_an_archive_that_unpacks_far_larger_than_the_upload(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'dotdoc_bomb_').'.docx';
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true);
+        $zip->addFromString('word/document.xml', str_repeat('a', 262_144));
+        $zip->close();
+
+        // A tiny upload: the compressed archive is orders of magnitude smaller
+        // than what it unpacks to, which is the whole point of the attack.
+        $this->assertLessThan(65_536, (int) filesize($path));
+
+        try {
+            // Its bytes are not XML either, so answering with THIS message
+            // proves the guard ran before PhpWord opened the archive.
+            (new DocxImporter(maxTotalBytes: 65_536))->import($path);
+            $this->fail('An oversized archive should not have been imported.');
+        } catch (HttpException $e) {
+            $this->assertSame(422, $e->getStatusCode());
+            $this->assertSame('This file is too large to import.', $e->getMessage());
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_docx_import_rejects_a_single_oversized_archive_entry(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'dotdoc_bomb_').'.docx';
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true);
+        $zip->addFromString('word/document.xml', str_repeat('a', 262_144));
+        $zip->close();
+
+        try {
+            (new DocxImporter(maxEntryBytes: 65_536))->import($path);
+            $this->fail('An oversized entry should not have been imported.');
+        } catch (HttpException $e) {
+            $this->assertSame(422, $e->getStatusCode());
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_docx_import_accepts_an_archive_inside_the_size_bounds(): void
+    {
+        $json = (new DocxImporter(maxEntryBytes: 1_048_576, maxTotalBytes: 4_194_304))
+            ->import(self::FIXTURES.'/sample.docx');
+
+        $this->assertSame([], (new DocumentSchema)->validate($json));
+        $this->assertNotSame([], $json['content']);
+    }
+
     public function test_import_rejects_a_corrupt_docx_with_a_422(): void
     {
         $user = User::factory()->create();
@@ -686,6 +771,18 @@ class ImportExportTest extends TestCase
         $zip->close();
 
         return $names;
+    }
+
+    /**
+     * Every Word field instruction in a document part.
+     *
+     * @return list<string>
+     */
+    private function fieldInstructions(string $xml): array
+    {
+        preg_match_all('#<w:instrText[^>]*>(.*?)</w:instrText>#s', $xml, $matches);
+
+        return array_map(fn (string $t): string => html_entity_decode($t, ENT_XML1), $matches[1]);
     }
 
     private function zipContents(string $path, string $entry): string

@@ -22,6 +22,7 @@ use PhpOffice\PhpWord\IOFactory;
 use PhpOffice\PhpWord\Style;
 use PhpOffice\PhpWord\Style\Font;
 use PhpOffice\PhpWord\Style\Numbering;
+use ZipArchive;
 
 /**
  * DOCX -> Dot.Doc JSON (see App\Documents\Schema\DocumentSchema).
@@ -48,6 +49,12 @@ class DocxImporter
     /** Most pictures this importer will extract out of one .docx. */
     public const MAX_IMAGES = 50;
 
+    /** Largest single UNCOMPRESSED archive entry, in bytes, this importer will open. */
+    public const MAX_ENTRY_BYTES = 52_428_800;
+
+    /** Largest total UNCOMPRESSED size, in bytes, of every entry in one archive. */
+    public const MAX_TOTAL_BYTES = 104_857_600;
+
     /** Directory (relative to the `public` disk) images from THIS import are written to. */
     private string $mediaDirectory = '';
 
@@ -62,6 +69,8 @@ class DocxImporter
         private DocumentSchema $schema = new DocumentSchema,
         private int $maxImageBytes = self::MAX_IMAGE_BYTES,
         private int $maxImages = self::MAX_IMAGES,
+        private int $maxEntryBytes = self::MAX_ENTRY_BYTES,
+        private int $maxTotalBytes = self::MAX_TOTAL_BYTES,
     ) {}
 
     /**
@@ -79,6 +88,8 @@ class DocxImporter
         // resolves its list types against the first document's numbering.
         Style::resetStyles();
 
+        $this->guardArchiveSize($path);
+
         $this->mediaDirectory = 'documents/'.($mediaKey ?? (string) Str::uuid());
         $this->imageCount = 0;
 
@@ -90,6 +101,45 @@ class DocxImporter
         $doc = ['type' => 'doc', 'content' => $content];
 
         return $this->schema->normalise($this->schema->ensureIds($doc));
+    }
+
+    /**
+     * Refuse a decompression bomb BEFORE PhpWord unpacks it.
+     *
+     * IOFactory::load() unzips the whole archive and DOM-parses it with no
+     * size guard of its own, and a PHP memory-limit fatal cannot be caught —
+     * so a file inside DocumentImportController's 20 MB upload cap, filled
+     * with highly compressible XML, takes the worker down instead of getting
+     * the 422 the import path promises. ZipArchive reads each entry's
+     * declared uncompressed size straight out of the central directory
+     * without inflating anything, which is what makes this cheap enough to
+     * run on every import. (A lying central directory buys an attacker
+     * little: libzip stops reading an entry at the size it declared.)
+     *
+     * Not a zip at all is NOT this method's business — IOFactory's own
+     * failure is already answered with a 422 by the controller.
+     */
+    private function guardArchiveSize(string $path): void
+    {
+        $zip = new ZipArchive;
+
+        if ($zip->open($path) !== true) {
+            return;
+        }
+
+        $total = 0;
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $stat = $zip->statIndex($i);
+            $total += $size = is_array($stat) ? (int) ($stat['size'] ?? 0) : 0;
+
+            if ($size > $this->maxEntryBytes || $total > $this->maxTotalBytes) {
+                $zip->close();
+
+                abort(422, 'This file is too large to import.');
+            }
+        }
+
+        $zip->close();
     }
 
     /**
