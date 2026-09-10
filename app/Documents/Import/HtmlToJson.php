@@ -16,6 +16,18 @@ class HtmlToJson
 {
     private const BLOCK_WRAPPING_PARENTS = ['li', 'td', 'th', 'blockquote'];
 
+    /**
+     * URL schemes a link may carry. An .html import is a stranger's file and
+     * a legacy blob is whatever was stored years ago, so an href is treated
+     * exactly as MarkdownImporter's commonmark treats one
+     * (`allow_unsafe_links => false`): anything else — `javascript:`,
+     * `data:`, `vbscript:` — loses the ATTRIBUTE, never the text.
+     */
+    private const LINK_SCHEMES = ['http', 'https', 'mailto'];
+
+    /** Schemes an `<img src>` may carry; `/`-relative paths are also allowed. */
+    private const IMAGE_SCHEMES = ['http', 'https'];
+
     public function convert(string $html): array
     {
         $dom = new DOMDocument;
@@ -68,13 +80,13 @@ class HtmlToJson
                 'content' => $this->convertInlineChildren($node),
             ],
             $tag === 'p' => ['type' => 'paragraph', 'content' => $this->convertInlineChildren($node)],
-            $tag === 'ul' => ['type' => 'bulletList', 'content' => $this->convertListItems($node)],
+            $tag === 'ul' => $this->convertUnorderedList($node),
             $tag === 'ol' => $this->convertOrderedList($node),
             $tag === 'blockquote' => ['type' => 'blockquote', 'content' => $this->convertBlockChildrenWrapped($node)],
             $tag === 'pre' => ['type' => 'codeBlock', 'content' => [['type' => 'text', 'text' => $node->textContent]]],
             $tag === 'hr' => ['type' => 'horizontalRule'],
             $tag === 'img' => ['type' => 'image', 'attrs' => array_filter([
-                'src' => $node->getAttribute('src') ?: null,
+                'src' => $this->safeUrl($node->getAttribute('src'), self::IMAGE_SCHEMES),
                 'alt' => $node->getAttribute('alt') ?: null,
             ])],
             $tag === 'table' => ['type' => 'table', 'content' => $this->convertTable($node)],
@@ -90,6 +102,52 @@ class HtmlToJson
         }
 
         return ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => $node->textContent]]];
+    }
+
+    /**
+     * A `<ul>` is a bullet list unless its items carry checkboxes, which is
+     * how commonmark's TaskListExtension renders `- [x]` — the shape
+     * MarkdownExporter writes a `taskList` back out as. Without this the
+     * checkbox state was lost on every Markdown round trip, and the `<input>`
+     * simply vanished into the item's text.
+     *
+     * @return array<string,mixed>
+     */
+    private function convertUnorderedList(DOMElement $node): array
+    {
+        $items = $this->convertListItems($node);
+        $checks = [];
+        foreach ($node->childNodes as $child) {
+            if ($child instanceof DOMElement && strtolower($child->tagName) === 'li') {
+                $checks[] = $this->taskState($child);
+            }
+        }
+
+        if (! in_array(true, array_map('is_bool', $checks), true)) {
+            return ['type' => 'bulletList', 'content' => $items];
+        }
+
+        foreach ($items as $index => $item) {
+            $items[$index] = [
+                'type' => 'taskItem',
+                'attrs' => ['checked' => ($checks[$index] ?? false) === true],
+                'content' => $item['content'],
+            ];
+        }
+
+        return ['type' => 'taskList', 'content' => $items];
+    }
+
+    /** The checked state of an `<li>`'s task checkbox, or null when it has none. */
+    private function taskState(DOMElement $item): ?bool
+    {
+        foreach ($item->getElementsByTagName('input') as $input) {
+            if ($input instanceof DOMElement && strtolower($input->getAttribute('type')) === 'checkbox') {
+                return $input->hasAttribute('checked');
+            }
+        }
+
+        return null;
     }
 
     /** @return array<string,mixed> */
@@ -193,6 +251,30 @@ class HtmlToJson
         return $rows;
     }
 
+    /**
+     * $url when it is one this app will hand back to a browser, null
+     * otherwise. A URL with no scheme is kept only when it is a plain
+     * document-root path (`/storage/...`, `/images/...`) — a relative or
+     * protocol-relative one has no meaning once stored, and a scheme-looking
+     * prefix that is not in $schemes (`javascript:`, `data:`) is exactly what
+     * this exists to refuse.
+     *
+     * @param  list<string>  $schemes
+     */
+    private function safeUrl(string $url, array $schemes): ?string
+    {
+        $url = trim($url);
+        if ($url === '' || str_starts_with($url, '//')) {
+            return null;
+        }
+
+        if (preg_match('#^([A-Za-z][A-Za-z0-9+.-]*):#', $url, $m) === 1) {
+            return in_array(strtolower($m[1]), $schemes, true) ? $url : null;
+        }
+
+        return str_starts_with($url, '/') || str_starts_with($url, '#') ? $url : null;
+    }
+
     /** @return list<array<string,mixed>> */
     private function convertInlineChildren(DOMElement $node): array
     {
@@ -252,7 +334,18 @@ class HtmlToJson
 
         $mark = ['type' => $markType];
         if ($markType === 'link') {
-            $mark['attrs'] = ['href' => $node->getAttribute('href')];
+            $href = $this->safeUrl($node->getAttribute('href'), self::LINK_SCHEMES);
+            if ($href === null) {
+                // Keep the words, drop the link: an unsafe href stored here
+                // is rendered into an <a> by HtmlRenderer on every view.
+                $out = [];
+                foreach ($node->childNodes as $child) {
+                    $out = array_merge($out, $this->convertInlineNode($child, $marks));
+                }
+
+                return $out;
+            }
+            $mark['attrs'] = ['href' => $href];
         }
         $childMarks = [...$marks, $mark];
 

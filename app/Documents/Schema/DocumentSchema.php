@@ -160,6 +160,23 @@ class DocumentSchema
     }
 
     /**
+     * The C0 control characters XML forbids outright (tab, newline and
+     * carriage return excepted). One of them in stored content produces a
+     * .docx Word refuses to open and an `_x000B_` in its place in a running
+     * header, so this strips them at the boundary every writer goes through
+     * — importers, the autosave endpoint, a legacy blob — instead of leaving
+     * each exporter to find them on the way out.
+     *
+     * Deliberately NOT a /u pattern: every byte matched here is ASCII, and a
+     * unicode pattern returns null (i.e. loses the whole string) the moment
+     * the text is not valid UTF-8, which imported content sometimes is not.
+     */
+    private function stripControlCharacters(string $text): string
+    {
+        return (string) preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $text);
+    }
+
+    /**
      * @return list<array> the node's replacement: empty when it must be
      *                     dropped, one node normally, or the node followed by
      *                     children lifted out of it (see normaliseFigure()).
@@ -167,6 +184,10 @@ class DocumentSchema
     private function normaliseNode(array $node): array
     {
         $type = $node['type'] ?? '';
+
+        if ($type === 'text' && is_string($node['text'] ?? null)) {
+            $node['text'] = $this->stripControlCharacters($node['text']);
+        }
 
         // Same guard as ensureNodeIds(): a block whose `attrs` came off the
         // wire as a scalar must not reach array_key_exists()/normaliseColumns()

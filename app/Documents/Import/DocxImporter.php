@@ -42,10 +42,27 @@ class DocxImporter
         'image/webp' => 'webp',
     ];
 
+    /** Largest picture, in bytes, this importer will extract out of one .docx. */
+    public const MAX_IMAGE_BYTES = 5_242_880;
+
+    /** Most pictures this importer will extract out of one .docx. */
+    public const MAX_IMAGES = 50;
+
     /** Directory (relative to the `public` disk) images from THIS import are written to. */
     private string $mediaDirectory = '';
 
-    public function __construct(private DocumentSchema $schema = new DocumentSchema) {}
+    /** Pictures already extracted during THIS import, against $maxImages. */
+    private int $imageCount = 0;
+
+    /**
+     * The caps are constructor arguments, not constants, so a caller (and the
+     * test suite) can bound a single import harder without a 5 MB fixture.
+     */
+    public function __construct(
+        private DocumentSchema $schema = new DocumentSchema,
+        private int $maxImageBytes = self::MAX_IMAGE_BYTES,
+        private int $maxImages = self::MAX_IMAGES,
+    ) {}
 
     /**
      * @param  string  $path  a readable .docx on the local filesystem
@@ -63,6 +80,7 @@ class DocxImporter
         Style::resetStyles();
 
         $this->mediaDirectory = 'documents/'.($mediaKey ?? (string) Str::uuid());
+        $this->imageCount = 0;
 
         $content = [];
         foreach (IOFactory::load($path)->getSections() as $section) {
@@ -78,10 +96,11 @@ class DocxImporter
      * Convert a run of sibling PHPWord elements into block nodes.
      *
      * Two pieces of state make this a loop rather than a map: consecutive
-     * list items are merged into a single list node, and a `PageBreak` is
-     * followed in the reader's output by an echo of the very same `w:p` as a
-     * break-only paragraph (Reader\Word2007\Document::readWPNode() emits
-     * both), which would otherwise land as a stray empty paragraph.
+     * list items are gathered up and rebuilt into ONE (possibly nested) list
+     * node, and a `PageBreak` is followed in the reader's output by an echo
+     * of the very same `w:p` as a break-only paragraph
+     * (Reader\Word2007\Document::readWPNode() emits both), which would
+     * otherwise land as a stray empty paragraph.
      *
      * @param  array<int,AbstractElement>  $elements
      * @return list<array<string,mixed>>
@@ -89,15 +108,15 @@ class DocxImporter
     private function convertElements(array $elements): array
     {
         $out = [];
-        /** @var array{type:string,key:string,items:list<array<string,mixed>>}|null $list */
-        $list = null;
+        /** @var list<array{depth:int,type:string,key:string,node:array<string,mixed>}> $items */
+        $items = [];
         $afterPageBreak = false;
         $inToc = false;
 
-        $flush = function () use (&$list, &$out): void {
-            if ($list !== null) {
-                $out[] = ['type' => $list['type'], 'content' => $list['items']];
-                $list = null;
+        $flush = function () use (&$items, &$out): void {
+            if ($items !== []) {
+                array_push($out, ...$this->buildLists($items));
+                $items = [];
             }
         };
 
@@ -121,11 +140,15 @@ class DocxImporter
             if ($element instanceof ListItemRun || $element instanceof ListItem) {
                 $afterPageBreak = false;
                 $item = $this->listItem($element);
-                if ($list !== null && $list['key'] !== $item['key']) {
+                // A deeper item always continues the list it is nested in,
+                // whatever its own numbering definition says (a bullet list
+                // with a numbered sub-list is two definitions, one list). At
+                // the list's own depth, a different definition is a different
+                // list.
+                if ($items !== [] && $item['depth'] <= $items[0]['depth'] && $item['key'] !== $items[0]['key']) {
                     $flush();
                 }
-                $list ??= ['type' => $item['type'], 'key' => $item['key'], 'items' => []];
-                $list['items'][] = $item['node'];
+                $items[] = $item;
 
                 continue;
             }
@@ -180,11 +203,11 @@ class DocxImporter
     }
 
     /**
-     * A list item plus the key that decides whether it continues the list
-     * before it: two adjacent lists that share a type but not a numbering
-     * definition are two lists, not one.
+     * A list item, its Word indent level, and the key that decides whether it
+     * continues the list before it: two adjacent lists that share a type but
+     * not a numbering definition are two lists, not one.
      *
-     * @return array{type:string,key:string,node:array<string,mixed>}
+     * @return array{depth:int,type:string,key:string,node:array<string,mixed>}
      */
     private function listItem(ListItemRun|ListItem $element): array
     {
@@ -197,10 +220,79 @@ class DocxImporter
             : $this->textNodes($element->getTextObject()->getText(), $this->fontMarks($element->getTextObject()->getFontStyle()));
 
         return [
+            // Word's `w:ilvl`, which the reader passes straight to
+            // addListItemRun() — the ONLY record of nesting in the file.
+            'depth' => max(0, (int) $element->getDepth()),
             'type' => $ordered ? 'orderedList' : 'bulletList',
             'key' => ($ordered ? 'ol:' : 'ul:').$numStyleName,
             'node' => ['type' => 'listItem', 'content' => [$this->paragraph($inline)]],
         ];
+    }
+
+    /**
+     * Rebuild the tree a flat run of Word list paragraphs describes.
+     *
+     * Word has no nested list element: nesting is a run of sibling paragraphs
+     * each carrying its own indent level, and a sub-item is simply an item
+     * with a deeper one. This is the inverse of `DocxExporter::writeList()`,
+     * which flattens the tree the same way on the way out. Reading it back as
+     * one flat list (what this did before) silently destroyed the structure
+     * of every nested list on a full export -> re-import round trip.
+     *
+     * @param  list<array{depth:int,type:string,key:string,node:array<string,mixed>}>  $items
+     * @return list<array<string,mixed>>
+     */
+    private function buildLists(array $items): array
+    {
+        $out = [];
+        $index = 0;
+        while ($index < count($items)) {
+            $out[] = $this->buildList($items, $index, $items[$index]['depth']);
+        }
+
+        return $out;
+    }
+
+    /**
+     * One list node, consuming every item at $depth or deeper from $index.
+     *
+     * @param  list<array{depth:int,type:string,key:string,node:array<string,mixed>}>  $items
+     * @return array<string,mixed>
+     */
+    private function buildList(array $items, int &$index, int $depth): array
+    {
+        $type = $items[$index]['type'];
+        $nodes = [];
+        $count = count($items);
+
+        while ($index < $count) {
+            $item = $items[$index];
+
+            if ($item['depth'] < $depth) {
+                break;
+            }
+
+            if ($item['depth'] > $depth) {
+                if ($nodes === []) {
+                    // Word can open a list at a sub-level with no parent item
+                    // above it; this schema cannot, so the missing parent is
+                    // invented rather than the nesting flattened away.
+                    $nodes[] = ['type' => 'listItem', 'content' => [$this->paragraph([])]];
+                }
+                $nodes[count($nodes) - 1]['content'][] = $this->buildList($items, $index, $item['depth']);
+
+                continue;
+            }
+
+            if ($nodes !== [] && $item['type'] !== $type) {
+                break;
+            }
+
+            $nodes[] = $item['node'];
+            $index++;
+        }
+
+        return ['type' => $type, 'content' => $nodes];
     }
 
     /**
@@ -276,9 +368,11 @@ class DocxImporter
     {
         $out = [];
         $inline = [];
+        $hadImage = false;
 
         foreach ($run->getElements() as $child) {
             if ($child instanceof Image) {
+                $hadImage = true;
                 if ($inline !== []) {
                     $out[] = $this->paragraph($inline);
                     $inline = [];
@@ -292,10 +386,12 @@ class DocxImporter
 
         if ($inline !== [] && ! $this->onlyHardBreaks($inline)) {
             $out[] = $this->paragraph($inline);
-        } elseif ($out === []) {
+        } elseif ($out === [] && ! $hadImage) {
             // Nothing but line breaks (or nothing at all) is Word's way of
             // writing an empty paragraph; keeping the hardBreaks would render
-            // as blank lines nobody typed.
+            // as blank lines nobody typed. A run that held ONLY a picture
+            // this importer refused (too big, or a type it will not serve) is
+            // not an empty paragraph the writer typed, so it leaves nothing.
             $out[] = $this->paragraph([]);
         }
 
@@ -389,10 +485,19 @@ class DocxImporter
      * but this app will not serve (anything outside IMAGE_EXTENSIONS) is
      * skipped rather than stored under a wrong extension.
      *
+     * An upload is a stranger's file: a .docx is a zip, so a handful of
+     * megabytes of it can carry far more picture than this app should write
+     * to disk in one request. Both caps SKIP — a document whose pictures are
+     * too big or too many still imports its text.
+     *
      * @return list<array<string,mixed>>
      */
     private function convertImage(Image $image): array
     {
+        if ($this->imageCount >= $this->maxImages) {
+            return [];
+        }
+
         $binary = $this->imageBinary($image);
         if ($binary === null) {
             return [];
@@ -406,6 +511,7 @@ class DocxImporter
 
         $relative = $this->mediaDirectory.'/'.sha1($binary).'.'.self::IMAGE_EXTENSIONS[$mime];
         Storage::disk('public')->put($relative, $binary);
+        $this->imageCount++;
 
         return [['type' => 'image', 'attrs' => ['src' => '/storage/'.$relative]]];
     }
@@ -419,9 +525,19 @@ class DocxImporter
         if (! is_string($hex) || $hex === '') {
             return null;
         }
+        // Two hex characters per byte, plus a newline every 76 — so a hex
+        // string this long cannot decode to anything within the cap, and the
+        // decode (which doubles the memory again) is skipped entirely.
+        if (strlen($hex) > $this->maxImageBytes * 3) {
+            return null;
+        }
         $binary = @hex2bin((string) preg_replace('/\s+/', '', $hex));
 
-        return $binary === false || $binary === '' ? null : $binary;
+        if ($binary === false || $binary === '' || strlen($binary) > $this->maxImageBytes) {
+            return null;
+        }
+
+        return $binary;
     }
 
     /** @return list<array<string,mixed>> */
@@ -472,7 +588,10 @@ class DocxImporter
         }
 
         if ($element instanceof Link) {
-            $marks = $this->fontMarks($element->getFontStyle());
+            // withColour: false — Word writes a hyperlink's blue as ordinary
+            // character formatting, so reading it back as an authored
+            // `textStyle` colour would stamp one onto every imported link.
+            $marks = $this->fontMarks($element->getFontStyle(), false);
             $href = (string) $element->getSource();
             if ($href !== '') {
                 $marks[] = ['type' => 'link', 'attrs' => ['href' => $href]];
@@ -529,8 +648,17 @@ class DocxImporter
         return html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
     }
 
-    /** @return list<array<string,mixed>> */
-    private function fontMarks(mixed $font): array
+    /**
+     * The marks a run's character formatting carries. This reads back every
+     * property `DocxExporter::writeText()` writes — the two sides are one
+     * contract (see .ai/rules/documents-io.md), and a mark this did not read
+     * was a mark a round trip silently dropped.
+     *
+     * @param  bool  $withColour  false for a hyperlink run, whose colour is
+     *                            link styling rather than an authored one
+     * @return list<array<string,mixed>>
+     */
+    private function fontMarks(mixed $font, bool $withColour = true): array
     {
         if (! $font instanceof Font) {
             return [];
@@ -550,7 +678,53 @@ class DocxImporter
         if ($font->isStrikethrough() || $font->isDoubleStrikethrough()) {
             $marks[] = ['type' => 'strike'];
         }
+        if ($this->isMonospaced($font->getName())) {
+            $marks[] = ['type' => 'code'];
+        }
+        if ($this->isHighlighted($font)) {
+            $marks[] = ['type' => 'highlight'];
+        }
+        if ($font->isSuperScript()) {
+            $marks[] = ['type' => 'superscript'];
+        }
+        if ($font->isSubScript()) {
+            $marks[] = ['type' => 'subscript'];
+        }
+
+        $colour = $withColour ? $font->getColor() : null;
+        if (is_string($colour) && preg_match('/^[0-9a-fA-F]{6}$/', $colour) === 1) {
+            $marks[] = ['type' => 'textStyle', 'attrs' => ['color' => '#'.strtolower($colour)]];
+        }
 
         return $marks;
+    }
+
+    /**
+     * Word's own highlight (`w:highlight`, which PhpWord's reader calls
+     * fgColor) — what DocxExporter writes for a `highlight` mark. A run
+     * shading colour (bgColor) counts too, since that is how some other
+     * writers mark up highlighted text.
+     */
+    private function isHighlighted(Font $font): bool
+    {
+        foreach ([$font->getFgColor(), $font->getBgColor()] as $value) {
+            if (is_string($value) && $value !== '' && strtolower($value) !== 'none') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a run's font is the monospaced one, i.e. a `code` mark. There
+     * is no mono flag in OOXML, only the font name, and the name this app
+     * writes comes from the document's own `fonts.mono` style token (which a
+     * .docx does not carry back) — so this matches the families those tokens
+     * and other writers actually use.
+     */
+    private function isMonospaced(mixed $name): bool
+    {
+        return is_string($name) && preg_match('/mono|consolas|courier|menlo|monaco/i', $name) === 1;
     }
 }

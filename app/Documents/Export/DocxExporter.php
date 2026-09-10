@@ -19,8 +19,10 @@ use PhpOffice\PhpWord\PhpWord;
 use PhpOffice\PhpWord\Shared\Converter;
 use PhpOffice\PhpWord\SimpleType\TblWidth;
 use PhpOffice\PhpWord\Style;
+use PhpOffice\PhpWord\Style\Font;
 use PhpOffice\PhpWord\Style\TOC;
 use Throwable;
+use ZipArchive;
 
 /**
  * Dot.Doc JSON -> a .docx file, styled from the document's resolved
@@ -43,6 +45,16 @@ class DocxExporter
     private const BULLET_STYLE = 'DotDocBullet';
 
     private const NUMBER_STYLE = 'DotDocNumber';
+
+    /**
+     * The `image.attrs.src` values this writer will embed: a path under the
+     * public disk, every segment starting with an alphanumeric (so no `.`
+     * or `..` segment can appear), ending in an image extension this app
+     * stores. `DocumentSchema` puts no format constraint on the src and
+     * content reaches the store straight from the autosave endpoint, so this
+     * is where a hand-written traversal src is refused.
+     */
+    private const IMAGE_SRC = '#^/storage/[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*\.(?:png|jpe?g|gif|webp)$#i';
 
     /** @var array<string,string> block id => outline number */
     private array $numbers = [];
@@ -99,10 +111,42 @@ class DocxExporter
         $content = $json['content'] ?? [];
         $this->writeBlocks(is_array($content) ? $content : [], $section);
 
-        $path = tempnam(sys_get_temp_dir(), 'dotdoc_').'.docx';
+        // tempnam() creates the file itself, atomically and only readable by
+        // this process — so the document is written to THAT path rather than
+        // to a second, differently named one created under the umask.
+        $path = tempnam(sys_get_temp_dir(), 'dotdoc_');
         IOFactory::createWriter($word, 'Word2007')->save($path);
+        $this->reattachInlineBreaks($path);
 
         return $path;
+    }
+
+    /**
+     * Move every inline line break inside a run.
+     *
+     * PhpWord writes a `TextBreak` that sits inside a `TextRun` as a bare
+     * `<w:br/>` directly under `<w:p>` (Writer\Word2007\Element\TextBreak
+     * with $withoutP). That is not where OOXML puts a break, and PhpWord's
+     * own reader proves it: Reader\Word2007\AbstractPart::readRun() only
+     * descends into `w:r`/`w:ins`/`w:del`/`w:smartTag`/`w:hyperlink`, so the
+     * break is dropped on the way back in and the two lines around it
+     * silently concatenate. Wrapping it in its own `w:r` is the canonical
+     * form, and the reader reassembles it as a `hardBreak`.
+     *
+     * A page break is `<w:br w:type="page"/>` and is already written inside a
+     * run, so the attribute-less needle here cannot match one.
+     */
+    private function reattachInlineBreaks(string $path): void
+    {
+        $zip = new ZipArchive;
+        if ($zip->open($path) !== true) {
+            return;
+        }
+        $xml = $zip->getFromName('word/document.xml');
+        if (is_string($xml) && str_contains($xml, '<w:br/>')) {
+            $zip->addFromString('word/document.xml', str_replace('<w:br/>', '<w:r><w:br/></w:r>', $xml));
+        }
+        $zip->close();
     }
 
     private function newPhpWord(): PhpWord
@@ -196,6 +240,11 @@ class DocxExporter
      */
     private function writeBand(mixed $band, string $text, array $font, array $paragraph = []): void
     {
+        // escape() like every other text-writing path in this class: a band's
+        // text is the page-setup template with $doc->variables substituted
+        // into it, and both are user-controlled.
+        $text = $this->escape($text);
+
         if (str_contains($text, '{PAGE}') || str_contains($text, '{NUMPAGES}')) {
             $band->addPreserveText($text, $font, $paragraph);
 
@@ -323,7 +372,21 @@ class DocxExporter
         $this->writeInline($node['content'] ?? [], $run);
     }
 
-    /** @param Section|Cell $container */
+    /**
+     * A list, one `addListItemRun($depth, …)` per item; a nested list is
+     * written at $depth + 1 into the SAME container, which is how Word
+     * expresses nesting (one flat run of paragraphs, each carrying its own
+     * `w:ilvl`) and what DocxImporter reads the nesting back out of.
+     *
+     * An item's SECOND and later paragraphs go into the run the item already
+     * opened, separated by an inline break. Word has no "continuation
+     * paragraph" this writer could emit without giving it its own bullet, and
+     * writing them as ordinary paragraphs (what this did before) detached
+     * them from the list entirely: the text left the item on the way out and
+     * came back after the list on the way in.
+     *
+     * @param  Section|Cell  $container
+     */
     private function writeList(array $node, AbstractContainer $container, bool $ordered, int $depth): void
     {
         $numStyle = $ordered ? self::NUMBER_STYLE : self::BULLET_STYLE;
@@ -331,7 +394,7 @@ class DocxExporter
             if (! is_array($item)) {
                 continue;
             }
-            $first = true;
+            $run = null;
             foreach ($item['content'] ?? [] as $child) {
                 if (! is_array($child)) {
                     continue;
@@ -342,22 +405,25 @@ class DocxExporter
 
                     continue;
                 }
-                if ($first && $type === 'paragraph') {
-                    $run = $container->addListItemRun($depth, $numStyle);
-                    $prefix = ($node['type'] ?? '') === 'taskList'
-                        ? ((($item['attrs']['checked'] ?? false)) ? '[x] ' : '[ ] ')
-                        : '';
-                    if ($prefix !== '') {
-                        $run->addText($prefix);
+                if ($type === 'paragraph') {
+                    if ($run === null) {
+                        $run = $container->addListItemRun($depth, $numStyle);
+                        $prefix = ($node['type'] ?? '') === 'taskList'
+                            ? ((($item['attrs']['checked'] ?? false)) ? '[x] ' : '[ ] ')
+                            : '';
+                        if ($prefix !== '') {
+                            $run->addText($prefix);
+                        }
+                    } else {
+                        $run->addTextBreak();
                     }
                     $this->writeInline($child['content'] ?? [], $run);
-                    $first = false;
 
                     continue;
                 }
                 $this->writeBlock($child, $container);
             }
-            if ($first) {
+            if ($run === null) {
                 $container->addListItemRun($depth, $numStyle);
             }
         }
@@ -460,7 +526,7 @@ class DocxExporter
     private function writeImage(array $node, AbstractContainer $container): void
     {
         $src = $node['attrs']['src'] ?? null;
-        if (! is_string($src) || ! str_starts_with($src, '/storage/')) {
+        if (! is_string($src)) {
             return;
         }
         // A detached run (writeHeading's Title run) is not in the document's
@@ -469,8 +535,8 @@ class DocxExporter
         if ($container->getPhpWord() === null) {
             return;
         }
-        $path = Storage::disk('public')->path(substr($src, strlen('/storage/')));
-        if (! is_file($path)) {
+        $path = $this->publicDiskPath($src);
+        if ($path === null) {
             return;
         }
 
@@ -486,6 +552,36 @@ class DocxExporter
             // An unreadable or unsupported picture is not a reason to fail
             // the export; the rest of the document still exports.
         }
+    }
+
+    /**
+     * The absolute path an `image.attrs.src` names inside the public disk, or
+     * null when it names anything else — a remote URL, a file type this app
+     * does not store, or a path that climbs out of the disk.
+     *
+     * Both checks are load-bearing. The pattern refuses `.`/`..` segments and
+     * anything but an image extension before a path is built at all;
+     * realpath() then proves that what the src actually resolves to is still
+     * under the disk root, which is the only check a symlink cannot walk
+     * around. A src that fails is SKIPPED — the rest of the document still
+     * exports — never thrown, because this is stored content and an export
+     * that 500s is worse than an export missing a picture.
+     */
+    private function publicDiskPath(string $src): ?string
+    {
+        if (preg_match(self::IMAGE_SRC, $src) !== 1) {
+            return null;
+        }
+
+        $root = realpath(Storage::disk('public')->path(''));
+        $path = realpath(Storage::disk('public')->path(substr($src, strlen('/storage/'))));
+        if ($root === false || $path === false || ! is_file($path)) {
+            return null;
+        }
+
+        $root = rtrim($root, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
+
+        return str_starts_with($path, $root) ? $path : null;
     }
 
     /** @param Section|Cell $container */
@@ -603,7 +699,12 @@ class DocxExporter
                 'underline' => $font['underline'] = 'single',
                 'strike' => $font['strikethrough'] = true,
                 'code' => $font['name'] = $this->font('mono'),
-                'highlight' => $font['bgColor'] = 'FFF3B0',
+                // Word's highlight is `w:highlight`, whose value is one of a
+                // fixed set of names — PhpWord calls it fgColor, and the
+                // bgColor this used to set is not written by its font-style
+                // writer at all (only `shading` is), so the mark was lost on
+                // the way out AND had nothing to read back.
+                'highlight' => $font['fgColor'] = Font::FGCOLOR_YELLOW,
                 'subscript' => $font['subScript'] = true,
                 'superscript' => $font['superScript'] = true,
                 'textStyle' => $font = $this->applyTextStyle($mark, $font),
@@ -642,10 +743,16 @@ class DocxExporter
      * What it does NOT do is drop the control characters XML forbids
      * outright — one of those in stored content produces a .docx Word
      * refuses to open, and document JSON comes from importers and the wire.
+     * DocumentSchema::normalise() strips them on the way IN; this is the
+     * belt for content stored before it did.
+     *
+     * Not a /u pattern: every byte matched is ASCII, and a unicode pattern
+     * returns null — dropping the whole run — on text that is not valid
+     * UTF-8.
      */
     private function escape(string $text): string
     {
-        return (string) preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/u', '', $text);
+        return (string) preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $text);
     }
 
     private function font(string $key): string
