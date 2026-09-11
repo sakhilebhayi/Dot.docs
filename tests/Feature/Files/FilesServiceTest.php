@@ -12,6 +12,7 @@ use App\Models\Files\Obj;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -54,6 +55,77 @@ class FilesServiceTest extends TestCase
         ]);
         $this->assertDatabaseHas('folders', ['id' => $root->objectable_id, 'team_id' => $team->id]);
         $this->assertSame(1, Obj::where('team_id', $team->id)->whereNull('parent_id')->count());
+    }
+
+    /**
+     * root() and registerDocument() both used to be a plain
+     * query-then-create, which two concurrent first-time callers can both
+     * pass before either commits - two roots for one team, or two live nodes
+     * for one document, permanently. The check in PHP is now backed by the
+     * database, so the loser of that race gets a unique violation instead of
+     * a second row.
+     */
+    public function test_the_database_refuses_a_second_root_for_one_team(): void
+    {
+        $user = $this->member();
+        $team = $user->personalTeam();
+        $root = $this->files->root($team);
+
+        $folder = Folder::create(['name' => 'A second root', 'team_id' => $team->id]);
+
+        $this->expectException(UniqueConstraintViolationException::class);
+
+        Obj::create([
+            'objectable_type' => 'folder',
+            'objectable_id' => $folder->id,
+            'parent_id' => null,
+            'team_id' => $team->id,
+        ]);
+
+        $this->assertNotNull($root);
+    }
+
+    /** A team root is unique; a SUBfolder of course is not. */
+    public function test_two_folders_may_still_live_under_one_parent(): void
+    {
+        $user = $this->member();
+        $root = $this->files->root($user->personalTeam());
+
+        $this->files->createFolder($root, 'Reports', $user);
+        $this->files->createFolder($root, 'Invoices', $user);
+
+        $this->assertSame(2, Obj::where('parent_id', $root->id)->count());
+    }
+
+    public function test_the_database_refuses_a_second_node_for_one_document(): void
+    {
+        $user = $this->member();
+        $root = $this->files->root($user->personalTeam());
+        $document = app(DocumentStore::class)->create($user, 'Filed once', null, [], $root);
+
+        $this->expectException(UniqueConstraintViolationException::class);
+
+        Obj::create([
+            'objectable_type' => 'document',
+            'objectable_id' => $document->id,
+            'parent_id' => $root->id,
+            'team_id' => $root->team_id,
+        ]);
+    }
+
+    public function test_registering_a_document_twice_returns_the_same_node(): void
+    {
+        $user = $this->member();
+        $root = $this->files->root($user->personalTeam());
+        $document = app(DocumentStore::class)->create($user, 'Filed once', null, [], $root);
+        $folder = $this->files->createFolder($root, 'Reports', $user);
+
+        $first = $this->files->registerDocument($document, $root);
+        $second = $this->files->registerDocument($document->fresh(), $folder);
+
+        $this->assertSame($first->id, $second->id);
+        $this->assertSame($folder->id, $second->parent_id);
+        $this->assertSame(1, Obj::where('objectable_type', 'document')->where('objectable_id', $document->id)->count());
     }
 
     public function test_creating_a_folder_inserts_objects_and_folders_rows(): void
@@ -99,6 +171,31 @@ class FilesServiceTest extends TestCase
         $this->assertSame('Report (2)', $second->name());
         $this->assertSame('report (3)', $third->name());
         $this->assertSame('Fresh', UniqueName::for($root, 'Fresh'));
+    }
+
+    /**
+     * `folders.name` and `files.name` are VARCHAR(255). Appending " (2)" to
+     * a name already at that boundary used to hand the database a 259-char
+     * string - a raw QueryException on postgres and mysql where the name is
+     * only ever a person's typing, and silently accepted on sqlite, which is
+     * why no test caught it. The BASE is trimmed instead of the counter: the
+     * counter is the part that makes the name unique.
+     */
+    public function test_a_name_at_the_column_limit_still_gets_a_suffix_that_fits(): void
+    {
+        $user = $this->member();
+        $root = $this->files->root($user->personalTeam());
+        $name = str_repeat('a', 255);
+
+        $first = $this->files->createFolder($root, $name, $user);
+        $second = $this->files->createFolder($root, $name, $user);
+        $third = $this->files->createFolder($root, $name, $user);
+
+        $this->assertSame(255, mb_strlen($first->name()));
+        $this->assertSame(255, mb_strlen($second->name()));
+        $this->assertStringEndsWith(' (2)', $second->name());
+        $this->assertStringEndsWith(' (3)', $third->name());
+        $this->assertLessThanOrEqual(255, mb_strlen($third->name()));
     }
 
     public function test_a_document_created_through_the_store_lands_in_the_tree(): void

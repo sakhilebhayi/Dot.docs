@@ -8,6 +8,7 @@ use App\Models\Files\Folder;
 use App\Models\Files\Obj;
 use App\Models\Team;
 use App\Models\User;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -41,29 +42,48 @@ class FilesService
      * render, and from the adopt command, which is exactly why it is a
      * firstOrCreate and not a "create the root when a team is created" hook
      * that existing teams would have missed.
+     *
+     * Check-then-create is a race, and no amount of care in PHP closes it:
+     * two tabs opening a brand-new workspace can both find no root before
+     * either commits, and two roots for one team is not recoverable
+     * afterwards. `objects_team_root_unique` (migration 2026_09_08_000004)
+     * is what actually decides the race; the loser catches its violation
+     * here and takes the winner's row. The create runs in its own
+     * transaction so a nested call rolls back to a SAVEPOINT rather than
+     * poisoning a caller's transaction on postgres.
      */
     public function root(Team $team): Obj
     {
-        $root = Obj::where('team_id', $team->id)
-            ->whereNull('parent_id')
-            ->where('objectable_type', 'folder')
-            ->orderBy('id')
-            ->first();
+        $root = $this->existingRoot($team->id);
 
         if ($root !== null) {
             return $root;
         }
 
-        return DB::transaction(function () use ($team) {
-            $folder = Folder::create(['name' => $team->name, 'team_id' => $team->id]);
+        try {
+            return DB::transaction(function () use ($team) {
+                $folder = Folder::create(['name' => $team->name, 'team_id' => $team->id]);
 
-            return Obj::create([
-                'objectable_type' => 'folder',
-                'objectable_id' => $folder->id,
-                'parent_id' => null,
-                'team_id' => $team->id,
-            ]);
-        });
+                return Obj::create([
+                    'objectable_type' => 'folder',
+                    'objectable_id' => $folder->id,
+                    'parent_id' => null,
+                    'team_id' => $team->id,
+                ]);
+            });
+        } catch (UniqueConstraintViolationException $e) {
+            return $this->existingRoot($team->id) ?? throw $e;
+        }
+    }
+
+    /** The team's root node as the database has it, or null. */
+    private function existingRoot(int $teamId): ?Obj
+    {
+        return Obj::where('team_id', $teamId)
+            ->whereNull('parent_id')
+            ->where('objectable_type', 'folder')
+            ->orderBy('id')
+            ->first();
     }
 
     /**
@@ -191,23 +211,34 @@ class FilesService
      *
      * Idempotent - a document that already has a node is MOVED to the given
      * parent rather than filed twice.
+     *
+     * And idempotent under CONCURRENCY, not just in sequence: the same
+     * check-then-create race root() has (two first page loads of a document
+     * that predates adoption) is decided by `objects_objectable_unique`
+     * (migration 2026_09_08_000004), and the loser adopts the winner's node
+     * instead of raising. The insert runs inside a transaction so that
+     * rollback is to a SAVEPOINT when a caller already opened one.
      */
     public function registerDocument(Document $document, Obj $parent): Obj
     {
         $node = $document->node()->first();
 
-        if ($node !== null) {
-            $node->update(['parent_id' => $parent->id, 'team_id' => $parent->team_id]);
-
-            return $node;
+        if ($node === null) {
+            try {
+                return DB::transaction(fn () => Obj::create([
+                    'objectable_type' => 'document',
+                    'objectable_id' => $document->id,
+                    'parent_id' => $parent->id,
+                    'team_id' => $parent->team_id,
+                ]));
+            } catch (UniqueConstraintViolationException $e) {
+                $node = $document->node()->first() ?? throw $e;
+            }
         }
 
-        return Obj::create([
-            'objectable_type' => 'document',
-            'objectable_id' => $document->id,
-            'parent_id' => $parent->id,
-            'team_id' => $parent->team_id,
-        ]);
+        $node->update(['parent_id' => $parent->id, 'team_id' => $parent->team_id]);
+
+        return $node;
     }
 
     public function moveObject(Obj $obj, Obj $parent, User $actor): Obj
@@ -301,6 +332,30 @@ class FilesService
 
             $obj->delete();
         });
+    }
+
+    /**
+     * The same name rule as every interactive path, for a name nobody is
+     * standing there to correct - an adopted legacy row, an imported one.
+     *
+     * Interactive callers get cleanName()'s ValidationException so the person
+     * can fix what they typed; a migration has no one to ask, so the
+     * offending characters are replaced with spaces and a name left with
+     * nothing in it becomes the fallback. What must NOT happen is a name
+     * carrying a path separator or a control character reaching the shared
+     * tree, where the invariant everything else relies on is that it cannot.
+     */
+    public function safeName(string $name, string $fallback = 'Folder'): string
+    {
+        $name = (string) preg_replace(self::BAD_NAME, ' ', $name);
+        $name = trim((string) preg_replace('/\s+/u', ' ', $name));
+        $name = mb_substr($name, 0, 255);
+
+        try {
+            return $this->cleanName($name);
+        } catch (ValidationException) {
+            return $fallback;
+        }
     }
 
     /** @throws ValidationException */

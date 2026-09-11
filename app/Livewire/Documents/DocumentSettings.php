@@ -249,10 +249,28 @@ class DocumentSettings extends Component
         session()->flash('status', 'Ownership transferred.');
     }
 
+    /**
+     * Deleting goes through FilesService, never straight to
+     * $document->delete(). The service soft-deletes the document (it keeps
+     * its own trash/restore lifecycle) AND drops its `objects` row in the
+     * same transaction; a raw delete leaves that row behind, where it is
+     * invisible in every listing but still counts as "something is filed in
+     * here" the next time somebody tries to delete the folder that held it.
+     * See App\Files\FilesService::deleteObject and .ai/rules/files.md.
+     */
     public function delete(): void
     {
         $this->authorize('delete', $this->document);
-        $this->document->delete();
+
+        $node = $this->node();
+
+        if ($node === null) {
+            // No workspace to file it in, so there is no tree row either -
+            // only reachable for a team-less factory account.
+            $this->document->delete();
+        } else {
+            app(FilesService::class)->deleteObject($node, auth()->user());
+        }
 
         $this->redirect(route('documents.index'));
     }

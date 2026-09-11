@@ -159,9 +159,44 @@ class DocumentFoldersAndTagsTest extends TestCase
     }
 
     /**
-     * Renaming used to run through the browser's native prompt() from an inline
-     * onclick - unstyled, untranslatable and untestable. It is a sheet now, so
-     * the rename is a state machine the component owns.
+     * The Delete button in Document Settings has to go through FilesService
+     * as well. A raw $document->delete() leaves the `objects` row behind:
+     * the document vanishes from the listing, but deleteObject()'s
+     * "is anything filed in here" check still counts the orphan, so the
+     * folder that held it could never be deleted again - with nothing a
+     * person could do about it from the UI.
+     */
+    public function test_deleting_a_document_from_settings_takes_its_tree_row_with_it(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $this->actingAs($user);
+
+        $folder = $this->folder($user, 'Reports');
+        $document = $this->personalDocument($user, $folder, 'Filed here');
+        $node = $document->node()->first();
+
+        $this->assertNotNull($node);
+
+        Livewire::test(DocumentSettings::class, ['uuid' => $document->uuid])
+            ->call('delete')
+            ->assertRedirect(route('documents.index'));
+
+        $this->assertNull(Obj::find($node->id));
+        $this->assertNull(Document::find($document->id));
+        $this->assertNotNull(Document::withTrashed()->find($document->id), 'the document keeps its own trash lifecycle');
+
+        // The folder is genuinely empty now, so it deletes.
+        Livewire::test(Index::class)
+            ->call('deleteFolder', $folder->id)
+            ->assertHasNoErrors();
+
+        $this->assertNull(Obj::find($folder->id));
+    }
+
+    /**
+     * Renaming used to run through the browser's native prompt() - unstyled,
+     * untranslatable and untestable. It is a sheet now, so the rename is a
+     * state machine the component owns.
      */
     public function test_renaming_a_folder_runs_through_the_sheet_not_a_browser_prompt(): void
     {
