@@ -5,6 +5,8 @@ use App\Http\Controllers\DocumentAutosaveController;
 use App\Http\Controllers\DocumentExportController;
 use App\Http\Controllers\DocumentImageController;
 use App\Http\Controllers\DocumentImportController;
+use App\Http\Controllers\FileUploadController;
+use App\Http\Controllers\FileViewController;
 use App\Http\Controllers\PublishedDocumentController;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
@@ -12,6 +14,7 @@ use App\Livewire\Documents\Index;
 use App\Livewire\Documents\ShareManager;
 use App\Livewire\Documents\SlashCommandManager;
 use App\Livewire\Documents\VersionHistory;
+use App\Livewire\Files\Navigator;
 use App\Models\AiSuggestion;
 use App\Models\Document;
 use App\Models\DocumentCollaborator;
@@ -134,7 +137,26 @@ Route::middleware([
         ->where('format', 'pdf|word|html|markdown')
         ->name('documents.export');
 
+    // The same export, filed in the shared tree instead of downloaded.
+    Route::post('/documents/{uuid}/export/{format}/save-to-files', [DocumentExportController::class, 'saveToFiles'])
+        ->where('format', 'pdf|word|html|markdown')
+        ->name('documents.export.save-to-files');
+
+    // The shared Dot.Files tree
+    Route::get('/files', Navigator::class)->name('files.index');
+
+    Route::post('/files/{parent}/upload', [FileUploadController::class, 'store'])
+        ->name('files.upload');
+
     // Import
     Route::post('/documents/{uuid}/import', [DocumentImportController::class, 'store'])
         ->name('documents.import');
+
+    // Reading one file out of the private `files` disk. `signed` proves the
+    // link was minted here and has not expired (10 minutes); the controller
+    // then checks the viewer belongs to the FILE'S team, so a signed link
+    // is not a bearer token for anyone who happens to be logged in.
+    Route::get('/files/{file}/view', [FileViewController::class, 'show'])
+        ->middleware('signed')
+        ->name('files.view');
 });

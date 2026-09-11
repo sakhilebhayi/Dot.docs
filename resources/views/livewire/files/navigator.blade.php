@@ -7,7 +7,22 @@
     documents index established for rename - Escape closes and returns focus
     to the control that opened it, which is what `moveTrigger` holds.
 --}}
-<div x-data="{ sheetTrigger: null }">
+<div class="page" x-data="{ sheetTrigger: null }">
+    <div class="page-head">
+        <div>
+            <h1 class="page-title">Files</h1>
+            <p class="page-lede">Folders, documents and files in {{ auth()->user()->currentTeam->name ?? 'your personal space' }}.</p>
+        </div>
+        <a href="{{ route('documents.index') }}" class="btn">The documents ledger</a>
+    </div>
+
+    @if (session('status'))
+        <p class="note" role="status">
+            <span class="lamp lamp-good" aria-hidden="true"></span>
+            {{ session('status') }}
+        </p>
+    @endif
+
     <nav class="toolbar" aria-label="Folder path" style="margin-bottom:var(--s4)">
         @foreach ($this->crumbs as $crumb)
             @if (! $loop->first)
@@ -202,9 +217,9 @@
                     @enderror
                     <ul class="ledger">
                         @foreach ($this->folderChoices as $choice)
-                            <li wire:key="dest-{{ $choice['obj']->uuid }}">
+                            <li wire:key="dest-{{ $choice['uuid'] }}">
                                 <button type="button" class="ledger-row" style="width:100%;text-align:left"
-                                        wire:click="moveTo('{{ $choice['obj']->uuid }}')">
+                                        wire:click="moveTo('{{ $choice['uuid'] }}')">
                                     <span class="ledger-key">{{ $choice['label'] }}</span>
                                 </button>
                             </li>

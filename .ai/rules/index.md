@@ -9,6 +9,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Audit/** | .ai/rules/audit.md |
 | app/Documents/Import/**, app/Documents/Export/**, app/Http/Controllers/DocumentImportController.php, app/Http/Controllers/DocumentExportController.php | .ai/rules/documents-io.md |
 | resources/js/editor/** | .ai/rules/editor.md |
+| app/Files/** | .ai/rules/files.md |
 | resources/views/livewire/** | .ai/rules/livewire.md |
 | app/Documents/Outline/** | .ai/rules/outline.md |
 | app/Print/** | .ai/rules/print.md |

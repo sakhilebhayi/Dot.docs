@@ -9,9 +9,9 @@ use App\Documents\Render\RenderContext;
 use App\Documents\Schema\DocumentSchema;
 use App\Files\FilesService;
 use App\Models\Document;
-use App\Models\Files\Obj;
 use App\Models\DocumentStyle;
 use App\Models\DocumentVersion;
+use App\Models\Files\Obj;
 use App\Models\User;
 use App\Services\WebhookService;
 use Illuminate\Support\Facades\DB;
@@ -46,7 +46,11 @@ class DocumentStore
         $doc->save();
 
         $files = app(FilesService::class);
-        $parent ??= ($team = $owner->currentTeam ?? $owner->personalTeam()) ? $files->root($team) : null;
+
+        if ($parent === null) {
+            $team = $owner->currentTeam ?? $owner->personalTeam();
+            $parent = $team === null ? null : $files->root($team);
+        }
 
         if ($parent !== null) {
             $files->registerDocument($doc, $parent);

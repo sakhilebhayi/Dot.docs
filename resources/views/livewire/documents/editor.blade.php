@@ -457,6 +457,23 @@
                 <span class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</span>
             @enderror
 
+            {{-- Where this document is filed in the shared Dot.Files tree.
+                 A readout, not a link: the button beside it is the one
+                 affordance, and it opens the same .sheet folder picker the
+                 documents index uses for rename. --}}
+            <span class="readout" aria-label="Filed in">
+                @forelse ($this->locationCrumbs as $crumb)
+                    @if (! $loop->first)/@endif{{ $crumb->name() }}
+                @empty
+                    Unfiled
+                @endforelse
+            </span>
+            <button type="button" class="tool tool-mono" x-ref="moveTrigger"
+                    wire:click="$set('showMoveSheet', true)">Move</button>
+            @error('location')
+                <span class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</span>
+            @enderror
+
             @if (count($activeUsers) > 0)
                 <div class="presence" aria-label="People here now">
                     @foreach (array_slice($activeUsers, 0, 4) as $member)
@@ -615,6 +632,17 @@
                     <a href="{{ route('documents.export', [$document->uuid, 'html']) }}">HTML</a>
                     <a href="{{ route('documents.export', [$document->uuid, 'markdown']) }}">Markdown</a>
 
+                    {{-- The same render, filed beside the document in the
+                         shared tree instead of downloaded. --}}
+                    <span class="menu-label">Save to Dot.Files</span>
+                    @foreach (['pdf' => 'PDF', 'word' => 'Word (.docx)', 'html' => 'HTML', 'markdown' => 'Markdown'] as $format => $label)
+                        <form action="{{ route('documents.export.save-to-files', [$document->uuid, $format]) }}"
+                              method="POST" class="menu-form">
+                            @csrf
+                            <button type="submit" class="btn">{{ $label }}</button>
+                        </form>
+                    @endforeach
+
                     <span class="menu-label">Import</span>
                     <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
                           enctype="multipart/form-data" class="menu-form">
@@ -670,4 +698,38 @@
             </div>
         @endif
     </div>
+
+    {{-- Move: the same .sheet pattern as the documents index's rename -
+         Escape closes it and returns focus to the control that opened it.
+         A folder picker rather than drag-and-drop, so it is keyboard-
+         operable from the first commit rather than as a fallback. --}}
+    @if ($showMoveSheet)
+        <div class="scrim" wire:click.self="$set('showMoveSheet', false)" role="dialog" aria-modal="true"
+             aria-labelledby="doc-move-title"
+             x-on:keydown.escape.window="$wire.set('showMoveSheet', false); $refs.moveTrigger && $refs.moveTrigger.focus()">
+            <div class="sheet">
+                <div class="sheet-head">
+                    <h2 class="h-panel" id="doc-move-title">File this document in</h2>
+                </div>
+                <div class="sheet-body">
+                    @error('location')
+                        <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                    @enderror
+                    <ul class="ledger">
+                        @foreach ($this->folderChoices as $choice)
+                            <li wire:key="move-{{ $choice['uuid'] }}">
+                                <button type="button" class="ledger-row" style="width:100%;text-align:left"
+                                        wire:click="moveTo({{ $choice['id'] }})">
+                                    <span class="ledger-key">{{ $choice['label'] }}</span>
+                                </button>
+                            </li>
+                        @endforeach
+                    </ul>
+                </div>
+                <div class="sheet-foot">
+                    <button type="button" class="btn" wire:click="$set('showMoveSheet', false)">Cancel</button>
+                </div>
+            </div>
+        </div>
+    @endif
 </div>

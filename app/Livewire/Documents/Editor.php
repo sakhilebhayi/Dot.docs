@@ -9,16 +9,20 @@ use App\Documents\Outline\Outline;
 use App\Events\DocumentUpdated;
 use App\Events\UserJoinedDocument;
 use App\Events\UserLeftDocument;
+use App\Files\FilesService;
 use App\Models\AiSuggestion;
 use App\Models\Document;
 use App\Models\DocumentStyle;
+use App\Models\Files\Obj;
 use App\Services\PresenceService;
 use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use InvalidArgumentException;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -49,6 +53,9 @@ class Editor extends Component
 
     /** Whether the editor is showing the print/PDF stylesheet instead of the canvas one (see StyleEngine::css()) */
     public bool $printPreview = false;
+
+    /** Whether the Move sheet - the tree's folder picker - is open. */
+    public bool $showMoveSheet = false;
 
     public function mount(string $uuid): void
     {
@@ -238,6 +245,94 @@ class Editor extends Component
         $this->contentJson = $this->document->content_json;
 
         $this->dispatch('style-changed', css: $engine->css($engine->resolve($this->document), 'canvas'));
+    }
+
+    /**
+     * Where this document is filed, root first - the location chip in the
+     * bench. Empty when the document has no tree node at all, which only a
+     * factory-made account with no team can produce.
+     *
+     * @return list<Obj>
+     */
+    #[Computed]
+    public function locationCrumbs(): array
+    {
+        $node = $this->node();
+
+        if ($node === null) {
+            return [];
+        }
+
+        $parent = $node->parent;
+
+        return $parent === null ? [] : [...$parent->ancestors(), $parent];
+    }
+
+    /**
+     * Folders this document can be moved into, taken from the node's OWN
+     * team - never the session's current team.
+     *
+     * @return list<array{id:int,uuid:string,label:string,depth:int}>
+     */
+    #[Computed]
+    public function folderChoices(): array
+    {
+        $node = $this->node();
+
+        return $node === null ? [] : app(FilesService::class)->folderChoices($node->team_id);
+    }
+
+    /**
+     * File the document somewhere else. The sheet is the SAME APG pattern
+     * the documents index uses for rename - Escape closes it and returns
+     * focus - and it is the only move affordance: no drag-and-drop, so
+     * there is nothing a keyboard cannot reach.
+     */
+    public function moveTo(int $destinationId): void
+    {
+        $this->authorize('update', $this->document);
+
+        $node = $this->node();
+        $destination = Obj::find($destinationId);
+
+        if ($node === null || $destination === null || ! $destination->isFolder() || $destination->team_id !== $node->team_id) {
+            $this->addError('location', 'That folder is not available for this document.');
+
+            return;
+        }
+
+        try {
+            app(FilesService::class)->moveObject($node, $destination, Auth::user());
+        } catch (ValidationException $e) {
+            $this->addError('location', collect($e->errors())->flatten()->first() ?? 'That move is not allowed.');
+
+            return;
+        }
+
+        $this->showMoveSheet = false;
+        unset($this->locationCrumbs, $this->folderChoices);
+
+        session()->flash('status', 'Filed in '.$destination->name().'.');
+    }
+
+    /** This document's node in the shared tree, filed at its workspace root if it has none. */
+    private function node(): ?Obj
+    {
+        $node = $this->document->node()->first();
+
+        if ($node !== null) {
+            return $node;
+        }
+
+        $team = $this->document->team ?? $this->document->owner?->personalTeam();
+
+        if ($team === null) {
+            return null;
+        }
+
+        $files = app(FilesService::class);
+
+        return $files->registerDocument($this->document, $files->root($team));
     }
 
     public function heartbeat(): void

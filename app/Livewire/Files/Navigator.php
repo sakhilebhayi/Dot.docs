@@ -8,7 +8,7 @@ use App\Models\Files\Obj;
 use App\Models\Team;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\URL as UrlGenerator;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
@@ -102,36 +102,16 @@ class Navigator extends Component
     }
 
     /**
-     * Every folder in this team, deepest path first, for the Move picker.
+     * Every folder in this team, labelled with its path, for the Move
+     * picker. Built by FilesService off the open node's OWN team_id, so the
+     * picker can never offer a destination outside this workspace.
      *
-     * @return list<array{obj:Obj,label:string}>
+     * @return list<array{id:int,uuid:string,label:string,depth:int}>
      */
     #[Computed]
     public function folderChoices(): array
     {
-        $folders = Obj::where('team_id', $this->parent()->team_id)
-            ->where('objectable_type', 'folder')
-            ->with('objectable')
-            ->get();
-
-        $byId = $folders->keyBy('id');
-        $choices = [];
-
-        foreach ($folders as $folder) {
-            $trail = [$folder->name()];
-            $node = $folder;
-
-            while ($node->parent_id !== null && isset($byId[$node->parent_id])) {
-                $node = $byId[$node->parent_id];
-                array_unshift($trail, $node->name());
-            }
-
-            $choices[] = ['obj' => $folder, 'label' => implode(' / ', $trail)];
-        }
-
-        usort($choices, fn ($a, $b) => strcasecmp($a['label'], $b['label']));
-
-        return $choices;
+        return app(FilesService::class)->folderChoices($this->parent()->team_id);
     }
 
     public function createFolder(): void
@@ -260,14 +240,16 @@ class Navigator extends Component
     /** A 10-minute signed link to read a file inline. */
     public function fileUrl(Obj $node): string
     {
-        return URL::temporarySignedRoute('files.view', now()->addMinutes(10), [
+        return UrlGenerator::temporarySignedRoute('files.view', now()->addMinutes(10), [
             'file' => $node->objectable?->uuid,
         ]);
     }
 
     public function render()
     {
-        return view('livewire.files.navigator');
+        return view('livewire.files.navigator')
+            ->layout('layouts.app')
+            ->title('Files');
     }
 
     /**
@@ -303,7 +285,13 @@ class Navigator extends Component
     private function resolveTeam(): Team
     {
         $user = auth()->user();
+        $team = $user->currentTeam ?? $user->personalTeam();
 
-        return $user->currentTeam ?? $user->personalTeam();
+        // Jetstream's CreateNewUser guarantees a personal team, so this is
+        // only reachable from a factory-made account; a clear 409 beats the
+        // TypeError a null would become one frame later.
+        abort_if($team === null, 409, 'This account has no workspace to file anything in.');
+
+        return $team;
     }
 }

@@ -52,8 +52,13 @@ class AdoptFilesTree extends Command
     {
         $dryRun = (bool) $this->option('dry-run');
 
-        if (! Schema::hasTable('objects') || ! Schema::hasTable('folders')) {
-            $this->error('The shared tree tables are not there yet - run `php artisan migrate` first.');
+        // `folders` must be the SHARED table (the one with a uuid column),
+        // not Dot.Doc's legacy one still holding the name. Without the
+        // column check, running this before 2026_09_08_000002 would write
+        // shared rows straight into the legacy table through the Folder
+        // model - the same name collision the first WIP shipped.
+        if (! Schema::hasTable('objects') || ! Schema::hasTable('folders') || ! Schema::hasColumn('folders', 'uuid')) {
+            $this->error('The shared tree tables are not ready - run `php artisan migrate` first.');
 
             return self::FAILURE;
         }
@@ -82,23 +87,16 @@ class AdoptFilesTree extends Command
     /**
      * The table Dot.Doc's legacy folders can be read from, or null when
      * there are none left to adopt (a fresh install, or a second run after
-     * 2026_09_08_000003 dropped it).
+     * 2026_09_08_000003 dropped it). Only ever the table 000002 moved them
+     * to - handle() has already proved `folders` is the shared one.
      */
     private function findLegacyTable(): ?string
     {
-        if (Schema::hasTable(self::LEGACY_TABLE)) {
-            return self::LEGACY_TABLE;
-        }
-
-        if (Schema::hasTable('folders') && ! Schema::hasColumn('folders', 'uuid')) {
-            return 'folders';
-        }
-
-        return null;
+        return Schema::hasTable(self::LEGACY_TABLE) ? self::LEGACY_TABLE : null;
     }
 
     /**
-     * @param  array<int, Obj>  $roots  team id => root Obj, filled as teams are touched
+     * @param  array<int, Obj|null>  $roots  team id => root Obj, filled as teams are touched (null under --dry-run)
      * @return array{0:int,1:array<int,int>} adopted count, legacy folder id => new Obj id
      */
     private function adoptFolders(FilesService $files, string $legacyTable, bool $dryRun, array &$roots): array
@@ -172,7 +170,7 @@ class AdoptFilesTree extends Command
 
     /**
      * @param  array<int,int>  $folderMap
-     * @param  array<int, Obj>  $roots
+     * @param  array<int, Obj|null>  $roots
      */
     private function fileDocuments(FilesService $files, array $folderMap, bool $dryRun, array &$roots): int
     {
@@ -209,7 +207,12 @@ class AdoptFilesTree extends Command
         return $filed;
     }
 
-    /** @param array<int, Obj> $roots */
+    /**
+     * The team's root, resolved once per team. A dry run memoises NULL
+     * instead - it must not create a root either.
+     *
+     * @param  array<int, Obj|null>  $roots
+     */
     private function rootFor(FilesService $files, Team $team, bool $dryRun, array &$roots): ?Obj
     {
         if (array_key_exists($team->id, $roots)) {

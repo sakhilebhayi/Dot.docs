@@ -34,6 +34,13 @@
             <span class="rail-item-text">Documents</span>
         </a>
 
+        <a href="{{ route('files.index') }}"
+           class="rail-item {{ request()->routeIs('files.index') ? 'is-current' : '' }}"
+           @if (request()->routeIs('files.index')) aria-current="page" @endif>
+            <span class="rail-initial" aria-hidden="true">FL</span>
+            <span class="rail-item-text">Files</span>
+        </a>
+
         <a href="{{ route('documents.index', ['gallery' => 1]) }}" class="rail-item">
             <span class="rail-initial" aria-hidden="true">TP</span>
             <span class="rail-item-text">Templates</span>
