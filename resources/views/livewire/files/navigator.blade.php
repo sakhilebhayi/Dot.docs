@@ -47,20 +47,27 @@
             <div class="toolbar" role="group" aria-label="Add to this folder">
                 <button type="button" class="btn" wire:click="$set('showFolderSheet', true)">New folder</button>
                 <button type="button" class="btn" wire:click="importHere">Import a document</button>
-                <form method="POST" action="{{ route('files.upload', $this->parent->uuid) }}"
-                      enctype="multipart/form-data" class="toolbar">
-                    @csrf
-                    <label class="field-label" for="files-upload">Upload a file</label>
-                    <input id="files-upload" type="file" name="file" class="field" style="flex:0 1 auto" required />
-                    <button type="submit" class="btn">Upload it</button>
-                </form>
                 <button type="button" class="btn btn-primary" wire:click="$set('showCreateSheet', true)">New document</button>
             </div>
 
+            {{-- Upload is a plain form, not a Livewire action: the file goes
+                 straight to FileUploadController, which authorises the PARENT
+                 node. It sits on its own row rather than in the toolbar above
+                 because a file input is a field, not a button. --}}
+            <form method="POST" action="{{ route('files.upload', $this->parent->uuid) }}"
+                  enctype="multipart/form-data" class="field-row">
+                @csrf
+                <label class="field-label" for="files-upload">Upload a file</label>
+                <div class="toolbar">
+                    <input id="files-upload" type="file" name="file" class="field" style="flex:1 1 260px;min-width:0" required />
+                    <button type="submit" class="btn">Upload it</button>
+                </div>
+                @error('file')
+                    <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                @enderror
+            </form>
+
             @error('object')
-                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
-            @enderror
-            @error('file')
                 <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
             @enderror
         </div>

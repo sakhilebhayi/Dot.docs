@@ -461,13 +461,7 @@
                  A readout, not a link: the button beside it is the one
                  affordance, and it opens the same .sheet folder picker the
                  documents index uses for rename. --}}
-            <span class="readout" aria-label="Filed in">
-                @forelse ($this->locationCrumbs as $crumb)
-                    @if (! $loop->first)/@endif{{ $crumb->name() }}
-                @empty
-                    Unfiled
-                @endforelse
-            </span>
+            <span class="readout" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
             <button type="button" class="tool tool-mono" x-ref="moveTrigger"
                     wire:click="$set('showMoveSheet', true)">Move</button>
             @error('location')
@@ -635,11 +629,14 @@
                     {{-- The same render, filed beside the document in the
                          shared tree instead of downloaded. --}}
                     <span class="menu-label">Save to Dot.Files</span>
+                    {{-- A bare <form>/<button>, NOT .menu-form/.btn: those are
+                         for the import picker, and their centred full-width
+                         button breaks the menu's row rhythm beside the export
+                         links above. `.menu-list button` already styles this. --}}
                     @foreach (['pdf' => 'PDF', 'word' => 'Word (.docx)', 'html' => 'HTML', 'markdown' => 'Markdown'] as $format => $label)
-                        <form action="{{ route('documents.export.save-to-files', [$document->uuid, $format]) }}"
-                              method="POST" class="menu-form">
+                        <form action="{{ route('documents.export.save-to-files', [$document->uuid, $format]) }}" method="POST">
                             @csrf
-                            <button type="submit" class="btn">{{ $label }}</button>
+                            <button type="submit">{{ $label }}</button>
                         </form>
                     @endforeach
 
