@@ -327,7 +327,19 @@ class Index extends Component
         // The style and page setup travel with the template's content, the
         // same way TemplateGallery::useTemplate() carries them - a proposal on
         // the default portrait `report` style is not the template.
-        $attrs = ['is_public' => false, 'style_key' => $template?->style_key ?: 'report'];
+        //
+        // `team_id` is the LOCATION's team, not the session's current one. A
+        // folder in another of this person's teams is a legitimate destination,
+        // and DocumentStore::create() would otherwise default the document to
+        // $owner->currentTeam while FilesService::registerDocument() stamps the
+        // tree node with $parent->team_id - two rows disagreeing about which
+        // team owns one document. Navigator::createDocument()/importHere() pass
+        // the parent's team for the same reason.
+        $attrs = [
+            'team_id' => $parent->team_id,
+            'is_public' => false,
+            'style_key' => $template?->style_key ?: 'report',
+        ];
         if ($template !== null && is_array($template->page_setup) && $template->page_setup !== []) {
             $attrs['page_setup'] = $template->page_setup;
         }
@@ -444,25 +456,41 @@ class Index extends Component
      * The folder the sheet says it is filing into, proved rather than
      * trusted.
      *
-     * LocationPicker::mount() applies the tree's stale-bookmark rule
-     * (BrowsesTheTree::folderOrRoot): an id that is gone, is not a folder or
-     * belongs to another team lands on this person's OWN root. That is right
-     * for a bookmark and wrong for a sheet the reader just filled in, so a
-     * landing that disagrees with what was asked for is refused instead of
-     * quietly filing the document somewhere nobody chose. resolve() then
-     * authorises the node it returns through ObjPolicy.
+     * This is an ACTION TARGET, so it gets the check every action target in
+     * the tree gets - the same three lines as Files\Navigator::node(): find
+     * the node, authorise it through ObjPolicy, insist it is a folder.
+     *
+     * The tree's stale-bookmark fallback (BrowsesTheTree::folderOrRoot) is
+     * deliberately not consulted. It belongs to an id arriving from a bookmark,
+     * where landing on your own root is the right answer; here it would file a
+     * document somewhere nobody chose. Asking the target directly also keeps
+     * the two failures apart, which watching the fallback substitute could
+     * never do: a folder in another team is a 403, and a folder DELETED while
+     * the sheet was open is a 404 that says so.
      */
     private function chosenLocation(): Obj
     {
-        $picker = app(LocationPicker::class);
-        $picker->mount($this->newDocumentFolderId);
+        if ($this->newDocumentFolderId === null) {
+            $here = $this->currentNode();
 
-        abort_if(
-            $this->newDocumentFolderId !== null && $picker->selectedId !== $this->newDocumentFolderId,
-            403,
-        );
+            abort_if($here === null, 409, 'There is no workspace to file this in yet.');
 
-        return $picker->resolve();
+            return $here;
+        }
+
+        $obj = Obj::find($this->newDocumentFolderId);
+
+        // abort() rather than findOrFail() for the one reason that matters to
+        // the writer: a message. The sheet still holds their name and template,
+        // and "that folder is gone" is the only thing that tells them why the
+        // document did not appear.
+        abort_if($obj === null, 404, 'That folder is no longer there. Choose another location.');
+
+        $this->authorize('view', $obj);
+
+        abort_unless($obj->isFolder(), 404, 'That location is not a folder.');
+
+        return $obj;
     }
 
     private function folderNode(int $id): Obj

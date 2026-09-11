@@ -1,9 +1,13 @@
 ---
 paths:
   - 'resources/views/**'
+  - 'resources/css/**'
+  - 'resources/js/**'
 ---
 
 # Views
+
+This file covers the CHROME as a whole, not just Blade: `resources/css/shell.css` and `resources/css/paper.css` carry the tokens and the breakpoints described here, and `resources/js/shell.js` carries the panel behaviour. `resources/js/editor/**` also has .ai/rules/editor.md, which is the more specific of the two and wins where they touch.
 
 ## The shell is "Fair Copy": the token table, and colour never appears as a literal
 The shell is **Fair Copy** (docs/superpowers/specs/2026-09-11-dot-doc-fair-copy-redesign-design.md, design note docs/design/2026-09-11-fair-copy-design-note.md). It REPLACED "Two Inks on a Desk" for Dot.Doc in Tasks 1-3 of that phase; Two Inks is not retracted as an ecosystem pattern (it is right for control-room products like Dot.Memory) but nothing in this repo should reach for it again. `--desk`, `--desk-raised`, `--rule`, `--text`, `--text-2`, `--signal`, `--good`, `.lamp`, `.readout`, `.ledger*`, `.status-line`, `.status-item`, `.desk`, `.rail-initial` and `<x-shell.lamp>` no longer exist — a view that names one is a view written against the retired system.
@@ -56,7 +60,7 @@ Three ways a panel opens, and no fourth:
 2. **`⌘\` / `Ctrl+\`**, the rail's own chord (`isRailShortcut`), which also toggles. It deliberately does not bow out inside a field: a chord with Cmd/Ctrl held types nothing, and the writer with a caret in the paper is exactly the person reaching for the panel.
 3. **An expand trigger** — `data-shell-expand="dock"` on a control, or the `open-ai-palette` / `shell:reveal-dock` window events. Revealing is ONE-WAY: a trigger never closes a panel somebody opened on purpose. Add a control that acts INTO a panel and you give it an expand trigger rather than letting it act into a panel nobody can see.
 
-**Below 900px both panels stop being columns**: `position: fixed; inset: var(--topbar-h) 0 0 0` — full-screen overlays starting below the top bar, so the toggle that opened one is still on screen. They are shown by `data-panel-user="open"`, which is written ONLY by shell.js and never by the server, so a panel the server rendered expanded for a desktop layout does not land on a phone already covering the page. Each carries a `.panel-overlay-head` close control that is the SAME `data-shell-panel-toggle` hook as the top bar's — one source of truth, one keyboard path. The dock crosses over earlier, at 1180px, where there is still room for the rail. At the same 900px breakpoint the floating contextual toolbar becomes a bottom-anchored sheet; the `!important` on its `left`/`top` is load-bearing, because resources/js/editor/ui/bubble.js writes those two as INLINE styles and that file is out of scope for chrome work.
+**Below 900px both panels stop being columns**: `position: fixed; inset: var(--topbar-h) 0 0 0` — full-screen overlays starting below the top bar, so the toggle that opened one is still on screen. They are shown by `data-panel-user="open"`, which is written ONLY by shell.js and never by the server, so a panel the server rendered expanded for a desktop layout does not land on a phone already covering the page. **The breakpoint is re-evaluated when it is CROSSED, not only at load** (`watchOverlayBreakpoints()` / `panelStateAtWidth()`): a window dragged narrow, or a tablet rotated, applies the same rule again, falling back to the state the server rendered when nothing is stored. A resize never WRITES the stored preference — that is a choice, and pressing the toggle at a narrow width still stores as it does at any other width. Each carries a `.panel-overlay-head` close control that is the SAME `data-shell-panel-toggle` hook as the top bar's — one source of truth, one keyboard path. The dock crosses over earlier, at 1180px, where there is still room for the rail, and its close control starts there too: wherever a panel is fixed OVER the canvas it carries its own way out, rather than leaving the only control on the bar behind it. At the same 900px breakpoint the floating contextual toolbar becomes a bottom-anchored sheet; the `!important` on its `left`/`top` is load-bearing, because resources/js/editor/ui/bubble.js writes those two as INLINE styles and that file is out of scope for chrome work.
 
 ## Contrast is measured on RENDERED PAIRS, not on token pairs
 `node scripts/design/contrast-dom.mjs` is the gate, and it must print ALL PASS.

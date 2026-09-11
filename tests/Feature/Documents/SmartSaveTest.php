@@ -11,6 +11,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Tests\TestCase;
 
 class SmartSaveTest extends TestCase
@@ -66,6 +67,88 @@ class SmartSaveTest extends TestCase
             ->assertForbidden();
 
         $this->assertDatabaseMissing('documents', ['title' => 'Not yours']);
+    }
+
+    /**
+     * A folder in ANOTHER of this person's own teams is a legitimate
+     * destination, and the document has to land in that team - not in the one
+     * that happens to be active in the session.
+     *
+     * DocumentStore::create() defaults team_id to $owner->currentTeam, while
+     * FilesService::registerDocument() stamps the tree node with
+     * $parent->team_id. Without the location's team in $attrs the two
+     * disagree: the node says team B and the document says team A, so team B
+     * sees a title in the Navigator it cannot open (children() does not run
+     * DocumentPolicy) and the writer loses the document the moment they switch
+     * teams. Navigator::createDocument()/importHere() pass the parent's team
+     * for exactly this reason.
+     */
+    public function test_filing_into_another_of_the_users_teams_takes_that_teams_id(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $other = $user->ownedTeams()->create(['name' => 'Second team', 'personal_team' => false]);
+        $board = app(FilesService::class)->createFolder(
+            app(FilesService::class)->root($other),
+            'Board',
+            $user,
+        );
+
+        Livewire::actingAs($user)->test(Index::class)
+            ->call('openSmartSave')
+            ->set('newDocumentName', 'Board pack')
+            ->set('newDocumentFolderId', $board->id)
+            ->call('createDocumentAtLocation')
+            ->assertRedirect();
+
+        $doc = Document::where('title', 'Board pack')->firstOrFail();
+
+        $this->assertNotSame($other->id, $user->currentTeam->id, 'the two teams must differ for this to prove anything');
+        $this->assertSame($other->id, $doc->team_id, 'the document belongs to the team it was filed in');
+        $this->assertSame($other->id, $doc->node->team_id, 'and the tree node agrees with it');
+    }
+
+    /**
+     * The race the sheet is open across: the chosen folder is deleted between
+     * the picker naming it and the document being created. That is a 404 the
+     * writer can read, NOT the 403 a foreign folder gets and not a silent
+     * refiling into their own root.
+     */
+    public function test_a_location_deleted_while_the_sheet_was_open_is_a_404_with_a_message(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $root = app(FilesService::class)->root($user->currentTeam);
+        $reports = app(FilesService::class)->createFolder($root, 'Reports', $user);
+
+        $sheet = Livewire::actingAs($user)->test(Index::class)
+            ->call('openSmartSave')
+            ->set('newDocumentName', 'Q4 Update')
+            ->set('newDocumentFolderId', $reports->id);
+
+        // Held on to before the refusal: a call that aborts leaves the
+        // Testable with no state to hand an instance back from.
+        $sheetComponent = $sheet->instance();
+
+        app(FilesService::class)->deleteObject($reports, $user);
+
+        // 404, not the 403 a folder in someone else's team gets: the two
+        // failures are told apart, which watching the stale-bookmark fallback
+        // substitute could never do.
+        $sheet->call('createDocumentAtLocation')->assertStatus(404);
+
+        // The MESSAGE cannot be read back off the wire. Livewire's
+        // RequestBroker deliberately keeps framework handling for
+        // HttpException, so what comes back is the stock error view - which
+        // prints "Not Found" and drops whatever abort() was given. Calling the
+        // action on the hydrated component is the only way to read it.
+        try {
+            $sheetComponent->createDocumentAtLocation();
+
+            $this->fail('A deleted location was accepted.');
+        } catch (NotFoundHttpException $e) {
+            $this->assertStringContainsString('no longer there', $e->getMessage());
+        }
+
+        $this->assertDatabaseMissing('documents', ['title' => 'Q4 Update']);
     }
 
     public function test_the_sheet_can_start_the_document_from_a_template(): void
@@ -137,7 +220,12 @@ class SmartSaveTest extends TestCase
             ->call('openSmartSave')
             ->assertSeeLivewire(LocationPicker::class)
             ->assertSee('Location')
-            ->assertSee('Start from');
+            ->assertSee('Start from')
+            // Two navigation landmarks on one page need two names. The ledger
+            // behind the sheet already has an "Folder path" breadcrumb, so the
+            // picker's is the destination's.
+            ->assertSeeHtml('aria-label="Destination folder path"')
+            ->assertSeeHtml('aria-label="Folder path"');
     }
 
     /**

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isRailShortcut, nextPanelState, openingPanelState } from '../../resources/js/shell.js';
+import { isRailShortcut, nextPanelState, openingPanelState, panelStateAtWidth, watchOverlayBreakpoints } from '../../resources/js/shell.js';
 
 // Spec §3 gives the left panel a keyboard route of its own: ⌘\ on a Mac,
 // Ctrl+\ everywhere else. shell.js keeps the predicate separate from the
@@ -89,4 +89,81 @@ test('nothing stored at a column width leaves the server default alone', () => {
     assert.equal(openingPanelState(null, false), null);
     assert.equal(openingPanelState('', false), null);
     assert.equal(openingPanelState('nonsense', false), null);
+});
+
+// The breakpoint is crossed LIVE as well as at load - a window dragged narrow,
+// a tablet rotated. Without this the fix above only held for the width the page
+// happened to open at: drag a 1200px window with the rail open down past 900px
+// and the overlay arrived already covering the page, which is the exact bug it
+// was meant to close.
+test('crossing into overlay width shuts the panel whatever is stored', () => {
+    assert.equal(panelStateAtWidth('expanded', true, 'expanded'), 'collapsed');
+    assert.equal(panelStateAtWidth(null, true, 'expanded'), 'collapsed');
+});
+
+test('crossing back out restores the stored preference, or the server default', () => {
+    assert.equal(panelStateAtWidth('expanded', false, 'collapsed'), 'expanded');
+    assert.equal(panelStateAtWidth('collapsed', false, 'expanded'), 'collapsed');
+
+    // Nothing stored: back to what the server rendered for this page - the
+    // editor's collapsed rail, everywhere else's open one. openingPanelState()
+    // answers null here, and null must not reach the DOM as a state.
+    assert.equal(panelStateAtWidth(null, false, 'expanded'), 'expanded');
+    assert.equal(panelStateAtWidth(null, false, 'collapsed'), 'collapsed');
+    assert.equal(panelStateAtWidth('nonsense', false, 'collapsed'), 'collapsed');
+});
+
+test('both panels get a listener on their own breakpoint, and it reports which way it went', () => {
+    const registered = [];
+    const listeners = {};
+
+    const match = (query) => {
+        const list = {
+            matches: false,
+            addEventListener(type, handler) {
+                registered.push([query, type]);
+                listeners[query] = handler;
+            },
+        };
+
+        return list;
+    };
+
+    const crossings = [];
+    const watched = watchOverlayBreakpoints(match, (name, overlay) => crossings.push([name, overlay]));
+
+    assert.deepEqual(watched, ['rail', 'dock']);
+    assert.deepEqual(registered, [
+        ['(max-width: 900px)', 'change'],
+        ['(max-width: 1180px)', 'change'],
+    ]);
+
+    // The handler reads the CHANGE event, not the stale MediaQueryList it
+    // closed over: Safari fires `change` on a list whose `matches` it has
+    // already updated, but the event is what every browser agrees on.
+    listeners['(max-width: 900px)']({ matches: true });
+    listeners['(max-width: 1180px)']({ matches: false });
+
+    assert.deepEqual(crossings, [
+        ['rail', true],
+        ['dock', false],
+    ]);
+});
+
+test('a browser with only the legacy addListener is still watched', () => {
+    const seen = [];
+    const match = () => ({
+        matches: false,
+        addListener(handler) {
+            seen.push(handler);
+        },
+    });
+
+    assert.deepEqual(watchOverlayBreakpoints(match, () => {}), ['rail', 'dock']);
+    assert.equal(seen.length, 2);
+});
+
+test('a browser with no matchMedia at all is left alone rather than thrown at', () => {
+    assert.deepEqual(watchOverlayBreakpoints(() => null, () => {}), []);
+    assert.deepEqual(watchOverlayBreakpoints(() => ({}), () => {}), []);
 });

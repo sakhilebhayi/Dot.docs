@@ -150,8 +150,11 @@ function isOverlay(name) {
  * a panel that was not on screen, so the first press of it appeared to do
  * nothing at all.
  *
- * The stored preference is deliberately NOT rewritten: it is the desktop
- * layout's answer, and a narrow window does not get to overwrite it.
+ * Booting shut does not rewrite the stored preference: a page that merely
+ * OPENED narrow leaves the desktop layout's answer alone, so the reader's wide
+ * window is still as they left it. Pressing the toggle at a narrow width is a
+ * different thing and DOES store, the same as at any other width - it is a
+ * choice, not a side effect of a viewport.
  *
  * It is a predicate, not a handler, so the rule is testable without a DOM
  * (tests/js/shell.test.js).
@@ -165,6 +168,71 @@ export function openingPanelState(stored, overlay) {
 
     return stored === 'collapsed' || stored === 'expanded' ? stored : null;
 }
+
+/**
+ * What state a panel should be in at the width it is at NOW.
+ *
+ * openingPanelState() answers null for "leave what the server rendered", which
+ * is a fine answer at boot and no answer at all once the page has been running
+ * and the panel has been moved. Crossing a breakpoint therefore falls back to
+ * the state the server DID render, remembered at boot.
+ *
+ * @param {string|null} stored
+ * @param {boolean} overlay
+ * @param {'collapsed'|'expanded'} serverDefault
+ * @returns {'collapsed'|'expanded'}
+ */
+export function panelStateAtWidth(stored, overlay, serverDefault) {
+    return openingPanelState(stored, overlay) ?? serverDefault;
+}
+
+/**
+ * Watch each panel's own overlay breakpoint and say when it is crossed.
+ *
+ * The boot-time rule was only half the fix: a window dragged from 1200px down
+ * past 900px with the rail open reproduced the very bug it closed - the overlay
+ * arriving already spread over the page - because nothing re-evaluated after
+ * load. A tablet rotated does the same thing.
+ *
+ * `match` and `onCross` are arguments rather than reached for directly so the
+ * registration and the callback are testable without a DOM
+ * (tests/js/shell.test.js). `addListener` is the pre-2021 Safari spelling.
+ *
+ * @param {(query: string) => (MediaQueryList|null)} match
+ * @param {(name: string, overlay: boolean) => void} onCross
+ * @returns {string[]} the panels actually being watched
+ */
+export function watchOverlayBreakpoints(match, onCross) {
+    return Object.keys(PANELS).filter((name) => {
+        const query = match(OVERLAY_AT[name]);
+
+        if (!query) return false;
+
+        // The event carries the new answer; the MediaQueryList the closure
+        // holds is not guaranteed to have caught up when the handler runs.
+        const handler = (event) => onCross(name, event ? event.matches === true : query.matches === true);
+
+        if (typeof query.addEventListener === 'function') {
+            query.addEventListener('change', handler);
+        } else if (typeof query.addListener === 'function') {
+            query.addListener(handler);
+        } else {
+            return false;
+        }
+
+        return true;
+    });
+}
+
+/**
+ * What the SERVER rendered for each panel, read once before anything has
+ * touched it. It is what a panel goes back to when the window is dragged wide
+ * again and nothing is stored - the editor's collapsed rail, every other
+ * page's open one.
+ *
+ * @type {Record<string, 'collapsed'|'expanded'>}
+ */
+const serverPanelState = {};
 
 function panelState(name) {
     const panel = document.getElementById(PANELS[name]);
@@ -230,9 +298,18 @@ function togglePanel(name) {
 
 function initPanels() {
     Object.keys(PANELS).forEach((name) => {
+        serverPanelState[name] = panelState(name);
+
         const state = openingPanelState(readStoredPanel(name), isOverlay(name));
         if (state !== null) applyPanel(name, state);
     });
+
+    // Crossing the breakpoint applies the same rule again, and deliberately
+    // does NOT store: a resize is not somebody choosing anything.
+    watchOverlayBreakpoints(
+        (query) => (typeof window.matchMedia === 'function' ? window.matchMedia(query) : null),
+        (name, overlay) => applyPanel(name, panelStateAtWidth(readStoredPanel(name), overlay, serverPanelState[name] ?? 'expanded')),
+    );
 
     document.addEventListener('click', (event) => {
         const toggle = event.target.closest('[data-shell-panel-toggle]');

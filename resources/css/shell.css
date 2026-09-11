@@ -412,21 +412,22 @@ body {
 }
 
 /*
- * The navigator's groups scroll; the account block is pinned to the foot. The
- * leftover height is absorbed HERE rather than by a margin-top:auto on the
- * foot, which is what opened the 190px void between the last nav group and the
- * user block.
- */
-/*
  * The overlay's close control. It exists in the markup at every width and is
- * shown only where a panel actually covers the page (the <900px block at the
- * foot of this file) — a "Close the panel" button beside a panel that is a
- * column is a control for a state the reader is not in.
+ * shown only where a panel actually covers the page — the <900px block at the
+ * foot of this file, and the dock's own drawer from 1180px down, where the dock
+ * is already fixed over the canvas. A "Close the tools" button beside a panel
+ * that is still a column is a control for a state the reader is not in.
  */
 .panel-overlay-head {
     display: none;
 }
 
+/*
+ * The navigator's groups scroll; the account block is pinned to the foot. The
+ * leftover height is absorbed HERE rather than by a margin-top:auto on the
+ * foot, which is what opened the 190px void between the last nav group and the
+ * user block.
+ */
 .rail-scroll {
     flex: 1 1 auto;
     min-height: 0;
@@ -1611,6 +1612,20 @@ button.list-row {
 
     .dock[data-panel-user='open'] {
         display: flex;
+    }
+
+    /*
+     * The dock is already a sheet over the canvas HERE, not at 900px, so its
+     * way out starts here too. Without this the drawer could only be shut from
+     * the top bar behind it, which is a longer reach than the control sitting
+     * at the top of the thing covering the page. The rail is still a column at
+     * this width and keeps its `display: none`.
+     */
+    .dock .panel-overlay-head {
+        display: flex;
+        flex: none;
+        justify-content: flex-end;
+        padding: var(--s3) var(--s3) 0;
     }
 }
 

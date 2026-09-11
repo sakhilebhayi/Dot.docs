@@ -278,6 +278,16 @@ class FairCopyTest extends TestCase
         $this->assertStringContainsString(".rail[data-panel-user='open'],", $overlay);
         $this->assertStringContainsString(".dock[data-panel-user='open'] {", $overlay);
         $this->assertMatchesRegularExpression('/\.panel-overlay-head \{[^}]*display: flex;/', $overlay);
+
+        // The dock is a fixed drawer over the canvas from 1180px DOWN, not from
+        // 900px, so its way out has to start where the drawer does - otherwise
+        // there is a band of widths where the only control that shuts the thing
+        // covering the page is the one behind it. The rail is still a column
+        // here and must NOT get the control.
+        $drawer = $this->mediaBlock($shell, '@media (max-width: 1180px)');
+
+        $this->assertMatchesRegularExpression('/\.dock \.panel-overlay-head \{[^}]*display: flex;/', $drawer);
+        $this->assertStringNotContainsString('.rail .panel-overlay-head', $drawer);
     }
 
     /**

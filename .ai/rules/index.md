@@ -1,6 +1,6 @@
 # Project Rules Index
 
-Before planning or editing, find the row whose globs match the file's path and read that rule file.
+Before planning or editing, find EVERY row whose globs match the file's path and read those rule files - more than one row can match (a file under `resources/js/editor/**` is covered by both `editor.md` and `views.md`).
 
 | Applies to | Rule file |
 | --- | --- |
@@ -18,4 +18,4 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Search/** | .ai/rules/search.md |
 | app/Styles/** | .ai/rules/styles.md |
 | app/Services/WebhookService.php, app/Support/SsrfGuard.php | .ai/rules/support.md |
-| resources/views/** | .ai/rules/views.md |
+| resources/views/**, resources/css/**, resources/js/** | .ai/rules/views.md |

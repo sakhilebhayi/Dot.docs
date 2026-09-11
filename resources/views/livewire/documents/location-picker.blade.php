@@ -13,7 +13,12 @@
 <div class="field-row">
     <span class="field-label" id="location-picker-label">Location</span>
 
-    <nav class="toolbar" aria-label="Folder path" style="margin-bottom:var(--s2)">
+    {{--
+        "Destination folder path", not "Folder path": the page behind this sheet
+        already has a breadcrumb by that name, and two navigation landmarks with
+        the same label are two rows a screen reader cannot tell apart.
+    --}}
+    <nav class="toolbar" aria-label="Destination folder path" style="margin-bottom:var(--s2)">
         @foreach ($trail as $crumb)
             @if (! $loop->first)
                 <span class="micro" aria-hidden="true">/</span>

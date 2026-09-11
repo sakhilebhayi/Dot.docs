@@ -5,6 +5,7 @@ namespace Tests\Feature\Documents;
 use App\Files\FilesService;
 use App\Livewire\Documents\LocationPicker;
 use App\Models\User;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -48,5 +49,32 @@ class LocationPickerTest extends TestCase
         Livewire::actingAs($user)->test(LocationPicker::class, ['currentFolderId' => null])
             ->call('selectFolder', $strangersRoot->id)
             ->assertForbidden();
+    }
+
+    /**
+     * resolve()'s OWN authorisation, with nothing else in front of it.
+     *
+     * `selectedId` is a public Livewire property, so it can be written without
+     * ever calling selectFolder(). Going through `->set('selectedId', ...)`
+     * does NOT prove this method: set() re-renders, and render()'s openFolder()
+     * snaps a foreign id back to the viewer's own root before resolve() is ever
+     * reached. Writing the property straight onto the instance skips that
+     * snap-back, which is the only way to exercise the check inside resolve()
+     * itself - the one that has to survive a refactor of everything around it.
+     */
+    public function test_resolve_refuses_a_folder_outside_the_users_team_on_its_own(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $stranger = User::factory()->withPersonalTeam()->create();
+        $strangersRoot = app(FilesService::class)->root($stranger->currentTeam);
+
+        $component = Livewire::actingAs($user)->test(LocationPicker::class, ['currentFolderId' => null]);
+        $picker = $component->instance();
+
+        $picker->selectedId = $strangersRoot->id;
+
+        $this->expectException(AuthorizationException::class);
+
+        $picker->resolve();
     }
 }
