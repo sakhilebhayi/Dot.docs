@@ -212,10 +212,13 @@
             } else if (name === 'search') {
                 // The DocumentSearch-backed box is the documents ledger's. A
                 // selection travels with the command as `q`, which Index reads
-                // off the query string.
+                // off the query string; `focus=search` puts the cursor in that
+                // box on arrival. Without it, searching with nothing selected
+                // landed on exactly the page `recent.open` lands on, with
+                // nothing to type into — two palette rows, one destination.
                 const term = (params && params.term) || '';
-                window.location.href = '{{ route('documents.index') }}' +
-                    (term ? '?q=' + encodeURIComponent(term) : '');
+                window.location.href = '{{ route('documents.index') }}?focus=search' +
+                    (term ? '&q=' + encodeURIComponent(term) : '');
             } else if (name === 'ai' && params && params.action) {
                 // The assistant lives in the dock, which starts collapsed on
                 // this route — asking it something has to open it, the same
@@ -225,8 +228,24 @@
                     action: params.action,
                     param: params.param || '',
                 });
-            } else if (name === 'style.switch' && params && params.key) {
-                @this.setStyle(params.key);
+            } else if (name === 'style.switch') {
+                // The picker sends a key; the palette sends nothing at all
+                // (`run(editor, name)` passes no params), and a branch that
+                // only answered the first case made the style row in ⌘K a row
+                // that silently did nothing. With no key the command's
+                // destination is the picker itself.
+                if (params && params.key) {
+                    @this.setStyle(params.key);
+                } else {
+                    const picker = document.getElementById('doc-style-picker');
+                    if (picker) {
+                        picker.focus();
+                        // Chrome drops the list open outright; where it is not
+                        // supported (or the gesture does not carry), the focus
+                        // ring on the picker is the answer on its own.
+                        try { picker.showPicker(); } catch (ignored) { /* no user gesture */ }
+                    }
+                }
             } else if (name === 'comment') {
                 if (!@this.commentSidebarOpen) @this.toggleCommentSidebar();
             }

@@ -64,8 +64,11 @@
 
     @if ($document)
         <nav class="rail-group" aria-label="This document">
+            {{-- No title line here. The editor's own field names the document
+                 (once, and editably); repeating it as static text in the panel
+                 you open to reach the OUTLINE put it on screen twice. The
+                 label above is the section heading this group needs. --}}
             <div class="rail-label">This document</div>
-            <p class="rail-title">{{ $document->title ?: 'Untitled' }}</p>
 
             <a href="{{ route('documents.edit', $document->uuid) }}"
                class="rail-item {{ $isEditor ? 'is-current' : '' }}"

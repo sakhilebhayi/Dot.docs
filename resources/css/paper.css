@@ -370,8 +370,17 @@
  * A second row is a different KIND of tool from the one above it (marks, then
  * the heading or the table), so the two get a hairline — the one place in this
  * toolbar where content would otherwise be ambiguous.
+ *
+ * It is scoped by the variant bubble.js writes onto the toolbar, NOT by an
+ * adjacent-sibling selector. Every row exists in the DOM at all times and the
+ * unwanted ones are `hidden`; `+` does not care whether the FIRST element of
+ * the pair is hidden, so the image variant — whose only row follows the hidden
+ * table row — drew a hairline above nothing. Only the variants that genuinely
+ * stack two visible rows are named here.
  */
-.dotdoc-bubble-row + .dotdoc-bubble-row:not([hidden]) {
+[data-variant='heading'] .dotdoc-bubble-heading,
+[data-variant='table'] .dotdoc-bubble-table,
+.dotdoc-bubble-link:not([hidden]) {
     padding-top: 3px;
     border-top: 1px solid var(--line);
 }

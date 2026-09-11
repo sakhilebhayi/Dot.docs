@@ -124,6 +124,24 @@ class ContextualToolbarTest extends TestCase
         $this->assertSame(1, substr_count($html, 'id="doc-title"'));
         $this->assertStringContainsString('wire:model.blur="title"', $html);
 
+        // And the rail does not state it a second time. The rail's contents
+        // are rendered by the server whether or not it is open — `⌘\` only
+        // changes `data-panel-state` — so what is measured here is exactly
+        // what the writer sees the moment they open it for the outline.
+        $this->assertSame(1, preg_match('/<aside id="shell-rail".*?<\/aside>/s', $html, $rail));
+        $this->assertStringContainsString(
+            'This document',
+            $rail[0],
+            'the rail lost the label that does the section-naming job',
+        );
+        $this->assertStringContainsString('data-shell-outline', $rail[0]);
+        $this->assertStringNotContainsString(
+            'Singular Title',
+            $rail[0],
+            'the rail repeats the document title the persistent bar already carries',
+        );
+        $this->assertStringNotContainsString('rail-title', $html);
+
         // Every OTHER document route still names the document up there, because
         // on those pages nothing else does.
         foreach ([
@@ -146,8 +164,11 @@ class ContextualToolbarTest extends TestCase
 
     /**
      * The palette's `search` entry carries the writer's selection to the
-     * ledger as `?q=`. That query string is the backing the entry claims, so
-     * it is measured here rather than assumed.
+     * ledger as `?q=` and asks for the box itself with `?focus=search`. Both
+     * are the backing the entry claims, so both are measured here rather than
+     * assumed — without the second one, "Search documents" chosen with nothing
+     * selected lands on precisely the page "Open another document" lands on,
+     * with the cursor nowhere.
      */
     public function test_the_ledger_reads_a_search_off_the_query_string(): void
     {
@@ -162,6 +183,40 @@ class ContextualToolbarTest extends TestCase
             ->assertOk()
             ->assertSee('Quarterly forecast')
             ->assertDontSee('Holiday rota');
+    }
+
+    public function test_the_ledger_puts_the_cursor_in_the_search_box_when_asked_to(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+
+        $focused = $this->actingAs($user)
+            ->get(route('documents.index', ['focus' => 'search']))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertSame(1, preg_match('/<input id="doc-search"[^>]*>/', $focused, $field));
+        $this->assertStringContainsString('autofocus', $field[0]);
+
+        // ...and not otherwise: a page anyone opens from the rail must not
+        // steal the caret from whatever they came to read.
+        $this->app->forgetScopedInstances();
+
+        $plain = $this->actingAs($user)->get(route('documents.index'))->assertOk()->getContent();
+
+        $this->assertSame(1, preg_match('/<input id="doc-search"[^>]*>/', $plain, $unfocused));
+        $this->assertStringNotContainsString('autofocus', $unfocused[0]);
+    }
+
+    /**
+     * The editor's palette is what sends that query string, so the page has to
+     * be the one asking for it — an entry that navigates somewhere the page
+     * does not read is the dead row in a different costume.
+     */
+    public function test_the_palette_search_entry_asks_the_ledger_for_its_search_box(): void
+    {
+        $blade = file_get_contents(resource_path('views/livewire/documents/editor.blade.php'));
+
+        $this->assertStringContainsString('?focus=search', $blade);
     }
 
     /**
@@ -187,13 +242,37 @@ class ContextualToolbarTest extends TestCase
             $this->assertStringContainsString($present, $registry, "the registry is missing {$present}");
         }
 
-        foreach (['find.replace', 'insert.chart', 'ai.analyze'] as $absent) {
-            $this->assertStringNotContainsString(
-                $absent,
-                $registry,
-                "{$absent} was added to the registry with no implementation behind it",
-            );
-        }
+        // The NEGATIVE half — that find/replace, insert-chart and an `analyze`
+        // AI pass are absent — used to live here as three
+        // assertStringNotContainsString calls against this same source text.
+        // They could not fail on any tree: the AI entries are generated as
+        // `ai.${name}` from a tuple list, so the literal 'ai.analyze' would
+        // never appear however the feature was added. That half now measures
+        // the list the module actually BUILDS, in
+        // tests/js/registry.test.js ("the registry names nothing the
+        // application cannot actually do"), where the generated names exist.
+    }
+
+    /**
+     * The editor's whole Alpine component is the value of ONE html attribute,
+     * `x-data="..."`. A double quote anywhere inside it — in a string, or in a
+     * comment naming a menu row — closes the attribute early, and everything
+     * after it becomes stray markup: Alpine then reports `SyntaxError:
+     * Unexpected token` and the page loses the editor, the save word and every
+     * toolbar binding at once. Nothing else in the suite can see that, because
+     * the server renders it perfectly happily; this round shipped it for
+     * exactly as long as it took to open a browser.
+     */
+    public function test_the_editors_alpine_component_survives_being_an_html_attribute(): void
+    {
+        $html = $this->editorHtml();
+
+        // `[^"]*` is not a shortcut here — it is precisely how a browser reads
+        // the attribute, so a quote inside the component makes this match stop
+        // short of the component's end.
+        $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"/s', $html, $alpine));
+        $this->assertStringContainsString('hostCommand(name, params)', $alpine[1]);
+        $this->assertStringEndsWith('}', trim($alpine[1]));
     }
 
     /**
@@ -227,5 +306,21 @@ class ContextualToolbarTest extends TestCase
         // The AI passes arrive under one name with an action parameter.
         $this->assertStringContainsString("name === 'ai'", $blade);
         $this->assertStringContainsString("'shell:reveal-dock'", $blade);
+
+        /*
+         * A branch is not enough on its own: `style.switch` reaches the page
+         * from the palette with NO params (palette.js calls `run(editor, key)`),
+         * and the branch was guarded on `params.key`, so choosing "Switch
+         * document style" from ⌘K fell straight through and did nothing at
+         * all. The handler has to answer the no-key case too, and its
+         * destination is the picker in the persistent bar.
+         */
+        $this->assertStringNotContainsString(
+            "name === 'style.switch' && params && params.key",
+            $blade,
+            'style.switch is guarded on a parameter the palette never sends',
+        );
+        $this->assertStringContainsString("getElementById('doc-style-picker')", $blade);
+        $this->assertStringContainsString('id="doc-style-picker"', $blade);
     }
 }

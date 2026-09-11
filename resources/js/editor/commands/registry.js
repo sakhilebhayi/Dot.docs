@@ -318,9 +318,15 @@ export const commands = [
         },
     },
     {
+        // `contextual` for the same reason as `image.alt` above: chosen from
+        // the palette with no image selected it can only refuse, and a row
+        // that silently does nothing is worse than an absent one (spec §4).
+        // The floating toolbar's image variant is where it is reachable, and
+        // that variant only exists when an image IS selected.
         name: 'image.remove',
         title: 'Remove this image',
         group: 'media',
+        contextual: true,
         run: (editor) => (editor.isActive('image') ? editor.chain().focus().deleteSelection().run() : false),
     },
 
@@ -407,6 +413,11 @@ export const commands = [
         run: (editor) => host(editor, 'ai', { action, param }),
     })),
     {
+        // Chosen from the palette this carries NO key — `run(editor, name)`
+        // passes none — so the page's handler opens the style picker itself
+        // rather than dropping the command on the floor. That destination is
+        // what keeps this entry off the dead-row list; see hostCommand() in
+        // resources/views/livewire/documents/editor.blade.php.
         name: 'style.switch',
         title: 'Switch document style',
         group: 'system',

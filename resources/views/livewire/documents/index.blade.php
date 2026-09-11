@@ -33,8 +33,13 @@
         <div class="panel-body">
             <div class="field-row">
                 <label class="field-label" for="doc-search">Search titles and text</label>
+                {{-- `?focus=search` is what the editor's ⌘K "Search documents"
+                     row arrives with: without it that row landed on this page
+                     with the cursor nowhere, which is the same thing "Open
+                     another document" does. --}}
                 <input id="doc-search" wire:model.live.debounce.300ms="search" type="search" class="field"
-                       placeholder="A word you remember writing" />
+                       placeholder="A word you remember writing"
+                       @if (request()->query('focus') === 'search') autofocus @endif />
             </div>
 
             <div class="field-row">

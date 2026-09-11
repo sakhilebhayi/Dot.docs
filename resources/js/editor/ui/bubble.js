@@ -16,6 +16,43 @@ import { selectionShape, toolbarVariantFor } from './toolbarVariant';
  */
 export { selectionShape, toolbarVariantFor } from './toolbarVariant';
 
+/** The keys that activate a focused button, per the native `<button>`. */
+const ACTIVATION_KEYS = ['Enter', ' ', 'Spacebar'];
+
+/**
+ * Bind one toolbar button's activation.
+ *
+ * `mousedown` is what a MOUSE press has to use: the default must be prevented
+ * before the editor loses its selection to the click, and a `click` listener
+ * fires too late for that. But a keyboard press never produces `mousedown`, so
+ * a button bound that way ALONE cannot be operated without a mouse at all —
+ * which is how "Alt text", the one command whose whole purpose is
+ * accessibility, became unreachable from the keyboard. `Enter` and `Space` are
+ * therefore bound explicitly, with the default prevented so the browser does
+ * not also synthesise a click (and so Space does not scroll the page).
+ *
+ * Exported so `tests/js/toolbar.test.js` can measure it: the rule is about
+ * which events are bound, which needs no DOM to check.
+ *
+ * @param {{addEventListener: Function}} el
+ * @param {() => void} onActivate
+ */
+export function bindActivation(el, onActivate) {
+    el.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        onActivate();
+    });
+
+    el.addEventListener('keydown', (event) => {
+        if (!ACTIVATION_KEYS.includes(event.key)) {
+            return;
+        }
+
+        event.preventDefault();
+        onActivate();
+    });
+}
+
 /** The marks a writer reaches for mid-sentence. */
 const MARKS = [
     { name: 'bold', label: 'B', title: 'Bold', className: 'is-bold' },
@@ -61,8 +98,8 @@ export function installBubble(editor) {
         return el;
     };
 
-    /** Build one button in a row. `onPress` runs on mousedown, before the
-     *  editor can lose its selection to the click. */
+    /** Build one button in a row. Activation is bound by `bindActivation`, so
+     *  the button answers a mouse press AND a keyboard one. */
     const makeButton = (row, { label, title, className = '', onPress }) => {
         const el = document.createElement('button');
         el.type = 'button';
@@ -70,8 +107,7 @@ export function installBubble(editor) {
         el.setAttribute('aria-label', title);
         el.textContent = label;
         el.className = `dotdoc-bubble-btn${className ? ` ${className}` : ''}`;
-        el.addEventListener('mousedown', (event) => {
-            event.preventDefault();
+        bindActivation(el, () => {
             onPress();
             paint();
         });
@@ -207,8 +243,7 @@ export function installBubble(editor) {
     linkClear.type = 'button';
     linkClear.textContent = 'Unlink';
     linkClear.className = 'dotdoc-bubble-btn dotdoc-bubble-btn-word';
-    linkClear.addEventListener('mousedown', (event) => {
-        event.preventDefault();
+    bindActivation(linkClear, () => {
         editor.chain().focus().unsetLink().run();
         closeLink();
     });
@@ -309,6 +344,15 @@ export function installBubble(editor) {
     }
 
     function hide() {
+        // Focus sitting on one of the toolbar's own controls holds it open.
+        // Reaching a button from the keyboard means leaving the editor, and
+        // the editor reports `blur` the instant that happens — hiding then
+        // takes the button out from under the press, which is why "Alt text"
+        // stayed unreachable without a mouse even once it answered Enter.
+        if (dom.contains(document.activeElement)) {
+            return;
+        }
+
         // A row the writer is typing into holds the toolbar open — losing the
         // link field mid-URL because the selection reported itself again is
         // how the old bubble lost a half-typed address.
@@ -369,7 +413,35 @@ export function installBubble(editor) {
     }
 
     const onSelection = () => place();
-    const onBlur = () => hide();
+
+    // `relatedTarget` is the element ABOUT to take focus, which is the only
+    // reading available while the blur is still in flight (`activeElement` is
+    // `body` at that moment). Tabbing into the toolbar is not leaving it.
+    const onBlur = ({ event }) => {
+        if (event?.relatedTarget && dom.contains(event.relatedTarget)) {
+            return;
+        }
+
+        hide();
+    };
+
+    // ...and the other half of the same rule: once focus leaves the toolbar
+    // for something that is not the writing, the toolbar has nothing to be
+    // open for.
+    const onFocusOut = (event) => {
+        if (event.relatedTarget && dom.contains(event.relatedTarget)) {
+            return;
+        }
+        if (editor.view.hasFocus()) {
+            return;
+        }
+
+        closeLink();
+        altRow.hidden = true;
+        dom.hidden = true;
+    };
+
+    dom.addEventListener('focusout', onFocusOut);
 
     editor.on('selectionUpdate', onSelection);
     // A table tool adds a row WITHOUT moving the selection, so the toolbar has
@@ -382,6 +454,7 @@ export function installBubble(editor) {
         editor.off('selectionUpdate', onSelection);
         editor.off('update', onSelection);
         editor.off('blur', onBlur);
+        dom.removeEventListener('focusout', onFocusOut);
         dom.remove();
     };
 }

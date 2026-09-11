@@ -488,17 +488,6 @@ body {
     color: var(--ink-soft);
 }
 
-.rail-title {
-    margin: 0 0 var(--s2);
-    padding: 0 var(--s2);
-    font-family: var(--font-display);
-    font-optical-sizing: auto;
-    font-size: var(--t-body);
-    font-weight: 500;
-    color: var(--ink);
-    overflow-wrap: anywhere;
-}
-
 .rail-foot {
     flex: none;
     padding: var(--s3) var(--s4) var(--s4);
@@ -1341,13 +1330,6 @@ button.list-row {
 
 .tool-mono {
     font-size: var(--t-micro);
-}
-
-.tool-sep {
-    width: 1px;
-    align-self: stretch;
-    margin: 0 var(--s1);
-    background: var(--line);
 }
 
 /* A <label> acting as a tool (the image picker wraps a hidden file input). */

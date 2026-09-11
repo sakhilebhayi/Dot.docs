@@ -1,17 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-// The task brief writes this test against `ui/bubble.js`. Node cannot load
-// that file: it imports the command registry with an extensionless specifier
-// (which only Vite resolves) and the registry pulls in @tiptap/core, so
-// `node --test` dies with ERR_MODULE_NOT_FOUND before a single case runs. The
-// project's own rule for this (.ai/rules/editor.md) is that anything the test
-// runner has to reach lives in a dependency-free module — attrs.js, guards.js
-// and validation.js are all shaped this way. So the decision itself lives
-// here, and `ui/bubble.js` re-exports both names verbatim, which is the
-// interface the brief actually promises ("bubble.js exports
-// toolbarVariantFor(selectionShape)").
+// The task brief writes this test against `ui/bubble.js`. The decision itself
+// lives in the dependency-free `ui/toolbarVariant.js` — the project's own rule
+// for anything the test runner has to reach (.ai/rules/editor.md), which
+// attrs.js, guards.js and validation.js all follow — and bubble.js re-exports
+// both names verbatim, which is the interface the brief actually promises
+// ("bubble.js exports toolbarVariantFor(selectionShape)"). The rules are
+// measured against the pure module...
 import { selectionShape, toolbarVariantFor } from '../../resources/js/editor/ui/toolbarVariant.js';
+import { loadEditorModule } from './moduleLoader.js';
+
+// ...and `ui/bubble.js` itself, loaded through the harness that resolves the
+// extensionless specifiers Vite resolves (see tests/js/moduleLoader.js), so
+// the re-export the brief's interface depends on is measured rather than
+// assumed.
+const bubble = await loadEditorModule('ui/bubble.js');
 
 test('text selection maps to the text toolbar variant', () => {
     assert.equal(toolbarVariantFor({ type: 'text' }), 'text');
@@ -116,4 +120,78 @@ test('the shape a selection reports is a shape the variant map understands', () 
     shapes.forEach((shape) => {
         assert.notEqual(toolbarVariantFor(shape), null, `no variant for ${JSON.stringify(shape)}`);
     });
+});
+
+/*
+ * The interface the brief names: "bubble.js exports
+ * toolbarVariantFor(selectionShape)". The rules live in toolbarVariant.js and
+ * bubble.js re-exports them, so a dropped `export { … } from './toolbarVariant'`
+ * would leave every case above green while breaking the contract Task 3 was
+ * told to rely on.
+ */
+
+test('bubble.js re-exports the decision it is the named interface for', () => {
+    assert.equal(bubble.toolbarVariantFor, toolbarVariantFor);
+    assert.equal(bubble.selectionShape, selectionShape);
+    assert.equal(typeof bubble.installBubble, 'function');
+});
+
+/*
+ * Button activation.
+ *
+ * `mousedown` is the only event a mouse press may use here — the default has
+ * to be prevented before the editor loses its selection — but a button bound
+ * to mousedown ALONE cannot be pressed from the keyboard at all, which is how
+ * "Alt text", the one command whose entire purpose is accessibility, became
+ * mouse-only. `bindActivation` is exported so the rule can be measured without
+ * a DOM: it is a statement about which events are bound and which keys count.
+ */
+
+/** The smallest thing that answers `addEventListener`. */
+function fakeButton() {
+    const listeners = new Map();
+
+    return {
+        listeners,
+        addEventListener(type, handler) {
+            listeners.set(type, handler);
+        },
+        fire(type, event = {}) {
+            let prevented = false;
+            listeners.get(type)?.({ preventDefault: () => { prevented = true; }, ...event });
+
+            return prevented;
+        },
+    };
+}
+
+test('a toolbar button answers the mouse and the keyboard, not just the mouse', () => {
+    const el = fakeButton();
+    let pressed = 0;
+    bubble.bindActivation(el, () => { pressed += 1; });
+
+    assert.deepEqual([...el.listeners.keys()], ['mousedown', 'keydown']);
+
+    assert.equal(el.fire('mousedown'), true, 'the mouse press must prevent the default');
+    assert.equal(pressed, 1);
+
+    assert.equal(el.fire('keydown', { key: 'Enter' }), true);
+    assert.equal(pressed, 2, 'Enter on a focused button did nothing');
+
+    assert.equal(el.fire('keydown', { key: ' ' }), true);
+    assert.equal(pressed, 3, 'Space on a focused button did nothing');
+});
+
+test('a key that is not an activation key leaves the button alone', () => {
+    const el = fakeButton();
+    let pressed = 0;
+    bubble.bindActivation(el, () => { pressed += 1; });
+
+    // Tab and the arrows have to travel: swallowing them would trap focus in
+    // the toolbar.
+    for (const key of ['Tab', 'ArrowRight', 'a', 'Escape']) {
+        assert.equal(el.fire('keydown', { key }), false, `${key} was swallowed`);
+    }
+
+    assert.equal(pressed, 0);
 });
