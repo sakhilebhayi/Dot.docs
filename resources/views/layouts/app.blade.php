@@ -22,7 +22,27 @@
     $cookieTheme = request()->cookie('theme');
     $theme = $cookieTheme === 'dark' ? 'dark' : ($cookieTheme === 'light' ? 'light' : 'system');
     $shellDocument = app(\App\Support\ShellContext::class)->document();
-    $pageTitle = trim((string) ($title ?? ''));
+
+    /*
+     * What this page is called, in its own words.
+     *
+     * A full-page Livewire component says it with ->title(); a Jetstream page
+     * says it through the `header` slot; anything else can pass a `title` slot.
+     * The last resort is the route's own first word — NEVER config('app.name').
+     * Spec §3 retired the platform-name readout, and a top bar that falls back
+     * to "Dot.Doc" in Fraunces is that readout with a new typeface. The brand
+     * keeps the tab title and the rail's colophon, which is where a brand goes.
+     */
+    $pageTitle = trim(strip_tags((string) ($title ?? '')));
+
+    if ($pageTitle === '') {
+        $pageTitle = trim(strip_tags((string) ($header ?? '')));
+    }
+
+    $topbarTitle = $shellDocument?->title
+        ?: ($pageTitle !== ''
+            ? $pageTitle
+            : \Illuminate\Support\Str::headline(\Illuminate\Support\Str::before((string) request()->route()?->getName(), '.')));
 
     // The editor is the one route with a canvas competing for width, so it is
     // the one route where both panels start collapsed (spec §2.4). Everywhere
@@ -86,9 +106,7 @@
         <x-shell.dock :document="$shellDocument" :state="$dockState" />
 
         <x-shell.topbar :rail-expanded="$railState === 'expanded'" :save-owner="$isEditor">
-            <x-slot:title>
-                {{ $shellDocument?->title ?: ($pageTitle !== '' ? $pageTitle : config('app.name')) }}
-            </x-slot:title>
+            <x-slot:title>{{ $topbarTitle }}</x-slot:title>
 
             <x-slot:actions>
                 <button type="button"

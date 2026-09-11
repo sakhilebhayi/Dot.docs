@@ -1,4 +1,9 @@
 <x-app-layout>
+    {{-- The top bar names the PAGE, not the platform (spec §3), and this is the
+         one page in the shell with no Livewire ->title() of its own. The word
+         matches the rail's entry for it, so the two never disagree. --}}
+    <x-slot name="title">Dashboard</x-slot>
+
     <div class="page">
         <div class="page-head">
             <div>
