@@ -135,6 +135,45 @@ function panelState(name) {
 }
 
 /**
+ * What a toggle does, whatever asked for it: the click in the top bar and the
+ * keyboard chord below both come through here, so they can never disagree
+ * about which way the panel is going. Anything unrecognised OPENS - a panel
+ * nobody can see is the state worth escaping.
+ *
+ * @param {string|null} current
+ * @returns {'collapsed'|'expanded'}
+ */
+export function nextPanelState(current) {
+    return current === 'expanded' ? 'collapsed' : 'expanded';
+}
+
+/**
+ * Spec §3 gives the left panel a keyboard route of its own: ⌘\ on a Mac, Ctrl+\
+ * everywhere else.
+ *
+ * It is a predicate, not a handler, so the only thing worth pinning — WHICH
+ * chord counts — is testable without a DOM (tests/js/shell.test.js).
+ *
+ * It deliberately does NOT bow out inside a field or the document itself. A
+ * bare-key shortcut has to, or it eats what somebody is typing; a chord with
+ * Cmd/Ctrl held types nothing, and the writer with a caret in the paper is
+ * exactly the person reaching for the panel. What it does refuse is a modifier
+ * it never asked for — ⌥\ is a real character on a Mac keyboard («) and ⇧\ is
+ * the pipe — and a held key repeating, which would flap the panel open and shut
+ * for as long as the chord was down.
+ *
+ * @param {KeyboardEvent|null} event
+ * @returns {boolean}
+ */
+export function isRailShortcut(event) {
+    if (!event || event.key !== '\\' || event.repeat) return false;
+    if (event.altKey || event.shiftKey) return false;
+
+    // Exactly one of the two: Ctrl+⌘+\ is not this shortcut either.
+    return event.metaKey !== event.ctrlKey;
+}
+
+/**
  * Show a panel because something the writer just did needs it: invoking the
  * assistant, opening comments, attaching a file. Expanding is one-way — this
  * never closes a panel the writer opened on purpose.
@@ -143,6 +182,12 @@ function revealPanel(name) {
     if (panelState(name) === 'expanded') return;
     applyPanel(name, 'expanded');
     storePanel(name, 'expanded');
+}
+
+function togglePanel(name) {
+    const next = nextPanelState(panelState(name));
+    applyPanel(name, next);
+    storePanel(name, next);
 }
 
 function initPanels() {
@@ -157,9 +202,7 @@ function initPanels() {
             const name = toggle.getAttribute('data-shell-panel-toggle');
             if (!PANELS[name]) return;
 
-            const next = panelState(name) === 'collapsed' ? 'expanded' : 'collapsed';
-            applyPanel(name, next);
-            storePanel(name, next);
+            togglePanel(name);
 
             return;
         }
@@ -168,6 +211,16 @@ function initPanels() {
         // acting into a panel nobody can see.
         const reveal = event.target.closest('[data-shell-expand]');
         if (reveal) revealPanel(reveal.getAttribute('data-shell-expand'));
+    });
+
+    // ⌘\ / Ctrl+\ is the rail's own route, and it TOGGLES rather than reveals:
+    // the panel it opens is the one thing on the editor competing with the page
+    // for width, so the same chord has to put it away again.
+    document.addEventListener('keydown', (event) => {
+        if (!isRailShortcut(event)) return;
+
+        event.preventDefault();
+        togglePanel('rail');
     });
 
     // ⌘K / Ctrl+Shift+K reach the assistant without passing through any button,
@@ -210,8 +263,13 @@ function setSaveState(tone, word) {
     const item = document.getElementById('shell-save');
     if (!item || !item.hasAttribute('data-shell-save-owner')) return;
 
-    item.className = `status-word status-word-${tone} topbar-status`;
+    // Only the TONE class is swapped. Rewriting className wholesale took
+    // `topbar-status` with it (and would take anything a later task adds to
+    // #shell-save), which is how the word ended up unpositioned in the bar.
+    SAVE_TONES.forEach((name) => item.classList.toggle(`status-word-${name}`, name === tone));
 
+    // The word span carries `data-shell-save-word`; lastElementChild is kept
+    // only as a floor, for markup this file did not render.
     const text = item.querySelector('[data-shell-save-word]') ?? item.lastElementChild;
     if (text) text.textContent = word;
 }
@@ -382,8 +440,12 @@ function boot() {
     initDockTabs();
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-} else {
-    boot();
+// Guarded so tests/js/shell.test.js can import the two predicates above
+// without a DOM; in the browser this is the only entry point.
+if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
+    }
 }
