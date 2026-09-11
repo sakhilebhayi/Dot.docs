@@ -101,27 +101,67 @@
             <span wire:loading wire:target="search,filter,filterByTag" class="micro">Filtering</span>
         </div>
 
-        {{-- The "nothing matched" branch is tested FIRST: with no subfolders in
-             the current node, a search that matches nothing satisfied the
-             empty-everything condition too, and the page answered a search with
-             "Start with an idea." --}}
-        @if ($this->documents->isEmpty() && ($search !== '' || $tagId))
+        @php
+            /*
+             * The empty state names what is ACTUALLY on, and offers a way out of
+             * each of it.
+             *
+             * Three filters can be active independently — the search box, a tag
+             * and the scope chips — so the sentence is composed from whichever
+             * are, rather than assuming the search box is the only one that can
+             * empty a list. The first pass interpolated $search into the
+             * sentence whenever ANY filter was on, so filtering by a tag from a
+             * rail link produced `Nothing here matches "".` and offered to clear
+             * a search that was already empty, leaving the tag on with no way
+             * out of this panel.
+             */
+            $scopeWords = ['mine' => 'Mine', 'shared' => 'Shared', 'team' => 'Team'];
+
+            $activeFilters = [];
+
+            if ($search !== '') {
+                $activeFilters['search'] = '"'.$search.'"';
+            }
+
+            if ($tagId) {
+                $activeFilters['tag'] = 'the tag "'.($this->availableTags->firstWhere('id', $tagId)?->name ?? 'you chose').'"';
+            }
+
+            if (isset($scopeWords[$filter])) {
+                $activeFilters['scope'] = 'the '.$scopeWords[$filter].' scope';
+            }
+        @endphp
+
+        @if ($this->documents->isEmpty() && $activeFilters !== [])
             <div class="empty">
-                <p class="empty-line">Nothing here matches "{{ $search }}".</p>
+                <p class="empty-line">Nothing here matches {{ \Illuminate\Support\Arr::join($activeFilters, ', ', ' and ') }}.</p>
                 <div class="empty-actions">
-                    <button type="button" class="btn" wire:click="$set('search', '')">Clear the search</button>
+                    @if (isset($activeFilters['search']))
+                        <button type="button" class="btn" wire:click="$set('search', '')">Clear the search</button>
+                    @endif
+                    @if (isset($activeFilters['tag']))
+                        <button type="button" class="btn" wire:click="filterByTag(null)">Clear the tag filter</button>
+                    @endif
+                    @if (isset($activeFilters['scope']))
+                        <button type="button" class="btn" wire:click="$set('filter', 'all')">Show all documents</button>
+                    @endif
                 </div>
             </div>
-        @elseif ($this->documents->isEmpty() && $this->subfolders->isEmpty())
+        @elseif ($this->documents->isEmpty())
             {{-- One sentence, then what to do about it. No illustration, no
                  "No documents found." A third action, "Create with AI", is
                  deliberately absent: nothing in this application generates a
                  whole document from a prompt yet (App\Livewire\Documents\
                  AiAssistant works on a document that already exists), and an
                  action that does nothing is worse than an action that is not
-                 there. It belongs to whichever task ships that capability. --}}
+                 there. It belongs to whichever task ships that capability.
+
+                 A node holding only SUBFOLDERS says so rather than claiming
+                 this is where you begin: it used to fall straight through to
+                 the list branch below and render an empty <ul> with no sentence
+                 and no action at all. --}}
             <div class="empty">
-                <p class="empty-line">Start with an idea.</p>
+                <p class="empty-line">{{ $this->subfolders->isEmpty() ? 'Start with an idea.' : 'Nothing is filed here yet.' }}</p>
                 <div class="empty-actions">
                     <button type="button" class="btn btn-primary" wire:click="$set('showCreateModal', true)">Blank document</button>
                     <button type="button" class="btn" @click="$dispatch('open-template-gallery')">Use a template</button>
