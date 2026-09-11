@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isRailShortcut, nextPanelState } from '../../resources/js/shell.js';
+import { isRailShortcut, nextPanelState, openingPanelState } from '../../resources/js/shell.js';
 
 // Spec §3 gives the left panel a keyboard route of its own: ⌘\ on a Mac,
 // Ctrl+\ everywhere else. shell.js keeps the predicate separate from the
@@ -67,4 +67,26 @@ test('the toggle flips, and anything it does not recognise opens', () => {
     assert.equal(nextPanelState('expanded'), 'collapsed');
     assert.equal(nextPanelState('collapsed'), 'expanded');
     assert.equal(nextPanelState(null), 'expanded');
+});
+
+// Spec §6: below its breakpoint a panel is a sheet over the page, not a
+// column. It therefore boots SHUT whatever the server rendered and whatever
+// the reader last chose at a desktop width - otherwise the overlay arrives
+// already covering the page, and the top bar offers "Hide the panel" for a
+// panel that is not on screen, so the first press of it does nothing visible.
+test('an overlay-width panel always boots shut', () => {
+    assert.equal(openingPanelState(null, true), 'collapsed');
+    assert.equal(openingPanelState('expanded', true), 'collapsed');
+    assert.equal(openingPanelState('collapsed', true), 'collapsed');
+});
+
+test('at a column width the stored preference is what boots', () => {
+    assert.equal(openingPanelState('expanded', false), 'expanded');
+    assert.equal(openingPanelState('collapsed', false), 'collapsed');
+});
+
+test('nothing stored at a column width leaves the server default alone', () => {
+    assert.equal(openingPanelState(null, false), null);
+    assert.equal(openingPanelState('', false), null);
+    assert.equal(openingPanelState('nonsense', false), null);
 });

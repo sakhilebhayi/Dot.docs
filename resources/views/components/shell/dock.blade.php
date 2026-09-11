@@ -26,6 +26,14 @@
 
 <aside id="shell-dock" class="dock" data-panel-state="{{ $state }}"
        aria-label="Intelligence and data" x-data="{ tab: 'intelligence' }" data-shell-tabs>
+    {{-- Same overlay close control the rail carries, for the same reason: below
+         900px this panel is covering the page. See components/shell/rail. --}}
+    <div class="panel-overlay-head">
+        <button type="button" class="btn btn-sm" data-shell-panel-toggle="dock" aria-controls="shell-dock">
+            Close the tools
+        </button>
+    </div>
+
     <div class="dock-tabs" role="tablist" aria-label="Dock sections">
         <button type="button" class="dock-tab" role="tab"
                 id="dock-tab-intelligence"

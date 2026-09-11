@@ -86,6 +86,13 @@ const PANEL_WORDS = {
     dock: { expanded: 'Hide the tools', collapsed: 'Show the tools' },
 };
 
+/*
+ * The width below which each panel stops being a column and becomes a sheet
+ * over the page (shell.css, spec §6). The dock crosses over first, because
+ * there is still room for the rail at 1180px.
+ */
+const OVERLAY_AT = { rail: '(max-width: 900px)', dock: '(max-width: 1180px)' };
+
 function panelContext() {
     const shell = document.querySelector('[data-shell]');
 
@@ -126,6 +133,37 @@ function applyPanel(name, state) {
         const word = button.querySelector(`[data-shell-${name}-word]`);
         if (word) word.textContent = PANEL_WORDS[name][state];
     });
+}
+
+function isOverlay(name) {
+    return typeof window.matchMedia === 'function' && window.matchMedia(OVERLAY_AT[name]).matches;
+}
+
+/**
+ * What state a panel BOOTS into.
+ *
+ * Below its overlay breakpoint a panel is a sheet over the page, not a column,
+ * so it starts shut whatever the server rendered and whatever the reader last
+ * chose at a desktop width. Two things were wrong without this: an overlay
+ * arrived already covering the page for anyone whose stored preference said
+ * "open", and — with nothing stored — the top bar offered "Hide the panel" for
+ * a panel that was not on screen, so the first press of it appeared to do
+ * nothing at all.
+ *
+ * The stored preference is deliberately NOT rewritten: it is the desktop
+ * layout's answer, and a narrow window does not get to overwrite it.
+ *
+ * It is a predicate, not a handler, so the rule is testable without a DOM
+ * (tests/js/shell.test.js).
+ *
+ * @param {string|null} stored
+ * @param {boolean} overlay
+ * @returns {'collapsed'|'expanded'|null} null leaves what the server rendered
+ */
+export function openingPanelState(stored, overlay) {
+    if (overlay) return 'collapsed';
+
+    return stored === 'collapsed' || stored === 'expanded' ? stored : null;
 }
 
 function panelState(name) {
@@ -192,8 +230,8 @@ function togglePanel(name) {
 
 function initPanels() {
     Object.keys(PANELS).forEach((name) => {
-        const stored = readStoredPanel(name);
-        if (stored === 'collapsed' || stored === 'expanded') applyPanel(name, stored);
+        const state = openingPanelState(readStoredPanel(name), isOverlay(name));
+        if (state !== null) applyPanel(name, state);
     });
 
     document.addEventListener('click', (event) => {

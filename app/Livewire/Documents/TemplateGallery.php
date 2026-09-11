@@ -46,15 +46,7 @@ class TemplateGallery extends Component
         $user = auth()->user();
 
         return DocumentTemplate::query()
-            ->where(function ($q) use ($user) {
-                $q->where('is_global', true);
-
-                if ($user->currentTeam) {
-                    $q->orWhere('team_id', $user->currentTeam->id);
-                }
-
-                $q->orWhere('created_by', $user->id);
-            })
+            ->visibleTo($user)
             ->when($this->activeCategory !== 'all', fn ($q) => $q->where('category', $this->activeCategory))
             ->orderBy('is_global', 'desc')
             ->orderBy('name')
@@ -69,16 +61,7 @@ class TemplateGallery extends Component
         // the user's own team, or authored by the user. Prevents an
         // authenticated user from pulling another team's private template
         // content by guessing/incrementing the templateId argument.
-        $template = DocumentTemplate::where('id', $templateId)
-            ->where(function ($q) use ($user) {
-                $q->where('is_global', true)
-                    ->orWhere('created_by', $user->id);
-
-                if ($user->currentTeam) {
-                    $q->orWhere('team_id', $user->currentTeam->id);
-                }
-            })
-            ->firstOrFail();
+        $template = DocumentTemplate::query()->visibleTo($user)->whereKey($templateId)->firstOrFail();
 
         // Content goes in as JSON through DocumentStore, which renders the
         // HTML, numbers the outline against the template's own style and

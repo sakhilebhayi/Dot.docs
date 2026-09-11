@@ -6,12 +6,14 @@ use App\Documents\DocumentStore;
 use App\Files\FilesService;
 use App\Livewire\Files\BrowsesTheTree;
 use App\Models\Document;
+use App\Models\DocumentTemplate;
 use App\Models\Files\Obj;
 use App\Search\DocumentSearch;
 use App\Services\TagRepository;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -59,9 +61,25 @@ class Index extends Component
 
     public ?int $tagId = null;
 
-    public bool $showCreateModal = false;
+    /*
+     * Smart save (spec §5). One sheet: what it is called, what kind of
+     * document it is, and where it goes - instead of the old flow, which made
+     * you navigate to the right folder FIRST and then offered a name-only box
+     * that filed the document wherever you happened to be standing.
+     *
+     * `$newDocumentFolderId` is the sheet's own copy of the answer, kept in
+     * step by the `location-chosen` event the embedded LocationPicker
+     * dispatches. It is a hint, never a licence: the node it names is
+     * re-resolved and re-authorised through LocationPicker::resolve() at the
+     * moment the document is created.
+     */
+    public bool $showSmartSave = false;
 
-    public string $newTitle = '';
+    public string $newDocumentName = '';
+
+    public ?int $newDocumentFolderId = null;
+
+    public ?int $newDocumentTemplateId = null;
 
     public bool $showFolderModal = false;
 
@@ -74,9 +92,9 @@ class Index extends Component
 
     public int $perPage = 12;
 
-    public function mount(): void
+    public function mount(?int $folderId = null): void
     {
-        $this->folderId = request()->integer('folder') ?: null;
+        $this->folderId = $folderId ?: (request()->integer('folder') ?: null);
         $this->tagId = request()->integer('tag') ?: null;
 
         // The navigator rail links straight to a filter (Shared with me), so
@@ -245,22 +263,86 @@ class Index extends Component
             ->paginate($this->perPage);
     }
 
-    public function createDocument(): void
+    /**
+     * Open the smart-save sheet, with the location already answered: wherever
+     * the reader is standing right now.
+     *
+     * It deliberately does NOT clear the name. The sheet can be opened from a
+     * control that has already collected one, and resetting the field under
+     * somebody who has just typed into it is worse than carrying a stale
+     * value they can see and edit.
+     */
+    public function openSmartSave(): void
     {
-        $this->validate(['newTitle' => 'required|string|max:255']);
+        $this->showSmartSave = true;
+        $this->newDocumentFolderId = $this->currentNode()?->id;
+        $this->resetErrorBag(['newDocumentName', 'newDocumentTemplateId']);
+    }
 
-        $parent = $this->currentNode();
+    public function closeSmartSave(): void
+    {
+        $this->showSmartSave = false;
+        $this->resetErrorBag(['newDocumentName', 'newDocumentTemplateId']);
+    }
 
-        if ($parent !== null) {
-            $this->authorize('create', [Obj::class, $parent]);
+    /**
+     * The embedded picker telling the sheet where it landed. The id it sends
+     * has already been authorised there; this is the sheet's copy so it can
+     * name the destination, and it is checked again before anything is filed.
+     */
+    #[On('location-chosen')]
+    public function locationChosen(int $objId): void
+    {
+        $this->newDocumentFolderId = $objId;
+    }
+
+    /**
+     * The templates the picker offers - the same visibility rule the gallery
+     * uses, asked through the one scope both share.
+     */
+    #[Computed]
+    public function newDocumentTemplates()
+    {
+        return DocumentTemplate::query()
+            ->visibleTo(auth()->user())
+            ->orderBy('is_global', 'desc')
+            ->orderBy('name')
+            ->get();
+    }
+
+    public function createDocumentAtLocation(): void
+    {
+        $this->validate([
+            'newDocumentName' => 'required|string|max:255',
+            'newDocumentTemplateId' => 'nullable|integer',
+        ]);
+
+        $parent = $this->chosenLocation();
+        $this->authorize('create', [Obj::class, $parent]);
+
+        $template = $this->newDocumentTemplateId === null
+            ? null
+            : DocumentTemplate::query()->visibleTo(auth()->user())->whereKey($this->newDocumentTemplateId)->firstOrFail();
+
+        // The style and page setup travel with the template's content, the
+        // same way TemplateGallery::useTemplate() carries them - a proposal on
+        // the default portrait `report` style is not the template.
+        $attrs = ['is_public' => false, 'style_key' => $template?->style_key ?: 'report'];
+        if ($template !== null && is_array($template->page_setup) && $template->page_setup !== []) {
+            $attrs['page_setup'] = $template->page_setup;
         }
 
-        $document = app(DocumentStore::class)->create(auth()->user(), $this->newTitle, null, [
-            'is_public' => false,
-        ], $parent);
+        $document = app(DocumentStore::class)->create(
+            auth()->user(),
+            $this->newDocumentName,
+            $template?->contentJson(),
+            $attrs,
+            $parent,
+        );
 
-        $this->showCreateModal = false;
-        $this->newTitle = '';
+        $this->showSmartSave = false;
+        $this->newDocumentName = '';
+        $this->newDocumentTemplateId = null;
 
         $this->redirect(route('documents.edit', $document->uuid));
     }
@@ -356,6 +438,31 @@ class Index extends Component
         return view('livewire.documents.index')
             ->layout('layouts.app')
             ->title('Documents');
+    }
+
+    /**
+     * The folder the sheet says it is filing into, proved rather than
+     * trusted.
+     *
+     * LocationPicker::mount() applies the tree's stale-bookmark rule
+     * (BrowsesTheTree::folderOrRoot): an id that is gone, is not a folder or
+     * belongs to another team lands on this person's OWN root. That is right
+     * for a bookmark and wrong for a sheet the reader just filled in, so a
+     * landing that disagrees with what was asked for is refused instead of
+     * quietly filing the document somewhere nobody chose. resolve() then
+     * authorises the node it returns through ObjPolicy.
+     */
+    private function chosenLocation(): Obj
+    {
+        $picker = app(LocationPicker::class);
+        $picker->mount($this->newDocumentFolderId);
+
+        abort_if(
+            $this->newDocumentFolderId !== null && $picker->selectedId !== $this->newDocumentFolderId,
+            403,
+        );
+
+        return $picker->resolve();
     }
 
     private function folderNode(int $id): Obj

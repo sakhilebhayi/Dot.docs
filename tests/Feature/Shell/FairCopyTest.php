@@ -240,4 +240,87 @@ class FairCopyTest extends TestCase
         $res = $this->actingAs($user)->get(route('dashboard'));
         $res->assertOk()->assertDontSee('class="dark"', false);
     }
+
+    /**
+     * Spec §6: below 900px neither panel is a column any more. Both become
+     * full-screen overlays over the canvas, and each carries its own way out —
+     * the SAME `data-shell-panel-toggle` control the top bar uses, so there is
+     * no second source of truth about whether a panel is open.
+     *
+     * Both halves are measured, because either alone is a lie: markup with no
+     * rule shows a "Close the panel" button beside a panel that is a column,
+     * and a rule with no markup leaves a full-screen overlay with nothing to
+     * press. There is no headless browser in this project (.ai/rules/views.md),
+     * so the rule is read out of the stylesheet rather than off a rendering.
+     */
+    public function test_both_panels_become_overlays_with_a_way_out_below_900px(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+
+        $html = $this->actingAs($user)->get(route('dashboard'))->assertOk()->getContent();
+
+        $this->assertSame(2, substr_count($html, 'class="panel-overlay-head"'), 'both panels need an overlay close control');
+        $this->assertStringContainsString('data-shell-panel-toggle="rail" aria-controls="shell-rail"', $html);
+        $this->assertStringContainsString('data-shell-panel-toggle="dock" aria-controls="shell-dock"', $html);
+
+        $shell = file_get_contents(resource_path('css/shell.css'));
+
+        // Hidden by default: a way out of an overlay is a control for a state
+        // the reader is not in while the panel is a column.
+        $this->assertMatchesRegularExpression('/\n\.panel-overlay-head \{\s*display: none;\s*\}/', $shell);
+
+        $overlay = $this->mediaBlock($shell, '@media (max-width: 900px)');
+
+        $this->assertStringContainsString('.rail,', $overlay);
+        $this->assertStringContainsString('.dock {', $overlay);
+        $this->assertStringContainsString('position: fixed;', $overlay);
+        $this->assertStringContainsString('inset: var(--topbar-h) 0 0 0;', $overlay);
+        $this->assertStringContainsString(".rail[data-panel-user='open'],", $overlay);
+        $this->assertStringContainsString(".dock[data-panel-user='open'] {", $overlay);
+        $this->assertMatchesRegularExpression('/\.panel-overlay-head \{[^}]*display: flex;/', $overlay);
+    }
+
+    /**
+     * Spec §6's other half: at the same width the floating contextual toolbar
+     * stops chasing the selection and sits on the bottom edge.
+     *
+     * The two `!important`s are the point of the assertion, not an accident:
+     * resources/js/editor/ui/bubble.js writes `left`/`top` as INLINE styles,
+     * which beat any author rule that is not marked important — and that JS is
+     * explicitly out of scope for this phase (spec §7).
+     */
+    public function test_the_contextual_toolbar_is_bottom_anchored_below_900px(): void
+    {
+        $paper = file_get_contents(resource_path('css/paper.css'));
+        $sheet = $this->mediaBlock($paper, '@media (max-width: 900px)');
+
+        $this->assertStringContainsString('.dotdoc-bubble {', $sheet);
+        $this->assertStringContainsString('position: fixed;', $sheet);
+        $this->assertStringContainsString('left: 0 !important;', $sheet);
+        $this->assertStringContainsString('top: auto !important;', $sheet);
+        $this->assertStringContainsString('bottom: 0;', $sheet);
+    }
+
+    /** The body of a named at-rule block, matched brace by brace. */
+    private function mediaBlock(string $css, string $query): string
+    {
+        $start = strpos($css, $query);
+        $this->assertNotFalse($start, "{$query} is not in this stylesheet");
+
+        $open = strpos($css, '{', $start);
+        $depth = 0;
+
+        for ($i = $open; $i < strlen($css); $i++) {
+            if ($css[$i] === '{') {
+                $depth++;
+            } elseif ($css[$i] === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    return substr($css, $open + 1, $i - $open - 1);
+                }
+            }
+        }
+
+        $this->fail("{$query} is never closed");
+    }
 }

@@ -20,6 +20,17 @@
 @endphp
 
 <aside id="shell-rail" class="rail" data-panel-state="{{ $state }}" aria-label="Navigator">
+    {{-- Below 900px this panel covers the page, so it carries its own way out.
+         It is the SAME control as the top bar's toggle - same
+         `data-shell-panel-toggle` hook, same handler in resources/js/shell.js -
+         so there is no second source of truth about whether the panel is open.
+         CSS shows it only at the width where the panel is an overlay. --}}
+    <div class="panel-overlay-head">
+        <button type="button" class="btn btn-sm" data-shell-panel-toggle="rail" aria-controls="shell-rail">
+            Close the panel
+        </button>
+    </div>
+
     {{-- The groups scroll; the account block below is pinned to the foot. The
          leftover height is absorbed by this scroll region rather than by a
          margin-top:auto on the foot, which is what opened the void between the

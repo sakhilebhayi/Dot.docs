@@ -1,4 +1,4 @@
-<div class="page" x-data="{ renameTrigger: null }">
+<div class="page" x-data="{ renameTrigger: null, smartSaveTrigger: null }">
     <div class="page-head">
         <div>
             <h1 class="page-title">Documents</h1>
@@ -7,7 +7,9 @@
         <div class="toolbar">
             <button type="button" class="btn" wire:click="$set('showFolderModal', true)">New folder</button>
             <button type="button" class="btn" @click="$dispatch('open-template-gallery')">From a template</button>
-            <button type="button" class="btn btn-primary" wire:click="$set('showCreateModal', true)">New document</button>
+            <button type="button" class="btn btn-primary"
+                    @click="smartSaveTrigger = $el"
+                    wire:click="openSmartSave">New document</button>
         </div>
     </div>
 
@@ -168,7 +170,9 @@
             <div class="empty">
                 <p class="empty-line">{{ $this->subfolders->isEmpty() ? 'Start with an idea.' : 'Nothing is filed here yet.' }}</p>
                 <div class="empty-actions">
-                    <button type="button" class="btn btn-primary" wire:click="$set('showCreateModal', true)">Blank document</button>
+                    <button type="button" class="btn btn-primary"
+                            @click="smartSaveTrigger = $el"
+                            wire:click="openSmartSave">Blank document</button>
                     <button type="button" class="btn" @click="$dispatch('open-template-gallery')">Use a template</button>
                 </div>
             </div>
@@ -213,25 +217,55 @@
          and on this window event from the "From a template" button. --}}
     <div x-data @open-template-gallery.window="Livewire.dispatchTo('documents.template-gallery', 'open')"></div>
 
-    @if ($showCreateModal)
-        <div class="scrim" wire:click.self="$set('showCreateModal', false)" role="dialog" aria-modal="true" aria-labelledby="new-doc-title">
+    {{-- Smart save (spec §5): one sheet asks what it is called, what kind of
+         document it is, and where it goes. The old flow asked only for a name
+         and filed the document wherever the reader happened to be standing,
+         which made "put this somewhere else" a navigation job you had to do
+         BEFORE you knew you wanted a document.
+
+         Escape closes it and returns focus to the control that opened it, the
+         same convention every other dialog in this product keeps. --}}
+    @if ($showSmartSave)
+        <div class="scrim" wire:click.self="closeSmartSave" role="dialog" aria-modal="true" aria-labelledby="new-doc-title"
+             x-on:keydown.escape.window="$wire.closeSmartSave(); smartSaveTrigger && smartSaveTrigger.focus()">
             <div class="sheet">
                 <div class="sheet-head">
                     <h2 class="h-panel" id="new-doc-title">New document</h2>
                 </div>
-                <form wire:submit="createDocument">
+                <form wire:submit="createDocumentAtLocation">
                     <div class="sheet-body">
                         <div class="field-row">
                             <label class="field-label" for="new-doc-name">Title</label>
-                            <input id="new-doc-name" wire:model="newTitle" type="text" class="field" autofocus
+                            <input id="new-doc-name" wire:model="newDocumentName" type="text" class="field" autofocus
                                    placeholder="What is it about?" />
-                            @error('newTitle')
+                            @error('newDocumentName')
                                 <p class="field-error">{{ $message }}</p>
                             @enderror
                         </div>
+
+                        <div class="field-row">
+                            <label class="field-label" for="new-doc-template">Start from</label>
+                            <select id="new-doc-template" wire:model="newDocumentTemplateId" class="field">
+                                <option value="">A blank document</option>
+                                @foreach ($this->newDocumentTemplates as $template)
+                                    <option value="{{ $template->id }}">{{ $template->name }}</option>
+                                @endforeach
+                            </select>
+                            @error('newDocumentTemplateId')
+                                <p class="field-error">{{ $message }}</p>
+                            @enderror
+                        </div>
+
+                        {{-- The location field is a component of its own so a
+                             later phase can add recents and favourites to what
+                             it offers without touching this sheet — spec §5's
+                             seam. It reports where it landed through the
+                             `location-chosen` event. --}}
+                        <livewire:documents.location-picker :current-folder-id="$newDocumentFolderId"
+                                                           :key="'smart-save-location'" />
                     </div>
                     <div class="sheet-foot">
-                        <button type="button" class="btn" wire:click="$set('showCreateModal', false)">Cancel</button>
+                        <button type="button" class="btn" wire:click="closeSmartSave">Cancel</button>
                         <button type="submit" class="btn btn-primary">Create the document</button>
                     </div>
                 </form>

@@ -447,6 +447,43 @@
     border-color: var(--danger);
 }
 
+/*
+ * Below 900px the floating toolbar becomes a bottom-anchored surface (spec
+ * §6). At a phone width there is no room to float a toolbar beside a selection
+ * without covering the words it is about, and the on-screen keyboard takes the
+ * lower half of the viewport anyway — so it stops chasing the selection and
+ * sits at the bottom edge, full width, where a thumb already is.
+ *
+ * The `!important`s are load-bearing and are the ONLY way to do this without
+ * touching the editor bundle: resources/js/editor/ui/bubble.js writes `left`
+ * and `top` as INLINE styles every time it positions the toolbar, and an
+ * inline declaration beats any author rule that is not marked important.
+ * bubble.js itself is unchanged (spec §7) — what it computes is simply not
+ * what decides where the toolbar sits at this width.
+ *
+ * `hidden` still wins: the rule below only reshapes the toolbar, and
+ * `.dotdoc-bubble[hidden] { display: none }` above is what keeps a toolbar
+ * nobody has summoned out of the layout.
+ */
+@media (max-width: 900px) {
+    .dotdoc-bubble {
+        position: fixed;
+        left: 0 !important;
+        top: auto !important;
+        right: 0;
+        bottom: 0;
+        max-width: none;
+        padding: var(--s2);
+        border-width: 1px 0 0;
+        border-radius: var(--r-canvas) var(--r-canvas) 0 0;
+    }
+
+    /* Six word-buttons on a phone wrap rather than overflow their sheet. */
+    .dotdoc-bubble-row {
+        justify-content: center;
+    }
+}
+
 /* ── Motion ──────────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {

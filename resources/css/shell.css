@@ -417,6 +417,16 @@ body {
  * foot, which is what opened the 190px void between the last nav group and the
  * user block.
  */
+/*
+ * The overlay's close control. It exists in the markup at every width and is
+ * shown only where a panel actually covers the page (the <900px block at the
+ * foot of this file) — a "Close the panel" button beside a panel that is a
+ * column is a control for a state the reader is not in.
+ */
+.panel-overlay-head {
+    display: none;
+}
+
 .rail-scroll {
     flex: 1 1 auto;
     min-height: 0;
@@ -1604,6 +1614,18 @@ button.list-row {
     }
 }
 
+/*
+ * Below 900px there is room for ONE column, so both panels stop being columns
+ * at all: they are full-screen overlays over the canvas, opened by the same
+ * top-bar toggles and closed either from those or from the close control each
+ * one carries at its head (spec §6).
+ *
+ * The overlay starts BELOW the top bar rather than covering it, so the toggle
+ * that opened it is still on screen and the page never loses its one landmark
+ * row. `data-panel-user` is still what shows a panel here — it is written only
+ * by resources/js/shell.js, so a panel the server rendered expanded for a
+ * desktop layout does not land on a phone already covering the page.
+ */
 @media (max-width: 900px) {
     .shell {
         grid-template-columns: minmax(0, 1fr);
@@ -1613,17 +1635,33 @@ button.list-row {
             'canvas';
     }
 
-    .rail {
+    .rail,
+    .dock {
         position: fixed;
         inset: var(--topbar-h) 0 0 0;
         width: auto;
         z-index: 60;
         border-right: 0;
+        border-left: 0;
         display: none;
     }
 
-    .rail[data-panel-user='open'] {
+    .rail[data-panel-user='open'],
+    .dock[data-panel-user='open'] {
         display: flex;
+    }
+
+    /*
+     * The way out of a panel that is covering the page. It is the SAME control
+     * as the top bar's toggle (`data-shell-panel-toggle`), so there is no
+     * second source of truth about whether a panel is open and no second
+     * keyboard path to keep in step.
+     */
+    .panel-overlay-head {
+        display: flex;
+        flex: none;
+        justify-content: flex-end;
+        padding: var(--s3) var(--s3) 0;
     }
 
     .editor {
