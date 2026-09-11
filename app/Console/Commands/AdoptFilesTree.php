@@ -10,36 +10,33 @@ use App\Models\Files\Obj;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Console\Command;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
  * Move Dot.Doc's own folder system into the shared Dot.Files tree.
  *
- * Two jobs, in this order:
+ * DATA ONLY - this command owns no schema. By the time it runs, migration
+ * 2026_09_08_000002 has already moved Dot.Doc's legacy `folders` aside to
+ * `document_folders_legacy` and given the shared tree the `folders` name,
+ * so every model this touches points at a table that exists. A command
+ * that renamed tables as a side effect of a data migration (the first WIP's
+ * shape) made `--dry-run` a lie and made the whole thing unrunnable twice.
  *
- * 1. SCHEMA. Dot.Doc's legacy `folders` table occupies the name the shared
- *    one needs, so this command tells them apart by shape (the shared table
- *    has a `uuid` column), renames the legacy one aside to
- *    `document_folders_legacy`, and creates the shared table in its place.
- *    2026_09_08_000001 deliberately leaves that alone: a migration that
- *    silently skipped creating `folders` would have left the tree with no
- *    folder type at all.
- * 2. DATA. Every legacy folder becomes a `folders`+`objects` pair under its
- *    team's root, parent-first so nesting survives; then every document -
- *    soft-deleted ones included, so a restore still lands somewhere - gets
- *    an `objects` row under the folder it was filed in, or the team root.
- *    Personal (team-less) folders and documents go under the OWNER'S
- *    personal team root, which Jetstream guarantees exists.
+ * Every legacy folder becomes a `folders`+`objects` pair under its team's
+ * root, parent-first so nesting survives; then every document -
+ * soft-deleted ones included, so a restore still lands somewhere - gets an
+ * `objects` row under the folder it was filed in, or the team root.
+ * Personal (team-less) folders and documents go under the OWNER'S personal
+ * team root, which Jetstream's CreateNewUser guarantees exists.
  *
  * Idempotent by construction: a document that already has a node is left
  * alone, roots are firstOrCreate, and a second run after the legacy table
  * has been dropped simply files anything created since. `--dry-run` reports
- * the plan and touches neither schema nor rows, which is what makes it safe
- * to look before running it against a shared production database.
+ * the plan and writes nothing at all, which is what makes it safe to look
+ * before running it against a shared production database.
  *
- * 2026_09_08_000002 calls this command before dropping `documents.folder_id`
+ * 2026_09_08_000003 calls this command before dropping `documents.folder_id`
  * and the legacy table, so `php artisan migrate` is the whole procedure -
  * there is no two-step ops dance to get wrong.
  */
@@ -55,7 +52,13 @@ class AdoptFilesTree extends Command
     {
         $dryRun = (bool) $this->option('dry-run');
 
-        $legacyTable = $dryRun ? $this->findLegacyTable() : $this->prepareSchema();
+        if (! Schema::hasTable('objects') || ! Schema::hasTable('folders')) {
+            $this->error('The shared tree tables are not there yet - run `php artisan migrate` first.');
+
+            return self::FAILURE;
+        }
+
+        $legacyTable = $this->findLegacyTable();
 
         $foldersAdopted = 0;
         $roots = [];
@@ -77,8 +80,9 @@ class AdoptFilesTree extends Command
     }
 
     /**
-     * The table legacy folders can be read from right now, without changing
-     * anything. Used by --dry-run only.
+     * The table Dot.Doc's legacy folders can be read from, or null when
+     * there are none left to adopt (a fresh install, or a second run after
+     * 2026_09_08_000003 dropped it).
      */
     private function findLegacyTable(): ?string
     {
@@ -91,50 +95,6 @@ class AdoptFilesTree extends Command
         }
 
         return null;
-    }
-
-    /**
-     * Make sure a SHARED `folders` table exists, moving Dot.Doc's legacy one
-     * out of the way if it is holding the name.
-     *
-     * @return string|null the table legacy folders can be read from, or null when there are none
-     */
-    private function prepareSchema(): ?string
-    {
-        if (Schema::hasTable(self::LEGACY_TABLE)) {
-            $this->ensureSharedFoldersTable();
-
-            return self::LEGACY_TABLE;
-        }
-
-        $legacyInTheWay = Schema::hasTable('folders') && ! Schema::hasColumn('folders', 'uuid');
-
-        if ($legacyInTheWay) {
-            $this->info('Moving Dot.Doc\'s legacy folders table aside to '.self::LEGACY_TABLE.'.');
-            Schema::rename('folders', self::LEGACY_TABLE);
-            $this->ensureSharedFoldersTable();
-
-            return self::LEGACY_TABLE;
-        }
-
-        $this->ensureSharedFoldersTable();
-
-        return null;
-    }
-
-    private function ensureSharedFoldersTable(): void
-    {
-        if (Schema::hasTable('folders')) {
-            return;
-        }
-
-        Schema::create('folders', function (Blueprint $table) {
-            $table->id();
-            $table->uuid('uuid')->index();
-            $table->string('name');
-            $table->foreignId('team_id')->constrained('teams')->cascadeOnDelete();
-            $table->timestamps();
-        });
     }
 
     /**

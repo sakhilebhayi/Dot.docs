@@ -11,13 +11,21 @@ use Illuminate\Support\Str;
 
 /**
  * A folder in the SHARED Dot.Files tree - not Dot.Doc's old
- * owner_id/parent_id folder, which `dot:files:adopt-tree` forwards into
- * this table and the following migration then drops. Nesting lives on the
+ * owner_id/parent_id folder, which `dot:files:adopt-tree` forwarded into
+ * this table before 2026_09_08_000003 dropped it. Nesting lives on the
  * `objects` row, never here.
+ *
+ * The table is named explicitly because it is not this model's to guess:
+ * 2026_09_08_000001 stages it as `tree_folders` (Dot.Doc's legacy table
+ * still holds the name at that point) and 2026_09_08_000002 renames it to
+ * `folders` before anything - adoption included - reads it through here.
+ * See .ai/rules/files.md.
  */
 class Folder extends Model
 {
     use HasFactory;
+
+    protected $table = 'folders';
 
     protected $fillable = ['uuid', 'name', 'team_id'];
 

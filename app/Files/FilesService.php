@@ -91,6 +91,47 @@ class FilesService
             ->values();
     }
 
+    /**
+     * Every folder node in a team, labelled with its full path, deepest
+     * path last - the list a Move picker or a "file it under" <select> is
+     * built from. Team comes from the caller's own object, never the
+     * session.
+     *
+     * @return list<array{id:int,uuid:string,label:string,depth:int}>
+     */
+    public function folderChoices(int $teamId): array
+    {
+        $folders = Obj::where('team_id', $teamId)
+            ->where('objectable_type', 'folder')
+            ->with('objectable')
+            ->get();
+
+        $byId = $folders->keyBy('id');
+        $choices = [];
+
+        foreach ($folders as $folder) {
+            $trail = [$folder->name()];
+            $node = $folder;
+            $guard = 0;
+
+            while ($node->parent_id !== null && isset($byId[$node->parent_id]) && $guard++ < 64) {
+                $node = $byId[$node->parent_id];
+                array_unshift($trail, $node->name());
+            }
+
+            $choices[] = [
+                'id' => $folder->id,
+                'uuid' => $folder->uuid,
+                'label' => implode(' / ', $trail),
+                'depth' => count($trail) - 1,
+            ];
+        }
+
+        usort($choices, fn (array $a, array $b) => strcasecmp($a['label'], $b['label']));
+
+        return $choices;
+    }
+
     public function createFolder(Obj $parent, string $name, User $actor): Obj
     {
         Gate::forUser($actor)->authorize('create', [Obj::class, $parent]);

@@ -3,14 +3,33 @@
 namespace App\Livewire\Documents;
 
 use App\Documents\DocumentStore;
+use App\Files\FilesService;
 use App\Models\Document;
-use App\Models\Folder;
+use App\Models\Files\Obj;
+use App\Models\Team;
 use App\Search\DocumentSearch;
 use App\Services\TagRepository;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Collection;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
+/**
+ * The documents ledger, standing in the shared Dot.Files tree.
+ *
+ * `$folderId` is an `objects` row id, not the id of the folder record it
+ * points at, and null means "the workspace root". Everything the page shows
+ * - subfolders, the document list, the breadcrumb - is derived from that
+ * one node through App\Files\FilesService, so a folder made here is the
+ * same row Dot.Files lists, and Dot.Doc has no folder table of its own any
+ * more (see .ai/rules/files.md).
+ *
+ * currentTeam is read in exactly one place, workspaceTeam(), and only to
+ * decide WHICH root to open. Every later call takes its team from the node
+ * itself, which is what keeps a uuid/id in the query string from reaching
+ * another team's rows.
+ */
 class Index extends Component
 {
     use AuthorizesRequests;
@@ -26,6 +45,7 @@ class Index extends Component
 
     public string $filter = 'all'; // all | mine | shared | team
 
+    /** The open folder's `objects` row id, or null for the workspace root. */
     public ?int $folderId = null;
 
     public ?int $tagId = null;
@@ -38,7 +58,7 @@ class Index extends Component
 
     public string $newFolderName = '';
 
-    /** The folder being renamed, or null when the rename sheet is closed. */
+    /** The folder node being renamed, or null when the rename sheet is closed. */
     public ?int $renamingFolderId = null;
 
     public string $renameFolderName = '';
@@ -76,6 +96,8 @@ class Index extends Component
         $this->folderId = $folderId;
         $this->tagId = null;
         $this->perPage = 12;
+
+        unset($this->currentNode, $this->subfolders, $this->breadcrumbs);
     }
 
     public function filterByTag(?int $tagId): void
@@ -85,49 +107,88 @@ class Index extends Component
     }
 
     /**
-     * The team/personal scope the current view operates in -- folders and
-     * tags are always resolved against this, the same duality Document
-     * itself uses (a team's shared space, or the signed-in user's own).
+     * The node whose contents are on screen: the one named in the query
+     * string, or this workspace's root. A node the signed-in user may not
+     * view, or one that is not a folder, silently falls back to the root
+     * rather than 403-ing a bookmark.
      */
-    private function currentTeamId(): ?int
-    {
-        return auth()->user()->currentTeam?->id;
-    }
-
     #[Computed]
-    public function currentFolder()
+    public function currentNode(): ?Obj
     {
-        if (! $this->folderId) {
+        $team = $this->workspaceTeam();
+
+        if ($team === null) {
             return null;
         }
 
-        $folder = Folder::find($this->folderId);
+        $files = app(FilesService::class);
+        $root = $files->root($team);
 
-        return ($folder && auth()->user()->can('view', $folder)) ? $folder : null;
+        if ($this->folderId === null) {
+            return $root;
+        }
+
+        $node = Obj::find($this->folderId);
+
+        if ($node === null || ! $node->isFolder() || ! auth()->user()->can('view', $node)) {
+            $this->folderId = null;
+
+            return $root;
+        }
+
+        return $node;
     }
 
+    /** The open folder, or null when standing at the workspace root. */
+    #[Computed]
+    public function currentFolder(): ?Obj
+    {
+        $node = $this->currentNode();
+
+        return $node === null || $node->parent_id === null ? null : $node;
+    }
+
+    /**
+     * The trail below the root, root itself excluded - the view renders the
+     * root as its own "All documents" crumb.
+     *
+     * @return list<Obj>
+     */
     #[Computed]
     public function breadcrumbs(): array
     {
-        return $this->currentFolder ? [...$this->currentFolder->breadcrumbs(), $this->currentFolder] : [];
+        $node = $this->currentNode();
+
+        if ($node === null) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            [...$node->ancestors(), $node],
+            fn (Obj $crumb) => $crumb->parent_id !== null,
+        ));
     }
 
+    /** @return Collection<int, Obj> */
     #[Computed]
     public function subfolders()
     {
-        $teamId = $this->currentTeamId();
+        $node = $this->currentNode();
 
-        return Folder::where('parent_id', $this->folderId)
-            ->when($teamId, fn ($q) => $q->where('team_id', $teamId))
-            ->when(! $teamId, fn ($q) => $q->whereNull('team_id')->where('owner_id', auth()->id()))
-            ->orderBy('name')
-            ->get();
+        if ($node === null) {
+            return collect();
+        }
+
+        return app(FilesService::class)
+            ->children($node)
+            ->filter(fn (Obj $obj) => $obj->isFolder())
+            ->values();
     }
 
     #[Computed]
     public function availableTags()
     {
-        return app(TagRepository::class)->availableFor(auth()->user(), $this->currentTeamId());
+        return app(TagRepository::class)->availableFor(auth()->user(), auth()->user()->currentTeam?->id);
     }
 
     #[Computed]
@@ -163,8 +224,12 @@ class Index extends Component
             ->when($this->tagId, fn ($q) => $q->whereHas('tags', fn ($q) => $q->where('tags.id', $this->tagId)))
             // A search or tag filter searches the whole space, not just
             // the current folder -- otherwise finding something means
-            // already knowing which folder it's in.
-            ->when(! $searching && ! $this->tagId, fn ($q) => $q->where('folder_id', $this->folderId))
+            // already knowing which folder it's in. Otherwise the list is
+            // exactly what the tree says is filed in the open folder.
+            ->when(
+                ! $searching && ! $this->tagId && $this->currentNode() !== null,
+                fn ($q) => $q->whereHas('node', fn ($q) => $q->where('parent_id', $this->currentNode()->id)),
+            )
             ->latest()
             ->paginate($this->perPage);
     }
@@ -173,10 +238,15 @@ class Index extends Component
     {
         $this->validate(['newTitle' => 'required|string|max:255']);
 
+        $parent = $this->currentNode();
+
+        if ($parent !== null) {
+            $this->authorize('create', [Obj::class, $parent]);
+        }
+
         $document = app(DocumentStore::class)->create(auth()->user(), $this->newTitle, null, [
-            'folder_id' => $this->folderId,
             'is_public' => false,
-        ]);
+        ], $parent);
 
         $this->showCreateModal = false;
         $this->newTitle = '';
@@ -186,18 +256,25 @@ class Index extends Component
 
     public function createFolder(): void
     {
-        $this->authorize('create', Folder::class);
         $this->validate(['newFolderName' => 'required|string|max:255']);
 
-        Folder::create([
-            'owner_id' => auth()->id(),
-            'team_id' => $this->currentTeamId(),
-            'parent_id' => $this->folderId,
-            'name' => $this->newFolderName,
-        ]);
+        $parent = $this->currentNode();
+
+        if ($parent === null) {
+            $this->addError('newFolderName', 'There is no workspace to make a folder in.');
+
+            return;
+        }
+
+        if (! $this->guarded(fn () => app(FilesService::class)
+            ->createFolder($parent, $this->newFolderName, auth()->user()), 'newFolderName')) {
+            return;
+        }
 
         $this->showFolderModal = false;
         $this->newFolderName = '';
+
+        unset($this->subfolders);
     }
 
     /**
@@ -206,17 +283,18 @@ class Index extends Component
      */
     public function startRenamingFolder(int $folderId): void
     {
-        $folder = Folder::findOrFail($folderId);
-        $this->authorize('update', $folder);
+        $node = $this->folderNode($folderId);
+        $this->authorize('rename', $node);
 
-        $this->renamingFolderId = $folder->id;
-        $this->renameFolderName = $folder->name;
+        $this->renamingFolderId = $node->id;
+        $this->renameFolderName = $node->name();
     }
 
     public function cancelRenamingFolder(): void
     {
         $this->renamingFolderId = null;
         $this->renameFolderName = '';
+        $this->resetErrorBag('renameFolderName');
     }
 
     public function renameFolder(?int $folderId = null, ?string $name = null): void
@@ -226,8 +304,8 @@ class Index extends Component
             return;
         }
 
-        $folder = Folder::findOrFail($folderId);
-        $this->authorize('update', $folder);
+        $node = $this->folderNode($folderId);
+        $this->authorize('rename', $node);
 
         $name = trim($name ?? $this->renameFolderName);
         if ($name === '') {
@@ -236,18 +314,30 @@ class Index extends Component
             return;
         }
 
-        $folder->update(['name' => $name]);
+        if (! $this->guarded(fn () => app(FilesService::class)
+            ->renameObject($node, $name, auth()->user()), 'renameFolderName')) {
+            return;
+        }
+
         $this->cancelRenamingFolder();
+        unset($this->subfolders, $this->breadcrumbs);
     }
 
+    /**
+     * Deleting a folder REFUSES while anything is filed in it - the tree is
+     * shared with Dot.Files now, and cascading would take real documents and
+     * files down with a piece of filing. The old behaviour (orphan the
+     * documents to the root) silently rearranged a person's filing instead
+     * of telling them what was in the way. See App\Files\FilesService.
+     */
     public function deleteFolder(int $folderId): void
     {
-        $folder = Folder::findOrFail($folderId);
-        $this->authorize('delete', $folder);
+        $node = $this->folderNode($folderId);
+        $this->authorize('delete', $node);
 
-        // Documents inside are orphaned to the root (folder_id
-        // nullOnDelete in the migration), never deleted with the folder.
-        $folder->delete();
+        $this->guarded(fn () => app(FilesService::class)->deleteObject($node, auth()->user()), 'folder');
+
+        unset($this->subfolders);
     }
 
     public function render()
@@ -255,5 +345,42 @@ class Index extends Component
         return view('livewire.documents.index')
             ->layout('layouts.app')
             ->title('Documents');
+    }
+
+    /**
+     * The workspace whose root this page opens on. The ONE currentTeam read
+     * in the tree code; every team decision after it comes off a node.
+     */
+    private function workspaceTeam(): ?Team
+    {
+        $user = auth()->user();
+
+        return $user->currentTeam ?? $user->personalTeam();
+    }
+
+    private function folderNode(int $id): Obj
+    {
+        $node = Obj::findOrFail($id);
+
+        abort_unless($node->isFolder(), 404);
+
+        return $node;
+    }
+
+    /**
+     * Run a FilesService call, turning its refusals into an error on the
+     * field that caused them rather than a 422 nobody sees.
+     */
+    private function guarded(callable $call, string $field): bool
+    {
+        try {
+            $call();
+        } catch (ValidationException $e) {
+            $this->addError($field, collect($e->errors())->flatten()->first() ?? 'That could not be done.');
+
+            return false;
+        }
+
+        return true;
     }
 }

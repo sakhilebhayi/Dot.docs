@@ -17,7 +17,7 @@
                 class="btn btn-quiet btn-sm {{ ! $folderId ? 'is-current' : '' }}">All documents</button>
         @foreach ($this->breadcrumbs as $crumb)
             <span class="readout" aria-hidden="true">/</span>
-            <button type="button" wire:click="openFolder({{ $crumb->id }})" class="btn btn-quiet btn-sm">{{ $crumb->name }}</button>
+            <button type="button" wire:click="openFolder({{ $crumb->id }})" class="btn btn-quiet btn-sm">{{ $crumb->name() }}</button>
         @endforeach
     </nav>
 
@@ -69,12 +69,17 @@
             <div class="panel-head">
                 <h2 class="section-title" id="doc-folders">Folders</h2>
             </div>
+            @error('folder')
+                <div class="panel-body">
+                    <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                </div>
+            @enderror
             <ul class="ledger">
                 @foreach ($this->subfolders as $folder)
                     <li class="ledger-row">
                         <button type="button" wire:click="openFolder({{ $folder->id }})"
                                 class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start">
-                            {{ $folder->name }}
+                            {{ $folder->name() }}
                         </button>
                         <button type="button" class="btn btn-quiet btn-sm"
                                 @click="renameTrigger = $el"
@@ -82,7 +87,7 @@
                             Rename
                         </button>
                         <button type="button" class="btn btn-quiet btn-sm" wire:click="deleteFolder({{ $folder->id }})"
-                                wire:confirm="Delete this folder? Documents inside move to the parent folder; nothing is deleted.">
+                                wire:confirm="Delete this folder? It has to be empty first — nothing inside is ever deleted with it.">
                             Delete
                         </button>
                     </li>
@@ -205,7 +210,7 @@
             <div class="sheet">
                 <div class="sheet-head">
                     <h2 class="h-panel" id="new-folder-title">
-                        New folder @if ($this->currentFolder) in {{ $this->currentFolder->name }} @endif
+                        New folder @if ($this->currentFolder) in {{ $this->currentFolder->name() }} @endif
                     </h2>
                 </div>
                 <form wire:submit="createFolder">

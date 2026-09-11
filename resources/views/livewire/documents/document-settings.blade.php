@@ -50,9 +50,9 @@
                 <label class="field-label" for="set-folder">Folder</label>
                 <div class="toolbar">
                     <select id="set-folder" wire:model="folderId" class="field" style="flex:1 1 auto">
-                        <option value="">No folder — the root</option>
+                        <option value="">The root of this workspace</option>
                         @foreach ($this->availableFolders as $folder)
-                            <option value="{{ $folder->id }}">{{ $folder->name }}</option>
+                            <option value="{{ $folder['id'] }}">{{ $folder['label'] }}</option>
                         @endforeach
                     </select>
                     <button type="button" class="btn" wire:click="moveToFolder">Move it</button>

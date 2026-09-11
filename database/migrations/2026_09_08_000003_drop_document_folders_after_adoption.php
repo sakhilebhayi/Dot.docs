@@ -12,13 +12,12 @@ use Illuminate\Support\Facades\Schema;
  * The adoption runs INSIDE this migration rather than as a separate ops
  * step: `php artisan migrate` is then the whole procedure - in CI, in dev
  * and in production - and there is no window in which `documents.folder_id`
- * has been dropped but the tree has not been filled. The command is
- * idempotent, so re-running migrations is harmless.
+ * has been dropped but the tree has not been filled. `dot:files:adopt-tree`
+ * is idempotent, so re-running migrations is harmless.
  *
- * Order matters. dot:files:adopt-tree renames the legacy table aside to
- * `document_folders_legacy` and reads it; the foreign key on
- * documents.folder_id follows the rename, so the column has to go before
- * the table it points at.
+ * Order matters and is the reverse of the obvious one: the foreign key on
+ * `documents.folder_id` followed the legacy table through 000002's rename,
+ * so the COLUMN has to go before the table it now points at.
  */
 return new class extends Migration
 {

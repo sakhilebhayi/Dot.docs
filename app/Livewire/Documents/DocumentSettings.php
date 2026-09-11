@@ -2,13 +2,15 @@
 
 namespace App\Livewire\Documents;
 
+use App\Files\FilesService;
 use App\Models\Document;
-use App\Models\Folder;
+use App\Models\Files\Obj;
 use App\Models\User;
 use App\Print\PageSetup;
 use App\Services\TagRepository;
 use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -55,7 +57,7 @@ class DocumentSettings extends Component
 
         $this->title = $this->document->title;
         $this->isPublic = $this->document->is_public;
-        $this->folderId = $this->document->folder_id;
+        $this->folderId = $this->node()?->parent_id;
 
         $setup = PageSetup::fromDocument($this->document, app(StyleEngine::class)->resolve($this->document));
         $this->pageSize = $setup->size;
@@ -126,46 +128,85 @@ class DocumentSettings extends Component
     }
 
     /**
-     * Every folder offered here belongs to the document's own scope
-     * (its team, or the current user personally if it has none) --
-     * a document can never be filed under a folder from a different
-     * team/owner's space.
+     * Every folder offered here belongs to the document's OWN workspace -
+     * the team its tree node sits in, never the session's current team - so
+     * a document can never be filed under another team's folder. The tree
+     * root is offered as "the root" rather than left out: in the shared
+     * Dot.Files tree everything is inside a folder, and the root is the one
+     * that always exists.
+     *
+     * @return list<array{id:int,uuid:string,label:string,depth:int}>
      */
     #[Computed]
-    public function availableFolders()
+    public function availableFolders(): array
     {
-        return Folder::when($this->document->team_id, fn ($q) => $q->where('team_id', $this->document->team_id))
-            ->when(! $this->document->team_id, fn ($q) => $q->whereNull('team_id')->where('owner_id', $this->document->owner_id))
-            ->orderBy('name')
-            ->get();
+        $node = $this->node();
+
+        return $node === null ? [] : app(FilesService::class)->folderChoices($node->team_id);
+    }
+
+    /**
+     * The document's node in the shared tree, filed at its workspace root if
+     * it has none yet.
+     *
+     * Null only for a document whose owner has no team at all - impossible
+     * through Jetstream's CreateNewUser, reachable from a factory, and a
+     * 500 rather than an empty picker if this pretended otherwise.
+     */
+    public function node(): ?Obj
+    {
+        $node = $this->document->node()->first();
+
+        if ($node !== null) {
+            return $node;
+        }
+
+        $team = $this->document->team ?? $this->document->owner?->personalTeam();
+
+        if ($team === null) {
+            return null;
+        }
+
+        $files = app(FilesService::class);
+
+        return $files->registerDocument($this->document, $files->root($team));
     }
 
     public function moveToFolder(): void
     {
         $this->authorize('update', $this->document);
 
-        // The "No folder (root)" <option> submits an empty string, which
-        // Livewire casts to 0 for a ?int property, not null -- normalize
-        // it here, otherwise `folder_id => 0` hits the FK constraint
-        // (folder ids start at 1) instead of clearing the folder.
-        $folderId = $this->folderId ?: null;
+        $node = $this->node();
 
-        if ($folderId) {
-            $folder = Folder::find($folderId);
-            $inScope = $folder && (
-                ($this->document->team_id && $folder->team_id === $this->document->team_id)
-                || (! $this->document->team_id && $folder->owner_id === $this->document->owner_id)
-            );
+        if ($node === null) {
+            $this->addError('folderId', 'This document has no workspace to file it in.');
 
-            if (! $inScope) {
-                $this->addError('folderId', 'That folder is not available for this document.');
-
-                return;
-            }
+            return;
         }
 
-        $this->folderId = $folderId;
-        $this->document->update(['folder_id' => $folderId]);
+        // The "the root" <option> submits an empty string, which Livewire
+        // casts to 0 for a ?int property, not null -- normalize it here so
+        // an empty pick means the workspace root rather than object id 0.
+        $destination = $this->folderId
+            ? Obj::find($this->folderId)
+            : app(FilesService::class)->root($node->team);
+
+        if ($destination === null || ! $destination->isFolder() || $destination->team_id !== $node->team_id) {
+            $this->addError('folderId', 'That folder is not available for this document.');
+
+            return;
+        }
+
+        try {
+            app(FilesService::class)->moveObject($node, $destination, auth()->user());
+        } catch (ValidationException $e) {
+            $this->addError('folderId', collect($e->errors())->flatten()->first() ?? 'That move is not allowed.');
+
+            return;
+        }
+
+        $this->folderId = $destination->id;
+        unset($this->availableFolders);
         session()->flash('status', 'Document moved.');
     }
 
