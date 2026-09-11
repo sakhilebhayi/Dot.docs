@@ -9,7 +9,6 @@ use App\Models\Team;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\URL as UrlGenerator;
-use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -24,15 +23,17 @@ use Livewire\Component;
  * which IS the keyboard-first pattern rather than a fallback bolted onto
  * one.
  *
- * currentTeam appears in exactly one place, resolveTeam(), and only to pick
- * WHICH workspace to open when no folder was named. Everything after that
- * derives from the parent object, which is authorised through ObjPolicy -
- * so a node from another team cannot be reached by putting its uuid in the
- * query string.
+ * currentTeam appears in exactly one place, resolveTeam() via
+ * BrowsesTheTree::workspaceTeam(), and only to pick WHICH workspace to open
+ * when no folder was named. Everything after that derives from the parent
+ * object, which is authorised through ObjPolicy - so a node from another team
+ * cannot be reached by putting its uuid in the query string. The fallback
+ * rule, the team lookup and the refusal-to-field-error helper live in that
+ * trait, shared with App\Livewire\Documents\Index.
  */
 class Navigator extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, BrowsesTheTree;
 
     #[Url(as: 'folder', except: '')]
     public string $parentUuid = '';
@@ -72,13 +73,7 @@ class Navigator extends Component
             return $root;
         }
 
-        $node = Obj::where('uuid', $this->parentUuid)->first();
-
-        if ($node === null || ! $node->isFolder() || ! auth()->user()->can('view', $node)) {
-            return $root;
-        }
-
-        return $node;
+        return $this->folderOrRoot(Obj::where('uuid', $this->parentUuid)->first(), $root);
     }
 
     /** @return Collection<int, Obj> */
@@ -252,23 +247,6 @@ class Navigator extends Component
             ->title('Files');
     }
 
-    /**
-     * Run a FilesService call, turning its refusals into errors on the field
-     * that caused them rather than a 422 the person never sees.
-     */
-    private function guarded(callable $call, string $field): bool
-    {
-        try {
-            $call();
-        } catch (ValidationException $e) {
-            $this->addError($field, collect($e->errors())->flatten()->first() ?? 'That could not be done.');
-
-            return false;
-        }
-
-        return true;
-    }
-
     private function node(string $uuid): Obj
     {
         $node = Obj::where('uuid', $uuid)->firstOrFail();
@@ -278,18 +256,18 @@ class Navigator extends Component
     }
 
     /**
-     * The workspace to open when no folder was named. This is the ONLY
-     * currentTeam read in the tree code - FilesService takes its team from
-     * the parent object, so nothing downstream depends on this being right.
+     * The workspace to open when no folder was named - BrowsesTheTree's, with
+     * the one difference that matters here: a tree browser with no workspace
+     * has nothing to show at all.
+     *
+     * Jetstream's CreateNewUser guarantees a personal team, so a null is only
+     * reachable from a factory-made account; a clear 409 beats the TypeError
+     * it would become one frame later.
      */
     private function resolveTeam(): Team
     {
-        $user = auth()->user();
-        $team = $user->currentTeam ?? $user->personalTeam();
+        $team = $this->workspaceTeam();
 
-        // Jetstream's CreateNewUser guarantees a personal team, so this is
-        // only reachable from a factory-made account; a clear 409 beats the
-        // TypeError a null would become one frame later.
         abort_if($team === null, 409, 'This account has no workspace to file anything in.');
 
         return $team;

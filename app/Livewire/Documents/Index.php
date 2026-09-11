@@ -4,14 +4,13 @@ namespace App\Livewire\Documents;
 
 use App\Documents\DocumentStore;
 use App\Files\FilesService;
+use App\Livewire\Files\BrowsesTheTree;
 use App\Models\Document;
 use App\Models\Files\Obj;
-use App\Models\Team;
 use App\Search\DocumentSearch;
 use App\Services\TagRepository;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
-use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -25,14 +24,17 @@ use Livewire\Component;
  * same row Dot.Files lists, and Dot.Doc has no folder table of its own any
  * more (see .ai/rules/files.md).
  *
- * currentTeam is read in exactly one place, workspaceTeam(), and only to
- * decide WHICH root to open. Every later call takes its team from the node
- * itself, which is what keeps a uuid/id in the query string from reaching
- * another team's rows.
+ * currentTeam is read in exactly one place, BrowsesTheTree::workspaceTeam(),
+ * and only to decide WHICH root to open. Every later call takes its team from
+ * the node itself, which is what keeps a uuid/id in the query string from
+ * reaching another team's rows. The node fallback, the team lookup and the
+ * refusal-to-field-error helper are shared with App\Livewire\Files\Navigator
+ * through that trait - three small pieces both pages need identically, and
+ * the kind that drift when they are copied.
  */
 class Index extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, BrowsesTheTree;
 
     /**
      * How many search hits the list will consider. DocumentSearch ranks and
@@ -121,19 +123,21 @@ class Index extends Component
             return null;
         }
 
-        $files = app(FilesService::class);
-        $root = $files->root($team);
+        $root = app(FilesService::class)->root($team);
 
         if ($this->folderId === null) {
             return $root;
         }
 
-        $node = Obj::find($this->folderId);
+        $node = $this->folderOrRoot(Obj::find($this->folderId), $root);
 
-        if ($node === null || ! $node->isFolder() || ! auth()->user()->can('view', $node)) {
+        // A stale or foreign bookmark lands on your own root, and the
+        // property is reset with it so the page does not keep offering a
+        // folder that is not there - impure inside a #[Computed], and
+        // deliberate: the alternative is 403-ing a link somebody shared
+        // before a folder moved.
+        if ($node->is($root)) {
             $this->folderId = null;
-
-            return $root;
         }
 
         return $node;
@@ -347,17 +351,6 @@ class Index extends Component
             ->title('Documents');
     }
 
-    /**
-     * The workspace whose root this page opens on. The ONE currentTeam read
-     * in the tree code; every team decision after it comes off a node.
-     */
-    private function workspaceTeam(): ?Team
-    {
-        $user = auth()->user();
-
-        return $user->currentTeam ?? $user->personalTeam();
-    }
-
     private function folderNode(int $id): Obj
     {
         $node = Obj::findOrFail($id);
@@ -365,22 +358,5 @@ class Index extends Component
         abort_unless($node->isFolder(), 404);
 
         return $node;
-    }
-
-    /**
-     * Run a FilesService call, turning its refusals into an error on the
-     * field that caused them rather than a 422 nobody sees.
-     */
-    private function guarded(callable $call, string $field): bool
-    {
-        try {
-            $call();
-        } catch (ValidationException $e) {
-            $this->addError($field, collect($e->errors())->flatten()->first() ?? 'That could not be done.');
-
-            return false;
-        }
-
-        return true;
     }
 }

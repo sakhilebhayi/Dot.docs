@@ -5,7 +5,9 @@
     sheet-based folder picker, and there is no drag-and-drop to need a
     keyboard fallback for. The two sheets follow the same APG pattern the
     documents index established for rename - Escape closes and returns focus
-    to the control that opened it, which is what `moveTrigger` holds.
+    to the control that opened it, which is what `sheetTrigger` holds (the
+    rename and move sheets; the New folder / New document sheets have no
+    Escape handler, matching the equivalent dialogs on the documents index).
 --}}
 <div class="page" x-data="{ sheetTrigger: null }">
     <div class="page-head">

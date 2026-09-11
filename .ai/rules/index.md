@@ -9,8 +9,9 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Audit/** | .ai/rules/audit.md |
 | app/Documents/Import/**, app/Documents/Export/**, app/Http/Controllers/DocumentImportController.php, app/Http/Controllers/DocumentExportController.php | .ai/rules/documents-io.md |
 | resources/js/editor/** | .ai/rules/editor.md |
-| app/Files/** | .ai/rules/files.md |
+| app/Files/**, app/Models/Files/**, app/Console/Commands/AdoptFilesTree.php, app/Policies/ObjPolicy.php, app/Livewire/Files/**, app/Http/Controllers/FileUploadController.php, app/Http/Controllers/FileViewController.php, app/Actions/Jetstream/DeleteUser.php | .ai/rules/files.md |
 | resources/views/livewire/** | .ai/rules/livewire.md |
+| database/migrations/** | .ai/rules/migrations.md |
 | app/Documents/Outline/** | .ai/rules/outline.md |
 | app/Print/** | .ai/rules/print.md |
 | app/Livewire/Documents/TemplateGallery.php, app/Livewire/Documents/SaveAsTemplate.php, app/Livewire/Documents/ShareManager.php, app/Http/Controllers/PublishedDocumentController.php, app/Providers/AppServiceProvider.php, app/Observers/DocumentObserver.php, routes/web.php, resources/views/documents/published.blade.php, resources/views/documents/published-password.blade.php, resources/views/documents/shared-password.blade.php, resources/views/documents/_password-gate.blade.php | .ai/rules/publishing.md |

@@ -151,7 +151,12 @@ class AdoptFilesTree extends Command
                     continue;
                 }
 
-                $name = UniqueName::for($parentObj, (string) ($row['name'] ?? 'Folder'));
+                // The legacy table enforced nothing, so a row can hold a name
+                // with a slash, a control character or nothing at all.
+                // safeName() applies the same rule every interactive create
+                // path uses, with a fallback instead of an exception - there
+                // is nobody here to correct it.
+                $name = UniqueName::for($parentObj, $files->safeName((string) ($row['name'] ?? '')));
                 $folder = Folder::create(['name' => $name, 'team_id' => $team->id]);
                 $obj = Obj::create([
                     'objectable_type' => 'folder',

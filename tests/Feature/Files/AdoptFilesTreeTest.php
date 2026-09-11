@@ -146,6 +146,36 @@ class AdoptFilesTreeTest extends TestCase
         $this->assertNotNull(Document::withTrashed()->find($trashed->id)->node);
     }
 
+    /**
+     * Adopted names go through the same cleaning every interactive create
+     * path uses. The legacy table enforced nothing, so it can hold a name
+     * with a slash, a control character, or nothing at all - and a name in
+     * the shared tree carries no path separators (see FilesService).
+     */
+    public function test_legacy_names_are_cleaned_on_the_way_in(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+
+        $this->rewindToLegacySchema();
+
+        $this->legacyFolder($user, "Reports/2026\tQ1");
+        $this->legacyFolder($user, '   ');
+        $this->legacyFolder($user, str_repeat('z', 300));
+
+        $this->rename();
+        $this->adoptAndDrop();
+
+        $names = Obj::whereNotNull('parent_id')->get()->map(fn (Obj $obj) => $obj->name())->all();
+
+        $this->assertContains('Reports 2026 Q1', $names);
+        $this->assertContains('Folder', $names, 'an unusable name falls back rather than being adopted as-is');
+
+        foreach ($names as $name) {
+            $this->assertDoesNotMatchRegularExpression('#[/\\\\]|[\x00-\x1F\x7F]#', $name);
+            $this->assertLessThanOrEqual(255, mb_strlen($name));
+        }
+    }
+
     public function test_a_dry_run_writes_nothing(): void
     {
         $user = User::factory()->withPersonalTeam()->create();
