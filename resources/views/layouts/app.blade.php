@@ -39,15 +39,28 @@
         $pageTitle = trim(strip_tags((string) ($header ?? '')));
     }
 
-    $topbarTitle = $shellDocument?->title
-        ?: ($pageTitle !== ''
-            ? $pageTitle
-            : \Illuminate\Support\Str::headline(\Illuminate\Support\Str::before((string) request()->route()?->getName(), '.')));
-
     // The editor is the one route with a canvas competing for width, so it is
     // the one route where both panels start collapsed (spec §2.4). Everywhere
     // else the rail is the page's navigation and stays open.
     $isEditor = request()->routeIs('documents.edit');
+
+    $sectionName = \Illuminate\Support\Str::headline(
+        \Illuminate\Support\Str::before((string) request()->route()?->getName(), '.')
+    );
+
+    /*
+     * The editor is the one route that does NOT put the document's title up
+     * here, and it is the only page in the product that owns an inline,
+     * editable copy of it: `.doc-bar`'s title field, right under this bar.
+     * A title you can READ in two places but EDIT in one is a title people try
+     * to edit in the wrong one, and Task 1 shipped it twice. So the editor
+     * names its section instead, and everywhere else — history, share,
+     * settings — still names the document it is about, because on those pages
+     * nothing else does.
+     */
+    $topbarTitle = $isEditor
+        ? $sectionName
+        : ($shellDocument?->title ?: ($pageTitle !== '' ? $pageTitle : $sectionName));
     $railState = $isEditor ? 'collapsed' : 'expanded';
     $dockState = $isEditor ? 'collapsed' : 'expanded';
 @endphp

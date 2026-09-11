@@ -12,6 +12,7 @@ use App\Services\TagRepository;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 /**
@@ -43,6 +44,12 @@ class Index extends Component
      */
     private const SEARCH_LIMIT = 200;
 
+    /*
+     * `#[Url]` so the ledger's search is addressable: the editor's ⌘K palette
+     * carries the writer's selection here as `?q=…` (registry.js `search`),
+     * and a search anyone runs by hand is a link they can keep.
+     */
+    #[Url(as: 'q', except: '')]
     public string $search = '';
 
     public string $filter = 'all'; // all | mine | shared | team

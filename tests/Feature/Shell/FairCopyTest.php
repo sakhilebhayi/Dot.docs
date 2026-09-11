@@ -168,10 +168,28 @@ class FairCopyTest extends TestCase
             route('slash-commands.index') => 'Slash commands',
             route('profile.show') => 'Profile',
             route('api-tokens.index') => 'API Tokens',
-            route('documents.edit', $doc->uuid) => 'Fair Copy check',
+            // The editor is the exception, and deliberately so: it owns the
+            // one INLINE, EDITABLE copy of the document's title (.doc-bar's
+            // title field), and Task 1 shipped that title twice — readable in
+            // the bar, editable under it. Spec §4's rebuild of the persistent
+            // row resolved it in favour of the field you can actually type in,
+            // so up here the editor names its section. Every other document
+            // route still names the document, because on those pages nothing
+            // else does. Covered end to end in ContextualToolbarTest.
+            route('documents.edit', $doc->uuid) => 'Documents',
+            route('documents.history', $doc->uuid) => 'Fair Copy check',
         ];
 
         foreach ($expected as $url => $name) {
+            // ShellContext is a SCOPED binding: it memoises the route's
+            // document for exactly one request. A test method issues several
+            // requests against ONE container, so without this the first URL's
+            // answer (null, for a page with no uuid) is still cached when the
+            // document routes are reached, and every later assertion measures
+            // the memo rather than the page. Forgetting them is what a new
+            // request does.
+            $this->app->forgetScopedInstances();
+
             $html = $this->actingAs($user)->get($url)->assertOk()->getContent();
 
             $this->assertSame(

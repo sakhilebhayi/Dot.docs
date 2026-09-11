@@ -1,4 +1,4 @@
-import { commands, run } from '../commands/registry';
+import { paletteCommands, run } from '../commands/registry';
 import { closeList, isListOpen, openList } from './list';
 
 /** Pretty-print a registry shortcut for the platform the reader is on. */
@@ -23,6 +23,8 @@ const GROUP_LABELS = {
     insert: 'Insert',
     layout: 'Layout',
     format: 'Format',
+    table: 'Table',
+    media: 'Image',
     system: 'Document',
 };
 
@@ -32,7 +34,7 @@ export function openPalette(editor) {
         title: 'Commands',
         placeholder: 'Search commands…',
         empty: 'No command matches',
-        items: commands.map((command) => ({
+        items: paletteCommands().map((command) => ({
             key: command.name,
             title: command.title,
             hint: prettyShortcut(command.shortcut) || GROUP_LABELS[command.group] || command.group,

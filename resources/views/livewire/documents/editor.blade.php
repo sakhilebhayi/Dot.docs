@@ -193,10 +193,38 @@
             });
         },
 
-        // Registry commands in the 'system' group need the page to act.
+        // Every name here is a registry command in the `system` group: the
+        // editor cannot do these on its own, so the page does them. Nothing is
+        // routed that has no destination — the palette carries no entry whose
+        // only behaviour would be to fall off the end of this function.
         hostCommand(name, params) {
-            if (name === 'export.pdf') {
-                window.location.href = '{{ route('documents.export', [$document->uuid, 'pdf']) }}';
+            const exports = {
+                'export.pdf': '{{ route('documents.export', [$document->uuid, 'pdf']) }}',
+                'export.word': '{{ route('documents.export', [$document->uuid, 'word']) }}',
+                'export.html': '{{ route('documents.export', [$document->uuid, 'html']) }}',
+                'export.markdown': '{{ route('documents.export', [$document->uuid, 'markdown']) }}',
+                'share': '{{ route('documents.share', $document->uuid) }}',
+                'recent.open': '{{ route('documents.index') }}',
+            };
+
+            if (exports[name]) {
+                window.location.href = exports[name];
+            } else if (name === 'search') {
+                // The DocumentSearch-backed box is the documents ledger's. A
+                // selection travels with the command as `q`, which Index reads
+                // off the query string.
+                const term = (params && params.term) || '';
+                window.location.href = '{{ route('documents.index') }}' +
+                    (term ? '?q=' + encodeURIComponent(term) : '');
+            } else if (name === 'ai' && params && params.action) {
+                // The assistant lives in the dock, which starts collapsed on
+                // this route — asking it something has to open it, the same
+                // way the dock's own quick passes do (data-shell-expand).
+                window.dispatchEvent(new CustomEvent('shell:reveal-dock'));
+                Livewire.dispatchTo('documents.ai-assistant', 'ai-action', {
+                    action: params.action,
+                    param: params.param || '',
+                });
             } else if (name === 'style.switch' && params && params.key) {
                 @this.setStyle(params.key);
             } else if (name === 'comment') {
@@ -418,243 +446,191 @@
          @open-ai-palette.window="Livewire.dispatchTo('documents.ai-assistant', 'open-palette')"
          @open-save-as-template.window="Livewire.dispatchTo('documents.save-as-template', 'open')"
          class="hidden"></div>
-    {{-- ── The bench ────────────────────────────────────────────────────
-         Two rows, neither of which wraps. .doc-head is the document's own
-         slug (title, style, who is here, state, version). .doc-tools is the
-         bench: the twelve things a writer reaches for mid-sentence, milled
-         into compartments by the shell's own hairline. Everything that acts
-         on the DOCUMENT rather than on the text under the cursor is in the
-         "More" menu at the end of it, and everything structural is in the ⌘K
-         palette — which is what lets the row hold one line at 1280px, where
-         the desk is only ~660px wide.
+    {{-- ── The persistent bar ───────────────────────────────────────────
+         ONE slim row under the top bar, and nothing on it inserts a block.
+         Spec §4 retired the bench: the twelve formatting buttons that used to
+         wrap into three ragged rows are now either on the floating toolbar
+         that follows the selection (marks, heading level, table and image
+         tools — resources/js/editor/ui/bubble.js) or in the two menus that
+         already listed them, `/` and ⌘K.
 
-         Every structural insert goes through window.DotDoc.run(), never
-         editor.chain(): the registry wraps each one in the caption guard, so a
-         toolbar button cannot split a figure from its media.
-         See .ai/rules/editor.md. --}}
-    <div class="doc-toolbar">
-        <div class="doc-head">
-            {{-- The page's one <h1>. The title is edited through the input
-                 beside it, so the heading is for the document outline and for
-                 assistive technology; Livewire re-renders both together. --}}
-            <h1 class="sr-only">{{ $title ?: 'Untitled' }}</h1>
+         What is left is what has to be true all the time: what the document is
+         called, which style it is set in, where it is filed, who else is here,
+         whether it is saved, and which version that is. The ⌘K button is the
+         door to everything else, and "More" holds the actions that act on the
+         whole document rather than on the text under the cursor.
 
-            <label class="sr-only" for="doc-title">Document title</label>
-            <input id="doc-title"
-                   wire:model.blur="title"
-                   wire:change="saveTitle"
-                   type="text"
-                   class="doc-title-field"
-                   placeholder="Untitled" />
+         The document's title is here, and ONLY here: the top bar deliberately
+         does not repeat it on this route (layouts/app.blade.php), because a
+         title you can read in two places but edit in one is a title people
+         edit in the wrong one. --}}
+    <div class="doc-bar">
+        {{-- The page's one <h1>. The title is edited through the input
+             beside it, so the heading is for the document outline and for
+             assistive technology; Livewire re-renders both together. --}}
+        <h1 class="sr-only">{{ $title ?: 'Untitled' }}</h1>
 
-            <label class="sr-only" for="doc-style-picker">Document style</label>
-            <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select">
-                @foreach (\App\Styles\StyleEngine::systemKeys() as $styleKey)
-                    <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
+        <label class="sr-only" for="doc-title">Document title</label>
+        <input id="doc-title"
+               wire:model.blur="title"
+               wire:change="saveTitle"
+               type="text"
+               class="doc-title-field"
+               placeholder="Untitled" />
+
+        <label class="sr-only" for="doc-style-picker">Document style</label>
+        <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select">
+            @foreach (\App\Styles\StyleEngine::systemKeys() as $styleKey)
+                <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
+            @endforeach
+        </select>
+        @error('style')
+            <span class="field-error">{{ $message }}</span>
+        @enderror
+
+        {{-- Everything structural — headings, lists, tables, images, callouts,
+             columns, breaks, cross-references, exports, the assistant — is in
+             the registry, which this button and the `/` menu both list. --}}
+        <button type="button" class="tool tool-mono doc-bar-palette"
+                title="Commands — or type / in the document" aria-keyshortcuts="Meta+K Control+K"
+                @click="window.DotDoc.openPalette(ed())">&#8984;K</button>
+
+        {{-- Where this document is filed in the shared Dot.Files tree.
+             A quiet line of text, not a link: the button beside it is the one
+             affordance, and it opens the same .sheet folder picker the
+             documents index uses for rename. --}}
+        <span class="micro doc-bar-filed" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
+        <button type="button" class="tool tool-mono" x-ref="moveTrigger"
+                wire:click="$set('showMoveSheet', true)">Move</button>
+        @error('location')
+            <span class="field-error">{{ $message }}</span>
+        @enderror
+
+        @if (count($activeUsers) > 0)
+            <div class="presence" aria-label="People here now">
+                @foreach (array_slice($activeUsers, 0, 4) as $member)
+                    <span class="presence-face" title="{{ $member['name'] }}">
+                        @if (! empty($member['avatar']))
+                            <img src="{{ $member['avatar'] }}" alt="{{ $member['name'] }}" />
+                        @else
+                            {{ strtoupper(substr($member['name'], 0, 1)) }}
+                        @endif
+                    </span>
                 @endforeach
-            </select>
-            @error('style')
-                <span class="field-error">{{ $message }}</span>
-            @enderror
+                @if (count($activeUsers) > 4)
+                    <span class="presence-face">+{{ count($activeUsers) - 4 }}</span>
+                @endif
+            </div>
+        @endif
 
-            {{-- Where this document is filed in the shared Dot.Files tree.
-                 A quiet line of text, not a link: the button beside it is the one
-                 affordance, and it opens the same .sheet folder picker the
-                 documents index uses for rename. --}}
-            <span class="micro" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
-            <button type="button" class="tool tool-mono" x-ref="moveTrigger"
-                    wire:click="$set('showMoveSheet', true)">Move</button>
-            @error('location')
-                <span class="field-error">{{ $message }}</span>
-            @enderror
+        {{-- State is a WORD and a dot, never colour alone. A rejected save
+             has to be visible: the writer keeps typing over content the
+             server never accepted, and the offline draft is deliberately
+             kept as the only remaining copy. The same words go to the
+             top bar through the `shell:save-state` event. --}}
+        <span class="doc-status" aria-live="polite">
+            <x-shell.status-word tone="idle" word="Offline" x-show="isOffline"
+                                 title="Edits are saved in this browser and sync when you are back online." />
 
-            @if (count($activeUsers) > 0)
-                <div class="presence" aria-label="People here now">
-                    @foreach (array_slice($activeUsers, 0, 4) as $member)
-                        <span class="presence-face" title="{{ $member['name'] }}">
-                            @if (! empty($member['avatar']))
-                                <img src="{{ $member['avatar'] }}" alt="{{ $member['name'] }}" />
-                            @else
-                                {{ strtoupper(substr($member['name'], 0, 1)) }}
-                            @endif
-                        </span>
-                    @endforeach
-                    @if (count($activeUsers) > 4)
-                        <span class="presence-face">+{{ count($activeUsers) - 4 }}</span>
-                    @endif
-                </div>
-            @endif
+            <x-shell.status-word tone="idle" word="Editing" x-show="isTyping && !isOffline" />
 
-            {{-- State is a WORD and a dot, never colour alone. A rejected save
-                 has to be visible: the writer keeps typing over content the
-                 server never accepted, and the offline draft is deliberately
-                 kept as the only remaining copy. The same words go to the
-                 top bar through the `shell:save-state` event. --}}
-            <span class="doc-status" aria-live="polite">
-                <span x-show="isOffline" class="status-word"
-                      title="Edits are saved in this browser and sync when you are back online.">
-                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
-                    <span>Offline</span>
-                </span>
-                <span x-show="isTyping && !isOffline" class="status-word">
-                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
-                    <span>Editing</span>
-                </span>
-                <span wire:loading wire:target="saveContent,saveTitle" class="status-word">
-                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
-                    <span>Saving</span>
-                </span>
-                <span x-show="aiError" x-cloak @click="aiError = ''" class="status-word" style="cursor:pointer"
-                      title="Click to dismiss">
-                    <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
-                    <span x-text="aiError"></span>
-                </span>
-                @error('content')
-                    <span class="status-word" title="{{ $message }}">
-                        <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
-                        <span>Not saved — {{ \Illuminate\Support\Str::limit($message, 60) }}</span>
-                    </span>
-                @else
-                    <span wire:loading.remove wire:target="saveContent,saveTitle" x-show="!isTyping && !isOffline"
-                          class="status-word">
-                        <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
-                        <span>@if ($saved) Saved @else Ready @endif</span>
-                    </span>
-                @enderror
+            <x-shell.status-word tone="idle" word="Saving"
+                                 wire:loading wire:target="saveContent,saveTitle" />
 
-                <span class="micro" title="Last edited {{ $document->updated_at->diffForHumans() }}">
-                    <x-shell.figure :value="$document->version" prefix="v" label="Version" />
-                </span>
+            <span class="status-word status-word-danger" x-show="aiError" x-cloak
+                  @click="aiError = ''" style="cursor:pointer" title="Click to dismiss">
+                <span class="status-word-dot" aria-hidden="true"></span>
+                <span x-text="aiError"></span>
             </span>
-        </div>
 
-        <div class="doc-tools" role="toolbar" aria-label="Writing tools" aria-controls="doc-paper">
-            <div class="doc-cluster">
-                <button type="button" class="tool" style="font-weight:700" title="Bold" aria-label="Bold"
-                        :class="ed()?.isActive('bold') ? 'tool is-on' : 'tool'"
-                        @click="ed().chain().focus().toggleBold().run()">B</button>
+            @error('content')
+                <x-shell.status-word tone="danger" :title="$message"
+                                     :word="'Not saved — '.\Illuminate\Support\Str::limit($message, 60)" />
+            @else
+                <x-shell.status-word tone="good" :word="$saved ? 'Saved' : 'Ready'"
+                                     wire:loading.remove wire:target="saveContent,saveTitle"
+                                     x-show="!isTyping && !isOffline" />
+            @enderror
 
-                <button type="button" class="tool" style="font-style:italic" title="Italic" aria-label="Italic"
-                        :class="ed()?.isActive('italic') ? 'tool is-on' : 'tool'"
-                        @click="ed().chain().focus().toggleItalic().run()">I</button>
-            </div>
+            <span class="micro" title="Last edited {{ $document->updated_at->diffForHumans() }}">
+                <x-shell.figure :value="$document->version" prefix="v" label="Version" />
+            </span>
+        </span>
 
-            <div class="doc-cluster">
-                @foreach ([1, 2, 3] as $h)
-                    <button type="button" class="tool tool-mono" title="Heading {{ $h }}" aria-label="Heading {{ $h }}"
-                            :class="ed()?.isActive('heading', { level: {{ $h }} }) ? 'tool tool-mono is-on' : 'tool tool-mono'"
-                            @click="window.DotDoc.run(ed(), 'heading.{{ $h }}')">H{{ $h }}</button>
+        {{-- Everything that acts on the whole document, in one menu, so the
+             row never has to reflow. --}}
+        <div class="menu doc-bar-end" x-data="{ open: false }"
+             x-on:keydown.escape.window="if (open) { open = false; $refs.moreBtn.focus() }">
+            <button type="button" class="tool tool-mono" x-ref="moreBtn" @click="open = !open"
+                    :aria-expanded="open ? 'true' : 'false'">More</button>
+
+            <div class="menu-list menu-list-wide" x-show="open" @click.outside="open = false" x-cloak>
+                <button type="button" data-shell-expand="dock"
+                        @click="$dispatch('open-ai-palette'); open = false">
+                    Ask the assistant
+                    <span class="micro">Ctrl+Shift+K</span>
+                </button>
+
+                <button type="button" wire:click="toggleSuggestionMode"
+                        aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
+                    {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
+                </button>
+
+                <button type="button" wire:click="toggleCommentSidebar" data-shell-expand="dock"
+                        aria-pressed="{{ $commentSidebarOpen ? 'true' : 'false' }}">
+                    {{ $commentSidebarOpen ? 'Hide comments' : 'Show comments' }}
+                </button>
+
+                <button type="button" @click="ed().chain().focus().undo().run(); open = false">
+                    Undo
+                    <span class="micro">&#8984;Z</span>
+                </button>
+                <button type="button" @click="ed().chain().focus().redo().run(); open = false">
+                    Redo
+                    <span class="micro">&#8679;&#8984;Z</span>
+                </button>
+
+                <button type="button"
+                        :class="ed()?.isActive('code') ? 'is-on' : ''"
+                        @click="ed().chain().focus().toggleCode().run(); open = false">Inline code</button>
+
+                <div x-data="voiceTyping" x-init="init()">
+                    <button type="button" x-show="supported" @click="toggle()"
+                            :aria-pressed="listening ? 'true' : 'false'"
+                            x-text="listening ? 'Stop voice typing' : 'Start voice typing'">Start voice typing</button>
+                </div>
+
+                <span class="menu-label">Export</span>
+                <a href="{{ route('documents.export', [$document->uuid, 'pdf']) }}">PDF</a>
+                <a href="{{ route('documents.export', [$document->uuid, 'word']) }}">Word (.docx)</a>
+                <a href="{{ route('documents.export', [$document->uuid, 'html']) }}">HTML</a>
+                <a href="{{ route('documents.export', [$document->uuid, 'markdown']) }}">Markdown</a>
+
+                {{-- The same render, filed beside the document in the
+                     shared tree instead of downloaded. --}}
+                <span class="menu-label">Save to Dot.Files</span>
+                {{-- A bare <form>/<button>, NOT .menu-form/.btn: those are
+                     for the import picker, and their centred full-width
+                     button breaks the menu's row rhythm beside the export
+                     links above. `.menu-list button` already styles this. --}}
+                @foreach (['pdf' => 'PDF', 'word' => 'Word (.docx)', 'html' => 'HTML', 'markdown' => 'Markdown'] as $format => $label)
+                    <form action="{{ route('documents.export.save-to-files', [$document->uuid, $format]) }}" method="POST">
+                        @csrf
+                        <button type="submit">{{ $label }}</button>
+                    </form>
                 @endforeach
 
-                <button type="button" class="tool tool-mono" title="Bulleted list" aria-label="Bulleted list"
-                        :class="ed()?.isActive('bulletList') ? 'tool tool-mono is-on' : 'tool tool-mono'"
-                        @click="window.DotDoc.run(ed(), 'list.bullet')">List</button>
+                <span class="menu-label">Import</span>
+                <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
+                      enctype="multipart/form-data" class="menu-form">
+                    @csrf
+                    <label class="field-label" for="doc-import">A .docx or .md file</label>
+                    <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
+                    <button type="submit" class="btn btn-primary">Import it</button>
+                </form>
 
-                <button type="button" class="tool tool-mono" title="Numbered list" aria-label="Numbered list"
-                        :class="ed()?.isActive('orderedList') ? 'tool tool-mono is-on' : 'tool tool-mono'"
-                        @click="window.DotDoc.run(ed(), 'list.ordered')">1.</button>
-
-                <button type="button" class="tool tool-mono" title="Blockquote" aria-label="Blockquote"
-                        :class="ed()?.isActive('blockquote') ? 'tool tool-mono is-on' : 'tool tool-mono'"
-                        @click="window.DotDoc.run(ed(), 'quote')">Quote</button>
-            </div>
-
-            <div class="doc-cluster">
-                <button type="button" class="tool tool-mono" title="Insert a table" aria-label="Insert a table"
-                        @click="window.DotDoc.run(ed(), 'table')">Table</button>
-
-                {{-- uploadImage() re-checks the caption guard at the moment it
-                     inserts, because the file dialog is asynchronous. --}}
-                {{-- Attaching a file is one of the three actions that OPEN the
-                     right panel (spec §3): shell.js reads data-shell-expand. --}}
-                <label class="tool tool-mono tool-label" title="Insert an image" data-shell-expand="dock">
-                    Image
-                    <input type="file" accept="image/*" class="sr-only"
-                           @change="ed().uploadImage($event.target.files[0]); $event.target.value = ''" />
-                </label>
-            </div>
-
-            <div class="doc-cluster">
-                {{-- Everything structural (TOC, figure, cross-reference,
-                     callout, columns, breaks, variables) lives in the command
-                     registry, which the palette and the slash menu both list. --}}
-                <button type="button" class="tool tool-mono" title="Commands — or type / in the document"
-                        @click="window.DotDoc.openPalette(ed())">&#8984;K</button>
-            </div>
-
-            <div class="doc-cluster">
-                <button type="button" class="tool tool-mono" title="Undo" aria-label="Undo"
-                        @click="ed().chain().focus().undo().run()">Undo</button>
-                <button type="button" class="tool tool-mono" title="Redo" aria-label="Redo"
-                        @click="ed().chain().focus().redo().run()">Redo</button>
-            </div>
-
-            {{-- Everything that acts on the whole document, in one menu, so the
-                 bench never has to reflow. --}}
-            <div class="menu doc-tools-end" x-data="{ open: false }"
-                 x-on:keydown.escape.window="if (open) { open = false; $refs.moreBtn.focus() }">
-                <button type="button" class="tool tool-mono" x-ref="moreBtn" @click="open = !open"
-                        :aria-expanded="open ? 'true' : 'false'">More</button>
-
-                <div class="menu-list menu-list-wide" x-show="open" @click.outside="open = false" x-cloak>
-                    <button type="button" data-shell-expand="dock"
-                            @click="$dispatch('open-ai-palette'); open = false">
-                        Ask the assistant
-                        <span class="micro">Ctrl+Shift+K</span>
-                    </button>
-
-                    <button type="button" wire:click="toggleSuggestionMode"
-                            aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
-                        {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
-                    </button>
-
-                    <button type="button" wire:click="toggleCommentSidebar" data-shell-expand="dock"
-                            aria-pressed="{{ $commentSidebarOpen ? 'true' : 'false' }}">
-                        {{ $commentSidebarOpen ? 'Hide comments' : 'Show comments' }}
-                    </button>
-
-                    <button type="button"
-                            :class="ed()?.isActive('code') ? 'is-on' : ''"
-                            @click="ed().chain().focus().toggleCode().run(); open = false">Inline code</button>
-
-                    <div x-data="voiceTyping" x-init="init()">
-                        <button type="button" x-show="supported" @click="toggle()"
-                                :aria-pressed="listening ? 'true' : 'false'"
-                                x-text="listening ? 'Stop voice typing' : 'Start voice typing'">Start voice typing</button>
-                    </div>
-
-                    <span class="menu-label">Export</span>
-                    <a href="{{ route('documents.export', [$document->uuid, 'pdf']) }}">PDF</a>
-                    <a href="{{ route('documents.export', [$document->uuid, 'word']) }}">Word (.docx)</a>
-                    <a href="{{ route('documents.export', [$document->uuid, 'html']) }}">HTML</a>
-                    <a href="{{ route('documents.export', [$document->uuid, 'markdown']) }}">Markdown</a>
-
-                    {{-- The same render, filed beside the document in the
-                         shared tree instead of downloaded. --}}
-                    <span class="menu-label">Save to Dot.Files</span>
-                    {{-- A bare <form>/<button>, NOT .menu-form/.btn: those are
-                         for the import picker, and their centred full-width
-                         button breaks the menu's row rhythm beside the export
-                         links above. `.menu-list button` already styles this. --}}
-                    @foreach (['pdf' => 'PDF', 'word' => 'Word (.docx)', 'html' => 'HTML', 'markdown' => 'Markdown'] as $format => $label)
-                        <form action="{{ route('documents.export.save-to-files', [$document->uuid, $format]) }}" method="POST">
-                            @csrf
-                            <button type="submit">{{ $label }}</button>
-                        </form>
-                    @endforeach
-
-                    <span class="menu-label">Import</span>
-                    <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
-                          enctype="multipart/form-data" class="menu-form">
-                        @csrf
-                        <label class="field-label" for="doc-import">A .docx or .md file</label>
-                        <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
-                        <button type="submit" class="btn btn-primary">Import it</button>
-                    </form>
-
-                    <button type="button" @click="$dispatch('open-save-as-template'); open = false"
-                            title="Save this document as a reusable template">Save as a template</button>
-                </div>
+                <button type="button" @click="$dispatch('open-save-as-template'); open = false"
+                        title="Save this document as a reusable template">Save as a template</button>
             </div>
         </div>
     </div>

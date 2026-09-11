@@ -287,6 +287,7 @@ const GROUND = [
     { surface: '.note', note: 'a note' },
     { surface: '.note-danger', note: 'a danger note' },
     { surface: '.dotdoc-panel', note: 'the command palette' },
+    { surface: '.dotdoc-bubble', note: 'the floating contextual toolbar' },
 ];
 
 const INKS = [
@@ -313,6 +314,7 @@ const INKS = [
     '.link',
     '.dotdoc-panel-hint',
     '.dotdoc-panel-title',
+    '.dotdoc-bubble-btn',
 ];
 
 /** The inverted surfaces — the pairs the token table was blind to. */

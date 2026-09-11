@@ -327,23 +327,31 @@
 }
 
 /*
- * The bubble is appended to <body> by the editor bundle, which hides it with
- * the `hidden` property (bubble.js: `dom.hidden = true`). An author-level
- * `display: flex` beats the UA sheet's `[hidden] { display: none }` whatever
- * the specificity, so the hidden bubble stayed laid out at the end of the body
- * flow and added ~74px of phantom page scroll under the 100dvh shell. The
- * hidden state has to be honoured here.
+ * THE FLOATING CONTEXTUAL TOOLBAR (spec §4).
+ *
+ * The one toolbar in the product. It is appended to <body> by the editor
+ * bundle, which hides it with the `hidden` property (bubble.js:
+ * `dom.hidden = true`). An author-level `display: flex` beats the UA sheet's
+ * `[hidden] { display: none }` whatever the specificity, so the hidden bubble
+ * stayed laid out at the end of the body flow and added ~74px of phantom page
+ * scroll under the 100dvh shell. The hidden state has to be honoured here —
+ * for the rows too, since each variant hides the ones it does not want.
+ *
+ * Fair Copy skin: it is a raised surface sitting over the page, so it takes
+ * the one radius allowed on a floating panel and the same hairline every other
+ * surface uses. It carries NO shadow — the page keeps the only one.
  */
 .dotdoc-bubble {
     position: absolute;
     z-index: 999;
+    max-width: min(560px, calc(100vw - 16px));
     background: var(--surface-raised);
     border: 1px solid var(--line);
     border-radius: var(--r-canvas);
     padding: 4px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
 }
 
 .dotdoc-bubble[hidden],
@@ -355,6 +363,17 @@
     display: flex;
     align-items: center;
     gap: 2px;
+    flex-wrap: wrap;
+}
+
+/*
+ * A second row is a different KIND of tool from the one above it (marks, then
+ * the heading or the table), so the two get a hairline — the one place in this
+ * toolbar where content would otherwise be ambiguous.
+ */
+.dotdoc-bubble-row + .dotdoc-bubble-row:not([hidden]) {
+    padding-top: 3px;
+    border-top: 1px solid var(--line);
 }
 
 .dotdoc-bubble-btn {
@@ -367,7 +386,18 @@
     color: var(--ink);
     font-family: var(--font-chrome);
     font-size: var(--t-body);
+    line-height: 1;
+    white-space: nowrap;
     cursor: pointer;
+}
+
+/*
+ * The table, heading and image tools are WORDS ("Row +", "Header", "Alt
+ * text"), not glyphs: a row of unlabelled icons is a row you have to learn.
+ * They take the small chrome size so six of them still fit one line.
+ */
+.dotdoc-bubble-btn-word {
+    font-size: var(--t-micro);
 }
 
 .dotdoc-bubble-btn:hover {

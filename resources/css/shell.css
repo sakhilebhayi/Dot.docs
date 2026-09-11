@@ -1203,76 +1203,72 @@ button.list-row {
 }
 
 /*
- * THE BENCH.
+ * THE PERSISTENT BAR.
  *
- * Row 1, .doc-head, is the document's own slug: title, style, who else is here,
- * the state word. Row 2, .doc-tools, is the bench: the things a writer reaches
- * for mid-sentence. Both rows are `flex-wrap: nowrap`; only the title is
- * allowed to shrink, and everything that acts on the DOCUMENT rather than on
- * the text under the cursor lives in the "More" menu at the end of the bench.
+ * ONE row under the top bar, and nothing on it inserts a block (spec §4). The
+ * bench of twelve formatting buttons that used to wrap into three ragged rows
+ * is gone: its marks, heading levels, table and image tools now come to the
+ * selection on the floating toolbar, and everything structural was already in
+ * `/` and ⌘K.
  *
- * With both panels collapsed by default the canvas is now the full width, so
- * the row has considerably more room than the 660px it was squeezed into.
+ * What is left is what has to be true all the time — the title, the style, the
+ * filing, who is here, whether it saved, which version. The row is
+ * `flex-wrap: nowrap`; only the title and the filed-in line are allowed to
+ * shrink, so it holds one line down to a phone.
  */
-.doc-toolbar {
+.doc-bar {
     position: sticky;
     top: 0;
     z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    flex-wrap: nowrap;
+    min-width: 0;
+    padding: var(--s2) var(--s4);
     background: var(--ground);
     border-bottom: 1px solid var(--line);
 }
 
-.doc-head,
-.doc-tools {
-    display: flex;
-    align-items: center;
-    gap: var(--s2);
-    flex-wrap: nowrap;
+/* Only the title and the filing line give ground; everything else is itself. */
+.doc-bar > * {
+    flex: none;
+}
+
+/* The ⌘K button is the door to everything the row no longer carries, so it
+   sits against the style picker rather than drifting to an edge. */
+.doc-bar-palette {
+    margin-left: calc(var(--s3) * -1 + var(--s1));
+}
+
+.doc-bar-filed {
+    flex: 0 1 auto;
     min-width: 0;
-    padding: var(--s2) var(--s4);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.doc-head {
-    gap: var(--s3);
-    padding-bottom: 0;
-}
-
-.doc-head > * {
-    flex: none;
-}
-
-.doc-cluster {
-    display: flex;
-    align-items: center;
-    gap: var(--s1);
-    flex: none;
-}
-
-.doc-cluster + .doc-cluster {
+.doc-bar-end {
     margin-left: var(--s2);
 }
 
-.doc-tools-end {
-    margin-left: auto;
-}
-
 @container (max-width: 780px) {
-    .doc-tools {
+    .doc-bar {
+        gap: var(--s2);
         padding-left: var(--s3);
         padding-right: var(--s3);
     }
 
-    .doc-tools .tool {
-        padding: 0 5px;
-    }
-
-    .doc-cluster + .doc-cluster {
-        margin-left: 0;
+    /* Where this document is filed is the one fact on the row that is also on
+       the documents ledger, so it is the one that goes when the room does. */
+    .doc-bar-filed {
+        display: none;
     }
 }
 
 @container (max-width: 620px) {
-    .doc-tools {
+    .doc-bar {
         overflow-x: auto;
     }
 }
