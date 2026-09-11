@@ -58,7 +58,10 @@ return [
          */
         'files' => [
             'driver' => env('FILES_DISK', 'local'),
-            'root' => env('FILES_ROOT', storage_path('app/files')),
+            // `?:` rather than env()'s second argument: an env file carrying a
+            // bare `FILES_ROOT=` yields '' - not null - and would silently root
+            // the disk at the filesystem's current directory.
+            'root' => env('FILES_ROOT') ?: storage_path('app/files'),
             'visibility' => 'private',
             'throw' => false,
             'report' => false,
