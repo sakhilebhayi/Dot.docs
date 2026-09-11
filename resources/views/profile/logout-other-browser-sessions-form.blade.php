@@ -13,18 +13,18 @@
         </p>
 
         @if (count($this->sessions) > 0)
-            <ul class="ledger">
+            <ul class="list">
                 @foreach ($this->sessions as $session)
-                    <li class="ledger-row">
-                        <span class="rail-initial" aria-hidden="true">{{ $session->agent->isDesktop() ? 'PC' : 'MB' }}</span>
-                        <span class="ledger-key">
+                    <li class="list-row">
+                        <span class="list-key">
+                            {{ $session->agent->isDesktop() ? __('Desktop') : __('Mobile') }} —
                             {{ $session->agent->platform() ?: __('Unknown') }} — {{ $session->agent->browser() ?: __('Unknown') }}
-                            <span class="ledger-sub">{{ $session->ip_address }}</span>
+                            <span class="list-sub">{{ $session->ip_address }}</span>
                         </span>
                         @if ($session->is_current_device)
-                            <x-shell.lamp tone="good" word="{{ __('This device') }}" />
+                            <x-shell.status-word tone="good" word="{{ __('This device') }}" />
                         @else
-                            <span class="ledger-val">{{ __('Last active') }} {{ $session->last_active }}</span>
+                            <span class="list-val">{{ __('Last active') }} {{ $session->last_active }}</span>
                         @endif
                     </li>
                 @endforeach

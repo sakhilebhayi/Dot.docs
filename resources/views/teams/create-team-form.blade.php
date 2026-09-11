@@ -15,9 +15,9 @@
                 <span class="face-plate">
                     <img src="{{ $this->user->profile_photo_url }}" alt="{{ $this->user->name }}">
                 </span>
-                <span class="ledger-key">
+                <span class="list-key">
                     {{ $this->user->name }}
-                    <span class="ledger-sub">{{ $this->user->email }}</span>
+                    <span class="list-sub">{{ $this->user->email }}</span>
                 </span>
             </div>
         </div>

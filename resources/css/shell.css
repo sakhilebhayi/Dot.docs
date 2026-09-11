@@ -1,56 +1,81 @@
 /*
- * Dot.Doc shell — "Two Inks on a Desk".
+ * Dot.Doc shell — "Fair Copy".
  *
- * The chrome around the paper: tokens, the three-region grid (rail / desk /
- * dock) with its status line, and the ledger primitives every inner page is
- * built from. Everything INSIDE .paper belongs to the Document Style CSS
+ * The chrome around the page: tokens, the three-region grid (rail / canvas /
+ * dock) under one top bar, and the primitives every inner page is built from.
+ * Everything INSIDE .paper belongs to the Document Style CSS
  * (<style id="doc-style">, App\Styles\CssBuilder) — do not style document
  * content from here.
  *
- * Token names are fixed by docs/superpowers/specs/2026-09-07-dot-doc-platform-
- * design.md §7. Night is the default (html.dark); day is :root. Nothing in the
- * chrome carries a shadow and nothing has a radius above 4px: the paper is the
- * only raised object in the product.
+ * Token names and values are fixed by docs/superpowers/specs/2026-09-11-dot-
+ * doc-fair-copy-redesign-design.md §2.3; the structural rules by §2.4. DAY is
+ * the default (bare :root) because a writing tool opens on paper. Whitespace
+ * does the dividing: a rule appears only where two surfaces of different
+ * elevation actually touch. The page keeps the only shadow in the product.
  */
 
 :root {
     /* Day */
-    --desk: #e9e6df;
-    --desk-raised: #f2f0ea;
-    --rule: #d5d1c7;
-    --paper: #ffffff;
-    --paper-shadow: rgba(30, 25, 15, 0.18);
-    --text: #1e1f22;
-    --text-2: #5d5e5a;
-    --ink: #1f2023;
-    --marker: #0f766e;
-    --marker-bg: #0f766e14;
-    --signal: #8a6d05;
-    --good: #2f7043;
-    --danger: #a9352d;
+    --ground: #f5f3ee;
+    --surface: #fbfaf7;
+    --surface-raised: #ffffff;
+    --ink: #23211d;
+    --ink-soft: #6b675f;
+    --line: #e5e1d8;
+    --accent: #2f5233;
+    --accent-soft: #2f523314;
+    --danger: #a63b2c;
 
-    /* Type — chrome sans, mono figures, ratio >= 1.25 a step */
-    --font-chrome: 'Atkinson Hyperlegible Next', 'Atkinson Hyperlegible', ui-sans-serif, system-ui, sans-serif;
-    --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, 'SFMono-Regular', monospace;
+    /*
+     * The document canvas does NOT invert with the theme, and that is
+     * deliberate: App\Styles\CssBuilder writes `.paper{background:#fff}` and
+     * colours every element of the document from --doc-ink, and Document
+     * Styles are out of scope for this phase (spec §7). A night-mode paper
+     * token would therefore put light chrome ink on a sheet that is still
+     * white. These two are measured as their own rows in the contrast gate.
+     */
+    --paper: #ffffff;
+    --paper-ink: #23211d;
+    --paper-shadow: rgba(35, 33, 29, 0.16);
+
+    /*
+     * The machine's ink. A person's writing is never painted in it.
+     *
+     * --marker is the ink IN THE DOCUMENT and so does not invert either: it
+     * sits on --paper, which is white in both modes. --marker-chrome is the
+     * same ink shown in the CHROME (the assistant's result sheet, the chat
+     * turns), where the ground does invert, and it is the one that flips.
+     */
+    --marker: #2a5f7a;
+    --marker-bg: #2a5f7a14;
+    --marker-chrome: #2a5f7a;
+
+    /* Type — Fraunces displays, Work Sans works, mono only where figures align */
+    --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+    --font-chrome: 'Work Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
     --t-micro: 12px;
     --t-body: 15px;
     --t-lede: 19px;
-    --t-title: 24px;
-    --t-display: 31px;
+    --t-title: 25px;
+    --t-display: 33px;
 
-    /* Space — uneven on purpose, so grouping reads */
+    /* Space — the top two steps grew: whitespace is the structural device now */
     --s1: 4px;
     --s2: 8px;
     --s3: 12px;
     --s4: 20px;
     --s5: 32px;
-    --s6: 52px;
+    --s6: 56px;
+
+    /* Radius — 8 on anything you click, 12 on the canvas, 0 everywhere else */
+    --r-control: 8px;
+    --r-canvas: 12px;
 
     /* Structure */
-    --rail-w: 260px;
-    --rail-w-collapsed: 56px;
-    --dock-w: 360px;
-    --status-h: 36px;
+    --rail-w: 268px;
+    --dock-w: 340px;
+    --topbar-h: 52px;
 
     /* Motion */
     --ai-in: 180ms;
@@ -58,21 +83,42 @@
     --chrome-move: 140ms;
 }
 
+/*
+ * Night. Two guards, and they are not redundant: html.dark is the explicit
+ * choice (the `theme` cookie, read server-side), and the media query catches
+ * the reader who has never touched the switch but whose system asks for dark.
+ * An explicit DAY choice is stamped html.light so it wins over that query —
+ * without the :not(.light), turning the theme back to day did nothing on a
+ * system-dark machine.
+ */
 html.dark {
-    /* Night (default) */
-    --desk: #14161a;
-    --desk-raised: #1b1e24;
-    --rule: #2a2f38;
-    --paper: #fbfaf7;
+    --ground: #1c1a17;
+    --surface: #242119;
+    --surface-raised: #2b2820;
+    --ink: #eeece6;
+    --ink-soft: #a39d90;
+    --line: #38352c;
+    --accent: #7fae7a;
+    --accent-soft: #7fae7a1f;
+    --danger: #d97c68;
     --paper-shadow: rgba(0, 0, 0, 0.55);
-    --text: #e6e4de;
-    --text-2: #9a9a94;
-    --ink: #1f2023;
-    --marker: #0f766e;
-    --marker-bg: #0f766e14;
-    --signal: #f1c62e;
-    --good: #3f8f5a;
-    --danger: #c9463d;
+    --marker-chrome: #7fb0c9;
+}
+
+@media (prefers-color-scheme: dark) {
+    html:not(.light) {
+        --ground: #1c1a17;
+        --surface: #242119;
+        --surface-raised: #2b2820;
+        --ink: #eeece6;
+        --ink-soft: #a39d90;
+        --line: #38352c;
+        --accent: #7fae7a;
+        --accent-soft: #7fae7a1f;
+        --danger: #d97c68;
+        --paper-shadow: rgba(0, 0, 0, 0.55);
+        --marker-chrome: #7fb0c9;
+    }
 }
 
 /* ── Ground ──────────────────────────────────────────────────────────── */
@@ -84,8 +130,8 @@ body {
 
 body {
     margin: 0;
-    background: var(--desk);
-    color: var(--text);
+    background: var(--ground);
+    color: var(--ink);
     font-family: var(--font-chrome);
     font-size: var(--t-body);
     line-height: 1.55;
@@ -119,9 +165,9 @@ body {
 }
 
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-    outline: 2px solid var(--text);
+    outline: 2px solid var(--ink);
     outline-offset: 2px;
-    border-radius: 2px;
+    border-radius: 3px;
 }
 
 .skip-link {
@@ -130,9 +176,10 @@ body {
     top: -100px;
     z-index: 200;
     padding: var(--s2) var(--s3);
-    background: var(--desk-raised);
-    border: 1px solid var(--rule);
-    color: var(--text);
+    border-radius: var(--r-control);
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    color: var(--ink);
     font-size: var(--t-body);
     text-decoration: none;
 }
@@ -143,16 +190,22 @@ body {
 
 /* ── Shell grid ──────────────────────────────────────────────────────── */
 
+/*
+ * The two side columns are `auto`, not fixed tracks, and the panels carry
+ * their own width. A collapsed panel is display:none, which empties its
+ * column, which collapses the track to zero — no :has(), no second source of
+ * truth on .shell, and nothing for a browser to disagree about.
+ */
 .shell {
     display: grid;
-    grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--dock-w);
-    grid-template-rows: var(--status-h) auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: var(--topbar-h) auto minmax(0, 1fr);
     grid-template-areas:
-        'status status status'
+        'topbar topbar topbar'
         'banner banner banner'
-        'rail   desk   dock';
+        'rail   canvas dock';
     height: 100dvh;
-    background: var(--desk);
+    background: var(--ground);
 }
 
 /*
@@ -165,209 +218,195 @@ body {
     grid-area: banner;
 }
 
-.shell[data-rail='collapsed'] {
-    --rail-w: var(--rail-w-collapsed);
-}
+/* ── Top bar ─────────────────────────────────────────────────────────── */
 
-.shell[data-dock='hidden'] {
-    --dock-w: 0px;
-}
-
-.shell[data-dock='hidden'] .dock {
-    display: none;
-}
-
-/* ── Status line ─────────────────────────────────────────────────────── */
-
-.status-line {
-    grid-area: status;
+.topbar {
+    grid-area: topbar;
     display: flex;
-    align-items: stretch;
-    gap: 0;
+    align-items: center;
+    gap: var(--s3);
     min-width: 0;
-    background: var(--desk-raised);
-    border-bottom: 1px solid var(--rule);
-    overflow: hidden;
+    padding: 0 var(--s4);
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
 }
 
-.status-brand,
-.status-item {
-    display: flex;
-    align-items: center;
-    gap: var(--s2);
-    padding: 0 var(--s3);
-    border-right: 1px solid var(--rule);
-    white-space: nowrap;
-    font-family: var(--font-mono);
-    font-size: var(--t-micro);
-    letter-spacing: 0.06em;
-    color: var(--text);
-}
-
-.status-brand {
-    font-weight: 700;
-    letter-spacing: 0.14em;
-}
-
-.status-item-key {
-    color: var(--text-2);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-}
-
-.status-spacer {
+.topbar-title {
     flex: 1 1 auto;
-    min-width: var(--s3);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-size: var(--t-lede);
+    font-weight: 500;
+    letter-spacing: 0.005em;
+    color: var(--ink);
 }
 
-.status-action {
+.topbar-actions {
+    flex: none;
     display: flex;
     align-items: center;
-    gap: var(--s2);
-    padding: 0 var(--s3);
-    border: 0;
-    border-left: 1px solid var(--rule);
-    background: transparent;
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: var(--t-micro);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    text-decoration: none;
-    cursor: pointer;
-    transition: background var(--chrome-move) ease;
+    gap: var(--s1);
 }
 
-.status-action:hover {
-    background: var(--desk);
-}
-
-/* ── Lamp + readout ──────────────────────────────────────────────────── */
-
-.lamp {
-    display: inline-block;
+.topbar-status {
     flex: none;
-    width: 8px;
-    height: 8px;
-    background: var(--text-2);
 }
 
-.lamp-good {
-    background: var(--good);
-}
-
-.lamp-signal {
-    background: var(--signal);
-}
-
-.lamp-danger {
-    background: var(--danger);
-}
-
-.lamp-marker {
-    background: var(--marker);
-}
-
-.lamp-idle {
-    /* A hairline ring, drawn as a border rather than an inset shadow: the paper
-       is the only element in the product allowed a box-shadow of any kind. */
-    background: transparent;
-    border: 1px solid var(--text-2);
-}
-
-/*
- * <x-shell.lamp> renders a BARE lamp + word. It carries no padding and no
- * hairline of its own, so it drops into a ledger row, a toolbar or a button
- * without ten call sites overriding it inline. The status line asks for
- * variant="status", which is the only place the compartment padding belongs.
- */
-.lamp-word {
+.topbar-action,
+.topbar-toggle {
+    flex: none;
     display: inline-flex;
     align-items: center;
     gap: var(--s2);
-    font-family: var(--font-mono);
+    height: 32px;
+    padding: 0 var(--s3);
+    border: 1px solid transparent;
+    border-radius: var(--r-control);
+    background: transparent;
+    color: var(--ink-soft);
+    font-family: var(--font-chrome);
     font-size: var(--t-micro);
-    letter-spacing: 0.06em;
-    color: var(--text);
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background var(--chrome-move) ease, color var(--chrome-move) ease;
+}
+
+.topbar-action:hover,
+.topbar-toggle:hover {
+    background: var(--accent-soft);
+    color: var(--ink);
+}
+
+/* ── Status word ─────────────────────────────────────────────────────── */
+
+/*
+ * A word plus a dot, and the word is what carries the state: the dot is 6px of
+ * tone with no border, no compartment and no padding of its own. The word is
+ * set in --ink, so the tone colours are never text and the contrast gate is met
+ * by construction.
+ */
+.status-word {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    font-size: var(--t-micro);
+    color: var(--ink);
     white-space: nowrap;
 }
 
-.readout {
-    font-family: var(--font-mono);
-    font-size: var(--t-micro);
-    letter-spacing: 0.06em;
+.status-word-dot {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ink-soft);
+}
+
+.status-word-good .status-word-dot,
+.status-word-dot-good {
+    background: var(--accent);
+}
+
+.status-word-danger .status-word-dot,
+.status-word-dot-danger {
+    background: var(--danger);
+}
+
+.status-word-idle .status-word-dot,
+.status-word-dot-idle {
+    background: var(--ink-soft);
+}
+
+/* ── Figures and quiet micro text ────────────────────────────────────── */
+
+/*
+ * A figure is a PLAIN NUMERAL in the UI font. No mono motif, no zero padding,
+ * no ghosted digits — and therefore no row in the contrast gate that has to be
+ * exempted from the 4.5:1 floor, which is the point.
+ */
+.numeral {
     font-variant-numeric: tabular-nums;
-    color: var(--text);
+    white-space: nowrap;
+    color: inherit;
+}
+
+.micro {
+    font-size: var(--t-micro);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-soft);
+}
+
+.micro-lg {
+    font-size: var(--t-title);
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--ink);
 }
 
 /*
  * INVERTED SURFACES.
  *
- * .readout, .lamp-word, .ledger-sub and .field-hint all pin their own colour
- * to a token measured against --desk / --desk-raised. Put one inside a surface
- * that inverts (a primary button, a pressed tag, an active tool, the palette's
- * active row) and that pinned colour lands on top of --text: 1.00:1, which is
- * exactly what happened to the "⇧⌘K" readout in the dock's CTA — it rendered
- * as blank padding. Anything that carries its own colour has to INHERIT inside
- * an inverted surface, and a lamp has to be painted from currentColor, because
- * the tone tokens are unreadable on --text too.
+ * .micro, .list-sub, .list-val and .field-hint all pin their own colour to a
+ * token measured against --ground / --surface. Put one inside a surface that
+ * inverts (a primary button, a pressed tag, an active tool, the palette's
+ * active row) and that pinned colour lands on the button's own fill, which is
+ * exactly what happened to the "⇧⌘K" in the dock's CTA — it rendered as blank
+ * padding. Anything that carries its own colour has to INHERIT inside an
+ * inverted surface, and the status dot has to be painted from currentColor,
+ * because the tone tokens are unreadable on the inverted fill too.
  *
  * The same rule lives in paper.css for .dotdoc-panel-row.is-active. Both are
  * checked by scripts/design/contrast-dom.mjs, which measures rendered pairs
  * (rule x rule), not tokens.
  */
 :is(.inverted, .btn-primary, .tool.is-on, .tag[aria-pressed='true'])
-    :is(.readout, .lamp-word, .ledger-sub, .ledger-val, .field-hint, .figure, .status-item-key) {
+    :is(.micro, .status-word, .list-sub, .list-val, .field-hint, .numeral) {
     color: inherit;
 }
 
-/* The padding zero stays a ghost, but of the ink it is actually sitting on. */
-:is(.inverted, .btn-primary, .tool.is-on, .tag[aria-pressed='true']) .readout .ghost {
-    color: color-mix(in srgb, currentColor 45%, transparent);
-}
-
-:is(.inverted, .btn-primary, .tool.is-on, .tag[aria-pressed='true']) .lamp {
+:is(.inverted, .btn-primary, .tool.is-on, .tag[aria-pressed='true']) .status-word-dot {
     background: currentColor;
-}
-
-:is(.inverted, .btn-primary, .tool.is-on, .tag[aria-pressed='true']) .lamp-idle {
-    background: transparent;
-    border-color: currentColor;
-}
-
-.readout-lg {
-    font-size: var(--t-title);
-    letter-spacing: 0.02em;
-    line-height: 1.2;
-}
-
-/*
- * A padding zero is decoration on a real figure. It is aria-hidden and the
- * true value rides in an .sr-only sibling, so the contrast gate does not
- * apply to it — it is the single deliberate exception.
- */
-.readout .ghost {
-    color: color-mix(in srgb, var(--text-2) 36%, transparent);
 }
 
 /* ── Rail ────────────────────────────────────────────────────────────── */
 
+/*
+ * The rail is a surface of different elevation standing against the canvas, so
+ * it keeps exactly one hairline — the only kind of rule Fair Copy allows.
+ * Inside it, groups are separated by space.
+ */
 .rail {
     grid-area: rail;
     display: flex;
     flex-direction: column;
+    width: var(--rail-w);
     min-width: 0;
-    background: var(--desk-raised);
-    border-right: 1px solid var(--rule);
+    background: var(--surface);
+    border-right: 1px solid var(--line);
     overflow: hidden;
+}
+
+/*
+ * Collapsed is width zero, not a strip of initials: the canvas is what the
+ * width is for, and a column of two-letter codes is a worse answer than no
+ * column. display:none also takes the whole panel out of the tab order, which
+ * a zero-width overflow:hidden column would not have done.
+ */
+.rail[data-panel-state='collapsed'],
+.dock[data-panel-state='collapsed'] {
+    display: none;
 }
 
 /*
  * The navigator's groups scroll; the account block is pinned to the foot. The
  * leftover height is absorbed HERE rather than by a margin-top:auto on the
  * foot, which is what opened the 190px void between the last nav group and the
- * user block. The groups now sit in contact, seam to seam, and the rail ends
- * where the list ends.
+ * user block.
  */
 .rail-scroll {
     flex: 1 1 auto;
@@ -377,25 +416,23 @@ body {
 }
 
 .rail-group {
-    padding: var(--s3) 0 var(--s4);
-    border-bottom: 1px solid var(--rule);
+    padding: var(--s4) var(--s3) 0;
 }
 
 .rail-group:last-child {
-    border-bottom: 0;
+    padding-bottom: var(--s4);
 }
 
 .rail-label-sub {
-    padding-top: var(--s3);
+    padding-top: var(--s4);
 }
 
 .rail-label {
-    padding: 0 var(--s3) var(--s2);
-    font-family: var(--font-mono);
+    padding: 0 var(--s2) var(--s2);
     font-size: var(--t-micro);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-2);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
 }
 
 .rail-item {
@@ -403,11 +440,11 @@ body {
     align-items: center;
     gap: var(--s2);
     width: 100%;
-    padding: 9px var(--s3) 9px 10px;
+    padding: 7px var(--s2);
     border: 0;
-    border-left: 2px solid transparent;
+    border-radius: var(--r-control);
     background: transparent;
-    color: var(--text-2);
+    color: var(--ink-soft);
     font: inherit;
     font-size: var(--t-body);
     text-align: left;
@@ -417,112 +454,102 @@ body {
 }
 
 .rail-item:hover {
-    background: var(--desk);
-    color: var(--text);
+    background: var(--accent-soft);
+    color: var(--ink);
 }
 
 .rail-item.is-current {
-    border-left-color: var(--text);
-    color: var(--text);
-    font-weight: 700;
+    background: var(--accent-soft);
+    color: var(--ink);
+    font-weight: 500;
+}
+
+.rail-item-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .rail-item-note {
+    flex: none;
     margin-left: auto;
-    font-family: var(--font-mono);
     font-size: var(--t-micro);
-    color: var(--text-2);
+    color: var(--ink-soft);
 }
 
 .rail-title {
-    padding: 0 var(--s3) var(--s2);
+    margin: 0 0 var(--s2);
+    padding: 0 var(--s2);
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
     font-size: var(--t-body);
-    font-weight: 700;
-    color: var(--text);
+    font-weight: 500;
+    color: var(--ink);
     overflow-wrap: anywhere;
-}
-
-.shell[data-rail='collapsed'] .rail-label,
-.shell[data-rail='collapsed'] .rail-title,
-.shell[data-rail='collapsed'] .rail-item-note,
-.shell[data-rail='collapsed'] .rail-item-text {
-    display: none;
-}
-
-.shell[data-rail='collapsed'] .rail-item {
-    justify-content: center;
-    padding-left: 0;
-    padding-right: 0;
-}
-
-.rail-initial {
-    font-family: var(--font-mono);
-    font-size: var(--t-micro);
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: inherit;
 }
 
 .rail-foot {
     flex: none;
-    display: flex;
-    align-items: center;
-    gap: var(--s2);
-    padding: var(--s2) var(--s3);
-    border-top: 1px solid var(--rule);
+    padding: var(--s3) var(--s4) var(--s4);
 }
 
-.rail-foot .rail-item {
-    padding: 0;
-    border-left-width: 0;
-    color: var(--text);
+.rail-account {
+    display: block;
 }
 
-.rail-foot .rail-item:hover {
-    background: transparent;
+.rail-account form {
+    margin: 0;
 }
 
-.shell[data-rail='collapsed'] .rail-foot {
-    flex-direction: column;
-    align-items: stretch;
+.rail-account-name {
+    display: block;
+    font-size: var(--t-body);
+    color: var(--ink);
 }
 
-/* ── Desk (the scrolling canvas) ─────────────────────────────────────── */
+.rail-account-team {
+    display: block;
+    font-size: var(--t-micro);
+    color: var(--ink-soft);
+}
 
-.desk-region {
-    grid-area: desk;
+/* The retired status line's figures, at the quietest point in the shell. */
+.rail-colophon {
+    margin: var(--s3) 0 0;
+    font-size: var(--t-micro);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-soft);
+}
+
+/* ── Canvas (the scrolling page area) ────────────────────────────────── */
+
+.canvas-region {
+    grid-area: canvas;
     min-width: 0;
     overflow: auto;
-    background: var(--desk);
-    /* So .page can ask how much desk there actually is, rather than guessing
+    background: var(--ground);
+    /* So .page can ask how much room there actually is, rather than guessing
        from the viewport (the rail and the dock both eat into it). */
     container-type: inline-size;
 }
 
 /*
- * The page column is left-anchored, not centred: a ledger is read from its
- * left edge, and the rail's hairline is what anchors it. What was dead desk to
- * its right is now RULED — the column ends in the same 1px seam every other
- * region of the shell ends in, so the empty area reads as the desk's margin
- * rather than as an unfinished layout. The rule only appears once there is
- * actually desk to the right of it (container query on the desk, not the
- * viewport, because the rail and the dock both eat into it).
+ * The page column is centred with room around it, because the object in the
+ * room is the page. Two Inks anchored it left against the rail's hairline and
+ * ruled the leftover; Fair Copy spends that leftover as margin instead, which
+ * is the whole point of the redesign.
  */
 .page {
-    max-width: 1080px;
+    max-width: 940px;
     min-height: 100%;
-    margin: 0;
+    margin: 0 auto;
     padding: var(--s5) var(--s5) var(--s6);
 }
 
-@container (min-width: 1140px) {
-    .page {
-        border-right: 1px solid var(--rule);
-    }
-}
-
 .page-narrow {
-    max-width: 760px;
+    max-width: 720px;
 }
 
 .page-head {
@@ -535,48 +562,56 @@ body {
 
 .page-title {
     margin: 0;
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
     font-size: var(--t-display);
-    font-weight: 700;
+    font-weight: 500;
     line-height: 1.15;
-    letter-spacing: -0.01em;
-    color: var(--text);
+    letter-spacing: -0.005em;
+    color: var(--ink);
 }
 
 .page-lede {
     margin: var(--s2) 0 0;
     max-width: 62ch;
     font-size: var(--t-body);
-    color: var(--text-2);
+    color: var(--ink-soft);
 }
 
 .section-title {
     margin: 0;
-    font-family: var(--font-mono);
     font-size: var(--t-micro);
     font-weight: 500;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-2);
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
 }
 
 .h-panel {
     margin: 0;
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
     font-size: var(--t-lede);
-    font-weight: 700;
+    font-weight: 500;
     line-height: 1.3;
-    color: var(--text);
+    color: var(--ink);
 }
 
-/* ── Panels and ledgers (shared edges; never a card) ─────────────────── */
+/* ── Panels and lists (space, not hairlines) ─────────────────────────── */
 
+/*
+ * A panel is a quiet field of --surface sitting in the page column, not a card
+ * floating in a gutter: no border, no shadow, and the tint against --ground is
+ * small enough that what separates two panels is the 32px between them.
+ */
 .panel {
-    background: var(--desk-raised);
-    border: 1px solid var(--rule);
-    border-radius: 0;
+    background: var(--surface);
+    border: 0;
+    border-radius: var(--r-canvas);
+    padding: var(--s2) 0;
 }
 
 .panel + .panel {
-    border-top: 0;
+    margin-top: var(--s5);
 }
 
 .panel-head {
@@ -584,71 +619,62 @@ body {
     align-items: center;
     justify-content: space-between;
     gap: var(--s3);
-    padding: var(--s3) var(--s4);
-    border-bottom: 1px solid var(--rule);
+    padding: var(--s3) var(--s4) var(--s2);
 }
 
 .panel-body {
-    padding: var(--s4);
+    padding: var(--s3) var(--s4);
 }
 
 .panel-body > * + * {
     margin-top: var(--s4);
 }
 
-/* The closing row of a panel: the same compartment as .panel-head, hairline on
-   top instead of underneath. Three views were writing this inline. */
+/* The closing row of a panel. Three views were writing this inline. */
 .panel-foot {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--s3);
-    padding: var(--s3) var(--s4);
-    border-top: 1px solid var(--rule);
+    padding: var(--s2) var(--s4) var(--s3);
 }
 
 .panel-foot-block {
     display: block;
 }
 
-.ledger {
+.list {
     list-style: none;
     margin: 0;
-    padding: 0;
+    padding: 0 var(--s2);
 }
 
-.ledger-row {
+.list-row {
     display: flex;
     align-items: center;
     gap: var(--s3);
-    padding: var(--s3) var(--s4);
-    border-top: 1px solid var(--rule);
-    color: var(--text);
+    padding: var(--s3);
+    border-radius: var(--r-control);
+    color: var(--ink);
     text-decoration: none;
     transition: background var(--chrome-move) ease;
 }
 
-.ledger > .ledger-row:first-child {
-    border-top: 0;
+a.list-row:hover,
+button.list-row:hover {
+    background: var(--accent-soft);
 }
 
-a.ledger-row:hover,
-button.ledger-row:hover {
-    background: var(--desk);
-}
-
-button.ledger-row {
+button.list-row {
     width: 100%;
-    border-left: 0;
-    border-right: 0;
-    border-bottom: 0;
+    border: 0;
     background: transparent;
     font: inherit;
     text-align: left;
     cursor: pointer;
 }
 
-.ledger-key {
+.list-key {
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
@@ -656,28 +682,26 @@ button.ledger-row {
     white-space: nowrap;
 }
 
-.ledger-sub {
+.list-sub {
     display: block;
     font-size: var(--t-micro);
-    color: var(--text-2);
-    letter-spacing: 0.02em;
+    color: var(--ink-soft);
     white-space: normal;
 }
 
-.ledger-val {
+.list-val {
     flex: none;
-    font-family: var(--font-mono);
     font-size: var(--t-micro);
     font-variant-numeric: tabular-nums;
-    color: var(--text-2);
+    color: var(--ink-soft);
     white-space: nowrap;
 }
 
-/* Figures in a ledger stack into ONE right-hand column, whatever else the row
+/* Figures in a list stack into ONE right-hand column, whatever else the row
    carries in front of them. */
-.ledger-figure {
+.list-figure {
     flex: none;
-    min-width: 5ch;
+    min-width: 4ch;
     text-align: right;
 }
 
@@ -687,46 +711,41 @@ button.ledger-row {
     grid-area: dock;
     display: flex;
     flex-direction: column;
+    width: var(--dock-w);
     min-width: 0;
-    background: var(--desk-raised);
-    border-left: 1px solid var(--rule);
+    background: var(--surface);
+    border-left: 1px solid var(--line);
     overflow: hidden;
 }
 
 .dock-tabs {
     display: flex;
     flex: none;
-    border-bottom: 1px solid var(--rule);
+    gap: var(--s1);
+    padding: var(--s2) var(--s3) 0;
 }
 
 .dock-tab {
     flex: 1 1 0;
-    padding: var(--s3) var(--s2);
+    padding: var(--s2);
     border: 0;
-    border-right: 1px solid var(--rule);
-    border-bottom: 2px solid transparent;
+    border-radius: var(--r-control);
     background: transparent;
-    color: var(--text-2);
-    font-family: var(--font-mono);
+    color: var(--ink-soft);
+    font-family: var(--font-chrome);
     font-size: var(--t-micro);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
     cursor: pointer;
     transition: color var(--chrome-move) ease, background var(--chrome-move) ease;
 }
 
-.dock-tab:last-child {
-    border-right: 0;
-}
-
 .dock-tab:hover {
-    background: var(--desk);
-    color: var(--text);
+    background: var(--accent-soft);
+    color: var(--ink);
 }
 
 .dock-tab[aria-selected='true'] {
-    border-bottom-color: var(--text);
-    color: var(--text);
+    background: var(--accent-soft);
+    color: var(--ink);
     font-weight: 500;
 }
 
@@ -741,7 +760,7 @@ button.ledger-row {
 
 .dock-section {
     flex: none;
-    border-bottom: 1px solid var(--rule);
+    padding-bottom: var(--s4);
 }
 
 .dock-section-head {
@@ -749,23 +768,35 @@ button.ledger-row {
 }
 
 .dock-section-body {
-    padding: 0 var(--s4) var(--s4);
+    padding: 0 var(--s4);
 }
 
 .dock-section-body > * + * {
     margin-top: var(--s3);
 }
 
-/* ── Empty states: one sentence, one action ──────────────────────────── */
+/* ── Empty states: one sentence, then what to do about it ────────────── */
 
 .empty {
     padding: var(--s5) var(--s4);
 }
 
 .empty-line {
-    margin: 0 0 var(--s3);
+    margin: 0 0 var(--s4);
     max-width: 46ch;
-    color: var(--text-2);
+    color: var(--ink);
+}
+
+/* Only an actual empty STATE gets the larger line; the same class is used for
+   ordinary explanatory copy inside the dock, where 19px shouted. */
+.empty > .empty-line {
+    font-size: var(--t-lede);
+}
+
+.empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
 }
 
 /* ── Controls ────────────────────────────────────────────────────────── */
@@ -775,10 +806,10 @@ button.ledger-row {
     align-items: center;
     gap: var(--s2);
     padding: 8px var(--s3);
-    border: 1px solid var(--rule);
-    border-radius: 3px;
-    background: var(--desk);
-    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface-raised);
+    color: var(--ink);
     font-family: var(--font-chrome);
     font-size: var(--t-body);
     line-height: 1.4;
@@ -788,24 +819,24 @@ button.ledger-row {
 }
 
 .btn:hover {
-    border-color: var(--text-2);
+    border-color: var(--ink-soft);
 }
 
 .btn:disabled {
     cursor: not-allowed;
-    color: var(--text-2);
+    color: var(--ink-soft);
 }
 
 .btn-primary {
-    background: var(--text);
-    border-color: var(--text);
-    color: var(--desk-raised);
-    font-weight: 700;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--surface-raised);
+    font-weight: 500;
 }
 
 .btn-primary:hover {
-    background: var(--text-2);
-    border-color: var(--text-2);
+    background: var(--ink);
+    border-color: var(--ink);
 }
 
 .btn-quiet {
@@ -814,19 +845,27 @@ button.ledger-row {
 }
 
 .btn-quiet:hover {
-    background: var(--desk);
-    border-color: var(--rule);
+    background: var(--accent-soft);
+    border-color: transparent;
 }
 
 .btn-sm {
     padding: 5px var(--s2);
-    font-family: var(--font-mono);
     font-size: var(--t-micro);
-    letter-spacing: 0.06em;
+}
+
+.btn-danger {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.btn-danger:hover {
+    background: var(--surface);
+    border-color: var(--danger);
 }
 
 .link {
-    color: var(--text);
+    color: var(--accent);
     text-decoration: underline;
     text-underline-offset: 3px;
     text-decoration-thickness: 1px;
@@ -843,77 +882,99 @@ button.ledger-row {
 .field-label {
     display: block;
     margin-bottom: var(--s2);
-    font-family: var(--font-mono);
     font-size: var(--t-micro);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-2);
+    font-weight: 500;
+    color: var(--ink-soft);
 }
 
 .field {
     width: 100%;
-    padding: 8px var(--s3);
-    border: 1px solid var(--rule);
-    border-radius: 3px;
-    background: var(--desk);
-    color: var(--text);
+    padding: 9px var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface-raised);
+    color: var(--ink);
     font-family: var(--font-chrome);
     font-size: var(--t-body);
     line-height: 1.5;
 }
 
 .field:focus {
-    border-color: var(--text-2);
-    outline: 2px solid var(--text);
+    border-color: var(--ink-soft);
+    outline: 2px solid var(--ink);
     outline-offset: 1px;
 }
 
 .field::placeholder {
-    color: var(--text-2);
+    color: var(--ink-soft);
 }
 
 .field-mono {
     font-family: var(--font-mono);
 }
 
+/*
+ * An error is its own word in --danger with a dot in front of it, drawn here
+ * rather than as a span every one of thirty call sites had to remember to
+ * write. --danger clears 4.5:1 on every ground in the shell, in both modes.
+ */
 .field-error {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
     margin: var(--s2) 0 0;
     font-size: var(--t-micro);
-    color: var(--text);
+    color: var(--danger);
+}
+
+.field-error::before {
+    content: '';
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--danger);
+    transform: translateY(-1px);
 }
 
 .field-hint {
     margin: var(--s2) 0 0;
     max-width: 62ch;
     font-size: var(--t-micro);
-    color: var(--text-2);
+    color: var(--ink-soft);
 }
 
 .field-check {
     display: flex;
     align-items: flex-start;
     gap: var(--s2);
-    color: var(--text);
+    color: var(--ink);
 }
 
 .field-check input {
     margin-top: 3px;
-    accent-color: var(--text);
+    accent-color: var(--accent);
 }
 
-/*
- * A face is a plate on the desk, not a floating avatar bubble: a square with
- * the same hairline every other compartment has. No border-radius above 4px
- * exists in this chrome, which rules the circular avatar out.
- */
+.field-box {
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--surface-raised);
+    accent-color: var(--accent);
+}
+
+/* A face is a face: radius is allowed now, and a portrait is round. */
 .face-plate {
     flex: none;
     display: inline-block;
     width: 40px;
     height: 40px;
     overflow: hidden;
-    border: 1px solid var(--rule);
-    background: var(--desk) center / cover no-repeat;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: var(--surface-raised) center / cover no-repeat;
 }
 
 .face-plate-sm {
@@ -928,9 +989,9 @@ button.ledger-row {
     display: block;
 }
 
-/* A single-choice ledger: the chosen row carries a lamp AND the word, so the
+/* A single-choice list: the chosen row carries the dot AND the word, so the
    choice survives greyscale. */
-.role-list .ledger-row {
+.role-list .list-row {
     align-items: flex-start;
 }
 
@@ -945,32 +1006,39 @@ button.ledger-row {
     display: inline-flex;
     align-items: center;
     gap: var(--s1);
-    padding: 3px var(--s2);
-    border: 1px solid var(--rule);
-    border-radius: 3px;
-    background: var(--desk);
-    color: var(--text);
-    font-family: var(--font-mono);
+    padding: 4px var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface-raised);
+    color: var(--ink);
     font-size: var(--t-micro);
-    letter-spacing: 0.04em;
     cursor: pointer;
 }
 
 .tag[aria-pressed='true'] {
-    background: var(--text);
-    border-color: var(--text);
-    color: var(--desk-raised);
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--surface-raised);
 }
 
+/*
+ * A note is a strip that has something to say. It is NEUTRAL: the tone comes
+ * from the status word inside it, never from the fill, which is why the danger
+ * variant is a 10% wash rather than a colour the reader has to decode.
+ */
 .note {
     display: flex;
     align-items: center;
-    gap: var(--s2);
+    gap: var(--s3);
     padding: var(--s3) var(--s4);
-    border: 1px solid var(--rule);
-    background: var(--desk);
-    color: var(--text);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    color: var(--ink);
     font-size: var(--t-body);
+}
+
+.note-danger {
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 /* ── Sheets (modal dialogs) ──────────────────────────────────────────── */
@@ -979,7 +1047,7 @@ button.ledger-row {
     position: fixed;
     inset: 0;
     z-index: 60;
-    background: color-mix(in srgb, var(--desk) 72%, transparent);
+    background: color-mix(in srgb, var(--ground) 78%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -991,9 +1059,10 @@ button.ledger-row {
     max-height: 84vh;
     display: flex;
     flex-direction: column;
-    background: var(--desk-raised);
-    border: 1px solid var(--rule);
-    border-radius: 0;
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--r-canvas);
+    overflow: hidden;
 }
 
 .sheet-wide {
@@ -1005,8 +1074,7 @@ button.ledger-row {
     align-items: center;
     justify-content: space-between;
     gap: var(--s3);
-    padding: var(--s3) var(--s4);
-    border-bottom: 1px solid var(--rule);
+    padding: var(--s4) var(--s4) var(--s3);
 }
 
 .sheet-head > .h-panel {
@@ -1022,40 +1090,36 @@ button.ledger-row {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    padding: var(--s4);
+    padding: var(--s3) var(--s4);
 }
 
 .sheet-foot {
     display: flex;
     justify-content: flex-end;
     gap: var(--s2);
-    padding: var(--s3) var(--s4);
-    border-top: 1px solid var(--rule);
+    padding: var(--s3) var(--s4) var(--s4);
 }
 
 /* ── Two inks ────────────────────────────────────────────────────────── */
 
 /*
  * Marker is the MACHINE's ink and nothing else. A person's @mention is not the
- * assistant writing, so it is graphite in a mono chip — the same shape as any
- * other named figure in the chrome. Spending marker on a human read as though
- * the AI had written the comment.
+ * assistant writing, so it is ordinary ink in a quiet chip — the same shape as
+ * any other named thing in the chrome. Spending marker on a human read as
+ * though the AI had written the comment.
  */
 .mention {
-    font-family: var(--font-mono);
-    font-size: 0.9em;
-    letter-spacing: 0.02em;
-    padding: 0 var(--s1);
-    border: 1px solid var(--rule);
-    border-radius: 2px;
-    background: var(--desk);
-    color: var(--text);
+    font-size: 0.92em;
+    padding: 1px var(--s2);
+    border-radius: var(--r-control);
+    background: var(--accent-soft);
+    color: var(--ink);
     white-space: nowrap;
 }
 
 .ink-marker {
-    color: var(--marker);
-    background: var(--marker-bg);
+    color: var(--marker-chrome);
+    background: color-mix(in srgb, var(--marker-chrome) 12%, transparent);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1078,87 +1142,7 @@ button.ledger-row {
     }
 }
 
-/* ── Narrow viewports: the dock stacks under the desk ────────────────── */
-
-@media (max-width: 1180px) {
-    .shell {
-        grid-template-columns: var(--rail-w) minmax(0, 1fr);
-        grid-template-areas:
-            'status status'
-            'banner banner'
-            'rail   desk';
-    }
-
-    .dock {
-        display: none;
-    }
-}
-
-@media (max-width: 720px) {
-    .shell {
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: var(--status-h) auto auto minmax(0, 1fr);
-        grid-template-areas:
-            'status'
-            'banner'
-            'rail'
-            'desk';
-        height: auto;
-        min-height: 100dvh;
-    }
-
-    /* Stacked: the rail is a band, not a column, so it grows with its list
-       instead of clipping, and the editor goes back to min-height. */
-    .rail {
-        border-right: 0;
-        border-bottom: 1px solid var(--rule);
-        overflow: visible;
-    }
-
-    .rail-scroll {
-        overflow-y: visible;
-    }
-
-    .editor {
-        height: auto;
-        min-height: 100%;
-    }
-
-    .editor-main {
-        overflow-y: visible;
-    }
-
-    .editor-row {
-        flex-wrap: wrap;
-    }
-
-    .editor-side {
-        flex: 1 1 100%;
-        overflow: visible;
-        border-left: 0;
-        border-top: 1px solid var(--rule);
-    }
-
-    .page {
-        min-height: 0;
-        padding: var(--s4) var(--s3) var(--s5);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    * {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-        scroll-behavior: auto !important;
-    }
-}
-
-/* ── Figures, rail outline, account block ────────────────────────────── */
-
-.figure {
-    white-space: nowrap;
-}
+/* ── Rail outline ────────────────────────────────────────────────────── */
 
 .rail-outline {
     list-style: none;
@@ -1169,15 +1153,13 @@ button.ledger-row {
 }
 
 .rail-outline-empty {
-    padding: 0 var(--s3) var(--s2);
+    padding: 0 var(--s2) var(--s2);
     font-size: var(--t-micro);
-    color: var(--text-2);
+    color: var(--ink-soft);
 }
 
 .rail-outline-item {
     font-size: var(--t-micro);
-    font-family: var(--font-mono);
-    letter-spacing: 0.02em;
     padding-top: 6px;
     padding-bottom: 6px;
     display: block;
@@ -1194,38 +1176,10 @@ button.ledger-row {
     padding-left: var(--s5);
 }
 
-.rail-account {
-    display: block;
-}
-
-.rail-account form {
-    margin: 0;
-}
-
-/* ── Controls, continued ─────────────────────────────────────────────── */
-
-.btn-danger {
-    border-color: var(--danger);
-}
-
-.btn-danger:hover {
-    background: var(--desk-raised);
-    border-color: var(--danger);
-}
-
-.field-box {
-    width: 16px;
-    height: 16px;
-    border: 1px solid var(--rule);
-    border-radius: 2px;
-    background: var(--desk);
-    accent-color: var(--text);
-}
-
 /* ── Editor page ─────────────────────────────────────────────────────── */
 
 /*
- * The editor page fills the desk exactly (height, not min-height) so the two
+ * The editor page fills the canvas exactly (height, not min-height) so the two
  * columns underneath it can own their own scrollbars: the paper in
  * .editor-main, the comment thread in .editor-side. Overlays (palette, slash
  * menu, selection bubble) are appended to document.body by the editor bundle
@@ -1240,42 +1194,38 @@ button.ledger-row {
 }
 
 /*
- * THE BENCH (two rows, and neither of them wraps).
+ * THE BENCH.
  *
  * Row 1, .doc-head, is the document's own slug: title, style, who else is here,
- * the state lamp, the version. Facts.
- * Row 2, .doc-tools, is the bench: the twelve things a writer reaches for
- * mid-sentence, milled into compartments by the same hairline that separates
- * every other region of the shell. Everything that acts on the DOCUMENT rather
- * than on the text under the cursor (assistant, suggesting mode, comments,
- * export, import, template) lives in the "More" menu at the end of the bench,
- * and everything structural is in the ⌘K palette. That split is what lets the
- * row hold its single line at 1280px, where the desk is only ~660px wide.
+ * the state word. Row 2, .doc-tools, is the bench: the things a writer reaches
+ * for mid-sentence. Both rows are `flex-wrap: nowrap`; only the title is
+ * allowed to shrink, and everything that acts on the DOCUMENT rather than on
+ * the text under the cursor lives in the "More" menu at the end of the bench.
  *
- * Both rows are `flex-wrap: nowrap`; only the title is allowed to shrink.
+ * With both panels collapsed by default the canvas is now the full width, so
+ * the row has considerably more room than the 660px it was squeezed into.
  */
 .doc-toolbar {
     position: sticky;
     top: 0;
     z-index: 20;
-    background: var(--desk-raised);
-    border-bottom: 1px solid var(--rule);
+    background: var(--ground);
+    border-bottom: 1px solid var(--line);
 }
 
 .doc-head,
 .doc-tools {
     display: flex;
     align-items: center;
-    gap: var(--s1);
+    gap: var(--s2);
     flex-wrap: nowrap;
     min-width: 0;
-    padding: var(--s1) var(--s3);
+    padding: var(--s2) var(--s4);
 }
 
 .doc-head {
     gap: var(--s3);
-    padding-top: var(--s2);
-    border-bottom: 1px solid var(--rule);
+    padding-bottom: 0;
 }
 
 .doc-head > * {
@@ -1290,27 +1240,17 @@ button.ledger-row {
 }
 
 .doc-cluster + .doc-cluster {
-    margin-left: var(--s1);
-    padding-left: var(--s2);
-    border-left: 1px solid var(--rule);
+    margin-left: var(--s2);
 }
 
 .doc-tools-end {
     margin-left: auto;
-    padding-left: var(--s2);
-    border-left: 1px solid var(--rule);
 }
 
-/*
- * At 1280px the desk is only ~660px wide (the rail takes 260, the dock 360),
- * which is 19px short of the roomy bench. The compartments tighten rather than
- * wrap: the row is one line at every width the dock is visible at. Below that
- * the bench scrolls sideways instead of spilling.
- */
 @container (max-width: 780px) {
     .doc-tools {
-        padding-left: var(--s2);
-        padding-right: var(--s2);
+        padding-left: var(--s3);
+        padding-right: var(--s3);
     }
 
     .doc-tools .tool {
@@ -1331,51 +1271,51 @@ button.ledger-row {
 .doc-title-field {
     flex: 1 1 auto;
     min-width: 0;
-    padding: 4px 0;
-    border: 0;
-    border-bottom: 1px solid transparent;
+    padding: 4px var(--s2);
+    border: 1px solid transparent;
+    border-radius: var(--r-control);
     background: transparent;
-    color: var(--text);
-    font-family: var(--font-chrome);
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
     font-size: var(--t-lede);
-    font-weight: 700;
+    font-weight: 500;
     line-height: 1.3;
 }
 
 .doc-title-field:hover,
 .doc-title-field:focus {
-    border-bottom-color: var(--rule);
+    background: var(--surface);
+    border-color: var(--line);
 }
 
-/* The style picker was the one boxed control among borderless tools. It is a
-   tool now, and only draws its edge when you go near it. */
+/* The style picker draws its edge only when you go near it. */
 .tool-select {
-    height: 28px;
+    height: 30px;
     padding: 0 var(--s2);
     border: 1px solid transparent;
-    border-radius: 3px;
+    border-radius: var(--r-control);
     background: transparent;
-    color: var(--text);
-    font-family: var(--font-mono);
+    color: var(--ink);
+    font-family: var(--font-chrome);
     font-size: var(--t-micro);
-    letter-spacing: 0.06em;
     cursor: pointer;
 }
 
 .tool-select:hover,
 .tool-select:focus {
-    border-color: var(--rule);
-    background: var(--desk);
+    border-color: var(--line);
+    background: var(--surface);
 }
 
 .tool {
-    min-width: 28px;
-    height: 28px;
-    padding: 0 6px;
+    min-width: 30px;
+    height: 30px;
+    padding: 0 var(--s2);
     border: 1px solid transparent;
-    border-radius: 3px;
+    border-radius: var(--r-control);
     background: transparent;
-    color: var(--text);
+    color: var(--ink);
     font-family: var(--font-chrome);
     font-size: var(--t-body);
     line-height: 1;
@@ -1385,27 +1325,30 @@ button.ledger-row {
 }
 
 .tool:hover {
-    background: var(--desk);
-    border-color: var(--rule);
+    background: var(--accent-soft);
 }
 
 .tool.is-on {
-    background: var(--text);
-    border-color: var(--text);
-    color: var(--desk-raised);
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--surface-raised);
 }
 
 .tool-mono {
-    font-family: var(--font-mono);
     font-size: var(--t-micro);
-    letter-spacing: 0.04em;
 }
 
 .tool-sep {
     width: 1px;
     align-self: stretch;
     margin: 0 var(--s1);
-    background: var(--rule);
+    background: var(--line);
+}
+
+/* A <label> acting as a tool (the image picker wraps a hidden file input). */
+.tool-label {
+    display: inline-flex;
+    align-items: center;
 }
 
 .doc-status {
@@ -1432,7 +1375,7 @@ button.ledger-row {
 
 /*
  * The comment sidebar scrolls on its own, the way the dock does: the column
- * clips, the ledger inside it takes the leftover and scrolls. Without this the
+ * clips, the list inside it takes the leftover and scrolls. Without this the
  * whole editor page grew with the thread and the paper scrolled away with it.
  */
 .editor-side {
@@ -1441,8 +1384,8 @@ button.ledger-row {
     flex-direction: column;
     min-height: 0;
     overflow: hidden;
-    border-left: 1px solid var(--rule);
-    background: var(--desk-raised);
+    border-left: 1px solid var(--line);
+    background: var(--surface);
 }
 
 .editor-side > * {
@@ -1478,10 +1421,10 @@ button.ledger-row {
 .presence-face {
     width: 24px;
     height: 24px;
-    border: 1px solid var(--rule);
-    background: var(--desk);
-    color: var(--text);
-    font-family: var(--font-mono);
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+    color: var(--ink);
     font-size: var(--t-micro);
     display: flex;
     align-items: center;
@@ -1495,6 +1438,8 @@ button.ledger-row {
     object-fit: cover;
 }
 
+/* ── Menus ───────────────────────────────────────────────────────────── */
+
 .menu {
     position: relative;
 }
@@ -1504,9 +1449,11 @@ button.ledger-row {
     right: 0;
     top: calc(100% + 4px);
     z-index: 40;
-    min-width: 200px;
-    background: var(--desk-raised);
-    border: 1px solid var(--rule);
+    min-width: 220px;
+    padding: var(--s1);
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--r-canvas);
 }
 
 .menu-list a,
@@ -1515,9 +1462,9 @@ button.ledger-row {
     width: 100%;
     padding: var(--s2) var(--s3);
     border: 0;
-    border-top: 1px solid var(--rule);
+    border-radius: var(--r-control);
     background: transparent;
-    color: var(--text);
+    color: var(--ink);
     font: inherit;
     font-size: var(--t-body);
     text-align: left;
@@ -1525,17 +1472,13 @@ button.ledger-row {
     cursor: pointer;
 }
 
-.menu-list > :first-child {
-    border-top: 0;
-}
-
 .menu-list a:hover,
 .menu-list button:hover {
-    background: var(--desk);
+    background: var(--accent-soft);
 }
 
 .menu-list button[aria-pressed='true'] {
-    font-weight: 700;
+    font-weight: 500;
 }
 
 /* The bench's "More" menu: everything that acts on the whole document. */
@@ -1547,18 +1490,15 @@ button.ledger-row {
 
 .menu-label {
     display: block;
+    margin-top: var(--s2);
     padding: var(--s2) var(--s3) var(--s1);
-    border-top: 1px solid var(--rule);
-    font-family: var(--font-mono);
     font-size: var(--t-micro);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-2);
+    font-weight: 500;
+    color: var(--ink-soft);
 }
 
 .menu-form {
     padding: var(--s2) var(--s3) var(--s3);
-    border-top: 1px solid var(--rule);
 }
 
 .menu-form .btn {
@@ -1567,13 +1507,7 @@ button.ledger-row {
     justify-content: center;
 }
 
-/* A <label> acting as a tool (the image picker wraps a hidden file input). */
-.tool-label {
-    display: inline-flex;
-    align-items: center;
-}
-
-/* ── Grids used by the ledger pages ──────────────────────────────────── */
+/* ── Grids and stacks used by the listing pages ──────────────────────── */
 
 .stack > * + * {
     margin-top: var(--s4);
@@ -1603,19 +1537,12 @@ button.ledger-row {
     gap: var(--s4);
 }
 
-@media (max-width: 900px) {
-    .grid-2,
-    .grid-4 {
-        grid-template-columns: minmax(0, 1fr);
-    }
-}
-
 /* ── The assistant ───────────────────────────────────────────────────── */
 
 /*
  * The assistant has no window of its own. It IS the bottom of the dock's
  * Intelligence tab — the floating pill and the second fixed panel are gone,
- * because nothing in this product floats except the paper.
+ * because nothing in this product floats except the page.
  */
 .dock-chat {
     display: flex;
@@ -1623,7 +1550,7 @@ button.ledger-row {
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
-    border-top: 1px solid var(--rule);
+    border-top: 1px solid var(--line);
 }
 
 .dock-chat > .dock-section-head,
@@ -1644,22 +1571,110 @@ button.ledger-row {
 
 .dock-chat-foot {
     padding: var(--s3) var(--s4);
-    border-top: 1px solid var(--rule);
 }
 
 .turn {
-    padding: var(--s2) 0;
-    border-top: 1px solid var(--rule);
+    padding: var(--s3) 0;
 }
 
-.turn:first-child {
-    border-top: 0;
+.turn + .turn {
+    border-top: 1px solid var(--line);
 }
 
 .turn-marker p {
-    color: var(--marker);
-    background: var(--marker-bg);
+    color: var(--marker-chrome);
+    background: color-mix(in srgb, var(--marker-chrome) 12%, transparent);
 }
 
-/* The assistant's result is a sheet now (a decision needs a dialog, not a
-   strip fixed over the desk), so it needs no surface of its own. */
+/* ── Narrow viewports ────────────────────────────────────────────────── */
+
+/*
+ * Below 1180px the dock stops being a column and becomes an overlay opened
+ * from the top bar. `data-panel-user` is written by resources/js/shell.js and
+ * never by the server, so a panel the server rendered expanded for a desktop
+ * layout does not land on a phone already covering the page: on these widths a
+ * panel is shown only once somebody has actually asked for it.
+ */
+@media (max-width: 1180px) {
+    .shell {
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas:
+            'topbar topbar'
+            'banner banner'
+            'rail   canvas';
+    }
+
+    .dock {
+        position: fixed;
+        inset: var(--topbar-h) 0 0 auto;
+        width: min(var(--dock-w), 92vw);
+        z-index: 60;
+        display: none;
+    }
+
+    .dock[data-panel-user='open'] {
+        display: flex;
+    }
+}
+
+@media (max-width: 900px) {
+    .shell {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            'topbar'
+            'banner'
+            'canvas';
+    }
+
+    .rail {
+        position: fixed;
+        inset: var(--topbar-h) 0 0 0;
+        width: auto;
+        z-index: 60;
+        border-right: 0;
+        display: none;
+    }
+
+    .rail[data-panel-user='open'] {
+        display: flex;
+    }
+
+    .editor {
+        height: auto;
+        min-height: 100%;
+    }
+
+    .editor-main {
+        overflow-y: visible;
+    }
+
+    .editor-row {
+        flex-wrap: wrap;
+    }
+
+    .editor-side {
+        flex: 1 1 100%;
+        overflow: visible;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+    }
+
+    .page {
+        min-height: 0;
+        padding: var(--s4) var(--s3) var(--s5);
+    }
+
+    .grid-2,
+    .grid-4 {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "fraunces",
+        "createdAt": "2026-09-11T18:06:11.387Z",
+        "reason": "Fixed by the owner's Fair Copy spec (docs/superpowers/specs/2026-09-11-dot-doc-fair-copy-redesign-design.md 2.2) and already the guest pages' display face since before this redesign; it is the product's identity, not an AI default. Inter, Geist, Roboto, Plus Jakarta Sans and Space Grotesk stay banned and still fail this rule."
+      }
+    ]
+  }
+}

@@ -9,7 +9,7 @@
 
     @if (session('status'))
         <p class="note" role="status">
-            <span class="lamp lamp-good" aria-hidden="true"></span>
+            <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
             {{ session('status') }}
         </p>
     @endif
@@ -19,8 +19,8 @@
             <div class="panel-head">
                 <h2 class="section-title" id="version-list">Versions</h2>
                 @if (count($compareIds) > 0)
-                    <span class="readout">
-                        <x-shell.figure :value="count($compareIds)" :width="1" label="Selected" />/2 selected
+                    <span class="micro">
+                        <x-shell.figure :value="count($compareIds)" />/2 selected
                     </span>
                 @endif
             </div>
@@ -28,8 +28,8 @@
             @if (count($compareIds) > 0)
                 <div class="panel-head">
                     <span class="toolbar">
-                        <span class="lamp lamp-signal" aria-hidden="true"></span>
-                        <span class="readout">Comparing</span>
+                        <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                        <span class="micro">Comparing</span>
                     </span>
                     <span class="toolbar">
                         @if (count($compareIds) === 2)
@@ -40,9 +40,9 @@
                 </div>
             @endif
 
-            <ul class="ledger">
+            <ul class="list">
                 @forelse ($versions as $version)
-                    <li class="ledger-row">
+                    <li class="list-row">
                         <input type="checkbox"
                                class="field-box"
                                id="cmp-{{ $version->id }}"
@@ -52,18 +52,18 @@
 
                         <button type="button" class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start"
                                 wire:click="preview({{ $version->id }})">
-                            <span class="ledger-key">
-                                <span class="readout">
-                                    <x-shell.figure :value="$version->version_number" :width="4" prefix="v" label="Version" />
+                            <span class="list-key">
+                                <span class="micro">
+                                    <x-shell.figure :value="$version->version_number" prefix="v" label="Version" />
                                 </span>
-                                <span class="ledger-sub">
+                                <span class="list-sub">
                                     {{ $version->created_at->diffForHumans() }}@if ($version->author) · {{ $version->author->name }}@endif
                                 </span>
                             </span>
                         </button>
 
                         @if ($version->version_number === $document->version)
-                            <x-shell.lamp tone="good" word="Current" />
+                            <x-shell.status-word tone="good" word="Current" />
                         @else
                             <button type="button" class="btn btn-sm" wire:click="restore({{ $version->id }})"
                                     wire:confirm="Restore the document to v{{ $version->version_number }}? What is there now is kept as a new version.">
@@ -90,7 +90,7 @@
                     {{ $showDiff && $diffHtml ? 'Difference' : 'Preview' }}
                 </h2>
                 @if ($previewVersion && ! $showDiff)
-                    <span class="readout">{{ $previewVersion->created_at->format('j M Y, H:i') }}</span>
+                    <span class="micro">{{ $previewVersion->created_at->format('j M Y, H:i') }}</span>
                 @endif
             </div>
 
@@ -101,8 +101,8 @@
             @elseif ($previewVersion)
                 <div class="panel-body">
                     <div class="split">
-                        <span class="readout">
-                            <x-shell.figure :value="$previewVersion->version_number" :width="4" prefix="v" label="Version" />
+                        <span class="micro">
+                            <x-shell.figure :value="$previewVersion->version_number" prefix="v" label="Version" />
                             @if ($previewVersion->author) · {{ $previewVersion->author->name }} @endif
                         </span>
                         @if ($previewVersion->version_number !== $document->version)
@@ -113,7 +113,7 @@
                         @endif
                     </div>
 
-                    <div class="desk" style="padding:var(--s4) 0">
+                    <div class="canvas" style="padding:var(--s4) 0">
                         <article class="paper" style="width:100%;min-height:0;padding:var(--s5)">
                             {!! $previewVersion->content_snapshot !!}
                         </article>
@@ -131,14 +131,14 @@
 
 @push('styles')
 <style>
-    .diff-wrapper { overflow-x: auto; border: 1px solid var(--rule); font-family: var(--font-mono); font-size: 13px; }
+    .diff-wrapper { overflow-x: auto; border: 1px solid var(--line); font-family: var(--font-mono); font-size: 13px; }
     .diff-wrapper table { width: 100%; border-collapse: collapse; }
-    .diff-wrapper td, .diff-wrapper th { padding: 4px 10px; vertical-align: top; white-space: pre-wrap; word-break: break-word; border-top: 1px solid var(--rule); }
-    .diff-wrapper .header { background: var(--desk); color: var(--text-2); }
+    .diff-wrapper td, .diff-wrapper th { padding: 4px 10px; vertical-align: top; white-space: pre-wrap; word-break: break-word; border-top: 1px solid var(--line); }
+    .diff-wrapper .header { background: var(--ground); color: var(--ink-soft); }
     .diff-wrapper .old { background: color-mix(in srgb, var(--danger) 12%, transparent); }
-    .diff-wrapper .new { background: color-mix(in srgb, var(--good) 14%, transparent); }
-    .diff-wrapper .replaced { background: color-mix(in srgb, var(--signal) 14%, transparent); }
-    .diff-wrapper ins { background: color-mix(in srgb, var(--good) 22%, transparent); text-decoration: none; }
+    .diff-wrapper .new { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    .diff-wrapper .replaced { background: color-mix(in srgb, var(--marker) 14%, transparent); }
+    .diff-wrapper ins { background: color-mix(in srgb, var(--accent) 22%, transparent); text-decoration: none; }
     .diff-wrapper del { background: color-mix(in srgb, var(--danger) 20%, transparent); text-decoration: line-through; }
 </style>
 @endpush

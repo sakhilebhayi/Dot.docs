@@ -1,4 +1,4 @@
-{{-- The read-and-act counterpart of <x-form-section>: same ledger panel, no
+{{-- The read-and-act counterpart of <x-form-section>: same list panel, no
      form around it. --}}
 <section {{ $attributes->merge(['class' => 'panel']) }}>
     <div class="panel-head">

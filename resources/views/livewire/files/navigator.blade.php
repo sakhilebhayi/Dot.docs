@@ -15,12 +15,12 @@
             <h1 class="page-title">Files</h1>
             <p class="page-lede">Folders, documents and files in {{ auth()->user()->currentTeam->name ?? 'your personal space' }}.</p>
         </div>
-        <a href="{{ route('documents.index') }}" class="btn">The documents ledger</a>
+        <a href="{{ route('documents.index') }}" class="btn">The documents list</a>
     </div>
 
     @if (session('status'))
         <p class="note" role="status">
-            <span class="lamp lamp-good" aria-hidden="true"></span>
+            <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
             {{ session('status') }}
         </p>
     @endif
@@ -28,7 +28,7 @@
     <nav class="toolbar" aria-label="Folder path" style="margin-bottom:var(--s4)">
         @foreach ($this->crumbs as $crumb)
             @if (! $loop->first)
-                <span class="readout" aria-hidden="true">/</span>
+                <span class="micro" aria-hidden="true">/</span>
             @endif
             <button type="button" wire:click="open('{{ $loop->last ? '' : $crumb->uuid }}')"
                     class="btn btn-quiet btn-sm"
@@ -39,9 +39,8 @@
     <section class="panel" aria-labelledby="files-here">
         <div class="panel-head">
             <h2 class="section-title" id="files-here">In {{ $this->parent->name() }}</h2>
-            <span class="readout">
-                <x-shell.figure :value="$this->rows->count()" :width="3" label="Items in this folder" />
-                &nbsp;items
+            <span class="micro">
+                <x-shell.figure :value="$this->rows->count()" />&nbsp;items
             </span>
         </div>
 
@@ -65,12 +64,12 @@
                     <button type="submit" class="btn">Upload it</button>
                 </div>
                 @error('file')
-                    <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                    <p class="field-error">{{ $message }}</p>
                 @enderror
             </form>
 
             @error('object')
-                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                <p class="field-error">{{ $message }}</p>
             @enderror
         </div>
 
@@ -80,36 +79,36 @@
                 <button type="button" class="btn btn-primary" wire:click="$set('showCreateSheet', true)">New document</button>
             </div>
         @else
-            <ul class="ledger">
+            <ul class="list">
                 @foreach ($this->rows as $row)
-                    <li class="ledger-row" wire:key="node-{{ $row->uuid }}">
+                    <li class="list-row" wire:key="node-{{ $row->uuid }}">
                         @if ($row->isFolder())
                             <button type="button" wire:click="open('{{ $row->uuid }}')"
                                     class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start">
-                                <span class="ledger-key">{{ $row->name() }}</span>
+                                <span class="list-key">{{ $row->name() }}</span>
                             </button>
-                            <x-shell.lamp tone="idle" word="Folder" />
+                            <x-shell.status-word tone="idle" word="Folder" />
                         @elseif ($row->isDocument())
                             <a href="{{ route('documents.edit', $row->objectable->uuid) }}"
                                class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start">
-                                <span class="ledger-key">
+                                <span class="list-key">
                                     {{ $row->name() }}
-                                    <span class="ledger-sub">Edited {{ $row->objectable->updated_at?->diffForHumans() }}</span>
+                                    <span class="list-sub">Edited {{ $row->objectable->updated_at?->diffForHumans() }}</span>
                                 </span>
                             </a>
-                            <x-shell.lamp tone="signal" word="Document" />
-                            <span class="ledger-val">
-                                <x-shell.figure :value="$row->objectable->version" :width="4" prefix="v" label="Version" />
+                            <x-shell.status-word tone="good" word="Document" />
+                            <span class="list-val">
+                                <x-shell.figure :value="$row->objectable->version" prefix="v" label="Version" />
                             </span>
                         @else
                             <a href="{{ $this->fileUrl($row) }}" target="_blank" rel="noopener"
                                class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start">
-                                <span class="ledger-key">
+                                <span class="list-key">
                                     {{ $row->name() }}
-                                    <span class="ledger-sub">{{ $row->objectable->sizeForHumans() }}</span>
+                                    <span class="list-sub">{{ $row->objectable->sizeForHumans() }}</span>
                                 </span>
                             </a>
-                            <x-shell.lamp tone="good" word="File" />
+                            <x-shell.status-word tone="good" word="File" />
                         @endif
 
                         <button type="button" class="btn btn-quiet btn-sm"
@@ -144,7 +143,7 @@
                             <input id="files-new-doc" wire:model="newTitle" type="text" class="field" autofocus
                                    placeholder="What is it about?" />
                             @error('newTitle')
-                                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                                <p class="field-error">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>
@@ -172,7 +171,7 @@
                             <input id="files-new-folder" wire:model="newFolderName" type="text" class="field" autofocus
                                    placeholder="What goes in it?" />
                             @error('newFolderName')
-                                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                                <p class="field-error">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>
@@ -199,7 +198,7 @@
                             <label class="field-label" for="files-rename">Name</label>
                             <input id="files-rename" wire:model="renameName" type="text" class="field" autofocus />
                             @error('renameName')
-                                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                                <p class="field-error">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>
@@ -222,14 +221,14 @@
                 </div>
                 <div class="sheet-body">
                     @error('object')
-                        <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                        <p class="field-error">{{ $message }}</p>
                     @enderror
-                    <ul class="ledger">
+                    <ul class="list">
                         @foreach ($this->folderChoices as $choice)
                             <li wire:key="dest-{{ $choice['uuid'] }}">
-                                <button type="button" class="ledger-row" style="width:100%;text-align:left"
+                                <button type="button" class="list-row" style="width:100%;text-align:left"
                                         wire:click="moveTo('{{ $choice['uuid'] }}')">
-                                    <span class="ledger-key">{{ $choice['label'] }}</span>
+                                    <span class="list-key">{{ $choice['label'] }}</span>
                                 </button>
                             </li>
                         @endforeach

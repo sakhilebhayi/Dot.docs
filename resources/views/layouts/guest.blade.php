@@ -1,5 +1,8 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+{{-- `light` pins this page to its own warm day palette: shell.css's night
+     guard is `html:not(.light)` under prefers-color-scheme: dark, and the
+     marketing and auth pages have never had a night mode of their own. --}}
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">

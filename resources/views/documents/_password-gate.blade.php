@@ -7,10 +7,13 @@
     default false).
 --}}
 @php
-    $theme = request()->cookie('theme') === 'light' ? 'light' : 'dark';
+    // Day-first, like the rest of the product: no cookie means no class and the
+    // prefers-color-scheme guard in shell.css decides.
+    $cookieTheme = request()->cookie('theme');
+    $theme = $cookieTheme === 'dark' ? 'dark' : ($cookieTheme === 'light' ? 'light' : 'system');
 @endphp
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="{{ $theme === 'dark' ? 'dark' : '' }}">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="{{ $theme === 'system' ? '' : $theme }}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -21,7 +24,7 @@
     <title>{{ $document->title }} · {{ config('app.name') }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;700&family=Atkinson+Hyperlegible+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..600&family=Work+Sans:wght@400..600&display=swap" rel="stylesheet">
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body>
@@ -35,8 +38,7 @@
 
         <section class="panel">
             <div class="panel-head">
-                <span class="lamp lamp-signal" aria-hidden="true"></span>
-                <h2 class="section-title" style="flex:1 1 auto">Password required</h2>
+                <h2 class="section-title">Password required</h2>
             </div>
             <div class="panel-body">
                 <form action="{{ $action }}" method="POST" class="stack">
@@ -45,7 +47,7 @@
                         <label class="field-label" for="password">Password</label>
                         <input id="password" type="password" name="password" class="field" autofocus required />
                         @error('password')
-                            <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                            <p class="field-error">{{ $message }}</p>
                         @enderror
                     </div>
                     <button type="submit" class="btn btn-primary">Open the document</button>

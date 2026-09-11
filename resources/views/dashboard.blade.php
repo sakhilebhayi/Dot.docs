@@ -11,54 +11,54 @@
             <a href="{{ route('documents.index') }}" class="btn btn-primary">New document</a>
         </div>
 
-        {{-- The counts read as one ledger, not as four equal tiles: a figure is
-             a mono readout beside its name, in the order you would actually
-             ask the questions. --}}
+        {{-- The counts read as one list, not as four equal tiles: a plain
+             numeral beside its name, in the order you would actually ask the
+             questions. --}}
         <section class="panel" aria-labelledby="dash-counts">
             <div class="panel-head">
                 <h2 class="section-title" id="dash-counts">Counts</h2>
-                <span class="readout">{{ now()->format('D j M') }}</span>
+                <span class="micro">{{ now()->format('D j M') }}</span>
             </div>
-            <ul class="ledger">
-                <li class="ledger-row">
-                    <span class="ledger-key">
+            <ul class="list">
+                <li class="list-row">
+                    <span class="list-key">
                         Documents you own
-                        <span class="ledger-sub">Everything authored under this account.</span>
+                        <span class="list-sub">Everything authored under this account.</span>
                     </span>
-                    <span class="readout readout-lg ledger-figure">
-                        <x-shell.figure :value="$myDocs" :width="3" label="Documents you own" />
+                    <span class="micro-lg list-figure">
+                        <x-shell.figure :value="$myDocs" label="Documents you own" />
                     </span>
                 </li>
-                <li class="ledger-row">
-                    <span class="ledger-key">
+                <li class="list-row">
+                    <span class="list-key">
                         Shared with you
-                        <span class="ledger-sub">Documents somebody added you to.</span>
+                        <span class="list-sub">Documents somebody added you to.</span>
                     </span>
-                    <span class="readout readout-lg ledger-figure">
-                        <x-shell.figure :value="$sharedDocs" :width="3" label="Shared with you" />
+                    <span class="micro-lg list-figure">
+                        <x-shell.figure :value="$sharedDocs" label="Shared with you" />
                     </span>
                 </li>
-                <li class="ledger-row">
-                    <span class="ledger-key">
+                <li class="list-row">
+                    <span class="list-key">
                         Published
-                        <span class="ledger-sub">Readable by anyone holding the link.</span>
+                        <span class="list-sub">Readable by anyone holding the link.</span>
                     </span>
-                    <span class="readout readout-lg ledger-figure">
-                        <x-shell.figure :value="$publicDocs" :width="3" label="Published" />
+                    <span class="micro-lg list-figure">
+                        <x-shell.figure :value="$publicDocs" label="Published" />
                     </span>
                 </li>
-                <li class="ledger-row">
-                    <span class="ledger-key">
+                <li class="list-row">
+                    <span class="list-key">
                         Suggestions in marker
-                        <span class="ledger-sub">The assistant's ink, still waiting to be accepted or dropped.</span>
+                        <span class="list-sub">The assistant's ink, still waiting to be accepted or dropped.</span>
                     </span>
-                    {{-- The lamp sits AFTER the label, like every other state
-                         word in the product, so the four figures stay in one
+                    {{-- The status word sits AFTER the label, like every other
+                         one in the product, so the four figures stay in one
                          right-hand column. --}}
-                    <x-shell.lamp :tone="$aiSuggestions > 0 ? 'signal' : 'idle'"
-                                  :word="$aiSuggestions > 0 ? 'Needs you' : 'Clear'" />
-                    <span class="readout readout-lg ledger-figure">
-                        <x-shell.figure :value="$aiSuggestions" :width="3" label="Suggestions waiting" />
+                    <x-shell.status-word :tone="$aiSuggestions > 0 ? 'good' : 'idle'"
+                                         :word="$aiSuggestions > 0 ? 'Needs you' : 'Clear'" />
+                    <span class="micro-lg list-figure">
+                        <x-shell.figure :value="$aiSuggestions" label="Suggestions waiting" />
                     </span>
                 </li>
             </ul>
@@ -76,25 +76,24 @@
                     <a href="{{ route('documents.index') }}" class="btn btn-primary">New document</a>
                 </div>
             @else
-                <ul class="ledger">
+                <ul class="list">
                     @foreach ($recentDocs as $doc)
                         <li>
-                            <a href="{{ route('documents.edit', $doc->uuid) }}" class="ledger-row">
-                                <span class="ledger-key">
+                            <a href="{{ route('documents.edit', $doc->uuid) }}" class="list-row">
+                                <span class="list-key">
                                     {{ $doc->title ?: 'Untitled' }}
-                                    <span class="ledger-sub">Edited {{ $doc->updated_at->diffForHumans() }}</span>
+                                    <span class="list-sub">Edited {{ $doc->updated_at->diffForHumans() }}</span>
                                 </span>
                                 @if ($doc->is_public)
-                                    <x-shell.lamp tone="signal" word="Public" />
+                                    <x-shell.status-word tone="good" word="Public" />
                                 @endif
                                 @if ($doc->collaborators->count() > 0)
-                                    <span class="ledger-val">
-                                        <x-shell.figure :value="$doc->collaborators->count()" :width="2" label="Collaborators" />
-                                        &nbsp;sharing
+                                    <span class="list-val">
+                                        <x-shell.figure :value="$doc->collaborators->count()" />&nbsp;sharing
                                     </span>
                                 @endif
-                                <span class="ledger-val">
-                                    <x-shell.figure :value="$doc->version" :width="4" prefix="v" label="Version" />
+                                <span class="list-val">
+                                    <x-shell.figure :value="$doc->version" prefix="v" label="Version" />
                                 </span>
                             </a>
                         </li>
@@ -115,16 +114,16 @@
                     <a href="{{ route('documents.index') }}" class="btn">Browse your own</a>
                 </div>
             @else
-                <ul class="ledger">
+                <ul class="list">
                     @foreach ($recentShared as $collab)
                         @if ($collab->document)
                             <li>
-                                <a href="{{ route('documents.edit', $collab->document->uuid) }}" class="ledger-row">
-                                    <span class="ledger-key">
+                                <a href="{{ route('documents.edit', $collab->document->uuid) }}" class="list-row">
+                                    <span class="list-key">
                                         {{ $collab->document->title ?: 'Untitled' }}
-                                        <span class="ledger-sub">From {{ $collab->document->owner?->name ?? 'someone who left' }}</span>
+                                        <span class="list-sub">From {{ $collab->document->owner?->name ?? 'someone who left' }}</span>
                                     </span>
-                                    <span class="ledger-val">{{ ucfirst($collab->role) }}</span>
+                                    <span class="list-val">{{ ucfirst($collab->role) }}</span>
                                 </a>
                             </li>
                         @endif

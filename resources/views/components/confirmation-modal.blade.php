@@ -6,7 +6,6 @@
 
 <x-modal :id="$modalId" :maxWidth="$maxWidth" {{ $attributes }}>
     <div class="sheet-head">
-        <span class="lamp lamp-danger" aria-hidden="true"></span>
         <h2 class="h-panel" id="{{ $modalId }}-title">{{ $title }}</h2>
     </div>
 

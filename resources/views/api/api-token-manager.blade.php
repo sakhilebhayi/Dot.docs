@@ -55,15 +55,15 @@
             </x-slot>
 
             <x-slot name="content">
-                <ul class="ledger">
+                <ul class="list">
                     @foreach ($this->user->tokens->sortBy('name') as $token)
-                        <li class="ledger-row">
-                            <span class="ledger-key">
+                        <li class="list-row">
+                            <span class="list-key">
                                 {{ $token->name }}
                                 @if ($token->last_used_at)
-                                    <span class="ledger-sub">{{ __('Last used') }} {{ $token->last_used_at->diffForHumans() }}</span>
+                                    <span class="list-sub">{{ __('Last used') }} {{ $token->last_used_at->diffForHumans() }}</span>
                                 @else
-                                    <span class="ledger-sub">{{ __('Never used') }}</span>
+                                    <span class="list-sub">{{ __('Never used') }}</span>
                                 @endif
                             </span>
 

@@ -1,4 +1,4 @@
-{{-- A settings form as a ledger panel: head (what it is), body (the fields),
+{{-- A settings form as a list panel: head (what it is), body (the fields),
      foot (the action). Jetstream's three-column card grid is gone — panels in
      this product share edges and never float. --}}
 @props(['submit'])

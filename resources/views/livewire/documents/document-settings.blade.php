@@ -9,7 +9,7 @@
 
     @if (session('status'))
         <p class="note" role="status">
-            <span class="lamp lamp-good" aria-hidden="true"></span>
+            <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
             {{ session('status') }}
         </p>
     @endif
@@ -24,7 +24,7 @@
                     <label class="field-label" for="set-title">Title</label>
                     <input id="set-title" wire:model="title" type="text" class="field" />
                     @error('title')
-                        <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                        <p class="field-error">{{ $message }}</p>
                     @enderror
                 </div>
 
@@ -32,7 +32,7 @@
                     <input wire:model="isPublic" type="checkbox" id="is_public" class="field-box" />
                     <span>
                         Publish a read-only link
-                        <span class="ledger-sub">Anyone holding the link can read the document.</span>
+                        <span class="list-sub">Anyone holding the link can read the document.</span>
                     </span>
                 </label>
 
@@ -58,7 +58,7 @@
                     <button type="button" class="btn" wire:click="moveToFolder">Move it</button>
                 </div>
                 @error('folderId')
-                    <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                    <p class="field-error">{{ $message }}</p>
                 @enderror
             </div>
 
@@ -72,7 +72,7 @@
                                     aria-label="Remove the tag {{ $tag->name }}">Remove</button>
                         </span>
                     @empty
-                        <span class="ledger-sub">No tags on this document yet.</span>
+                        <span class="list-sub">No tags on this document yet.</span>
                     @endforelse
                 </div>
                 <form wire:submit="addTag" class="toolbar">
@@ -88,7 +88,7 @@
     <section class="panel" aria-labelledby="set-page">
         <div class="panel-head">
             <h2 class="section-title" id="set-page">Page setup</h2>
-            <span class="readout">Used by print and PDF export</span>
+            <span class="micro">Used by print and PDF export</span>
         </div>
         <div class="panel-body">
             <form wire:submit="savePageSetup" class="stack">
@@ -101,7 +101,7 @@
                             <option value="Letter">Letter</option>
                         </select>
                         @error('pageSize')
-                            <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                            <p class="field-error">{{ $message }}</p>
                         @enderror
                     </div>
                     <div class="field-row" style="margin-top:0">
@@ -111,7 +111,7 @@
                             <option value="landscape">Landscape</option>
                         </select>
                         @error('orientation')
-                            <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                            <p class="field-error">{{ $message }}</p>
                         @enderror
                     </div>
                 </div>
@@ -128,7 +128,7 @@
                             <input id="set-{{ $model }}" wire:model="{{ $model }}" type="text" class="field field-mono"
                                    placeholder="{{ $placeholder }}" />
                             @error($model)
-                                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                                <p class="field-error">{{ $message }}</p>
                             @enderror
                         </div>
                     @endforeach
@@ -138,7 +138,7 @@
                     <label class="field-label" for="set-header">Running header</label>
                     <input id="set-header" wire:model="header" type="text" class="field field-mono" placeholder="@{{ title }}" />
                     @error('header')
-                        <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                        <p class="field-error">{{ $message }}</p>
                     @enderror
                 </div>
 
@@ -146,7 +146,7 @@
                     <label class="field-label" for="set-footer">Running footer</label>
                     <input id="set-footer" wire:model="footer" type="text" class="field field-mono" placeholder="Page @{{ page }} of @{{ pages }}" />
                     @error('footer')
-                        <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                        <p class="field-error">{{ $message }}</p>
                     @enderror
                     <p class="field-hint">
                         Takes @{{ title }}, @{{ date }}, @{{ team }}, @{{ page }}, @{{ pages }} and any variable the document defines.
@@ -168,7 +168,7 @@
                     <label class="field-label" for="set-transfer">Hand the document to</label>
                     <input id="set-transfer" wire:model="transferEmail" type="email" class="field" placeholder="name@example.com" />
                     @error('transferEmail')
-                        <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                        <p class="field-error">{{ $message }}</p>
                     @enderror
                     <p class="field-hint">They become the owner; you keep access as an editor.</p>
                 </div>
@@ -188,7 +188,7 @@
 
     <section class="panel" aria-labelledby="set-delete">
         <div class="panel-head">
-            <span class="lamp lamp-danger" aria-hidden="true"></span>
+            <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
             <h2 class="section-title" id="set-delete" style="flex:1 1 auto">Deleting this document</h2>
         </div>
         <div class="panel-body">
@@ -199,7 +199,7 @@
                 <p class="empty-line">Delete {{ $document->title }} and all of its history?</p>
                 <div class="toolbar">
                     <button type="button" class="btn btn-danger" wire:click="delete">
-                        <span class="lamp lamp-danger" aria-hidden="true"></span> Yes, delete it
+                        <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span> Yes, delete it
                     </button>
                     <button type="button" class="btn" wire:click="$set('showDeleteConfirm', false)">Keep it</button>
                 </div>

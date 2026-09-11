@@ -11,13 +11,11 @@
         @if (Laravel\Jetstream\Jetstream::hasTeamFeatures() && Auth::user()->currentTeam)
             <div class="rail-label">Workspace</div>
             <a href="{{ route('teams.show', Auth::user()->currentTeam->id) }}" class="rail-item">
-                <span class="rail-initial" aria-hidden="true">TM</span>
                 <span class="rail-item-text">{{ Auth::user()->currentTeam->name }}</span>
             </a>
 
             @can('create', Laravel\Jetstream\Jetstream::newTeamModel())
                 <a href="{{ route('teams.create') }}" class="rail-item">
-                    <span class="rail-initial" aria-hidden="true">+T</span>
                     <span class="rail-item-text">Create a team</span>
                 </a>
             @endcan
@@ -39,14 +37,12 @@
 
         <a href="{{ route('profile.show') }}"
            class="rail-item {{ request()->routeIs('profile.show') ? 'is-current' : '' }}">
-            <span class="rail-initial" aria-hidden="true">PR</span>
             <span class="rail-item-text">Profile</span>
         </a>
 
         @if (Laravel\Jetstream\Jetstream::hasApiFeatures())
             <a href="{{ route('api-tokens.index') }}"
                class="rail-item {{ request()->routeIs('api-tokens.index') ? 'is-current' : '' }}">
-                <span class="rail-initial" aria-hidden="true">AP</span>
                 <span class="rail-item-text">API tokens</span>
             </a>
         @endif
@@ -54,7 +50,6 @@
         <form method="POST" action="{{ route('logout') }}">
             @csrf
             <button type="submit" class="rail-item">
-                <span class="rail-initial" aria-hidden="true">&#8594;]</span>
                 <span class="rail-item-text">Log out</span>
             </button>
         </form>

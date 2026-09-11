@@ -27,17 +27,17 @@
                         <span class="field-label" id="add-member-role">{{ __('Role') }}</span>
                         <x-input-error for="role" />
 
-                        <ul class="ledger role-list" role="group" aria-labelledby="add-member-role">
+                        <ul class="list role-list" role="group" aria-labelledby="add-member-role">
                             @foreach ($this->roles as $role)
                                 <li>
-                                    <button type="button" class="ledger-row"
+                                    <button type="button" class="list-row"
                                             aria-pressed="{{ $addTeamMemberForm['role'] === $role->key ? 'true' : 'false' }}"
                                             wire:click="$set('addTeamMemberForm.role', '{{ $role->key }}')">
-                                        <x-shell.lamp :tone="$addTeamMemberForm['role'] === $role->key ? 'good' : 'idle'"
+                                        <x-shell.status-word :tone="$addTeamMemberForm['role'] === $role->key ? 'good' : 'idle'"
                                                       :word="$addTeamMemberForm['role'] === $role->key ? __('Chosen') : __('Not chosen')" />
-                                        <span class="ledger-key">
+                                        <span class="list-key">
                                             {{ $role->name }}
-                                            <span class="ledger-sub">{{ $role->description }}</span>
+                                            <span class="list-sub">{{ $role->description }}</span>
                                         </span>
                                     </button>
                                 </li>
@@ -72,11 +72,11 @@
             </x-slot>
 
             <x-slot name="content">
-                <ul class="ledger">
+                <ul class="list">
                     @foreach ($team->teamInvitations as $invitation)
-                        <li class="ledger-row">
-                            <span class="ledger-key">{{ $invitation->email }}</span>
-                            <x-shell.lamp tone="signal" word="{{ __('Invited') }}" />
+                        <li class="list-row">
+                            <span class="list-key">{{ $invitation->email }}</span>
+                            <x-shell.status-word tone="idle" word="{{ __('Invited') }}" />
                             @if (Gate::check('removeTeamMember', $team))
                                 <button type="button" class="btn btn-sm"
                                         wire:click="cancelTeamInvitation({{ $invitation->id }})">
@@ -103,20 +103,20 @@
             </x-slot>
 
             <x-slot name="content">
-                <ul class="ledger">
+                <ul class="list">
                     @foreach ($team->users->sortBy('name') as $user)
-                        <li class="ledger-row">
+                        <li class="list-row">
                             <span class="face-plate face-plate-sm">
                                 <img src="{{ $user->profile_photo_url }}" alt="{{ $user->name }}">
                             </span>
-                            <span class="ledger-key">{{ $user->name }}</span>
+                            <span class="list-key">{{ $user->name }}</span>
 
                             @if (Gate::check('updateTeamMember', $team) && Laravel\Jetstream\Jetstream::hasRoles())
                                 <button type="button" class="btn btn-sm" wire:click="manageRole('{{ $user->id }}')">
                                     {{ Laravel\Jetstream\Jetstream::findRole($user->membership->role)->name }}
                                 </button>
                             @elseif (Laravel\Jetstream\Jetstream::hasRoles())
-                                <span class="ledger-val">{{ Laravel\Jetstream\Jetstream::findRole($user->membership->role)->name }}</span>
+                                <span class="list-val">{{ Laravel\Jetstream\Jetstream::findRole($user->membership->role)->name }}</span>
                             @endif
 
                             @if ($this->user->id === $user->id)
@@ -141,17 +141,17 @@
         </x-slot>
 
         <x-slot name="content">
-            <ul class="ledger role-list" role="group" aria-label="{{ __('Role') }}">
+            <ul class="list role-list" role="group" aria-label="{{ __('Role') }}">
                 @foreach ($this->roles as $role)
                     <li>
-                        <button type="button" class="ledger-row"
+                        <button type="button" class="list-row"
                                 aria-pressed="{{ $currentRole === $role->key ? 'true' : 'false' }}"
                                 wire:click="$set('currentRole', '{{ $role->key }}')">
-                            <x-shell.lamp :tone="$currentRole === $role->key ? 'good' : 'idle'"
+                            <x-shell.status-word :tone="$currentRole === $role->key ? 'good' : 'idle'"
                                           :word="$currentRole === $role->key ? __('Chosen') : __('Not chosen')" />
-                            <span class="ledger-key">
+                            <span class="list-key">
                                 {{ $role->name }}
-                                <span class="ledger-sub">{{ $role->description }}</span>
+                                <span class="list-sub">{{ $role->description }}</span>
                             </span>
                         </button>
                     </li>

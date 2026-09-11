@@ -8,10 +8,13 @@
      * (see App\Styles\CssBuilder). $body arrives already numbered, with the
      * table of contents filled in and variables resolved.
      */
-    $theme = request()->cookie('theme') === 'light' ? 'light' : 'dark';
+    // Day-first, like the signed-in shell: no cookie means no class and the
+    // prefers-color-scheme guard in shell.css decides.
+    $cookieTheme = request()->cookie('theme');
+    $theme = $cookieTheme === 'dark' ? 'dark' : ($cookieTheme === 'light' ? 'light' : 'system');
 @endphp
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="{{ $theme === 'dark' ? 'dark' : '' }}">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="{{ $theme === 'system' ? '' : $theme }}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -20,7 +23,7 @@
     <title>{{ $document->title }} · {{ config('app.name') }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;700&family=Atkinson+Hyperlegible+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..600&family=Work+Sans:wght@400..600&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
     @vite(['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js'])
     <style>
         /*
@@ -30,13 +33,13 @@
          * only - every colour on this page is a shell token.
          */
         @media print {
-            .status-line,
+            .topbar,
             .published-foot,
             .skip-link { display: none !important; }
 
             .shell { display: block; height: auto; }
-            .desk { padding: 0; }
-            .desk .paper {
+            .canvas { padding: 0; }
+            .canvas .paper {
                 width: auto;
                 min-height: 0;
                 max-width: none;
@@ -50,36 +53,25 @@
 <body>
     <a href="#paper" class="skip-link">Skip to the document</a>
 
-    <div class="shell" data-shell style="grid-template-columns:minmax(0,1fr);grid-template-areas:'status' 'desk'">
-        <header class="status-line" aria-label="Document status">
-            <a class="status-brand" href="{{ url('/') }}">Dot.Doc</a>
-            <span class="status-item">
-                <span class="status-item-key">Title</span>
-                <span class="readout">{{ Str::limit($document->title, 48) }}</span>
-            </span>
-            <span class="status-item">
-                <span class="status-item-key">By</span>
-                <span class="readout">{{ $document->owner->name }}</span>
-            </span>
-            <span class="status-item">
-                <span class="status-item-key">Updated</span>
-                <span class="readout">{{ $document->updated_at->format('j M Y') }}</span>
-            </span>
-            <span class="status-spacer"></span>
-            <button type="button" class="status-action" onclick="window.print()">
-                <span class="lamp lamp-idle" aria-hidden="true"></span>
-                <span>Print</span>
-            </button>
-            <button type="button" class="status-action" data-shell-theme-toggle
-                    aria-pressed="{{ $theme === 'dark' ? 'true' : 'false' }}">
-                <span class="lamp {{ $theme === 'dark' ? 'lamp-idle' : 'lamp-signal' }}" aria-hidden="true"></span>
-                <span data-shell-theme-word>{{ $theme === 'dark' ? 'Night' : 'Day' }}</span>
-                <span class="sr-only">Switch to {{ $theme === 'dark' ? 'day' : 'night' }} mode</span>
-            </button>
+    <div class="shell" data-shell style="grid-template-columns:minmax(0,1fr);grid-template-areas:'topbar' 'canvas'">
+        <header class="topbar" aria-label="Document status">
+            <div class="topbar-title">{{ Str::limit($document->title, 64) }}</div>
+
+            <span class="micro">{{ $document->owner->name }} · {{ $document->updated_at->format('j M Y') }}</span>
+
+            <div class="topbar-actions">
+            <button type="button" class="topbar-action" onclick="window.print()">Print</button>
+                <button type="button" class="topbar-action" data-shell-theme-toggle
+                        aria-pressed="{{ $theme === 'dark' ? 'true' : 'false' }}">
+                    <span data-shell-theme-word>{{ $theme === 'dark' ? 'Night' : 'Day' }}</span>
+                    <span class="sr-only">Switch to {{ $theme === 'dark' ? 'day' : 'night' }} mode</span>
+                </button>
+                <a class="topbar-action" href="{{ url('/') }}">Dot.Doc</a>
+            </div>
         </header>
 
-        <main id="paper" class="desk-region" tabindex="-1">
-            <div class="desk">
+        <main id="paper" class="canvas-region" tabindex="-1">
+            <div class="canvas">
                 <style id="doc-style">{!! $styleCss !!}</style>
                 <article class="paper">
                     {!! $body !!}

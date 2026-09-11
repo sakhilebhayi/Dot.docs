@@ -1,17 +1,25 @@
 {{--
-    The navigator. Left edge of the shell, 260px, collapsible to 56px, sharing
-    its right edge with the desk through a single hairline. It renders before
-    the page's own component, so everything here comes from the route and from
-    App\Support\ShellContext - never from the page.
+    The left panel. Where you are, what is in this document, and — at the foot,
+    quietly — the facts the retired status line used to state across the top of
+    the screen: product, version, word count.
+
+    It COLLAPSES TO NOTHING rather than to a strip of initials: a 56px column of
+    two-letter codes is a worse answer than no column at all, and the width is
+    what the canvas is for. `state` is rendered by the layout (collapsed on the
+    editor, expanded everywhere else) so the panel never flashes open before
+    resources/js/shell.js runs; its single toggle lives in the top bar.
+
+    It renders before the page's own component, so everything here comes from
+    the route and from App\Support\ShellContext - never from the page.
 --}}
-@props(['document' => null])
+@props(['document' => null, 'state' => 'expanded'])
 
 @php
     $user = auth()->user();
     $isEditor = request()->routeIs('documents.edit');
 @endphp
 
-<aside class="rail" aria-label="Navigator">
+<aside id="shell-rail" class="rail" data-panel-state="{{ $state }}" aria-label="Navigator">
     {{-- The groups scroll; the account block below is pinned to the foot. The
          leftover height is absorbed by this scroll region rather than by a
          margin-top:auto on the foot, which is what opened the void between the
@@ -23,39 +31,33 @@
         <a href="{{ route('dashboard') }}"
            class="rail-item {{ request()->routeIs('dashboard') ? 'is-current' : '' }}"
            @if (request()->routeIs('dashboard')) aria-current="page" @endif>
-            <span class="rail-initial" aria-hidden="true">DB</span>
             <span class="rail-item-text">Dashboard</span>
         </a>
 
         <a href="{{ route('documents.index') }}"
            class="rail-item {{ request()->routeIs('documents.index') && ! request()->has('filter') ? 'is-current' : '' }}"
            @if (request()->routeIs('documents.index') && ! request()->has('filter')) aria-current="page" @endif>
-            <span class="rail-initial" aria-hidden="true">DC</span>
             <span class="rail-item-text">Documents</span>
         </a>
 
         <a href="{{ route('files.index') }}"
            class="rail-item {{ request()->routeIs('files.index') ? 'is-current' : '' }}"
            @if (request()->routeIs('files.index')) aria-current="page" @endif>
-            <span class="rail-initial" aria-hidden="true">FL</span>
             <span class="rail-item-text">Files</span>
         </a>
 
         <a href="{{ route('documents.index', ['gallery' => 1]) }}" class="rail-item">
-            <span class="rail-initial" aria-hidden="true">TP</span>
             <span class="rail-item-text">Templates</span>
         </a>
 
         <a href="{{ route('documents.index', ['filter' => 'shared']) }}"
            class="rail-item {{ request()->query('filter') === 'shared' ? 'is-current' : '' }}">
-            <span class="rail-initial" aria-hidden="true">SH</span>
             <span class="rail-item-text">Shared with me</span>
         </a>
 
         <a href="{{ route('slash-commands.index') }}"
            class="rail-item {{ request()->routeIs('slash-commands.index') ? 'is-current' : '' }}"
            @if (request()->routeIs('slash-commands.index')) aria-current="page" @endif>
-            <span class="rail-initial" aria-hidden="true">SL</span>
             <span class="rail-item-text">Slash commands</span>
         </a>
     </nav>
@@ -68,7 +70,6 @@
             <a href="{{ route('documents.edit', $document->uuid) }}"
                class="rail-item {{ $isEditor ? 'is-current' : '' }}"
                @if ($isEditor) aria-current="page" @endif>
-                <span class="rail-initial" aria-hidden="true">ED</span>
                 <span class="rail-item-text">Editor</span>
             </a>
 
@@ -84,24 +85,21 @@
             <a href="{{ route('documents.history', $document->uuid) }}"
                class="rail-item {{ request()->routeIs('documents.history') ? 'is-current' : '' }}"
                @if (request()->routeIs('documents.history')) aria-current="page" @endif>
-                <span class="rail-initial" aria-hidden="true">VR</span>
                 <span class="rail-item-text">Versions</span>
                 <span class="rail-item-note">
-                    <x-shell.figure :value="$document->version" :width="3" label="Version" />
+                    <x-shell.figure :value="$document->version" prefix="v" label="Version" />
                 </span>
             </a>
 
             <a href="{{ route('documents.share', $document->uuid) }}"
                class="rail-item {{ request()->routeIs('documents.share') ? 'is-current' : '' }}"
                @if (request()->routeIs('documents.share')) aria-current="page" @endif>
-                <span class="rail-initial" aria-hidden="true">SR</span>
                 <span class="rail-item-text">Share</span>
             </a>
 
             <a href="{{ route('documents.settings', $document->uuid) }}"
                class="rail-item {{ request()->routeIs('documents.settings') ? 'is-current' : '' }}"
                @if (request()->routeIs('documents.settings')) aria-current="page" @endif>
-                <span class="rail-initial" aria-hidden="true">ST</span>
                 <span class="rail-item-text">Settings</span>
             </a>
         </nav>
@@ -116,16 +114,20 @@
 
     @auth
         <div class="rail-foot">
-            <span class="rail-item">
-                <span class="rail-initial" aria-hidden="true">{{ strtoupper(mb_substr($user->name, 0, 2)) }}</span>
-                <span class="rail-item-text">
-                    {{ $user->name }}
-                    <span class="ledger-sub">{{ $user->currentTeam->name ?? 'Personal' }}</span>
-                </span>
+            <span class="rail-account">
+                <span class="rail-account-name">{{ $user->name }}</span>
+                <span class="rail-account-team">{{ $user->currentTeam->name ?? 'Personal' }}</span>
             </span>
-            <button type="button" class="btn btn-quiet btn-sm" data-shell-rail-toggle aria-expanded="true">
-                <span data-shell-rail-word>Narrow the rail</span>
-            </button>
+
+            {{-- The retired status line's row of figures, demoted to where it
+                 belongs: a quiet line at the foot of a panel nobody has to
+                 look at while writing. --}}
+            <p class="rail-colophon">
+                {{ config('app.name') }}@if ($document) ·
+                    <x-shell.figure :value="$document->version" prefix="v" label="Version" /> ·
+                    <x-shell.figure :value="$document->word_count ?? 0" /> words
+                @endif
+            </p>
         </div>
     @endauth
 </aside>

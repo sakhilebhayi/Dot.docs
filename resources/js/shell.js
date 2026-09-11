@@ -1,6 +1,6 @@
 /**
- * The shell's own behaviour: the night/day switch, the rail, the skip link,
- * the save lamp and the rail outline.
+ * The shell's own behaviour: the day/night switch, the two collapsible panels,
+ * the skip link, the save status word and the rail outline.
  *
  * This file never touches the editor bundle. The outline it builds is read
  * straight off the DOM (the headings already painted on the paper), so nothing
@@ -8,23 +8,39 @@
  */
 
 const THEME_COOKIE = 'theme';
-const RAIL_KEY = 'dotdoc.rail';
+const PANEL_PREFIX = 'dotdoc.panel';
 const YEAR = 60 * 60 * 24 * 365;
 
 /**
  * The cookie is written in plain text and read server-side in layouts/app.blade
  * .php, which is why `theme` is listed in the encryptCookies exception in
  * bootstrap/app.php. Encrypting it would make the server read null and every
- * day-mode reload would flash night.
+ * night-mode reload would flash day.
  */
 function writeThemeCookie(value) {
     const secure = window.location.protocol === 'https:' ? '; Secure' : '';
     document.cookie = `${THEME_COOKIE}=${value}; path=/; max-age=${YEAR}; SameSite=Lax${secure}`;
 }
 
+/**
+ * Day is the default, but a reader who has never touched the switch and whose
+ * OS asks for dark is already being served night by the `prefers-color-scheme`
+ * guard in shell.css. The toggle therefore asks what is ON SCREEN, not what
+ * class happens to be set: without this, the first click on a system-dark
+ * machine wrote `dark` and appeared to do nothing.
+ */
+function isNight() {
+    const root = document.documentElement;
+    if (root.classList.contains('dark')) return true;
+    if (root.classList.contains('light')) return false;
+
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
 function applyTheme(mode) {
     const root = document.documentElement;
     root.classList.toggle('dark', mode === 'dark');
+    root.classList.toggle('light', mode === 'light');
 
     const meta = document.querySelector('meta[name="color-scheme"]');
     if (meta) meta.setAttribute('content', mode === 'dark' ? 'dark light' : 'light dark');
@@ -34,12 +50,6 @@ function applyTheme(mode) {
 
         const word = button.querySelector('[data-shell-theme-word]');
         if (word) word.textContent = mode === 'dark' ? 'Night' : 'Day';
-
-        const lamp = button.querySelector('.lamp');
-        if (lamp) {
-            lamp.classList.toggle('lamp-idle', mode === 'dark');
-            lamp.classList.toggle('lamp-signal', mode !== 'dark');
-        }
 
         const hint = button.querySelector('.sr-only');
         if (hint) hint.textContent = mode === 'dark' ? 'Switch to day mode' : 'Switch to night mode';
@@ -51,56 +61,125 @@ function initTheme() {
         const button = event.target.closest('[data-shell-theme-toggle]');
         if (!button) return;
 
-        const next = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+        const next = isNight() ? 'light' : 'dark';
         writeThemeCookie(next);
         applyTheme(next);
     });
 }
 
-function applyRail(state) {
+/* ── The two panels ──────────────────────────────────────────────────────
+ *
+ * The rail and the dock default to COLLAPSED on the editor and EXPANDED
+ * everywhere else, and the server renders that default onto the panel itself
+ * (`data-panel-state`) so neither ever flashes open before this file runs.
+ *
+ * The stored preference is therefore keyed by CONTEXT as well as by panel: a
+ * single `dotdoc.rail` key would have carried "I opened the rail to read the
+ * outline" back onto the dashboard, where the rail was never collapsed in the
+ * first place, and — worse — carried a collapse off the dashboard onto the
+ * editor, defeating the default the spec asks for.
+ */
+const PANELS = { rail: 'shell-rail', dock: 'shell-dock' };
+
+const PANEL_WORDS = {
+    rail: { expanded: 'Hide the panel', collapsed: 'Show the panel' },
+    dock: { expanded: 'Hide the tools', collapsed: 'Show the tools' },
+};
+
+function panelContext() {
     const shell = document.querySelector('[data-shell]');
-    if (!shell) return;
 
-    if (state === 'collapsed') {
-        shell.setAttribute('data-rail', 'collapsed');
-    } else {
-        shell.removeAttribute('data-rail');
+    return (shell && shell.getAttribute('data-shell-context')) || 'page';
+}
+
+function readStoredPanel(name) {
+    try {
+        return window.localStorage.getItem(`${PANEL_PREFIX}.${panelContext()}.${name}`);
+    } catch (_) {
+        return null;
     }
+}
 
-    document.querySelectorAll('[data-shell-rail-toggle]').forEach((button) => {
-        button.setAttribute('aria-expanded', state === 'collapsed' ? 'false' : 'true');
-        const word = button.querySelector('[data-shell-rail-word]');
-        if (word) word.textContent = state === 'collapsed' ? 'Widen the rail' : 'Narrow the rail';
+function storePanel(name, state) {
+    try {
+        window.localStorage.setItem(`${PANEL_PREFIX}.${panelContext()}.${name}`, state);
+    } catch (_) {
+        /* private browsing: the panel simply does not persist */
+    }
+}
+
+function applyPanel(name, state) {
+    const panel = document.getElementById(PANELS[name]);
+    if (!panel) return;
+
+    panel.setAttribute('data-panel-state', state);
+
+    // Below 1180px a panel is an overlay, and the server cannot know the
+    // viewport: it renders the rail expanded for the dashboard's desktop
+    // layout, which on a phone would land on top of the page. `data-panel-user`
+    // is written HERE and never by the server, so at those widths a panel shows
+    // only once somebody (or their stored preference) has asked for it.
+    panel.setAttribute('data-panel-user', state === 'expanded' ? 'open' : 'shut');
+
+    document.querySelectorAll(`[data-shell-panel-toggle="${name}"]`).forEach((button) => {
+        button.setAttribute('aria-expanded', state === 'expanded' ? 'true' : 'false');
+        const word = button.querySelector(`[data-shell-${name}-word]`);
+        if (word) word.textContent = PANEL_WORDS[name][state];
     });
 }
 
-function initRail() {
-    let stored = null;
-    try {
-        stored = window.localStorage.getItem(RAIL_KEY);
-    } catch (_) {
-        stored = null;
-    }
-    if (stored === 'collapsed') applyRail('collapsed');
+function panelState(name) {
+    const panel = document.getElementById(PANELS[name]);
+
+    return panel && panel.getAttribute('data-panel-state') === 'collapsed' ? 'collapsed' : 'expanded';
+}
+
+/**
+ * Show a panel because something the writer just did needs it: invoking the
+ * assistant, opening comments, attaching a file. Expanding is one-way — this
+ * never closes a panel the writer opened on purpose.
+ */
+function revealPanel(name) {
+    if (panelState(name) === 'expanded') return;
+    applyPanel(name, 'expanded');
+    storePanel(name, 'expanded');
+}
+
+function initPanels() {
+    Object.keys(PANELS).forEach((name) => {
+        const stored = readStoredPanel(name);
+        if (stored === 'collapsed' || stored === 'expanded') applyPanel(name, stored);
+    });
 
     document.addEventListener('click', (event) => {
-        const button = event.target.closest('[data-shell-rail-toggle]');
-        if (!button) return;
+        const toggle = event.target.closest('[data-shell-panel-toggle]');
+        if (toggle) {
+            const name = toggle.getAttribute('data-shell-panel-toggle');
+            if (!PANELS[name]) return;
 
-        const shell = document.querySelector('[data-shell]');
-        const next = shell && shell.getAttribute('data-rail') === 'collapsed' ? 'open' : 'collapsed';
-        applyRail(next);
-        try {
-            window.localStorage.setItem(RAIL_KEY, next);
-        } catch (_) {
-            /* private browsing: the rail simply does not persist */
+            const next = panelState(name) === 'collapsed' ? 'expanded' : 'collapsed';
+            applyPanel(name, next);
+            storePanel(name, next);
+
+            return;
         }
+
+        // Expand triggers: a control that needs a panel opens it rather than
+        // acting into a panel nobody can see.
+        const reveal = event.target.closest('[data-shell-expand]');
+        if (reveal) revealPanel(reveal.getAttribute('data-shell-expand'));
+    });
+
+    // ⌘K / Ctrl+Shift+K reach the assistant without passing through any button,
+    // so the palette's own event is a trigger in its own right.
+    ['open-ai-palette', 'shell:reveal-dock'].forEach((name) => {
+        window.addEventListener(name, () => revealPanel('dock'));
     });
 }
 
 /**
  * A skip link moves the viewport but not the caret unless the target is
- * focused, so <main id="desk" tabindex="-1"> is focused by hand here.
+ * focused, so <main id="canvas" tabindex="-1"> is focused by hand here.
  */
 function initSkipLink() {
     document.addEventListener('click', (event) => {
@@ -113,32 +192,31 @@ function initSkipLink() {
 }
 
 /**
- * The status line's state lamp.
+ * The top bar's save status word.
  *
  * It reports what the PAGE says and nothing else. The earlier version hooked
  * Livewire's commit cycle, so a search box, a filter chip or "mark as read"
- * all wrote "Saved" into the status line on pages that save nothing - a claim
- * the reader could not check and which was, on a read-only page, false.
+ * all wrote "Saved" into the bar on pages that save nothing - a claim the
+ * reader could not check and which was, on a read-only page, false.
  *
- * A page that owns a document marks the item `data-shell-save-owner` (the
- * editor route does, in components/shell/status-line.blade.php) and dispatches
+ * A page that owns a document marks the word `data-shell-save-owner` (the
+ * editor route does, through components/shell/topbar.blade.php) and dispatches
  * `shell:save-state` with {tone, word}. Anywhere else the word the server
  * rendered stays exactly where it is.
  */
+const SAVE_TONES = ['good', 'danger', 'idle'];
+
 function setSaveState(tone, word) {
     const item = document.getElementById('shell-save');
     if (!item || !item.hasAttribute('data-shell-save-owner')) return;
 
-    const lamp = item.querySelector('.lamp');
-    if (lamp) lamp.className = `lamp lamp-${tone}`;
+    item.className = `status-word status-word-${tone} topbar-status`;
 
-    const text = item.querySelector('[data-shell-save-word]');
+    const text = item.querySelector('[data-shell-save-word]') ?? item.lastElementChild;
     if (text) text.textContent = word;
 }
 
-const SAVE_TONES = ['good', 'signal', 'danger', 'marker', 'idle'];
-
-function initSaveLamp() {
+function initSaveState() {
     window.addEventListener('shell:save-state', (event) => {
         const detail = event.detail || {};
         const tone = SAVE_TONES.includes(detail.tone) ? detail.tone : 'idle';
@@ -153,7 +231,7 @@ function initSaveLamp() {
  * It deliberately does not ask the editor for anything.
  */
 function collectHeadings() {
-    const paper = document.querySelector('.desk .paper');
+    const paper = document.querySelector('.canvas .paper');
     if (!paper) return [];
 
     // The heading number is painted as a .num decoration with no whitespace
@@ -236,7 +314,7 @@ function initOutline() {
 
     schedule();
 
-    const paper = document.querySelector('.desk');
+    const paper = document.querySelector('.canvas');
     if (!paper) return;
 
     new MutationObserver(schedule).observe(paper, { childList: true, subtree: true, characterData: true });
@@ -297,9 +375,9 @@ function initDockTabs() {
 
 function boot() {
     initTheme();
-    initRail();
+    initPanels();
     initSkipLink();
-    initSaveLamp();
+    initSaveState();
     initOutline();
     initDockTabs();
 }

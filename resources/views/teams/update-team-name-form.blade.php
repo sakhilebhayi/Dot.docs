@@ -15,9 +15,9 @@
                 <span class="face-plate">
                     <img src="{{ $team->owner->profile_photo_url }}" alt="{{ $team->owner->name }}">
                 </span>
-                <span class="ledger-key">
+                <span class="list-key">
                     {{ $team->owner->name }}
-                    <span class="ledger-sub">{{ $team->owner->email }}</span>
+                    <span class="list-sub">{{ $team->owner->email }}</span>
                 </span>
             </div>
         </div>

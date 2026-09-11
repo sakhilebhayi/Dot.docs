@@ -11,21 +11,21 @@
                            placeholder="/summarize, /grammar, /tone formal, /translate French" />
                     @if ($loading)
                         <span class="toolbar" aria-live="polite">
-                            <span class="lamp lamp-signal" aria-hidden="true"></span>
-                            <span class="readout">Working</span>
+                            <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                            <span class="micro">Working</span>
                         </span>
                     @else
                         <button type="button" class="btn btn-primary" wire:click="runCommand">Run</button>
                     @endif
                 </div>
 
-                <ul class="ledger" style="max-height:46vh;overflow-y:auto">
+                <ul class="list" style="max-height:46vh;overflow-y:auto">
                     @foreach ($commandSuggestions as $cmd => $desc)
                         <li>
-                            <button type="button" class="ledger-row" wire:click="$set('command', '{{ $cmd }}')">
-                                <span class="ledger-key">
-                                    <span class="readout">{{ $cmd }}</span>
-                                    <span class="ledger-sub">{{ $desc }}</span>
+                            <button type="button" class="list-row" wire:click="$set('command', '{{ $cmd }}')">
+                                <span class="list-key">
+                                    <span class="micro">{{ $cmd }}</span>
+                                    <span class="list-sub">{{ $desc }}</span>
                                 </span>
                             </button>
                         </li>
@@ -44,7 +44,7 @@
              x-data x-trap.inert.noscroll="true">
             <div class="sheet sheet-wide">
                 <div class="sheet-head">
-                    <span class="lamp lamp-marker" aria-hidden="true"></span>
+                    <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
                     <h2 class="h-panel" id="ai-result-title">In marker — {{ ucfirst($action) }}</h2>
                 </div>
                 <div class="sheet-body ink-marker">

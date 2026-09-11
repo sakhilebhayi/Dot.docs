@@ -10,7 +10,7 @@
     <section class="panel" aria-labelledby="share-link">
         <div class="panel-head">
             <h2 class="section-title" id="share-link">Public link</h2>
-            <x-shell.lamp :tone="$document->is_public ? 'signal' : 'idle'"
+            <x-shell.status-word :tone="$document->is_public ? 'good' : 'idle'"
                           :word="$document->is_public ? 'Published' : 'Private'"
                           />
         </div>
@@ -41,7 +41,7 @@
                     <input id="share-slug" wire:model="slug" type="text" class="field field-mono"
                            placeholder="august-production" />
                     @error('slug')
-                        <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                        <p class="field-error">{{ $message }}</p>
                     @enderror
                     @if ($publishedLink)
                         <p class="field-hint">
@@ -60,7 +60,7 @@
             @if ($document->is_public && $publicLink)
                 @if (session('status'))
                     <p class="note" role="status">
-                        <span class="lamp lamp-good" aria-hidden="true"></span>
+                        <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
                         {{ session('status') }}
                     </p>
                 @endif
@@ -77,7 +77,7 @@
                             </p>
                         @endif
                         @error('sharePassword')
-                            <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                            <p class="field-error">{{ $message }}</p>
                         @enderror
                     </div>
 
@@ -85,12 +85,12 @@
                         <label class="field-label" for="share-expiry">Expires at</label>
                         <input id="share-expiry" wire:model="shareExpiresAt" type="datetime-local" class="field field-mono" />
                         @error('shareExpiresAt')
-                            <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                            <p class="field-error">{{ $message }}</p>
                         @enderror
                         @if ($document->share_expires_at)
                             <p class="field-hint">
                                 @if ($document->share_expires_at->isPast())
-                                    <span class="lamp lamp-danger" aria-hidden="true"></span> Expired {{ $document->share_expires_at->diffForHumans() }}.
+                                    <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span> Expired {{ $document->share_expires_at->diffForHumans() }}.
                                 @else
                                     Expires {{ $document->share_expires_at->diffForHumans() }}.
                                 @endif
@@ -114,7 +114,7 @@
                     <label class="field-label" for="invite-email">Email address</label>
                     <input id="invite-email" wire:model="inviteEmail" type="email" class="field" placeholder="name@example.com" />
                     @error('inviteEmail')
-                        <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                        <p class="field-error">{{ $message }}</p>
                     @enderror
                 </div>
                 <div class="field-row">
@@ -133,25 +133,25 @@
     <section class="panel" aria-labelledby="share-people">
         <div class="panel-head">
             <h2 class="section-title" id="share-people">People with access</h2>
-            <span class="readout">
-                <x-shell.figure :value="$document->collaborators->count() + 1" :width="2" label="People" />
+            <span class="micro">
+                <x-shell.figure :value="$document->collaborators->count() + 1" label="People" />
             </span>
         </div>
-        <ul class="ledger">
-            <li class="ledger-row">
-                <span class="ledger-key">
+        <ul class="list">
+            <li class="list-row">
+                <span class="list-key">
                     {{ $document->owner->name }}
-                    <span class="ledger-sub">{{ $document->owner->email }}</span>
+                    <span class="list-sub">{{ $document->owner->email }}</span>
                 </span>
-                <span class="ledger-val">Owner</span>
+                <span class="list-val">Owner</span>
             </li>
             @foreach ($document->collaborators as $collab)
-                <li class="ledger-row">
-                    <span class="ledger-key">
+                <li class="list-row">
+                    <span class="list-key">
                         {{ $collab->user->name }}
-                        <span class="ledger-sub">{{ $collab->user->email }}</span>
+                        <span class="list-sub">{{ $collab->user->email }}</span>
                     </span>
-                    <span class="ledger-val">{{ ucfirst($collab->role) }}</span>
+                    <span class="list-val">{{ ucfirst($collab->role) }}</span>
                     <button type="button" class="btn btn-sm" wire:click="removeCollaborator({{ $collab->id }})">Remove</button>
                 </li>
             @endforeach

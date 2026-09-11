@@ -2,14 +2,14 @@
      260px wide and scrolls, so a 320px menu anchored inside it was clipped on
      both axes. A sheet is position:fixed and escapes the rail entirely. --}}
 <div x-data="{ open: @entangle('open').live }">
-    {{-- The count is a mono readout beside the word, not a coloured pip. --}}
+    {{-- The count is a plain numeral beside the word, not a coloured pip. --}}
     <button type="button" @click="$wire.toggle()" class="btn btn-quiet btn-sm"
             :aria-expanded="open ? 'true' : 'false'">
-        <span class="lamp {{ $unreadCount > 0 ? 'lamp-signal' : 'lamp-idle' }}" aria-hidden="true"></span>
+        <span class="status-word-dot {{ $unreadCount > 0 ? 'status-word-dot-good' : 'status-word-dot-idle' }}" aria-hidden="true"></span>
         Notifications
         @if ($unreadCount > 0)
-            <span class="readout">
-                <x-shell.figure :value="$unreadCount" :width="2" label="Unread notifications" />
+            <span class="micro">
+                <x-shell.figure :value="$unreadCount" label="Unread notifications" />
             </span>
         @endif
     </button>
@@ -26,18 +26,18 @@
                 @endif
             </div>
 
-            <ul class="ledger sheet-body">
+            <ul class="list sheet-body">
             @forelse ($notifications as $notification)
-                <li class="ledger-row">
-                    <span class="lamp {{ $notification['read'] ? 'lamp-idle' : 'lamp-signal' }}" aria-hidden="true"></span>
-                    <span class="ledger-key">
+                <li class="list-row">
+                    <span class="status-word-dot {{ $notification['read'] ? 'status-word-dot-idle' : 'status-word-dot-good' }}" aria-hidden="true"></span>
+                    <span class="list-key">
                         @if ($notification['url'])
                             <a href="{{ $notification['url'] }}" class="link"
                                wire:click="markRead('{{ $notification['id'] }}')">{{ $notification['message'] }}</a>
                         @else
                             {{ $notification['message'] }}
                         @endif
-                        <span class="ledger-sub">{{ $notification['time'] }}</span>
+                        <span class="list-sub">{{ $notification['time'] }}</span>
                     </span>
                     @if (! $notification['read'])
                         <button type="button" class="btn btn-quiet btn-sm"

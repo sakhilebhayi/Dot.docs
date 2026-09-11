@@ -1,5 +1,5 @@
 {{-- The thread owns its own scroll: the head and the composer are pinned, the
-     ledger between them takes the leftover and scrolls, exactly like the dock.
+     list between them takes the leftover and scrolls, exactly like the dock.
      Without it thirty comments grew the editor page and scrolled the paper
      away with them. --}}
 <div class="comment-thread">
@@ -8,7 +8,7 @@
         <h2 class="section-title">
             Comments
             @if ($totalOpen > 0)
-                — <x-shell.figure :value="$totalOpen" :width="2" label="Open comments" /> open
+                — <x-shell.figure :value="$totalOpen" /> open
             @endif
         </h2>
         <div class="toolbar" role="group" aria-label="Comment filter">
@@ -19,22 +19,22 @@
         </div>
     </div>
 
-    <ul class="ledger comment-thread-list">
+    <ul class="list comment-thread-list">
         @forelse ($comments as $comment)
-            <li class="ledger-row" style="display:block" wire:key="comment-{{ $comment->id }}">
+            <li class="list-row" style="display:block" wire:key="comment-{{ $comment->id }}">
                 @if ($comment->selection_text)
-                    <p class="field-hint" style="border-left:2px solid var(--rule);padding-left:var(--s2);margin:0 0 var(--s2)">
+                    <p class="field-hint" style="border-left:2px solid var(--line);padding-left:var(--s2);margin:0 0 var(--s2)">
                         &ldquo;{{ Str::limit($comment->selection_text, 90) }}&rdquo;
                     </p>
                 @endif
 
                 <div class="split" style="gap:var(--s2)">
-                    <span class="ledger-key" style="flex:1 1 auto">
+                    <span class="list-key" style="flex:1 1 auto">
                         {{ $comment->user->name }}
-                        <span class="ledger-sub">{{ $comment->created_at->diffForHumans() }}</span>
+                        <span class="list-sub">{{ $comment->created_at->diffForHumans() }}</span>
                     </span>
                     @if ($comment->isResolved())
-                        <x-shell.lamp tone="good" word="Resolved" />
+                        <x-shell.status-word tone="good" word="Resolved" />
                     @endif
                 </div>
 
@@ -56,12 +56,12 @@
                 </div>
 
                 @if ($comment->replies->isNotEmpty())
-                    <ul class="ledger" style="margin-top:var(--s3);border-left:1px solid var(--rule);padding-left:var(--s3)">
+                    <ul class="list" style="margin-top:var(--s3);border-left:1px solid var(--line);padding-left:var(--s3)">
                         @foreach ($comment->replies as $reply)
                             <li style="padding:var(--s2) 0" wire:key="reply-{{ $reply->id }}">
-                                <span class="ledger-key">
+                                <span class="list-key">
                                     {{ $reply->user->name }}
-                                    <span class="ledger-sub">{{ $reply->created_at->diffForHumans() }}</span>
+                                    <span class="list-sub">{{ $reply->created_at->diffForHumans() }}</span>
                                 </span>
                                 <p style="margin:var(--s1) 0 0;white-space:pre-line">
                                     {!! preg_replace('/@(\w+)/', '<span class="mention">@$1</span>', e($reply->content)) !!}
@@ -119,7 +119,7 @@
             @endif
         </div>
         <div class="split" style="margin-top:var(--s2)">
-            <span class="readout">Ctrl + Enter posts it</span>
+            <span class="micro">Ctrl + Enter posts it</span>
             <button type="button" class="btn btn-primary" wire:click="postComment" wire:loading.attr="disabled">Post</button>
         </div>
     </div>

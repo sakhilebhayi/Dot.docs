@@ -4,7 +4,7 @@
  * Everything that describes the DOCUMENT (fonts, sizes, margins, heading
  * weights, callout tones, table borders) is generated per style by
  * App\Styles\CssBuilder and injected as <style id="doc-style">. This file is
- * only the desk the paper sits on plus the editor's own chrome — the palette,
+ * only the canvas the page sits on plus the editor's own chrome — the palette,
  * the slash menu, the selection bubble and the affordances that exist while
  * editing and never print.
  *
@@ -13,15 +13,15 @@
  */
 
 /*
- * Tokens live in resources/css/shell.css (:root = day, html.dark = night) so
- * the desk under the paper changes with the shell. Nothing is redefined here.
+ * Tokens live in resources/css/shell.css (:root = DAY, html.dark = night) so
+ * the ground under the page changes with the shell. Nothing is redefined here.
  */
 
-/* ── Desk ────────────────────────────────────────────────────────────── */
+/* ── The canvas the page sits on ─────────────────────────────────────── */
 
-.desk {
-    background: var(--desk);
-    padding: 32px 16px 96px;
+.canvas {
+    background: var(--ground);
+    padding: var(--s6) var(--s4) 96px;
     min-height: 100%;
     display: flex;
     /* The read-only banner below is a full-width sibling of the paper. */
@@ -34,31 +34,31 @@
  * editor is read-only and autosave is off at that point, so this banner is
  * the only sign the writer gets that what they see is not the whole file.
  */
-.desk .dotdoc-content-error {
+.canvas .dotdoc-content-error {
     flex: 0 0 100%;
     order: -1;
     margin: 0 0 20px;
     padding: 12px 16px;
-    border-radius: 4px;
+    border-radius: var(--r-control);
     background: var(--danger);
     color: var(--paper);
     font: 500 var(--t-body)/1.5 var(--font-chrome);
     text-align: center;
 }
 
-.desk .paper {
+.canvas .paper {
     background: var(--paper);
-    color: var(--ink);
+    color: var(--paper-ink);
     width: 210mm;
     min-height: 297mm;
     max-width: 100%;
     /* The one shadow in the product. Nothing in the chrome may carry one. */
-    box-shadow: 0 1px 2px var(--paper-shadow), 0 22px 48px -10px var(--paper-shadow);
-    border-radius: 2px;
+    box-shadow: 0 1px 2px var(--paper-shadow), 0 24px 56px -12px var(--paper-shadow);
+    border-radius: var(--r-canvas);
 }
 
-.desk .paper:focus,
-.desk .paper:focus-visible {
+.canvas .paper:focus,
+.canvas .paper:focus-visible {
     outline: none;
 }
 
@@ -75,7 +75,7 @@
 
 .paper p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);
-    color: color-mix(in srgb, var(--ink) 38%, transparent);
+    color: color-mix(in srgb, var(--paper-ink) 38%, transparent);
     float: left;
     height: 0;
     pointer-events: none;
@@ -92,7 +92,7 @@
 }
 
 .paper .section-break {
-    border-top: 2px double var(--rule);
+    border-top: 2px double var(--line);
     margin: 2em 0;
     height: 0;
     position: relative;
@@ -110,7 +110,7 @@
     font-size: 0.72em;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: color-mix(in srgb, var(--ink) 45%, transparent);
+    color: color-mix(in srgb, var(--paper-ink) 45%, transparent);
 }
 
 .paper .xref {
@@ -164,7 +164,7 @@
 }
 
 .paper .toc-empty {
-    color: color-mix(in srgb, var(--ink) 45%, transparent);
+    color: color-mix(in srgb, var(--paper-ink) 45%, transparent);
     font-style: italic;
 }
 
@@ -192,7 +192,7 @@
 }
 
 .paper ul.tasks li[data-checked='true'] {
-    color: color-mix(in srgb, var(--ink) 55%, transparent);
+    color: color-mix(in srgb, var(--paper-ink) 55%, transparent);
     text-decoration: line-through;
 }
 
@@ -202,7 +202,7 @@
     position: fixed;
     inset: 0;
     z-index: 1000;
-    background: color-mix(in srgb, var(--desk) 72%, transparent);
+    background: color-mix(in srgb, var(--ground) 78%, transparent);
     display: flex;
     align-items: flex-start;
     justify-content: center;
@@ -210,12 +210,12 @@
 }
 
 .dotdoc-panel {
-    width: min(520px, calc(100vw - 32px));
-    background: var(--desk-raised);
-    border: 1px solid var(--rule);
-    border-radius: 0;
+    width: min(560px, calc(100vw - 32px));
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--r-canvas);
     overflow: hidden;
-    color: var(--text);
+    color: var(--ink);
     font-family: var(--font-chrome);
     font-size: var(--t-body);
     line-height: 1.55;
@@ -223,17 +223,16 @@
 
 .dotdoc-panel-title {
     padding: 12px 14px 0;
-    font-family: var(--font-mono);
     font-size: var(--t-micro);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-2);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
 }
 
 .dotdoc-panel-input {
     width: 100%;
     border: none;
-    border-bottom: 1px solid var(--rule);
+    border-bottom: 1px solid var(--line);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -248,7 +247,7 @@
  */
 .dotdoc-panel-input:focus-visible,
 .dotdoc-bubble-input:focus-visible {
-    outline: 2px solid var(--text);
+    outline: 2px solid var(--ink);
     outline-offset: -2px;
 }
 
@@ -268,7 +267,7 @@
     width: 100%;
     padding: 8px 10px;
     border: none;
-    border-radius: 3px;
+    border-radius: var(--r-control);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -277,18 +276,18 @@
 }
 
 .dotdoc-panel-row.is-active {
-    background: var(--text);
-    color: var(--desk-raised);
+    background: var(--accent);
+    color: var(--surface-raised);
 }
 
 /*
- * Inverted surface: the hint pins --text-2, which lands on --text at 2.2:1 the
- * moment the row goes active. Anything carrying its own colour inherits here.
- * Same rule as shell.css's .btn-primary / .tool.is-on / pressed .tag block;
- * both are measured by scripts/design/contrast-dom.mjs.
+ * Inverted surface: the hint pins --ink-soft, which lands on the active row's
+ * own fill the moment it goes active. Anything carrying its own colour inherits
+ * here. Same rule as shell.css's .btn-primary / .tool.is-on / pressed .tag
+ * block; both are measured by scripts/design/contrast-dom.mjs.
  */
 .dotdoc-panel-row.is-active :is(.dotdoc-panel-hint, .dotdoc-panel-label),
-.dotdoc-bubble-btn.is-active :is(.dotdoc-panel-hint, .readout) {
+.dotdoc-bubble-btn.is-active :is(.dotdoc-panel-hint, .micro) {
     color: inherit;
 }
 
@@ -302,14 +301,14 @@
 
 .dotdoc-panel-hint {
     flex-shrink: 0;
-    font-family: var(--font-mono);
     font-size: var(--t-micro);
-    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-soft);
 }
 
 .dotdoc-panel-empty {
     padding: 10px 12px;
-    color: var(--text-2);
+    color: var(--ink-soft);
 }
 
 .dotdoc-slash {
@@ -319,10 +318,10 @@
     max-height: 280px;
     overflow-y: auto;
     padding: 6px;
-    background: var(--desk-raised);
-    border: 1px solid var(--rule);
-    border-radius: 0;
-    color: var(--text);
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--r-canvas);
+    color: var(--ink);
     font-family: var(--font-chrome);
     font-size: var(--t-body);
 }
@@ -338,9 +337,9 @@
 .dotdoc-bubble {
     position: absolute;
     z-index: 999;
-    background: var(--desk-raised);
-    border: 1px solid var(--rule);
-    border-radius: 0;
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--r-canvas);
     padding: 4px;
     display: flex;
     flex-direction: column;
@@ -363,21 +362,21 @@
     height: 30px;
     padding: 0 7px;
     border: none;
-    border-radius: 3px;
+    border-radius: var(--r-control);
     background: transparent;
-    color: var(--text);
+    color: var(--ink);
     font-family: var(--font-chrome);
     font-size: var(--t-body);
     cursor: pointer;
 }
 
 .dotdoc-bubble-btn:hover {
-    background: var(--desk);
+    background: var(--accent-soft);
 }
 
 .dotdoc-bubble-btn.is-active {
-    background: var(--text);
-    color: var(--desk-raised);
+    background: var(--accent);
+    color: var(--surface-raised);
 }
 
 .dotdoc-bubble-btn.is-bold {
@@ -395,10 +394,10 @@
 .dotdoc-bubble-input {
     height: 30px;
     min-width: 190px;
-    border: 1px solid var(--rule);
-    border-radius: 3px;
-    background: var(--desk);
-    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    color: var(--ink);
     font-family: var(--font-chrome);
     font-size: var(--t-micro);
     padding: 0 8px;

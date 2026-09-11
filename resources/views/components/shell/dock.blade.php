@@ -1,7 +1,12 @@
 {{--
-    The dock: right edge of the shell, 360px, two tabs. "Intelligence" is what
-    the machine has to say, "Data" is what the record says. Panels inside are
-    ledgers - rows divided by hairlines - never cards.
+    The right panel: two tabs. "Intelligence" is what the machine has to say,
+    "Data" is what the record says. Rows inside are separated by space, not by
+    hairlines, and nothing in here is a card.
+
+    It defaults to COLLAPSED on the editor (spec §2.4) and opens when the writer
+    does something that needs it - invoking the assistant, opening comments,
+    attaching a file - or from its toggle at the right of the top bar. `state`
+    is rendered by the layout so it never flashes open.
 
     The tabs follow the WAI-ARIA APG tabs pattern: roving tabindex, arrow keys,
     Home/End, and every tab wired to its panel with aria-controls /
@@ -12,14 +17,15 @@
 
     Alpine here is Livewire's bundled copy (the layout loads no second one).
 --}}
-@props(['document' => null])
+@props(['document' => null, 'state' => 'expanded'])
 
 @php
     $user = auth()->user();
     $isEditor = request()->routeIs('documents.edit');
 @endphp
 
-<aside class="dock" aria-label="Intelligence and data" x-data="{ tab: 'intelligence' }" data-shell-tabs>
+<aside id="shell-dock" class="dock" data-panel-state="{{ $state }}"
+       aria-label="Intelligence and data" x-data="{ tab: 'intelligence' }" data-shell-tabs>
     <div class="dock-tabs" role="tablist" aria-label="Dock sections">
         <button type="button" class="dock-tab" role="tab"
                 id="dock-tab-intelligence"
@@ -49,12 +55,13 @@
                         and only then becomes graphite.
                     </p>
                     <div class="toolbar" x-data>
-                        {{-- The shortcut inherits the button's ink: a .readout
-                             pins --text, which on an inverted fill is 1.00:1 —
-                             see the inverted-surface block in shell.css. --}}
+                        {{-- The shortcut inherits the button's ink: a .micro
+                             pins --ink-soft, which on an inverted fill is
+                             unreadable — see the inverted-surface block in
+                             shell.css. --}}
                         <button type="button" class="btn btn-primary" @click="$dispatch('open-ai-palette')">
                             Open the command palette
-                            <span class="readout" aria-hidden="true">&#8679;&#8984;K</span>
+                            <span class="micro" aria-hidden="true">&#8679;&#8984;K</span>
                         </button>
                     </div>
                 </div>
@@ -64,7 +71,7 @@
                 <div class="dock-section-head">
                     <h2 class="section-title">Quick passes</h2>
                 </div>
-                <ul class="ledger">
+                <ul class="list">
                     @foreach ([
                         ['summarize', 'Summarize', 'A short abstract of the whole document.'],
                         ['grammar', 'Fix grammar', 'Spelling and grammar only; wording is left alone.'],
@@ -72,11 +79,11 @@
                         ['outline', 'Generate outline', 'Proposes headings for what is written so far.'],
                     ] as [$action, $label, $note])
                         <li>
-                            <button type="button" class="ledger-row"
+                            <button type="button" class="list-row"
                                     @click="Livewire.dispatchTo('documents.ai-assistant', 'ai-action', { action: '{{ $action }}' })">
-                                <span class="ledger-key">
+                                <span class="list-key">
                                     {{ $label }}
-                                    <span class="ledger-sub">{{ $note }}</span>
+                                    <span class="list-sub">{{ $note }}</span>
                                 </span>
                             </button>
                         </li>
@@ -103,30 +110,30 @@
                 <div class="dock-section-head">
                     <h2 class="section-title">Record</h2>
                 </div>
-                <ul class="ledger">
-                    <li class="ledger-row">
-                        <span class="ledger-key">Version</span>
-                        <span class="ledger-val">
-                            <x-shell.figure :value="$document->version" :width="4" prefix="v" label="Version" />
+                <ul class="list">
+                    <li class="list-row">
+                        <span class="list-key">Version</span>
+                        <span class="list-val">
+                            <x-shell.figure :value="$document->version" prefix="v" label="Version" />
                         </span>
                     </li>
-                    <li class="ledger-row">
-                        <span class="ledger-key">Words</span>
-                        <span class="ledger-val">
-                            <x-shell.figure :value="$document->word_count ?? 0" :width="5" label="Words" />
+                    <li class="list-row">
+                        <span class="list-key">Words</span>
+                        <span class="list-val">
+                            <x-shell.figure :value="$document->word_count ?? 0" label="Words" />
                         </span>
                     </li>
-                    <li class="ledger-row">
-                        <span class="ledger-key">Style</span>
-                        <span class="ledger-val">{{ $document->style_key ?: 'report' }}</span>
+                    <li class="list-row">
+                        <span class="list-key">Style</span>
+                        <span class="list-val">{{ $document->style_key ?: 'report' }}</span>
                     </li>
-                    <li class="ledger-row">
-                        <span class="ledger-key">Edited</span>
-                        <span class="ledger-val">{{ $document->updated_at?->diffForHumans() }}</span>
+                    <li class="list-row">
+                        <span class="list-key">Edited</span>
+                        <span class="list-val">{{ $document->updated_at?->diffForHumans() }}</span>
                     </li>
-                    <li class="ledger-row">
-                        <span class="ledger-key">Owner</span>
-                        <span class="ledger-val">{{ $document->owner?->name ?? 'Unknown' }}</span>
+                    <li class="list-row">
+                        <span class="list-key">Owner</span>
+                        <span class="list-val">{{ $document->owner?->name ?? 'Unknown' }}</span>
                     </li>
                 </ul>
             </section>
@@ -135,23 +142,23 @@
                 <div class="dock-section-head">
                     <h2 class="section-title">Reach</h2>
                 </div>
-                <ul class="ledger">
-                    <li class="ledger-row">
-                        <span class="ledger-key">
+                <ul class="list">
+                    <li class="list-row">
+                        <span class="list-key">
                             {{ $document->is_public ? 'Anyone with the link can read it' : 'Named people only' }}
                         </span>
-                        <x-shell.lamp :tone="$document->is_public ? 'signal' : 'idle'"
+                        <x-shell.status-word :tone="$document->is_public ? 'good' : 'idle'"
                                       :word="$document->is_public ? 'Public' : 'Private'" />
                     </li>
-                    <li class="ledger-row">
-                        <span class="ledger-key">Collaborators</span>
-                        <span class="ledger-val">
-                            <x-shell.figure :value="$document->collaborators()->count()" :width="3" label="Collaborators" />
+                    <li class="list-row">
+                        <span class="list-key">Collaborators</span>
+                        <span class="list-val">
+                            <x-shell.figure :value="$document->collaborators()->count()" label="Collaborators" />
                         </span>
                     </li>
                     <li>
-                        <a href="{{ route('documents.share', $document->uuid) }}" class="ledger-row">
-                            <span class="ledger-key">Manage sharing</span>
+                        <a href="{{ route('documents.share', $document->uuid) }}" class="list-row">
+                            <span class="list-key">Manage sharing</span>
                         </a>
                     </li>
                 </ul>
@@ -161,14 +168,14 @@
                 <div class="dock-section-head">
                     <h2 class="section-title">Session</h2>
                 </div>
-                <ul class="ledger">
-                    <li class="ledger-row">
-                        <span class="ledger-key">Signed in</span>
-                        <span class="ledger-val">{{ $user?->name }}</span>
+                <ul class="list">
+                    <li class="list-row">
+                        <span class="list-key">Signed in</span>
+                        <span class="list-val">{{ $user?->name }}</span>
                     </li>
-                    <li class="ledger-row">
-                        <span class="ledger-key">Workspace</span>
-                        <span class="ledger-val">{{ $user?->currentTeam->name ?? 'Personal' }}</span>
+                    <li class="list-row">
+                        <span class="list-key">Workspace</span>
+                        <span class="list-val">{{ $user?->currentTeam->name ?? 'Personal' }}</span>
                     </li>
                 </ul>
             </section>

@@ -12,17 +12,17 @@
     @if ($pendingWebhooks->isNotEmpty())
         <section aria-labelledby="hook-pending">
             <h3 class="section-title" id="hook-pending">Waiting for your approval</h3>
-            <ul class="ledger">
+            <ul class="list">
                 @foreach ($pendingWebhooks as $webhook)
-                    <li class="ledger-row" style="display:block">
+                    <li class="list-row" style="display:block">
                         <div class="split">
-                            <span class="ledger-key">
-                                <span class="readout">{{ $webhook->url }}</span>
-                                <span class="ledger-sub">
+                            <span class="list-key">
+                                <span class="micro">{{ $webhook->url }}</span>
+                                <span class="list-sub">
                                     {{ implode(', ', $webhook->events) }} — nothing has been sent to it yet.
                                 </span>
                             </span>
-                            <x-shell.lamp tone="signal" word="Pending" />
+                            <x-shell.status-word tone="idle" word="Pending" />
                         </div>
 
                         @if ($rejectingWebhookId === $webhook->id)
@@ -56,12 +56,12 @@
     @elseif ($reviewedWebhooks->isNotEmpty())
         <section aria-labelledby="hook-list">
             <h3 class="section-title" id="hook-list">Endpoints</h3>
-            <ul class="ledger">
+            <ul class="list">
                 @foreach ($reviewedWebhooks as $webhook)
-                    <li class="ledger-row">
-                        <span class="ledger-key">
-                            <span class="readout">{{ $webhook->url }}</span>
-                            <span class="ledger-sub">
+                    <li class="list-row">
+                        <span class="list-key">
+                            <span class="micro">{{ $webhook->url }}</span>
+                            <span class="list-sub">
                                 {{ implode(', ', $webhook->events) }}
                                 @if ($webhook->secret) · signed with {{ Str::limit($webhook->secret, 12) }}… @endif
                                 @if ($webhook->status === 'rejected') · rejected: {{ $webhook->rejected_reason }} @endif
@@ -69,10 +69,10 @@
                         </span>
 
                         @if ($webhook->status === 'rejected')
-                            <x-shell.lamp tone="danger" word="Rejected" />
+                            <x-shell.status-word tone="danger" word="Rejected" />
                         @else
                             <button type="button" class="btn btn-sm" wire:click="toggleWebhook({{ $webhook->id }})">
-                                <span class="lamp {{ $webhook->status === 'active' ? 'lamp-good' : 'lamp-idle' }}" aria-hidden="true"></span>
+                                <span class="status-word-dot {{ $webhook->status === 'active' ? 'status-word-dot-good' : 'status-word-dot-idle' }}" aria-hidden="true"></span>
                                 {{ $webhook->status === 'active' ? 'Active' : 'Paused' }}
                             </button>
                         @endif
@@ -93,7 +93,7 @@
             <input id="hook-url" wire:model="newUrl" type="url" class="field field-mono"
                    placeholder="https://example.com/webhook" />
             @error('newUrl')
-                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                <p class="field-error">{{ $message }}</p>
             @enderror
         </div>
 
@@ -115,7 +115,7 @@
             <input id="hook-secret" type="checkbox" wire:model="generateSecret" class="field-box" />
             <span>
                 Generate an HMAC signing secret
-                <span class="ledger-sub">Lets the receiver prove the request came from here.</span>
+                <span class="list-sub">Lets the receiver prove the request came from here.</span>
             </span>
         </label>
 

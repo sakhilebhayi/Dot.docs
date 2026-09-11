@@ -6,7 +6,6 @@
     <input type="hidden" name="team_id" value="{{ $team->id }}">
 
     <button type="submit" class="rail-item {{ Auth::user()->isCurrentTeam($team) ? 'is-current' : '' }}">
-        <span class="rail-initial" aria-hidden="true">{{ Auth::user()->isCurrentTeam($team) ? 'ON' : 'GO' }}</span>
         <span class="rail-item-text">{{ $team->name }}</span>
     </button>
 </form>

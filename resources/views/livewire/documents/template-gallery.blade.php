@@ -23,18 +23,18 @@
                             <button type="button" class="btn" wire:click="$set('activeCategory', 'all')">Show every template</button>
                         </div>
                     @else
-                        <ul class="ledger">
+                        <ul class="list">
                             @foreach ($this->templates as $template)
-                                <li class="ledger-row">
-                                    <span class="ledger-key">
+                                <li class="list-row">
+                                    <span class="list-key">
                                         {{ $template->name }}
-                                        <span class="ledger-sub">
+                                        <span class="list-sub">
                                             {{ $template->description ?: Str::limit(strip_tags($template->content), 120) }}
                                         </span>
                                     </span>
-                                    <span class="ledger-val">{{ ucfirst($template->category) }}</span>
+                                    <span class="list-val">{{ ucfirst($template->category) }}</span>
                                     @if ($template->is_global)
-                                        <x-shell.lamp tone="good" word="Built in" />
+                                        <x-shell.status-word tone="good" word="Built in" />
                                     @endif
                                     <button type="button" class="btn btn-sm btn-primary"
                                             wire:click="useTemplate({{ $template->id }})" wire:loading.attr="disabled">

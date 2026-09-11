@@ -69,7 +69,7 @@
 
                 @if ($this->verificationLinkSent)
                     <p class="field-hint">
-                        <x-shell.lamp tone="good" word="{{ __('Sent') }}" />
+                        <x-shell.status-word tone="good" word="{{ __('Sent') }}" />
                         {{ __('A new verification link has been sent to your email address.') }}
                     </p>
                 @endif

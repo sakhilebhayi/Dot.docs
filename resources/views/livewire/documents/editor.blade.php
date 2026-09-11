@@ -32,9 +32,9 @@
             return window.DotDoc?.get(this.$refs.editorEl)?.editor ?? null;
         },
 
-        // The status line's save lamp reports what THIS page knows, and only
-        // because this page registered itself as the owner of that lamp (see
-        // components/shell/status-line.blade.php). shell.js used to hook every
+        // The top bar's status word reports what THIS page knows, and only
+        // because this page registered itself as the owner of that word (see
+        // components/shell/topbar.blade.php). shell.js used to hook every
         // Livewire commit instead, which reported 'Saved' for a search box.
         report(tone, word) {
             window.dispatchEvent(new CustomEvent('shell:save-state', { detail: { tone, word } }));
@@ -87,7 +87,7 @@
             editor.on('update', () => {
                 this.isTyping = true;
                 this.tick++;
-                this.report('marker', 'Editing');
+                this.report('idle', 'Editing');
                 clearTimeout(this.typingTimeout);
                 this.typingTimeout = setTimeout(() => { this.isTyping = false; }, 1000);
                 // Never write a draft in fail-closed mode: what the editor is
@@ -107,7 +107,7 @@
             // Online / offline events (dispatched by offline.js initOfflineSupport)
             window.addEventListener('app-offline', () => {
                 this.isOffline = true;
-                this.report('signal', 'Offline');
+                this.report('idle', 'Offline');
             });
             window.addEventListener('app-online',  () => {
                 this.isOffline = false;
@@ -149,7 +149,7 @@
             // is read-only and must not write anything back.
             if (handle && handle.autosaves === false) return Promise.resolve();
 
-            this.report('signal', 'Saving');
+            this.report('idle', 'Saving');
 
             // What is being SENT, captured now. Saves resolve out of order, so
             // an older one must not be allowed to clear a draft that protects
@@ -454,18 +454,18 @@
                 @endforeach
             </select>
             @error('style')
-                <span class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</span>
+                <span class="field-error">{{ $message }}</span>
             @enderror
 
             {{-- Where this document is filed in the shared Dot.Files tree.
-                 A readout, not a link: the button beside it is the one
+                 A quiet line of text, not a link: the button beside it is the one
                  affordance, and it opens the same .sheet folder picker the
                  documents index uses for rename. --}}
-            <span class="readout" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
+            <span class="micro" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
             <button type="button" class="tool tool-mono" x-ref="moveTrigger"
                     wire:click="$set('showMoveSheet', true)">Move</button>
             @error('location')
-                <span class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</span>
+                <span class="field-error">{{ $message }}</span>
             @enderror
 
             @if (count($activeUsers) > 0)
@@ -485,45 +485,45 @@
                 </div>
             @endif
 
-            {{-- State is a lamp AND a word, never colour alone. A rejected save
+            {{-- State is a WORD and a dot, never colour alone. A rejected save
                  has to be visible: the writer keeps typing over content the
                  server never accepted, and the offline draft is deliberately
                  kept as the only remaining copy. The same words go to the
-                 status line through the `shell:save-state` event. --}}
+                 top bar through the `shell:save-state` event. --}}
             <span class="doc-status" aria-live="polite">
-                <span x-show="isOffline" class="lamp-word"
+                <span x-show="isOffline" class="status-word"
                       title="Edits are saved in this browser and sync when you are back online.">
-                    <span class="lamp lamp-signal" aria-hidden="true"></span>
+                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
                     <span>Offline</span>
                 </span>
-                <span x-show="isTyping && !isOffline" class="lamp-word">
-                    <span class="lamp lamp-marker" aria-hidden="true"></span>
+                <span x-show="isTyping && !isOffline" class="status-word">
+                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
                     <span>Editing</span>
                 </span>
-                <span wire:loading wire:target="saveContent,saveTitle" class="lamp-word">
-                    <span class="lamp lamp-signal" aria-hidden="true"></span>
+                <span wire:loading wire:target="saveContent,saveTitle" class="status-word">
+                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
                     <span>Saving</span>
                 </span>
-                <span x-show="aiError" x-cloak @click="aiError = ''" class="lamp-word" style="cursor:pointer"
+                <span x-show="aiError" x-cloak @click="aiError = ''" class="status-word" style="cursor:pointer"
                       title="Click to dismiss">
-                    <span class="lamp lamp-danger" aria-hidden="true"></span>
+                    <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
                     <span x-text="aiError"></span>
                 </span>
                 @error('content')
-                    <span class="lamp-word" title="{{ $message }}">
-                        <span class="lamp lamp-danger" aria-hidden="true"></span>
+                    <span class="status-word" title="{{ $message }}">
+                        <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
                         <span>Not saved — {{ \Illuminate\Support\Str::limit($message, 60) }}</span>
                     </span>
                 @else
                     <span wire:loading.remove wire:target="saveContent,saveTitle" x-show="!isTyping && !isOffline"
-                          class="lamp-word">
-                        <span class="lamp lamp-good" aria-hidden="true"></span>
+                          class="status-word">
+                        <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
                         <span>@if ($saved) Saved @else Ready @endif</span>
                     </span>
                 @enderror
 
-                <span class="readout" title="Last edited {{ $document->updated_at->diffForHumans() }}">
-                    <x-shell.figure :value="$document->version" :width="4" prefix="v" label="Version" />
+                <span class="micro" title="Last edited {{ $document->updated_at->diffForHumans() }}">
+                    <x-shell.figure :value="$document->version" prefix="v" label="Version" />
                 </span>
             </span>
         </div>
@@ -565,7 +565,9 @@
 
                 {{-- uploadImage() re-checks the caption guard at the moment it
                      inserts, because the file dialog is asynchronous. --}}
-                <label class="tool tool-mono tool-label" title="Insert an image">
+                {{-- Attaching a file is one of the three actions that OPEN the
+                     right panel (spec §3): shell.js reads data-shell-expand. --}}
+                <label class="tool tool-mono tool-label" title="Insert an image" data-shell-expand="dock">
                     Image
                     <input type="file" accept="image/*" class="sr-only"
                            @change="ed().uploadImage($event.target.files[0]); $event.target.value = ''" />
@@ -595,9 +597,10 @@
                         :aria-expanded="open ? 'true' : 'false'">More</button>
 
                 <div class="menu-list menu-list-wide" x-show="open" @click.outside="open = false" x-cloak>
-                    <button type="button" @click="$dispatch('open-ai-palette'); open = false">
+                    <button type="button" data-shell-expand="dock"
+                            @click="$dispatch('open-ai-palette'); open = false">
                         Ask the assistant
-                        <span class="readout">Ctrl+Shift+K</span>
+                        <span class="micro">Ctrl+Shift+K</span>
                     </button>
 
                     <button type="button" wire:click="toggleSuggestionMode"
@@ -605,7 +608,7 @@
                         {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
                     </button>
 
-                    <button type="button" wire:click="toggleCommentSidebar"
+                    <button type="button" wire:click="toggleCommentSidebar" data-shell-expand="dock"
                             aria-pressed="{{ $commentSidebarOpen ? 'true' : 'false' }}">
                         {{ $commentSidebarOpen ? 'Hide comments' : 'Show comments' }}
                     </button>
@@ -658,20 +661,20 @@
 
     {{-- Pending suggestions: the assistant's ink, still in marker. --}}
     @if (count($pendingSuggestions) > 0)
-        <section class="panel" aria-labelledby="pending-suggestions" style="border-left:0;border-right:0;border-top:0">
+        <section class="panel" aria-labelledby="pending-suggestions" style="border-radius:0">
             <div class="panel-head">
                 <h2 class="section-title" id="pending-suggestions">
-                    Waiting for you — <x-shell.figure :value="count($pendingSuggestions)" :width="2" label="Suggestions waiting" />
+                    Waiting for you — <x-shell.figure :value="count($pendingSuggestions)" label="Suggestions waiting" />
                 </h2>
-                <span class="readout">Marker becomes graphite once accepted</span>
+                <span class="micro">Marker becomes graphite once accepted</span>
             </div>
-            <ul class="ledger">
+            <ul class="list">
                 @foreach ($pendingSuggestions as $suggestion)
-                    <li class="ledger-row">
-                        <span class="lamp lamp-marker" aria-hidden="true"></span>
-                        <span class="ledger-key">
+                    <li class="list-row">
+                        <x-shell.status-word tone="good" word="In marker" />
+                        <span class="list-key">
                             {{ $suggestion['excerpt'] }}
-                            <span class="ledger-sub">{{ $suggestion['user'] }} · {{ $suggestion['created_at'] }}</span>
+                            <span class="list-sub">{{ $suggestion['user'] }} · {{ $suggestion['created_at'] }}</span>
                         </span>
                         <button type="button" class="btn btn-sm" wire:click="acceptSuggestion({{ $suggestion['id'] }})">Accept</button>
                         <button type="button" class="btn btn-sm" wire:click="rejectSuggestion({{ $suggestion['id'] }})">Drop</button>
@@ -686,7 +689,7 @@
              subtree, which it did not render and must not diff. data-outline
              seeds the numbering before the first save round trip. --}}
         <div class="editor-main">
-            <div id="doc-paper" x-ref="editorEl" wire:ignore class="desk" data-outline="{{ json_encode($outline) }}"></div>
+            <div id="doc-paper" x-ref="editorEl" wire:ignore class="canvas" data-outline="{{ json_encode($outline) }}"></div>
         </div>
 
         @if ($commentSidebarOpen)
@@ -710,14 +713,14 @@
                 </div>
                 <div class="sheet-body">
                     @error('location')
-                        <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                        <p class="field-error">{{ $message }}</p>
                     @enderror
-                    <ul class="ledger">
+                    <ul class="list">
                         @foreach ($this->folderChoices as $choice)
                             <li wire:key="move-{{ $choice['uuid'] }}">
-                                <button type="button" class="ledger-row" style="width:100%;text-align:left"
+                                <button type="button" class="list-row" style="width:100%;text-align:left"
                                         wire:click="moveTo({{ $choice['id'] }})">
-                                    <span class="ledger-key">{{ $choice['label'] }}</span>
+                                    <span class="list-key">{{ $choice['label'] }}</span>
                                 </button>
                             </li>
                         @endforeach

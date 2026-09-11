@@ -36,7 +36,7 @@
 
         @if ($loading)
             <p aria-live="polite">
-                <x-shell.lamp tone="signal" word="Thinking" />
+                <x-shell.status-word tone="idle" word="Thinking" />
             </p>
         @endif
     </div>

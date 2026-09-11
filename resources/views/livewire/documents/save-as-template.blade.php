@@ -13,7 +13,7 @@
                         <label class="field-label" for="tpl-name">Template name</label>
                         <input id="tpl-name" wire:model="name" type="text" class="field" />
                         @error('name')
-                            <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                            <p class="field-error">{{ $message }}</p>
                         @enderror
                     </div>
 

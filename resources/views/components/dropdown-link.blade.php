@@ -1,1 +1,1 @@
-<a {{ $attributes->merge(['class' => 'ledger-row']) }}>{{ $slot }}</a>
+<a {{ $attributes->merge(['class' => 'list-row']) }}>{{ $slot }}</a>

@@ -2,12 +2,12 @@
  * Rendered-pair contrast gate for the Dot.Doc shell.
  *
  * WHY THIS EXISTS. The first pass measured TOKEN pairs — every text token
- * against --desk and --desk-raised — and reported ALL PASS while the dock's
- * flagship button rendered its "⇧⌘K" readout at 1.00:1 and the command
- * palette's active row rendered its hint at 2.2:1. Neither pair is a token
- * pair: both are a rule (.readout {color: var(--text)}) landing inside another
- * rule's fill (.btn-primary {background: var(--text)}). A token table cannot
- * see that, by construction.
+ * against the two grounds — and reported ALL PASS while the dock's flagship
+ * button rendered its "⇧⌘K" at 1.00:1 and the command palette's active row
+ * rendered its hint at 2.2:1. Neither pair is a token pair: both are a rule
+ * (.micro {color: var(--ink-soft)}) landing inside another rule's fill
+ * (.btn-primary {background: var(--accent)}). A token table cannot see that,
+ * by construction.
  *
  * WHAT IT MEASURES. Pairs of RULES, the way the browser resolves them:
  *
@@ -22,9 +22,10 @@
  *      color-mix(... N%, transparent) over what is behind it.
  *   5. Report WCAG 2.1 contrast against the floor for that kind of pair.
  *
- * Text floor 4.5:1. Lamps and other non-text indicators take 3:1 (WCAG 1.4.11);
- * the ghosted padding zero in <x-shell.figure> is decoration — aria-hidden with
- * the true value in an .sr-only sibling — and is reported at the 3:1 floor.
+ * Text floor 4.5:1. Status dots and other non-text marks take 3:1 (WCAG
+ * 1.4.11). Fair Copy has NO exempt rows: the ghosted padding zero that was the
+ * single documented exemption went with the mono readout it decorated, so every
+ * row in this table now carries a real floor.
  *
  *   node scripts/design/contrast-dom.mjs           # table + exit 1 on a FAIL
  *   node scripts/design/contrast-dom.mjs --canary  # prove the harness is live
@@ -276,26 +277,61 @@ function surfaceColor(rules, surface, tokens, behind) {
 /* ── The pairs, taken from what the views actually render ─────────────── */
 
 const GROUND = [
-    { surface: 'body', note: 'the desk' },
+    { surface: 'body', note: 'the ground' },
     { surface: '.panel', note: 'a panel' },
     { surface: '.rail', note: 'the rail' },
     { surface: '.dock', note: 'the dock' },
-    { surface: '.status-line', note: 'the status line' },
+    { surface: '.topbar', note: 'the top bar' },
     { surface: '.sheet', note: 'a sheet' },
+    { surface: '.menu-list', note: 'a menu' },
+    { surface: '.note', note: 'a note' },
+    { surface: '.note-danger', note: 'a danger note' },
     { surface: '.dotdoc-panel', note: 'the command palette' },
 ];
 
-const INKS = ['.readout', '.lamp-word', '.ledger-sub', '.ledger-val', '.field-hint', '.rail-item', '.dock-tab', '.status-item-key', '.empty-line', '.section-title', '.field-label', '.dotdoc-panel-hint', '.dotdoc-panel-title'];
+const INKS = [
+    '.micro',
+    '.micro-lg',
+    '.status-word',
+    '.list-sub',
+    '.list-val',
+    '.field-hint',
+    '.field-error',
+    '.field-label',
+    '.rail-item',
+    '.rail-item-note',
+    '.rail-label',
+    '.rail-colophon',
+    '.rail-account-team',
+    '.dock-tab',
+    '.topbar-action',
+    '.topbar-toggle',
+    '.topbar-title',
+    '.empty-line',
+    '.section-title',
+    '.page-lede',
+    '.link',
+    '.dotdoc-panel-hint',
+    '.dotdoc-panel-title',
+];
 
 /** The inverted surfaces — the pairs the token table was blind to. */
 const INVERTED = [
-    { surface: '.btn-primary', inks: ['.readout', '.lamp-word', '.ledger-sub', '.figure'], note: 'primary button' },
-    { surface: ".tag[aria-pressed='true']", inks: ['.readout', '.lamp-word'], note: 'pressed tag' },
-    { surface: '.tool.is-on', inks: ['.readout', '.lamp-word'], note: 'active tool' },
+    { surface: '.btn-primary', inks: ['.micro', '.status-word', '.list-sub', '.numeral'], note: 'primary button' },
+    { surface: ".tag[aria-pressed='true']", inks: ['.micro', '.status-word', '.numeral'], note: 'pressed tag' },
+    { surface: '.tool.is-on', inks: ['.micro', '.status-word', '.numeral'], note: 'active tool' },
     { surface: '.dotdoc-panel-row.is-active', inks: ['.dotdoc-panel-hint', '.dotdoc-panel-label'], note: 'active palette row' },
+    { surface: '.dotdoc-bubble-btn.is-active', inks: ['.dotdoc-panel-hint', '.micro'], note: 'active bubble button' },
 ];
 
-const DECORATION = new Set(['.ghost']);
+/** The non-text marks: the three status dots and the field error's own dot. */
+const MARKS = [
+    { token: '--accent', note: 'a good dot' },
+    { token: '--danger', note: 'a danger dot' },
+    { token: '--ink-soft', note: 'an idle dot' },
+];
+
+const GROUND_TOKENS = ['--ground', '--surface', '--surface-raised'];
 
 function run() {
     const canary = process.argv.includes('--canary');
@@ -304,7 +340,7 @@ function run() {
         // Break exactly the rule that was broken in review, and prove the
         // harness reports it. Without this the table is unfalsifiable.
         css = css.replace(
-            /:is\(\.inverted, \.btn-primary, \.tool\.is-on, \.tag\[aria-pressed='true'\]\)\n {4}:is\(\.readout[^}]*\}/,
+            /:is\(\.inverted, \.btn-primary, \.tool\.is-on, \.tag\[aria-pressed='true'\]\)\n {4}:is\(\.micro[^}]*\}/,
             ''
         );
     }
@@ -315,11 +351,11 @@ function run() {
 
     for (const mode of ['night', 'day']) {
         const map = tokens[mode];
-        const desk = resolve1('var(--desk)', map, { r: 255, g: 255, b: 255, a: 1 });
+        const ground = resolve1('var(--ground)', map, { r: 255, g: 255, b: 255, a: 1 });
 
         // 1. Plain text on every ground the chrome actually paints.
         for (const { surface, note } of GROUND) {
-            const bg = surfaceBackground(rules, surface, map, desk);
+            const bg = surfaceBackground(rules, surface, map, ground);
             for (const ink of INKS) {
                 const win = winner(rules, null, ink, 'color');
                 if (!win.value) continue;
@@ -331,52 +367,53 @@ function run() {
 
         // 2. The inverted surfaces: the ink's WINNING colour, not its own.
         for (const { surface, inks, note } of INVERTED) {
-            const bg = surfaceBackground(rules, surface, map, desk);
-            const inheritTo = surfaceColor(rules, surface, map, bg) ?? resolve1('var(--text)', map, bg);
+            const bg = surfaceBackground(rules, surface, map, ground);
+            const inheritTo = surfaceColor(rules, surface, map, bg) ?? resolve1('var(--ink)', map, bg);
 
             for (const ink of inks) {
                 const win = winner(rules, surface, ink, 'color');
                 const fg = win.inherited ? inheritTo : resolve1(win.value ?? 'inherit', map, bg, 0, inheritTo) ?? inheritTo;
                 rows.push({ mode, kind: 'text', pair: `${ink} inside ${note}`, fg, bg, floor: 4.5 });
             }
-
-            // The ghosted padding zero is decoration (aria-hidden, real value
-            // in .sr-only), so it takes the 3:1 indicator floor.
-            // Only where the shell actually declares a ghost rule for this
-            // surface; elsewhere no figure renders inside it, so there is
-            // nothing to report.
-            const ghost = winner(rules, surface, '.readout .ghost', 'color');
-            if (ghost.nested) {
-                rows.push({
-                    mode,
-                    kind: 'decoration',
-                    pair: `.ghost inside ${note}`,
-                    fg: resolve1(ghost.value, map, bg, 0, inheritTo) ?? bg,
-                    bg,
-                    floor: null,
-                });
-            }
         }
 
-        // 3. Lamps: non-text indicators, 3:1, on both grounds.
-        for (const tone of ['good', 'signal', 'danger', 'marker']) {
-            for (const ground of ['--desk', '--desk-raised']) {
-                const bg = resolve1(`var(${ground})`, map, desk);
+        // 3. Marks: non-text indicators, 3:1, on every ground they land on.
+        for (const { token, note } of MARKS) {
+            for (const groundToken of GROUND_TOKENS) {
+                const bg = resolve1(`var(${groundToken})`, map, ground);
                 rows.push({
                     mode,
-                    kind: 'lamp',
-                    pair: `.lamp-${tone} on ${ground}`,
-                    fg: resolve1(`var(--${tone})`, map, bg),
+                    kind: 'mark',
+                    pair: `${note} on ${groundToken}`,
+                    fg: resolve1(`var(${token})`, map, bg),
                     bg,
                     floor: 3,
                 });
             }
         }
 
-        // 4. Ink on paper.
-        for (const ink of ['--ink', '--marker']) {
-            const bg = resolve1('var(--paper)', map, desk);
+        // 4. Ink on paper. The canvas does NOT invert - CssBuilder writes
+        //    `.paper{background:#fff}` and Document Styles are out of scope for
+        //    this phase - so --paper / --paper-ink are their own non-inverting
+        //    pair, measured in both modes rather than assumed.
+        for (const ink of ['--paper-ink', '--marker']) {
+            const bg = resolve1('var(--paper)', map, ground);
             rows.push({ mode, kind: 'text', pair: `${ink} on --paper`, fg: resolve1(`var(${ink})`, map, bg), bg, floor: 4.5 });
+        }
+
+        // 5. The same machine ink shown in the CHROME, where the ground does
+        //    invert. This is the pair that caught --marker being flipped for
+        //    night while the paper under it stayed white.
+        for (const groundToken of ['--surface', '--surface-raised']) {
+            const bg = resolve1(`var(${groundToken})`, map, ground);
+            rows.push({
+                mode,
+                kind: 'text',
+                pair: `.ink-marker on ${groundToken}`,
+                fg: resolve1('var(--marker-chrome)', map, bg),
+                bg,
+                floor: 4.5,
+            });
         }
     }
 
@@ -390,14 +427,10 @@ function run() {
     for (const row of rows) {
         if (!row.fg || !row.bg) continue;
         const ratio = contrast(row.fg, row.bg);
-        // A null floor is the ONE documented exemption: the ghosted padding
-        // zero in <x-shell.figure>. It is aria-hidden and the true value rides
-        // in an .sr-only sibling, so it carries no information a reader could
-        // lose. The ratio is printed anyway, for the record.
-        const verdict = row.floor === null ? 'EXEMPT' : ratio >= row.floor ? 'PASS' : 'FAIL';
+        const verdict = ratio >= row.floor ? 'PASS' : 'FAIL';
         if (verdict === 'FAIL') failed += 1;
         line.push(
-            `| ${row.mode.padEnd(5)} | ${row.kind.padEnd(10)} | ${row.pair.padEnd(width)} | ${hex(row.fg)} | ${hex(row.bg)} | ${ratio.toFixed(2).padStart(5)} | ${String(row.floor ?? '-').padStart(5)} | ${verdict.padEnd(7)} |`
+            `| ${row.mode.padEnd(5)} | ${row.kind.padEnd(10)} | ${row.pair.padEnd(width)} | ${hex(row.fg)} | ${hex(row.bg)} | ${ratio.toFixed(2).padStart(5)} | ${String(row.floor).padStart(5)} | ${verdict.padEnd(7)} |`
         );
     }
 

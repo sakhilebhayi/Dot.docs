@@ -16,7 +16,7 @@
         <button type="button" wire:click="openFolder(null)"
                 class="btn btn-quiet btn-sm {{ ! $folderId ? 'is-current' : '' }}">All documents</button>
         @foreach ($this->breadcrumbs as $crumb)
-            <span class="readout" aria-hidden="true">/</span>
+            <span class="micro" aria-hidden="true">/</span>
             <button type="button" wire:click="openFolder({{ $crumb->id }})" class="btn btn-quiet btn-sm">{{ $crumb->name() }}</button>
         @endforeach
     </nav>
@@ -26,9 +26,8 @@
     <section class="panel" aria-labelledby="doc-filters">
         <div class="panel-head">
             <h2 class="section-title" id="doc-filters">Find</h2>
-            <span class="readout">
-                <x-shell.figure :value="$this->documents->total()" :width="4" label="Documents listed" />
-                &nbsp;listed
+            <span class="micro">
+                <x-shell.figure :value="$this->documents->total()" />&nbsp;listed
             </span>
         </div>
         <div class="panel-body">
@@ -71,12 +70,12 @@
             </div>
             @error('folder')
                 <div class="panel-body">
-                    <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                    <p class="field-error">{{ $message }}</p>
                 </div>
             @enderror
-            <ul class="ledger">
+            <ul class="list">
                 @foreach ($this->subfolders as $folder)
-                    <li class="ledger-row">
+                    <li class="list-row">
                         <button type="button" wire:click="openFolder({{ $folder->id }})"
                                 class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start">
                             {{ $folder->name() }}
@@ -99,33 +98,49 @@
     <section class="panel" aria-labelledby="doc-list">
         <div class="panel-head">
             <h2 class="section-title" id="doc-list">Documents</h2>
-            <span wire:loading wire:target="search,filter,filterByTag" class="readout">Filtering</span>
+            <span wire:loading wire:target="search,filter,filterByTag" class="micro">Filtering</span>
         </div>
 
-        @if ($this->documents->isEmpty() && $this->subfolders->isEmpty())
+        {{-- The "nothing matched" branch is tested FIRST: with no subfolders in
+             the current node, a search that matches nothing satisfied the
+             empty-everything condition too, and the page answered a search with
+             "Start with an idea." --}}
+        @if ($this->documents->isEmpty() && ($search !== '' || $tagId))
             <div class="empty">
-                <p class="empty-line">No documents here yet.</p>
-                <button type="button" class="btn btn-primary" wire:click="$set('showCreateModal', true)">New document</button>
+                <p class="empty-line">Nothing here matches "{{ $search }}".</p>
+                <div class="empty-actions">
+                    <button type="button" class="btn" wire:click="$set('search', '')">Clear the search</button>
+                </div>
             </div>
-        @elseif ($this->documents->isEmpty())
+        @elseif ($this->documents->isEmpty() && $this->subfolders->isEmpty())
+            {{-- One sentence, then what to do about it. No illustration, no
+                 "No documents found." A third action, "Create with AI", is
+                 deliberately absent: nothing in this application generates a
+                 whole document from a prompt yet (App\Livewire\Documents\
+                 AiAssistant works on a document that already exists), and an
+                 action that does nothing is worse than an action that is not
+                 there. It belongs to whichever task ships that capability. --}}
             <div class="empty">
-                <p class="empty-line">Nothing matches that search in this folder.</p>
-                <button type="button" class="btn" wire:click="$set('search', '')">Clear the search</button>
+                <p class="empty-line">Start with an idea.</p>
+                <div class="empty-actions">
+                    <button type="button" class="btn btn-primary" wire:click="$set('showCreateModal', true)">Blank document</button>
+                    <button type="button" class="btn" @click="$dispatch('open-template-gallery')">Use a template</button>
+                </div>
             </div>
         @else
-            <ul class="ledger">
+            <ul class="list">
                 @foreach ($this->documents as $doc)
                     <li>
-                        <a href="{{ route('documents.edit', $doc->uuid) }}" class="ledger-row">
-                            <span class="ledger-key">
+                        <a href="{{ route('documents.edit', $doc->uuid) }}" class="list-row">
+                            <span class="list-key">
                                 {{ $doc->title ?: 'Untitled' }}
-                                <span class="ledger-sub">Edited {{ $doc->updated_at->diffForHumans() }}</span>
+                                <span class="list-sub">Edited {{ $doc->updated_at->diffForHumans() }}</span>
                             </span>
                             @if ($doc->is_public)
-                                <x-shell.lamp tone="signal" word="Public" />
+                                <x-shell.status-word tone="good" word="Public" />
                             @endif
-                            <span class="ledger-val">
-                                <x-shell.figure :value="$doc->version" :width="4" prefix="v" label="Version" />
+                            <span class="list-val">
+                                <x-shell.figure :value="$doc->version" prefix="v" label="Version" />
                             </span>
                         </a>
                     </li>
@@ -140,10 +155,10 @@
                             obs.observe($el);
                             $wire.$cleanup(() => obs.disconnect());
                          "></div>
-                    <span class="readout" wire:loading wire:target="loadMore">Loading more</span>
+                    <span class="micro" wire:loading wire:target="loadMore">Loading more</span>
                     <button type="button" class="btn btn-sm" wire:click="loadMore">Load more</button>
                 @else
-                    <span class="readout">All of them are listed</span>
+                    <span class="micro">All of them are listed</span>
                 @endif
             </div>
         @endif
@@ -166,7 +181,7 @@
                             <input id="new-doc-name" wire:model="newTitle" type="text" class="field" autofocus
                                    placeholder="What is it about?" />
                             @error('newTitle')
-                                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                                <p class="field-error">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>
@@ -192,7 +207,7 @@
                             <label class="field-label" for="rename-folder-name">Folder name</label>
                             <input id="rename-folder-name" wire:model="renameFolderName" type="text" class="field" autofocus />
                             @error('renameFolderName')
-                                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                                <p class="field-error">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>
@@ -220,7 +235,7 @@
                             <input id="new-folder-name" wire:model="newFolderName" type="text" class="field" autofocus
                                    placeholder="What goes in it?" />
                             @error('newFolderName')
-                                <p class="field-error"><span class="lamp lamp-danger" aria-hidden="true"></span> {{ $message }}</p>
+                                <p class="field-error">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>

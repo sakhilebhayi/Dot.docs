@@ -8,9 +8,9 @@
     </x-slot>
 
     <x-slot name="content">
-        {{-- State is a lamp AND a word, never a colour on its own. --}}
-        <x-shell.lamp :tone="$this->enabled ? 'good' : 'idle'"
-                      :word="$this->enabled ? __('On') : __('Off')" />
+        {{-- State is a WORD and a dot, never a colour on its own. --}}
+        <x-shell.status-word :tone="$this->enabled ? 'good' : 'idle'"
+                             :word="$this->enabled ? __('On') : __('Off')" />
 
         <h3 class="h-panel">
             @if ($this->enabled)
@@ -42,7 +42,7 @@
                     {!! $this->user->twoFactorQrCodeSvg() !!}
                 </div>
 
-                <p class="readout">
+                <p class="micro">
                     {{ __('Setup Key') }}: {{ decrypt($this->user->two_factor_secret) }}
                 </p>
 
@@ -64,9 +64,9 @@
                     {{ __('Store these recovery codes in a secure password manager. They can be used to recover access to your account if your two factor authentication device is lost.') }}
                 </p>
 
-                <ul class="ledger">
+                <ul class="list">
                     @foreach (json_decode(decrypt($this->user->two_factor_recovery_codes), true) as $code)
-                        <li class="ledger-row"><span class="readout">{{ $code }}</span></li>
+                        <li class="list-row"><span class="micro">{{ $code }}</span></li>
                     @endforeach
                 </ul>
             @endif
