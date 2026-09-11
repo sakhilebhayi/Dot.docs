@@ -90,6 +90,14 @@
  * An explicit DAY choice is stamped html.light so it wins over that query —
  * without the :not(.light), turning the theme back to day did nothing on a
  * system-dark machine.
+ *
+ * THE TWO BLOCKS BELOW ARE DUPLICATES AND MUST STAY IDENTICAL. They are not
+ * merged because a selector list cannot straddle an @media boundary, and the
+ * contrast gate (scripts/design/contrast-dom.mjs) reads the night palette off
+ * `html.dark` by name. Add a token to one and you have shipped a shell that is
+ * half night for every reader on a system-dark machine — which is why
+ * Tests\Feature\Shell\FairCopyTest::test_both_night_guards_declare_the_same_
+ * tokens compares them declaration by declaration rather than trusting the eye.
  */
 html.dark {
     --ground: #1c1a17;
@@ -105,6 +113,7 @@ html.dark {
     --marker-chrome: #7fb0c9;
 }
 
+/* Keep in lockstep with html.dark above — see the note there. */
 @media (prefers-color-scheme: dark) {
     html:not(.light) {
         --ground: #1c1a17;

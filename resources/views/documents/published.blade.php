@@ -60,7 +60,7 @@
             <span class="micro">{{ $document->owner->name }} · {{ $document->updated_at->format('j M Y') }}</span>
 
             <div class="topbar-actions">
-            <button type="button" class="topbar-action" onclick="window.print()">Print</button>
+                <button type="button" class="topbar-action" onclick="window.print()">Print</button>
                 <button type="button" class="topbar-action" data-shell-theme-toggle
                         aria-pressed="{{ $theme === 'dark' ? 'true' : 'false' }}">
                     <span data-shell-theme-word>{{ $theme === 'dark' ? 'Night' : 'Day' }}</span>

@@ -137,7 +137,10 @@
     .diff-wrapper .header { background: var(--ground); color: var(--ink-soft); }
     .diff-wrapper .old { background: color-mix(in srgb, var(--danger) 12%, transparent); }
     .diff-wrapper .new { background: color-mix(in srgb, var(--accent) 14%, transparent); }
-    .diff-wrapper .replaced { background: color-mix(in srgb, var(--marker) 14%, transparent); }
+    /* --marker-chrome, not --marker: this wash sits on a CHROME surface that
+       inverts with the theme, while --marker is the fixed ink in the document
+       (it lands on --paper, which is white in both modes). */
+    .diff-wrapper .replaced { background: color-mix(in srgb, var(--marker-chrome) 14%, transparent); }
     .diff-wrapper ins { background: color-mix(in srgb, var(--accent) 22%, transparent); text-decoration: none; }
     .diff-wrapper del { background: color-mix(in srgb, var(--danger) 20%, transparent); text-decoration: line-through; }
 </style>
