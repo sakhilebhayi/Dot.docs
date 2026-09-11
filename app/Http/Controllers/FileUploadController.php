@@ -40,7 +40,15 @@ class FileUploadController extends Controller
                 'file',
                 'max:'.self::MAX_KILOBYTES,
                 'mimetypes:'.implode(',', [
-                    'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml',
+                    // NO image/svg+xml. An SVG is a script that renders as a
+                    // picture, and FileViewController serves stored bytes
+                    // back: one carrying a <script> would execute in the
+                    // Dot.Doc origin with the session of whichever team
+                    // member opened it. DocumentImageController escapes this
+                    // by re-encoding every image to raster WebP; this
+                    // controller stores bytes verbatim, so the type is
+                    // refused at the door instead. See .ai/rules/files.md.
+                    'image/png', 'image/jpeg', 'image/gif', 'image/webp',
                     'application/pdf',
                     'text/plain', 'text/markdown', 'text/csv',
                     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

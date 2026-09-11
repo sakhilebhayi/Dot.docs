@@ -222,6 +222,29 @@ class NavigatorTest extends TestCase
         $this->assertSame(0, Obj::where('objectable_type', 'file')->count());
     }
 
+    /**
+     * An SVG is a script that renders as a picture: stored bytes are served
+     * back by FileViewController, so one carrying a <script> would run in
+     * the Dot.Doc origin with the session of whichever team member opened
+     * it. It is not a documented Files use case, so it is simply not
+     * accepted - and FileViewTest pins the second half of the rule, that a
+     * row a Dot.Files instance wrote is never rendered inline either.
+     */
+    public function test_an_svg_upload_is_refused(): void
+    {
+        $user = $this->signedIn();
+        $root = $this->files()->root($user->personalTeam());
+
+        $this->post(route('files.upload', $root->uuid), [
+            'file' => UploadedFile::fake()->createWithContent(
+                'logo.svg',
+                '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(document.cookie)</script></svg>',
+            ),
+        ])->assertSessionHasErrors('file');
+
+        $this->assertSame(0, Obj::where('objectable_type', 'file')->count());
+    }
+
     public function test_an_oversized_upload_is_refused(): void
     {
         $user = $this->signedIn();

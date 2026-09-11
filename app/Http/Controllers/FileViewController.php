@@ -28,6 +28,22 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  */
 class FileViewController extends Controller
 {
+    /**
+     * The only types rendered IN this origin. Everything else is handed over
+     * as a download, so a stored file can never run as a document with the
+     * viewer's session: SVG above all (a script that renders as a picture),
+     * and HTML by the same argument. Uploads refuse both
+     * (FileUploadController), but `files` is a SHARED table - a row written
+     * by a Dot.Files instance can name any type at all - so the inline
+     * decision is made here against an allow-list rather than from the
+     * stored string.
+     */
+    private const INLINE_TYPES = [
+        'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+        'application/pdf',
+        'text/plain', 'text/markdown', 'text/csv',
+    ];
+
     public function show(Request $request, string $file): BinaryFileResponse
     {
         $record = File::where('uuid', $file)->firstOrFail();
@@ -40,9 +56,17 @@ class FileViewController extends Controller
 
         return response()->file($path, [
             'Content-Type' => $record->mime_type ?: 'application/octet-stream',
-            'Content-Disposition' => 'inline; filename="'.addslashes($record->name).'"',
+            'Content-Disposition' => $this->disposition($record->mime_type).'; filename="'.addslashes($record->name).'"',
             'X-Content-Type-Options' => 'nosniff',
         ]);
+    }
+
+    /** `inline` only for a type on the allow-list; `attachment` for anything else. */
+    private function disposition(?string $mime): string
+    {
+        $type = strtolower(trim(explode(';', (string) $mime, 2)[0]));
+
+        return in_array($type, self::INLINE_TYPES, true) ? 'inline' : 'attachment';
     }
 
     /**

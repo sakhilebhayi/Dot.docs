@@ -27,11 +27,15 @@ class FileViewTest extends TestCase
         Storage::fake('files');
     }
 
-    private function uploadedFile(User $owner, string $contents = 'the bytes'): File
-    {
+    private function uploadedFile(
+        User $owner,
+        string $contents = 'the bytes',
+        string $name = 'notes.txt',
+        string $mime = 'text/plain',
+    ): File {
         $files = app(FilesService::class);
         $root = $files->root($owner->currentTeam ?? $owner->personalTeam());
-        $node = $files->createFile($root, 'notes.txt', $contents, 'text/plain', $owner);
+        $node = $files->createFile($root, $name, $contents, $mime, $owner);
 
         return $node->objectable;
     }
@@ -53,6 +57,42 @@ class FileViewTest extends TestCase
         $this->assertStringContainsString('inline', $response->headers->get('Content-Disposition'));
         $this->assertSame('nosniff', $response->headers->get('X-Content-Type-Options'));
         $this->assertSame('the bytes', $response->streamedContent());
+    }
+
+    /**
+     * An SVG is a script that renders as a picture. Uploading one is refused
+     * (NavigatorTest), but `files` is a SHARED table: a row written by a
+     * Dot.Files instance can name any type at all, so nothing outside a
+     * short inline allow-list is ever rendered in the Dot.Doc origin.
+     */
+    public function test_an_svg_is_handed_over_as_a_download_never_rendered_inline(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $file = $this->uploadedFile(
+            $user,
+            '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(document.cookie)</script></svg>',
+            'logo.svg',
+            'image/svg+xml',
+        );
+
+        $response = $this->actingAs($user)->get($this->link($file));
+
+        $response->assertOk();
+        $this->assertStringContainsString('attachment', $response->headers->get('Content-Disposition'));
+        $this->assertStringNotContainsString('inline', $response->headers->get('Content-Disposition'));
+        $this->assertSame('nosniff', $response->headers->get('X-Content-Type-Options'));
+    }
+
+    /** Same rule, and the one that matters most: HTML is never served inline either. */
+    public function test_html_is_handed_over_as_a_download(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $file = $this->uploadedFile($user, '<script>alert(1)</script>', 'page.html', 'text/html');
+
+        $response = $this->actingAs($user)->get($this->link($file));
+
+        $response->assertOk();
+        $this->assertStringContainsString('attachment', $response->headers->get('Content-Disposition'));
     }
 
     public function test_an_unsigned_link_is_refused(): void
