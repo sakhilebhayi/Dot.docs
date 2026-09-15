@@ -1,0 +1,262 @@
+name: Bootstrap Production
+
+# One-time first deployment of Dot.Doc to doc.infodot.co.za, mirroring the
+# established Dot.Mines/Dot.Memory pattern: manual dispatch with a typed
+# confirmation, SSH to an already-provisioned server, git-based release.
+#
+# Unlike Dot.Memory's SQLite deploy, this app runs the fuller stack (a
+# dedicated Postgres database, Reverb, and a persistent queue worker), so
+# this workflow also installs and enables the two systemd units under
+# deploy/. Safe to re-run: every step is idempotent, and the .env write is
+# skipped entirely once one already exists on the server.
+#
+# Secret values (DB password, API key) are written into a file on THIS
+# runner and transferred with scp -- never passed as SSH command-line
+# arguments. SSH concatenates remote-command arguments into one string
+# for the remote shell to re-parse, so a secret containing a shell
+# metacharacter (a $, backtick, or space) could corrupt or misparse the
+# remote command if passed that way. DEPLOY_PATH is passed as an argument
+# below because it's a value the deploy operator chooses, not
+# user-generated secret data -- the same convention every other Dot
+# product's deploy.yml already uses safely.
+#
+# Required repository secrets (set these before running -- see
+# deploy/README.md for the one-time manual steps this workflow does NOT
+# do, like provisioning the Postgres database itself):
+#   DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, DEPLOY_USER, DEPLOY_HOST, DEPLOY_PATH
+#   PROD_DB_HOST, PROD_DB_DATABASE, PROD_DB_USERNAME, PROD_DB_PASSWORD
+#   PROD_ANTHROPIC_API_KEY (optional -- AI_PROVIDER stays "mock" without it)
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "bootstrap" to confirm first-time production setup'
+        required: true
+
+concurrency:
+  group: dot-doc-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    name: Bootstrap doc.infodot.co.za
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Refuse unconfirmed runs
+        if: ${{ github.event.inputs.confirm != 'bootstrap' }}
+        run: |
+          echo '::error::Confirmation input was not "bootstrap" -- aborting.'
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Build frontend assets
+        run: |
+          npm ci --silent
+          npm run build
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes"
+          echo "SSH_CMD=$SSH" >> "$GITHUB_ENV"
+
+      - name: Write the production .env locally (never on the command line)
+        env:
+          PROD_DB_HOST: ${{ secrets.PROD_DB_HOST }}
+          PROD_DB_DATABASE: ${{ secrets.PROD_DB_DATABASE }}
+          PROD_DB_USERNAME: ${{ secrets.PROD_DB_USERNAME }}
+          PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+          PROD_ANTHROPIC_API_KEY: ${{ secrets.PROD_ANTHROPIC_API_KEY }}
+        run: |
+          umask 077
+
+          # A QUOTED heredoc ('ENV' below): nothing in this block is
+          # expanded by the shell, so a secret that happens to contain a
+          # $, a backtick, or any other shell metacharacter is written out
+          # as inert placeholder text below, never re-interpreted as shell
+          # syntax. The __PLACEHOLDER__ tokens are filled in afterward via
+          # a sed substitution that escapes its own special characters
+          # (&, /, \) in the replacement text -- sed does not invoke a
+          # shell, so this is safe for any value a secret could contain.
+          cat > /tmp/production.env <<'ENV'
+          APP_NAME="Dot.Doc"
+          APP_ENV=production
+          APP_KEY=
+          APP_DEBUG=false
+          APP_URL=https://doc.infodot.co.za
+
+          LOG_CHANNEL=daily
+          LOG_LEVEL=info
+
+          DB_CONNECTION=pgsql
+          DB_HOST=__PROD_DB_HOST__
+          DB_PORT=5432
+          DB_DATABASE=__PROD_DB_DATABASE__
+          DB_USERNAME=__PROD_DB_USERNAME__
+          DB_PASSWORD=__PROD_DB_PASSWORD__
+
+          SESSION_DRIVER=database
+          SESSION_LIFETIME=120
+          SESSION_SECURE_COOKIE=true
+
+          CACHE_STORE=database
+          QUEUE_CONNECTION=database
+
+          BROADCAST_CONNECTION=reverb
+          REVERB_APP_ID=dot-doc
+          REVERB_APP_KEY=__REVERB_APP_KEY__
+          REVERB_APP_SECRET=__REVERB_APP_SECRET__
+          REVERB_HOST=doc.infodot.co.za
+          REVERB_PORT=443
+          REVERB_SCHEME=https
+          REVERB_SERVER_HOST=127.0.0.1
+          REVERB_SERVER_PORT=8080
+          VITE_REVERB_APP_KEY=__REVERB_APP_KEY__
+          VITE_REVERB_HOST=doc.infodot.co.za
+          VITE_REVERB_PORT=443
+          VITE_REVERB_SCHEME=https
+
+          FILESYSTEM_DISK=local
+          FILES_DISK=local
+
+          AI_PROVIDER=__AI_PROVIDER__
+          ANTHROPIC_API_KEY=__PROD_ANTHROPIC_API_KEY__
+
+          MAIL_MAILER=log
+          ENV
+
+          # sed-escape a replacement string: backslash-escape &, /, and \
+          # (the three characters sed's s/// replacement side treats
+          # specially), so the value is inserted as pure literal text no
+          # matter what it contains.
+          sed_escape() { printf '%s' "$1" | sed -e 's/[&/\]/\\&/g'; }
+
+          ai_provider=mock
+          if [ -n "$PROD_ANTHROPIC_API_KEY" ]; then
+            ai_provider=anthropic
+          fi
+          reverb_app_key="$(openssl rand -hex 20)"
+          reverb_app_secret="$(openssl rand -hex 20)"
+
+          sed -i \
+            -e "s/__PROD_DB_HOST__/$(sed_escape "$PROD_DB_HOST")/" \
+            -e "s/__PROD_DB_DATABASE__/$(sed_escape "$PROD_DB_DATABASE")/" \
+            -e "s/__PROD_DB_USERNAME__/$(sed_escape "$PROD_DB_USERNAME")/" \
+            -e "s/__PROD_DB_PASSWORD__/$(sed_escape "$PROD_DB_PASSWORD")/" \
+            -e "s/__PROD_ANTHROPIC_API_KEY__/$(sed_escape "$PROD_ANTHROPIC_API_KEY")/" \
+            -e "s/__AI_PROVIDER__/$(sed_escape "$ai_provider")/" \
+            -e "s/__REVERB_APP_KEY__/$(sed_escape "$reverb_app_key")/g" \
+            -e "s/__REVERB_APP_SECRET__/$(sed_escape "$reverb_app_secret")/" \
+            /tmp/production.env
+
+      - name: Clone, install, migrate
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          $SSH_CMD "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              DEPLOY_PATH="$DEPLOY_PATH" \
+              'bash -s' <<'BOOTSTRAP'
+          set -euo pipefail
+          APP="$DEPLOY_PATH"
+          PHP=php
+
+          echo "== PHP: $($PHP -v | head -1)"
+
+          if [ ! -d "$APP/.git" ]; then
+            git clone https://github.com/sakhilebhayi/Dot.docs.git "$APP"
+          else
+            git -C "$APP" fetch origin main
+            git -C "$APP" reset --hard origin/main
+          fi
+          cd "$APP"
+
+          composer install --no-interaction --optimize-autoloader --no-dev
+          BOOTSTRAP
+
+      - name: Transfer .env (only if one doesn't already exist)
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          remote_has_env=$($SSH_CMD "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "[ -f '$DEPLOY_PATH/.env' ] && echo yes || echo no")
+          if [ "$remote_has_env" = "no" ]; then
+            scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+              /tmp/production.env \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$DEPLOY_PATH/.env"
+            $SSH_CMD "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              "cd '$DEPLOY_PATH' && chmod 600 .env && php artisan key:generate --force"
+            echo "Wrote a new .env and generated APP_KEY."
+          else
+            echo ".env already exists on the server -- left untouched."
+          fi
+          shred -u /tmp/production.env 2>/dev/null || rm -f /tmp/production.env
+
+      - name: Storage, migrations, seeders, caches
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          $SSH_CMD "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              DEPLOY_PATH="$DEPLOY_PATH" \
+              'bash -s' <<'MIGRATE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          PHP=php
+
+          mkdir -p storage/app/files
+          $PHP artisan storage:link || true
+
+          $PHP artisan migrate --force
+          $PHP artisan db:seed --class="Database\Seeders\DocumentStyleSeeder" --force
+          $PHP artisan db:seed --class="Database\Seeders\StarterTemplateSeeder" --force
+
+          $PHP artisan config:cache
+          $PHP artisan route:cache
+          $PHP artisan view:cache
+          $PHP artisan event:cache
+
+          echo "== Code deployed: $(git rev-parse --short HEAD)"
+          MIGRATE
+
+      - name: Transfer built assets
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            public/build/ \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$DEPLOY_PATH/public/build/"
+
+      - name: Install and start services
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          $SSH_CMD "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              DEPLOY_PATH="$DEPLOY_PATH" \
+              'bash -s' <<'SERVICES'
+          set -euo pipefail
+          APP="$DEPLOY_PATH"
+          cd "$APP"
+
+          for unit in reverb queue-worker; do
+            sed "s|__DEPLOY_PATH__|$APP|g" "deploy/${unit}.service" \
+              | sudo tee "/etc/systemd/system/dot-doc-${unit}.service" > /dev/null
+          done
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now dot-doc-reverb.service
+          sudo systemctl enable --now dot-doc-queue-worker.service
+          sudo systemctl status --no-pager dot-doc-reverb.service dot-doc-queue-worker.service
+
+          echo "== Bootstrap complete."
+          SERVICES

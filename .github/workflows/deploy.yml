@@ -1,0 +1,110 @@
+name: Deploy to Production
+
+# Manual-only, mirroring Dot.Mines' and Dot.Memory's pipelines: trigger
+# from the Actions tab (or `gh workflow run deploy.yml -f confirm=deploy`)
+# when a release on main is ready. Run bootstrap.yml once, first, on a new
+# server -- this workflow assumes .env, the database, and the two systemd
+# services already exist.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm deploying main to production'
+        required: true
+
+concurrency:
+  group: dot-doc-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy main to doc.infodot.co.za
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Refuse unconfirmed runs
+        if: ${{ github.event.inputs.confirm != 'deploy' }}
+        run: |
+          echo '::error::Confirmation input was not "deploy" -- aborting.'
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Build frontend assets
+        run: |
+          npm ci --silent
+          npm run build
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Deploy code and run migrations
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              DEPLOY_PATH="$DEPLOY_PATH" \
+              'bash -s' <<'DEPLOY'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          PHP=php
+
+          echo "== Current release: $(git rev-parse --short HEAD)"
+
+          git fetch origin main
+
+          # Maintenance mode only for the risky window (migrations).
+          $PHP artisan down --retry=30 || true
+
+          git reset --hard origin/main
+          composer install --no-interaction --optimize-autoloader --no-dev
+
+          $PHP artisan migrate --force
+
+          $PHP artisan config:cache
+          $PHP artisan route:cache
+          $PHP artisan view:cache
+          $PHP artisan event:cache
+          DEPLOY
+
+      - name: Transfer built assets
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            public/build/ \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$DEPLOY_PATH/public/build/"
+
+      - name: Restart services and go live
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              DEPLOY_PATH="$DEPLOY_PATH" \
+              'bash -s' <<'RESTART'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          PHP=php
+
+          # queue:restart signals workers to finish their current job and
+          # exit; systemd's Restart=always then spins up a fresh one --
+          # zero-downtime, no direct process kill.
+          $PHP artisan queue:restart
+          sudo systemctl reload dot-doc-reverb.service
+
+          $PHP artisan up
+          echo "== Deployed: $(git rev-parse --short HEAD)"
+          RESTART

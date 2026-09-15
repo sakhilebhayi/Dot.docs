@@ -1,0 +1,14 @@
+[Unit]
+Description=Dot.Doc Laravel Queue Worker
+After=network.target postgresql.service
+
+[Service]
+User=www-data
+Group=www-data
+Restart=always
+# database queue driver (this app's default, see config/queue.php) needs
+# no separate broker. Path substituted by bootstrap.yml, same as reverb.service.
+ExecStart=/usr/bin/php __DEPLOY_PATH__/artisan queue:work database --sleep=3 --tries=3 --timeout=90
+
+[Install]
+WantedBy=multi-user.target
