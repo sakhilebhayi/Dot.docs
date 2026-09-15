@@ -89,6 +89,46 @@ class ContextualToolbarTest extends TestCase
     }
 
     /**
+     * A reveal trigger names the panel the control actually acts INTO.
+     *
+     * `data-shell-expand` opens a panel and never closes one — revealing is
+     * one-way by design (.ai/rules/views.md), so a trigger pointing at the
+     * wrong panel has no way back. The comments toggle carried
+     * `data-shell-expand="dock"` and comments do not render in the dock: they
+     * render in `.editor-side`, beside the paper. Pressing it in EITHER
+     * direction took ~340px of canvas width for a panel the writer had not
+     * asked for and could only close by hand.
+     *
+     * The assistant is the genuine case and stays: it does live in the dock.
+     */
+    public function test_only_the_controls_that_act_into_the_dock_reveal_it(): void
+    {
+        $html = $this->editorHtml();
+
+        $this->assertSame(
+            1,
+            substr_count($html, 'data-shell-expand='),
+            'a second control claims to act into a panel — check that it really does',
+        );
+
+        $this->assertSame(1, preg_match(
+            '/<button[^>]*data-shell-expand="dock"[^>]*>(.*?)<\/button>/s',
+            $html,
+            $reveals,
+        ));
+        $this->assertStringContainsString('Ask the assistant', $reveals[1]);
+
+        // The comments toggle is still there, and still only toggles comments.
+        $this->assertSame(1, preg_match(
+            '/<button[^>]*wire:click="toggleCommentSidebar"[^>]*>(.*?)<\/button>/s',
+            $html,
+            $comments,
+        ));
+        $this->assertStringNotContainsString('data-shell-expand', $comments[0]);
+        $this->assertStringContainsString('comments', $comments[1]);
+    }
+
+    /**
      * The title lives ONCE.
      *
      * Task 1 shipped it twice: the top bar resolved it through ShellContext

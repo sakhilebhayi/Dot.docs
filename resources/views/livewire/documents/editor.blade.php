@@ -221,8 +221,15 @@
                     (term ? '&q=' + encodeURIComponent(term) : '');
             } else if (name === 'ai' && params && params.action) {
                 // The assistant lives in the dock, which starts collapsed on
-                // this route — asking it something has to open it, the same
-                // way the dock's own quick passes do (data-shell-expand).
+                // this route — asking it something has to open it. The one
+                // other control that reaches the assistant from outside the
+                // dock — Ask the assistant, in the More menu below — does the
+                // same thing with a data-shell-expand hook; a palette command
+                // has no button to hang one on, so the window event shell.js
+                // also listens for is this path's trigger.
+                //
+                // (Comments are NOT one of these: they render beside the
+                // paper, not in the dock. See the toggle in that same menu.)
                 window.dispatchEvent(new CustomEvent('shell:reveal-dock'));
                 Livewire.dispatchTo('documents.ai-assistant', 'ai-action', {
                     action: params.action,
@@ -595,7 +602,12 @@
                     {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
                 </button>
 
-                <button type="button" wire:click="toggleCommentSidebar" data-shell-expand="dock"
+                {{-- No `data-shell-expand` here, deliberately: comments render
+                     in `.editor-side`, beside the paper, NOT in the dock.
+                     Revealing a panel is one-way by design, so pointing this at
+                     the dock took ~340px of canvas width in either direction
+                     with no way back. --}}
+                <button type="button" wire:click="toggleCommentSidebar"
                         aria-pressed="{{ $commentSidebarOpen ? 'true' : 'false' }}">
                     {{ $commentSidebarOpen ? 'Hide comments' : 'Show comments' }}
                 </button>

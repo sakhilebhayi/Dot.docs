@@ -195,3 +195,134 @@ test('a key that is not an activation key leaves the button alone', () => {
 
     assert.equal(pressed, 0);
 });
+
+test('the button knows whether it was pressed by key or by mouse', () => {
+    // A registry command ends with `chain().focus()`, which puts the caret
+    // back in the paper. That is right for a mouse press and wrong for a key
+    // press — it ejects the writer from the toolbar after one command — so the
+    // press has to say which it was.
+    const el = fakeButton();
+    const from = [];
+    bubble.bindActivation(el, (fromKeyboard) => from.push(fromKeyboard));
+
+    el.fire('mousedown');
+    el.fire('keydown', { key: 'Enter' });
+
+    assert.deepEqual(from, [false, true]);
+});
+
+/*
+ * REACHING THE TOOLBAR WITHOUT A MOUSE.
+ *
+ * "Alt text" is the one command in the product whose entire purpose is
+ * accessibility, and the floating toolbar is its only home. Two things have to
+ * hold for it to be operable: a blur that hands focus to one of the toolbar's
+ * OWN controls must not tear the toolbar down under the press, and there has to
+ * be a route into it that does not depend on where the toolbar happens to sit
+ * in the document (`Alt+F10`, the WAI-ARIA APG convention).
+ */
+
+/** The smallest thing that answers `contains` the way an element does. */
+function fakeToolbar(...children) {
+    return { hidden: false, children, contains: (el) => children.includes(el) };
+}
+
+test('a blur that hands focus to the toolbar itself does not hide it', () => {
+    const altText = { name: 'Alt text' };
+    const caption = { name: 'Caption' };
+    const dom = fakeToolbar(altText, caption);
+
+    // Tab out of the paper: `relatedTarget` is the element ABOUT to take
+    // focus, which is the only reading available while the blur is in flight.
+    assert.equal(bubble.blurLeavesToolbar(dom, altText), false, 'tabbing INTO the toolbar hid it');
+    assert.equal(bubble.blurLeavesToolbar(dom, caption), false, 'moving between its own buttons hid it');
+
+    // ...and the toolbar holds itself open for as long as focus is on one of
+    // them, which is what `document.activeElement` answers once the blur has
+    // settled.
+    assert.equal(bubble.toolbarHoldsFocus(dom, altText), true);
+});
+
+test('a blur that leaves the toolbar for anything else does hide it', () => {
+    const altText = { name: 'Alt text' };
+    const dom = fakeToolbar(altText);
+
+    assert.equal(bubble.blurLeavesToolbar(dom, { name: 'the rail toggle' }), true);
+    assert.equal(bubble.blurLeavesToolbar(dom, null), true, 'a blur to nothing must still hide it');
+    assert.equal(bubble.blurLeavesToolbar(dom, undefined), true);
+
+    assert.equal(bubble.toolbarHoldsFocus(dom, { name: 'the rail toggle' }), false);
+    assert.equal(bubble.toolbarHoldsFocus(dom, null), false);
+});
+
+test('Alt+F10 and F10 both reach the toolbar; nothing else does', () => {
+    const key = (overrides = {}) => ({
+        key: 'F10',
+        altKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+        repeat: false,
+        ...overrides,
+    });
+
+    assert.equal(bubble.isToolbarFocusShortcut(key({ altKey: true })), true);
+    assert.equal(bubble.isToolbarFocusShortcut(key()), true);
+
+    // A chord the shortcut never asked for belongs to somebody else, and a
+    // held key would keep re-stealing focus for as long as it was down.
+    assert.equal(bubble.isToolbarFocusShortcut(key({ ctrlKey: true })), false);
+    assert.equal(bubble.isToolbarFocusShortcut(key({ metaKey: true })), false);
+    assert.equal(bubble.isToolbarFocusShortcut(key({ shiftKey: true })), false);
+    assert.equal(bubble.isToolbarFocusShortcut(key({ repeat: true })), false);
+    assert.equal(bubble.isToolbarFocusShortcut(key({ key: 'F9' })), false);
+    assert.equal(bubble.isToolbarFocusShortcut(null), false);
+});
+
+/*
+ * ROVING TABINDEX.
+ *
+ * `role="toolbar"` is a single tab stop with the arrows moving inside it — a
+ * toolbar whose every button is its own tab stop makes a writer Tab past nine
+ * controls to leave it.
+ */
+
+test('the arrows move along the toolbar and wrap at both ends', () => {
+    assert.equal(bubble.rovingMove('ArrowRight', 0, 4), 1);
+    assert.equal(bubble.rovingMove('ArrowRight', 3, 4), 0, 'the right end must wrap');
+    assert.equal(bubble.rovingMove('ArrowLeft', 0, 4), 3, 'the left end must wrap');
+    assert.equal(bubble.rovingMove('Home', 2, 4), 0);
+    assert.equal(bubble.rovingMove('End', 0, 4), 3);
+});
+
+test('a key the toolbar does not own travels on', () => {
+    // Tab has to leave the toolbar, Enter has to activate the button, and a
+    // letter belongs to whatever is listening for it.
+    for (const key of ['Tab', 'Enter', ' ', 'a', 'ArrowUp', 'Escape']) {
+        assert.equal(bubble.rovingMove(key, 0, 4), null, `${key} was taken by the roving tabindex`);
+    }
+
+    assert.equal(bubble.rovingMove('ArrowRight', 0, 0), null, 'an empty toolbar has nowhere to move');
+});
+
+/*
+ * WHERE THE TOOLBAR MAY SIT.
+ *
+ * It floats over the first line of the document as readily as the last, so it
+ * must not cover the two bars above the page. The top bar was already
+ * accounted for; `.doc-bar` — the persistent row directly under it — was not,
+ * and a selection in the first line put the toolbar over the title field.
+ */
+
+test('the ceiling clears every bar above the page, not just the top one', () => {
+    const topbar = { bottom: 52 };
+    const docBar = { bottom: 98 };
+
+    assert.equal(bubble.toolbarCeiling([topbar, docBar]), 106);
+    assert.equal(bubble.toolbarCeiling([docBar, topbar]), 106, 'the order of the bars must not matter');
+
+    // A page with no persistent bar (anything that is not the editor) still
+    // clears the top bar, and a page with neither has no ceiling but the gap.
+    assert.equal(bubble.toolbarCeiling([topbar, null]), 60);
+    assert.equal(bubble.toolbarCeiling([null, undefined]), 8);
+});

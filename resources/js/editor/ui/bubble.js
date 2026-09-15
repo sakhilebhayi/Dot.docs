@@ -31,16 +31,21 @@ const ACTIVATION_KEYS = ['Enter', ' ', 'Spacebar'];
  * therefore bound explicitly, with the default prevented so the browser does
  * not also synthesise a click (and so Space does not scroll the page).
  *
+ * The callback is told WHICH it was. Almost every button ends in a registry
+ * command, and a registry command ends with `chain().focus()` — right after a
+ * mouse press (the writer is already looking at the page) and wrong after a key
+ * press, which it would eject from the toolbar after a single command.
+ *
  * Exported so `tests/js/toolbar.test.js` can measure it: the rule is about
  * which events are bound, which needs no DOM to check.
  *
  * @param {{addEventListener: Function}} el
- * @param {() => void} onActivate
+ * @param {(fromKeyboard: boolean) => void} onActivate
  */
 export function bindActivation(el, onActivate) {
     el.addEventListener('mousedown', (event) => {
         event.preventDefault();
-        onActivate();
+        onActivate(false);
     });
 
     el.addEventListener('keydown', (event) => {
@@ -49,8 +54,113 @@ export function bindActivation(el, onActivate) {
         }
 
         event.preventDefault();
-        onActivate();
+        onActivate(true);
     });
+}
+
+/**
+ * Does a blur that is handing focus to `relatedTarget` actually LEAVE the
+ * toolbar?
+ *
+ * `relatedTarget` is the element ABOUT to take focus, which is the only reading
+ * available while the blur is still in flight (`activeElement` is `body` at
+ * that moment). Tabbing from the paper INTO the toolbar, and moving from one of
+ * its buttons to the next, are both blurs — and tearing the toolbar down on
+ * either takes the button out from under the press.
+ *
+ * @param {{contains: (el: unknown) => boolean}} dom
+ * @param {unknown} relatedTarget
+ * @returns {boolean}
+ */
+export function blurLeavesToolbar(dom, relatedTarget) {
+    return !relatedTarget || !dom.contains(relatedTarget);
+}
+
+/**
+ * The settled half of the same rule: focus sitting on one of the toolbar's own
+ * controls holds it open, whatever the editor reports about itself.
+ *
+ * @param {{contains: (el: unknown) => boolean}} dom
+ * @param {unknown} activeElement
+ * @returns {boolean}
+ */
+export function toolbarHoldsFocus(dom, activeElement) {
+    return Boolean(activeElement) && dom.contains(activeElement);
+}
+
+/**
+ * The toolbar's own focus shortcut.
+ *
+ * WAI-ARIA APG's convention for a toolbar that is not a natural tab stop is F10
+ * or Alt+F10, and both are accepted here. It is what makes "Alt text" reachable
+ * from a caret in the paper WHEREVER the toolbar node happens to sit: the
+ * toolbar is appended to `<body>`, so Tab reaches it only once nothing else
+ * follows the canvas in the document (the top bar is the shell's FIRST element
+ * for exactly that reason — layouts/app.blade.php), and with the comment
+ * sidebar or the dock open something always does.
+ *
+ * A modifier the chord never asked for belongs to somebody else, and a held key
+ * would keep re-stealing focus for as long as it was down.
+ *
+ * @param {KeyboardEvent|null} event
+ * @returns {boolean}
+ */
+export function isToolbarFocusShortcut(event) {
+    if (!event || event.key !== 'F10' || event.repeat) {
+        return false;
+    }
+
+    return !event.ctrlKey && !event.metaKey && !event.shiftKey;
+}
+
+/**
+ * Where the roving tabindex goes next.
+ *
+ * `role="toolbar"` is ONE tab stop with the arrows moving inside it. Every
+ * button being its own tab stop is not the ARIA toolbar pattern and makes a
+ * reachable toolbar worse than an unreachable one: nine presses of Tab to get
+ * past it. Home and End go to the ends; the arrows wrap, because a toolbar is a
+ * closed set of tools rather than a list you can fall off.
+ *
+ * @param {string} key
+ * @param {number} current index of the focused button, -1 when it is not one
+ * @param {number} count how many buttons are on screen
+ * @returns {number|null} null when the key is not the toolbar's to take
+ */
+export function rovingMove(key, current, count) {
+    if (!Number.isInteger(count) || count < 1 || !Number.isInteger(current) || current < 0) {
+        return null;
+    }
+
+    const moves = {
+        ArrowRight: current + 1,
+        ArrowLeft: current - 1,
+        Home: 0,
+        End: count - 1,
+    };
+
+    if (!(key in moves)) {
+        return null;
+    }
+
+    return ((moves[key] % count) + count) % count;
+}
+
+/**
+ * The lowest edge the toolbar may float above.
+ *
+ * It sits over the selection, but never over the bars above the page: the top
+ * bar, and — on the editor — the persistent `.doc-bar` directly under it, which
+ * is `position: sticky` and therefore always there. Accounting for the top bar
+ * alone put a first-line selection's toolbar straight over the title field and
+ * the style picker.
+ *
+ * @param {Array<{bottom: number}|null|undefined>} bars
+ * @param {number} [gap]
+ * @returns {number}
+ */
+export function toolbarCeiling(bars, gap = 8) {
+    return bars.reduce((lowest, bar) => Math.max(lowest, bar?.bottom ?? 0), 0) + gap;
 }
 
 /** The marks a writer reaches for mid-sentence. */
@@ -86,6 +196,7 @@ export function installBubble(editor) {
     dom.className = 'dotdoc-bubble';
     dom.setAttribute('role', 'toolbar');
     dom.setAttribute('aria-label', 'Tools for the selection');
+    dom.setAttribute('aria-keyshortcuts', 'Alt+F10');
     dom.hidden = true;
 
     /** Build one row of the toolbar. */
@@ -107,9 +218,20 @@ export function installBubble(editor) {
         el.setAttribute('aria-label', title);
         el.textContent = label;
         el.className = `dotdoc-bubble-btn${className ? ` ${className}` : ''}`;
-        bindActivation(el, () => {
+        // The roving tabindex owns which of these is the tab stop; until the
+        // toolbar is shown and `applyRoving()` runs, none of them is.
+        el.tabIndex = -1;
+        bindActivation(el, (fromKeyboard) => {
             onPress();
             paint();
+            // Most of these end in a registry command, and a registry command
+            // ends with `chain().focus()` — so a key press would apply one
+            // tool and drop the writer back in the paper. Focus comes back to
+            // the button, unless the press deliberately moved it INTO the
+            // toolbar (the link and alt-text fields both do).
+            if (fromKeyboard && !dom.contains(document.activeElement)) {
+                el.focus();
+            }
         });
         row.appendChild(el);
 
@@ -190,7 +312,7 @@ export function installBubble(editor) {
     // ── Image tools ──────────────────────────────────────────────────────
     const imageRow = makeRow('dotdoc-bubble-image');
 
-    makeButton(imageRow, {
+    const altButton = makeButton(imageRow, {
         label: 'Alt text',
         title: 'Describe this image',
         className: 'dotdoc-bubble-btn-word',
@@ -291,11 +413,126 @@ export function installBubble(editor) {
 
     dom.appendChild(altRow);
 
+    /**
+     * The two form rows submit NATIVELY: a click on a `type="submit"` button,
+     * or Enter in its field. Every other control in this toolbar answers Enter
+     * and Space explicitly rather than leaning on a default action
+     * (`bindActivation`), and these two are made explicit for the same reason —
+     * "Save" is the last step of the one command in the product whose whole
+     * purpose is accessibility, and an activation that exists only as a browser
+     * default is one nothing can prove still works.
+     *
+     * `preventDefault()` is what keeps it to ONE submission: it cancels the
+     * implicit submission, and the click the browser would otherwise synthesise
+     * for a focused submit button. The mouse path is untouched.
+     *
+     * @param {HTMLFormElement} row
+     */
+    const submitOnKey = (row) => (event) => {
+        if (!ACTIVATION_KEYS.includes(event.key)) {
+            return;
+        }
+
+        // Space in a text field is a space.
+        if (event.key !== 'Enter' && event.target.tagName === 'INPUT') {
+            return;
+        }
+
+        event.preventDefault();
+
+        if (typeof row.requestSubmit === 'function') {
+            row.requestSubmit();
+        } else {
+            row.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
+    };
+
+    // Bound per control, NOT on the row: `Unlink` sits in the same form and has
+    // an activation of its own, and a listener on the form would unlink and
+    // then submit on one press.
+    [
+        [linkInput, linkRow],
+        [linkApply, linkRow],
+        [altInput, altRow],
+        [altApply, altRow],
+    ].forEach(([el, row]) => el.addEventListener('keydown', submitOnKey(row)));
+
+    /*
+     * The toolbar lives on <body>, and that is a decision rather than a
+     * leftover.
+     *
+     * Putting it next to the editor element would read better in the document
+     * order — but `<main class="canvas-region">` carries `container-type:
+     * inline-size` (shell.css), and a container-type applies `contain: layout`,
+     * which makes that element the containing block for every absolutely AND
+     * fixed positioned descendant. The toolbar is positioned from viewport
+     * rects, so inside the canvas it would land offset by the rail's width and
+     * the top bar's height, and the <900px `position: fixed` sheet would
+     * measure the canvas rather than the screen.
+     *
+     * What the keyboard needs instead is elsewhere: the top bar is the FIRST
+     * element inside `.shell` (layouts/app.blade.php), so the body-mounted
+     * toolbar is no longer stranded behind it in the tab order, and Alt+F10
+     * reaches it directly whenever something else — the dock, the comment
+     * sidebar — does follow the canvas.
+     */
     document.body.appendChild(dom);
 
     function closeLink() {
         linkRow.hidden = true;
         linkInput.classList.remove('is-invalid');
+    }
+
+    /*
+     * THE ROVING TABINDEX.
+     *
+     * The rows of buttons are one `role="toolbar"`: a single tab stop, with the
+     * arrows moving between the tools inside it. The link and alt-text rows are
+     * FORMS rather than tools — once one is open the writer is typing in it, so
+     * those keep the natural tab order (field, then its own buttons) and the
+     * arrows stay what they are inside a text field.
+     */
+    const rovingRows = [markRow, headingRow, tableRow, imageRow];
+
+    /** The buttons on screen right now, in document order. */
+    function rovingButtons() {
+        return rovingRows
+            .filter((row) => !row.hidden)
+            .flatMap((row) => Array.from(row.children))
+            .filter((el) => el.tagName === 'BUTTON');
+    }
+
+    /** Which of them is the toolbar's one tab stop. */
+    let rovingAt = 0;
+
+    function applyRoving() {
+        const buttons = rovingButtons();
+
+        if (buttons.length === 0) {
+            return;
+        }
+
+        if (rovingAt >= buttons.length) {
+            rovingAt = 0;
+        }
+
+        buttons.forEach((el, index) => {
+            el.tabIndex = index === rovingAt ? 0 : -1;
+        });
+    }
+
+    /** Put the caret on the toolbar. Answers whether there was one to put it on. */
+    function focusToolbar() {
+        const buttons = rovingButtons();
+
+        if (dom.hidden || buttons.length === 0) {
+            return false;
+        }
+
+        applyRoving();
+        buttons[Math.min(rovingAt, buttons.length - 1)].focus();
+
+        return true;
     }
 
     /** Which rows a variant shows. Prose keeps its marks inside a heading and
@@ -349,7 +586,7 @@ export function installBubble(editor) {
         // the editor reports `blur` the instant that happens — hiding then
         // takes the button out from under the press, which is why "Alt text"
         // stayed unreachable without a mouse even once it answered Enter.
-        if (dom.contains(document.activeElement)) {
+        if (toolbarHoldsFocus(dom, document.activeElement)) {
             return;
         }
 
@@ -389,6 +626,12 @@ export function installBubble(editor) {
         if (!visible.includes(markRow)) closeLink();
         if (!visible.includes(imageRow)) altRow.hidden = true;
 
+        // A different set of tools starts at its first one rather than at
+        // whatever index the last variant happened to leave behind.
+        if (dom.dataset.variant !== variant) {
+            rovingAt = 0;
+        }
+
         dom.dataset.variant = variant;
         dom.hidden = false;
         // Measure after unhiding, so offsetWidth/Height are real.
@@ -399,26 +642,31 @@ export function installBubble(editor) {
             Math.max(8, document.documentElement.clientWidth - dom.offsetWidth - 8)
         );
 
-        // The toolbar sits above the selection, but never on top of the top
-        // bar: a selection in the first line of the page would otherwise put
-        // it over the save word and the panel toggles, which are not its to
-        // cover. With no room up there it goes below the selection instead.
-        const ceiling = (document.querySelector('.topbar')?.getBoundingClientRect().bottom ?? 0) + 8;
+        // The toolbar sits above the selection, but never on top of the bars
+        // above the page: a selection in the first line would otherwise put it
+        // over the save word and the panel toggles in the top bar, or over the
+        // title field and the style picker in the persistent bar under it —
+        // neither of which is its to cover. With no room up there it goes below
+        // the selection instead.
+        const ceiling = toolbarCeiling([
+            document.querySelector('.topbar')?.getBoundingClientRect(),
+            document.querySelector('.doc-bar')?.getBoundingClientRect(),
+        ]);
         const above = start.top - dom.offsetHeight - 8;
         const top = above >= ceiling ? above : end.bottom + 8;
 
         dom.style.left = `${left + window.scrollX}px`;
         dom.style.top = `${top + window.scrollY}px`;
         paint();
+        applyRoving();
     }
 
     const onSelection = () => place();
 
-    // `relatedTarget` is the element ABOUT to take focus, which is the only
-    // reading available while the blur is still in flight (`activeElement` is
-    // `body` at that moment). Tabbing into the toolbar is not leaving it.
+    // Tabbing into the toolbar is not leaving it, and nor is moving from one
+    // of its buttons to the next — see `blurLeavesToolbar`.
     const onBlur = ({ event }) => {
-        if (event?.relatedTarget && dom.contains(event.relatedTarget)) {
+        if (!blurLeavesToolbar(dom, event?.relatedTarget)) {
             return;
         }
 
@@ -429,7 +677,7 @@ export function installBubble(editor) {
     // for something that is not the writing, the toolbar has nothing to be
     // open for.
     const onFocusOut = (event) => {
-        if (event.relatedTarget && dom.contains(event.relatedTarget)) {
+        if (!blurLeavesToolbar(dom, event.relatedTarget)) {
             return;
         }
         if (editor.view.hasFocus()) {
@@ -441,7 +689,106 @@ export function installBubble(editor) {
         dom.hidden = true;
     };
 
+    // The roving tab stop follows whoever actually has focus, so arrowing away
+    // and tabbing back lands where the writer left off rather than at the first
+    // tool every time.
+    const onFocusIn = (event) => {
+        const index = rovingButtons().indexOf(event.target);
+
+        if (index === -1) {
+            return;
+        }
+
+        rovingAt = index;
+        applyRoving();
+    };
+
+    /**
+     * The toolbar's own keyboard: the arrows move inside it, Escape backs out
+     * of it one layer at a time — an open field first, then the toolbar itself,
+     * which hands focus back to the paper where the writer left the caret.
+     */
+    const onToolbarKeydown = (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+
+            if (!linkRow.hidden && linkRow.contains(event.target)) {
+                closeLink();
+                linkButton.focus();
+
+                return;
+            }
+
+            if (!altRow.hidden && altRow.contains(event.target)) {
+                altRow.hidden = true;
+                altButton.focus();
+
+                return;
+            }
+
+            // Escape from the toolbar itself DISMISSES it and puts the caret
+            // back where the writer left it. Hiding is explicit rather than
+            // left to the focusout race it would otherwise win by accident,
+            // and Alt+F10 is what summons it back — the selection has not
+            // changed, so nothing else would.
+            closeLink();
+            altRow.hidden = true;
+            dom.hidden = true;
+            editor.commands.focus();
+
+            return;
+        }
+
+        const buttons = rovingButtons();
+        const current = buttons.indexOf(event.target);
+
+        if (current === -1) {
+            return;
+        }
+
+        const next = rovingMove(event.key, current, buttons.length);
+
+        if (next === null) {
+            return;
+        }
+
+        event.preventDefault();
+        rovingAt = next;
+        applyRoving();
+        buttons[next].focus();
+    };
+
+    /**
+     * Alt+F10 / F10 from inside the paper. The toolbar is the only home the
+     * image tools have, so there has to be a route to it that does not depend
+     * on what else happens to be on the page (a dock, a comment sidebar) —
+     * which is the WAI-ARIA APG convention for a toolbar of this shape.
+     */
+    const onEditorKeydown = (event) => {
+        if (!isToolbarFocusShortcut(event)) {
+            return;
+        }
+
+        // Place it first. The toolbar may have been dismissed with Escape, or
+        // hidden by a blur, while the selection stayed exactly where it is —
+        // and a selection that has not changed fires no `selectionUpdate`, so
+        // without this the shortcut would answer for a toolbar nothing can
+        // bring back. With no tools for this selection it stays hidden and the
+        // key travels on.
+        place();
+
+        if (dom.hidden) {
+            return;
+        }
+
+        event.preventDefault();
+        focusToolbar();
+    };
+
     dom.addEventListener('focusout', onFocusOut);
+    dom.addEventListener('focusin', onFocusIn);
+    dom.addEventListener('keydown', onToolbarKeydown);
+    editor.view.dom.addEventListener('keydown', onEditorKeydown);
 
     editor.on('selectionUpdate', onSelection);
     // A table tool adds a row WITHOUT moving the selection, so the toolbar has
@@ -454,7 +801,10 @@ export function installBubble(editor) {
         editor.off('selectionUpdate', onSelection);
         editor.off('update', onSelection);
         editor.off('blur', onBlur);
+        editor.view.dom.removeEventListener('keydown', onEditorKeydown);
         dom.removeEventListener('focusout', onFocusOut);
+        dom.removeEventListener('focusin', onFocusIn);
+        dom.removeEventListener('keydown', onToolbarKeydown);
         dom.remove();
     };
 }
