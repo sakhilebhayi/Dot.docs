@@ -4,8 +4,14 @@
     status line's row of mono figures — no platform name, no version, no word
     count. Those facts live in the (collapsed-by-default) left panel now.
 
-    It is LAST in the DOM inside .shell and placed by grid-area, so Tab still
-    runs skip link -> rail -> canvas -> dock before it reaches the theme toggle.
+    It is FIRST in the DOM inside .shell, matching where it is on screen. It was
+    last for a while, on the reasoning that Tab should reach the document before
+    the chrome — but this bar is the page's navigation now, not a status
+    readout: both panels default to collapsed on the editor, a collapsed panel
+    is display:none, and the toggles up here are the only way to open either.
+    Last in the tab order they were a keyboard reader's first visible control
+    and their final tab stop, after the whole document. The skip link is what
+    puts the document first for anyone who wants it there.
 
     THE STATUS WORD ONLY EVER REPORTS WHAT THE PAGE TOLD IT.
 

@@ -50,6 +50,61 @@ class FairCopyTest extends TestCase
     }
 
     /**
+     * DOM ORDER IS TAB ORDER, and the top bar leads it.
+     *
+     * The bar was last inside `.shell` (the grid put it back on top whatever
+     * the order), on the reasoning that Tab should reach the document before
+     * the chrome. That stopped being right when the panels started defaulting
+     * to COLLAPSED: a collapsed panel is `display: none` and out of the tab
+     * order entirely, so the toggles up here are the only way to open either
+     * one — and they were a keyboard reader's first visible control and their
+     * LAST tab stop, after the whole document.
+     *
+     * It is also what makes the editor's floating toolbar reachable by Tab at
+     * all. That toolbar is appended to `<body>` (resources/js/editor/ui/bubble
+     * .js explains why it cannot live inside the canvas — `.canvas-region`'s
+     * `container-type` makes it the containing block for anything positioned
+     * inside it), so with the bar last, tabbing out of the paper hit the bar's
+     * rail toggle, the editor blurred, and the toolbar took itself out of the
+     * tab order before focus could ever come round to it. Alt+F10 is the
+     * belt-and-braces route, measured in tests/js/toolbar.test.js.
+     */
+    public function test_the_top_bar_leads_the_shell_in_dom_order(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Tab order');
+
+        foreach ([route('dashboard'), route('documents.index'), route('documents.edit', $doc->uuid)] as $url) {
+            $this->app->forgetScopedInstances();
+
+            $html = $this->actingAs($user)->get($url)->assertOk()->getContent();
+
+            $at = [];
+
+            foreach ([
+                'the top bar' => 'class="topbar"',
+                'the rail' => 'id="shell-rail"',
+                'the canvas' => 'id="canvas"',
+                'the dock' => 'id="shell-dock"',
+            ] as $what => $needle) {
+                $found = strpos($html, $needle);
+                $this->assertNotFalse($found, "{$url} renders no {$what}");
+                $at[$what] = $found;
+            }
+
+            $ordered = $at;
+            asort($ordered);
+
+            $this->assertSame(
+                ['the top bar', 'the rail', 'the canvas', 'the dock'],
+                array_keys($ordered),
+                "{$url}: the shell's DOM order no longer matches what is on screen, so the panel toggles are not the first tab stops",
+            );
+        }
+    }
+
+    /**
      * The banned faces are banned as TYPE, not as a substring: "Inter" lives
      * inside IntersectionObserver, "Roboto" inside a filename, and a bare
      * `assertDontSee` on either is a trap that passes for the wrong reason.

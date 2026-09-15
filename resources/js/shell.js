@@ -56,6 +56,22 @@ function applyTheme(mode) {
     });
 }
 
+/**
+ * Which theme the reader has CHOSEN, read back off the cookie the toggle writes.
+ *
+ * Nothing means they have never touched the switch and are still following
+ * their OS. It is a string parser rather than a reach for `document.cookie` so
+ * the rule is testable without a DOM (tests/js/shell.test.js).
+ *
+ * @param {string} cookies the raw `document.cookie` string
+ * @returns {'dark'|'light'|null}
+ */
+export function themeChoiceIn(cookies) {
+    const found = /(?:^|;\s*)theme=(dark|light)(?:;|$)/.exec(typeof cookies === 'string' ? cookies : '');
+
+    return found ? found[1] : null;
+}
+
 function initTheme() {
     document.addEventListener('click', (event) => {
         const button = event.target.closest('[data-shell-theme-toggle]');
@@ -64,6 +80,28 @@ function initTheme() {
         const next = isNight() ? 'light' : 'dark';
         writeThemeCookie(next);
         applyTheme(next);
+    });
+
+    // The label has to match what is ON SCREEN, and at boot it did not: with no
+    // `theme` cookie the server renders <html> bare and the page comes up in
+    // night mode through the `prefers-color-scheme` guard in shell.css, while
+    // the button still said "Day", `aria-pressed="false"` and "Switch to night
+    // mode" - three lies to a reader already sitting in night mode.
+    //
+    // This deliberately does NOT write the cookie: a system preference is not
+    // a choice somebody made, and stamping one would silently convert it into
+    // one that no longer follows the OS.
+    applyTheme(isNight() ? 'dark' : 'light');
+
+    // ...but stamping the CLASS above is what stops the media guard following
+    // the OS while the tab is open, so for a reader who has chosen nothing,
+    // follow it here instead. Anyone who has chosen is left alone.
+    const media = typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-color-scheme: dark)')
+        : null;
+
+    media?.addEventListener?.('change', (event) => {
+        if (themeChoiceIn(document.cookie) === null) applyTheme(event.matches ? 'dark' : 'light');
     });
 }
 

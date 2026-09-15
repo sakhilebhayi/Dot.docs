@@ -56,6 +56,29 @@ no ghost digits, nothing `aria-hidden` to exempt from the contrast floor. Hover 
 `--accent-soft` wash; the current nav item is `--accent-soft` plus weight, never colour
 alone. Empty state: "Start with an idea." and up to three actions.
 
+## Two deliberate departures from the spec, recorded so they do not read as drift
+
+**The two bars swapped contents.** Spec §3 put the document title, undo/redo, share,
+export and collaborator avatars in the **top bar**, and reserved the slim persistent bar
+under it for the style picker and `⌘K`. What shipped is the other way round: the
+persistent bar carries the title (as an editable field), where the document is filed,
+Move, presence, the save word, the version and a "More" menu; the top bar carries the
+panel toggles, the section name and the theme switch. The reason is the title. It has to
+be **editable in place**, and a title you can read in two places but type in one is a
+title people try to type in the wrong one — Task 1 shipped it twice and the review caught
+it. Once the title moves down, everything that acts on the document follows it, and what
+is left up top is what acts on the *shell*. The top bar is the shell's navigation now,
+which is also why it is the first element in `.shell`'s DOM (its toggles are the only way
+to open two panels that default to collapsed, so they must not be the last tab stops).
+
+**The editor's top bar says "Documents", not the document's name.** Every other route
+names the document it is about; the editor names its section, because the name lives in
+the field directly below. The cost is real and is accepted: the list and the editor read
+the same from the top bar alone, and the section name comes from the route (`documents.*`)
+rather than from the page. Calling it "Editor" would be better wayfinding, and is not done
+here only because two tests pin the current string as the *fix* for the duplicated title;
+changing it is a rename to make deliberately, not a side effect of an accessibility pass.
+
 ## Rejected
 
 - The `--design-system` answer almost entire: the "Product Review/Ratings" pattern

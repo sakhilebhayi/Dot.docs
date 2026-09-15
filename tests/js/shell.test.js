@@ -1,7 +1,33 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isRailShortcut, nextPanelState, openingPanelState, panelStateAtWidth, watchOverlayBreakpoints } from '../../resources/js/shell.js';
+import { isRailShortcut, nextPanelState, openingPanelState, panelStateAtWidth, themeChoiceIn, watchOverlayBreakpoints } from '../../resources/js/shell.js';
+
+/*
+ * The theme toggle's label has to match what is ON SCREEN. With no `theme`
+ * cookie the page follows the reader's OS through the `prefers-color-scheme`
+ * guard in shell.css, so the boot-time sync stamps the class that matches - and
+ * that stamping is what stops the guard following the OS afterwards, which is
+ * why "has this reader actually chosen?" has to be answerable.
+ */
+
+test('an explicit theme choice is read back off the cookie', () => {
+    assert.equal(themeChoiceIn('theme=dark'), 'dark');
+    assert.equal(themeChoiceIn('theme=light'), 'light');
+    assert.equal(themeChoiceIn('XSRF-TOKEN=abc; theme=dark; other=1'), 'dark');
+    assert.equal(themeChoiceIn('other=1; theme=light'), 'light');
+});
+
+test('no choice at all is not a choice', () => {
+    assert.equal(themeChoiceIn(''), null);
+    assert.equal(themeChoiceIn('XSRF-TOKEN=abc; session=zz'), null);
+    assert.equal(themeChoiceIn(undefined), null);
+
+    // A cookie whose NAME merely ends in "theme" is somebody else's.
+    assert.equal(themeChoiceIn('mytheme=dark'), null);
+    // ...and a value this file never writes is not a theme either.
+    assert.equal(themeChoiceIn('theme=sepia'), null);
+});
 
 // Spec §3 gives the left panel a keyboard route of its own: ⌘\ on a Mac,
 // Ctrl+\ everywhere else. shell.js keeps the predicate separate from the

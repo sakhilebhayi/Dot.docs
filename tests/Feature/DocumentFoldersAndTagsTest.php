@@ -11,6 +11,7 @@ use App\Models\Files\Obj;
 use App\Models\Tag;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Attributes\Url;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -314,6 +315,78 @@ class DocumentFoldersAndTagsTest extends TestCase
         Livewire::test(Index::class)
             ->call('filterByTag', $tag->id)
             ->assertSee($document->title);
+    }
+
+    /**
+     * A narrowed ledger is a ledger people SHARE. `$search` got `#[Url]` in
+     * Task 2's fix round; the scope and the tag were still read once out of the
+     * query string at mount and never written back, so a link sent after
+     * filtering arrived at the whole list with the filter silently dropped.
+     */
+    public function test_the_scope_and_the_tag_round_trip_through_the_query_string(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $this->actingAs($user);
+
+        $mine = $this->personalDocument($user, null, 'Tagged and mine');
+        $this->personalDocument($user, null, 'Neither of those');
+
+        $tag = Tag::create(['owner_id' => $user->id, 'team_id' => $mine->team_id, 'name' => 'Important']);
+        $mine->tags()->attach($tag->id);
+
+        // Read: the link opens on the list the sender was looking at.
+        Livewire::withQueryParams(['tag' => $tag->id, 'filter' => 'mine'])
+            ->test(Index::class)
+            ->assertSet('tagId', $tag->id)
+            ->assertSet('filter', 'mine')
+            ->assertSee('Tagged and mine')
+            ->assertDontSee('Neither of those');
+
+        // Write: every one of the three is an addressable property, which is
+        // what makes Livewire push it back into the URL as it changes. Read off
+        // the attributes rather than the rendered effect, so the assertion says
+        // WHICH parameter each one owns.
+        $addressable = [];
+
+        foreach ((new \ReflectionClass(Index::class))->getProperties() as $property) {
+            foreach ($property->getAttributes(Url::class) as $attribute) {
+                $addressable[$property->getName()] = $attribute->newInstance()->as;
+            }
+        }
+
+        $this->assertSame(['search' => 'q', 'filter' => 'filter', 'tagId' => 'tag'], $addressable);
+    }
+
+    /**
+     * `#[Url]` assigns the raw query-string value BEFORE mount() can look at
+     * it, so the properties are declared wider than what they hold and mount()
+     * narrows them. Without that, a hand-edited `?tag=` is a TypeError rather
+     * than the unfiltered list the old read-once code answered with.
+     */
+    public function test_a_hand_edited_filter_lands_on_the_whole_list_rather_than_an_error(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $this->actingAs($user);
+
+        $document = $this->personalDocument($user);
+
+        foreach ([
+            ['tag' => 'abc'],
+            ['tag' => ''],
+            ['tag' => ['1']],
+            ['filter' => 'everything'],
+            ['filter' => ['mine']],
+        ] as $params) {
+            Livewire::withQueryParams($params)
+                ->test(Index::class)
+                ->assertSet('tagId', null)
+                ->assertSet('filter', 'all')
+                ->assertSee($document->title);
+        }
+
+        // ...and the same URL served as a page, which is how it would actually
+        // arrive: the component mounts through the route, not the test helper.
+        $this->get(route('documents.index', ['tag' => 'abc', 'filter' => 'everything']))->assertOk();
     }
 
     public function test_moving_a_document_to_the_root_via_the_settings_form_files_it_at_the_root(): void

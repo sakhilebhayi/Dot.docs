@@ -360,21 +360,27 @@ body {
 /*
  * INVERTED SURFACES.
  *
- * .micro, .list-sub, .list-val and .field-hint all pin their own colour to a
- * token measured against --ground / --surface. Put one inside a surface that
- * inverts (a primary button, a pressed tag, an active tool, the palette's
- * active row) and that pinned colour lands on the button's own fill, which is
- * exactly what happened to the "⇧⌘K" in the dock's CTA — it rendered as blank
- * padding. Anything that carries its own colour has to INHERIT inside an
- * inverted surface, and the status dot has to be painted from currentColor,
- * because the tone tokens are unreadable on the inverted fill too.
+ * .micro, .list-sub, .list-val, .field-hint, .field-label and .numeral all pin
+ * their own colour to a token measured against --ground / --surface. Put one
+ * inside a surface that inverts (a primary button, a pressed tag, an active
+ * tool, the palette's active row) and that pinned colour lands on the button's
+ * own fill, which is exactly what happened to the "⇧⌘K" in the dock's CTA — it
+ * rendered as blank padding. Anything that carries its own colour has to
+ * INHERIT inside an inverted surface, and the status dot has to be painted from
+ * currentColor, because the tone tokens are unreadable on the inverted fill too.
+ *
+ * The list below is the whole of what .ai/rules/views.md promises and what
+ * contrast-dom.mjs's INKS names — including .field-label, which the rule file
+ * listed and this selector did not. Nothing renders one inside an inverted
+ * surface today; the point is that the guarantee is enforced rather than
+ * merely written down, for the day something does.
  *
  * The same rule lives in paper.css for .dotdoc-panel-row.is-active. Both are
  * checked by scripts/design/contrast-dom.mjs, which measures rendered pairs
  * (rule x rule), not tokens.
  */
 :is(.inverted, .btn-primary, .tool.is-on, .tag[aria-pressed='true'])
-    :is(.micro, .status-word, .list-sub, .list-val, .field-hint, .numeral) {
+    :is(.micro, .status-word, .list-sub, .list-val, .field-hint, .field-label, .numeral) {
     color: inherit;
 }
 
@@ -1479,7 +1485,9 @@ button.list-row {
     font-weight: 500;
 }
 
-/* The bench's "More" menu: everything that acts on the whole document. */
+/* The persistent bar's "More" menu: everything that acts on the whole
+   document, in one list, so the row never has to reflow. (The bench it used to
+   hang off is retired — see the note above .doc-bar.) */
 .menu-list-wide {
     min-width: 264px;
     max-height: 70vh;

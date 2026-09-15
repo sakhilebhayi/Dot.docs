@@ -54,12 +54,36 @@ class Index extends Component
     #[Url(as: 'q', except: '')]
     public string $search = '';
 
-    public string $filter = 'all'; // all | mine | shared | team
+    /*
+     * The scope and the tag are `#[Url]` for the same reason the search is: a
+     * list somebody has narrowed is a list they SHARE, and without these two
+     * the link arrived at the whole ledger with the filter silently dropped.
+     * They round-trip in both directions — read off the query string at mount,
+     * written back by `filterByTag()` / the scope chips — where before they
+     * were read once and never written.
+     *
+     * `except` is each one's own default, so an unfiltered ledger keeps a clean
+     * URL. mount() still normalises both AFTER Livewire has hydrated them
+     * (`SupportAttributes` runs before `SupportLifecycleHooks`, so the
+     * component's own mount is the later word): a hand-edited `?filter=` is a
+     * value this component has to refuse, not one it can pass to a query.
+     *
+     * Both are declared WIDER than what they hold for the same reason: `#[Url]`
+     * assigns the raw query-string value before mount() can look at it, so a
+     * narrow typehint turns `?tag=abc` or `?filter[]=x` into a TypeError — a
+     * 500 on a hand-edited URL, where the old read-once code answered the
+     * default. mount() narrows both immediately and nothing else ever writes
+     * anything but an int|null / one of self::FILTERS.
+     */
+    #[Url(as: 'filter', except: 'all')]
+    public array|string $filter = 'all'; // all | mine | shared | team
 
     /** The open folder's `objects` row id, or null for the workspace root. */
     public ?int $folderId = null;
 
-    public ?int $tagId = null;
+    /** The tag the ledger is narrowed to. Widened for the reason above. */
+    #[Url(as: 'tag', except: null)]
+    public array|int|string|null $tagId = null;
 
     /*
      * Smart save (spec §5). One sheet: what it is called, what kind of
@@ -70,8 +94,19 @@ class Index extends Component
      * `$newDocumentFolderId` is the sheet's own copy of the answer, kept in
      * step by the `location-chosen` event the embedded LocationPicker
      * dispatches. It is a hint, never a licence: the node it names is
-     * re-resolved and re-authorised through LocationPicker::resolve() at the
-     * moment the document is created.
+     * re-resolved and re-authorised at the moment the document is created.
+     *
+     * WHERE that check lives, precisely, because a security-shaped comment that
+     * points at the wrong method is worse than none: `chosenLocation()` below
+     * does its own find + `ObjPolicy::view` + is-it-a-folder, the same three
+     * lines every action target in the tree gets (`Files\Navigator::node()`).
+     * It does NOT call the embedded `LocationPicker::resolve()`, which has no
+     * production caller at all — that method is a second, independently tested
+     * gate on the picker's own public `selectedId`, and the two stand alone on
+     * purpose. Phase 3's richer picker (recents, favourites, starred) therefore
+     * has to touch BOTH if it wants those destinations to reach document
+     * creation: extending `LocationPicker` alone changes what the sheet OFFERS
+     * and nothing about what `chosenLocation()` will accept.
      */
     public bool $showSmartSave = false;
 
@@ -92,15 +127,24 @@ class Index extends Component
 
     public int $perPage = 12;
 
+    /** The scopes the ledger will narrow to; anything else is the whole list. */
+    private const FILTERS = ['all', 'mine', 'shared', 'team'];
+
     public function mount(?int $folderId = null): void
     {
         $this->folderId = $folderId ?: (request()->integer('folder') ?: null);
-        $this->tagId = request()->integer('tag') ?: null;
 
-        // The navigator rail links straight to a filter (Shared with me), so
-        // the query string seeds it once at mount.
-        $filter = (string) request()->query('filter', 'all');
-        $this->filter = in_array($filter, ['all', 'mine', 'shared', 'team'], true) ? $filter : 'all';
+        // `#[Url]` has already put whatever the query string said into both of
+        // these, raw. This is where they become values the rest of the
+        // component can trust: a tag id is an id or nothing, and a scope is one
+        // of the four or the whole list.
+        $this->tagId = is_scalar($this->tagId)
+            ? (filter_var($this->tagId, FILTER_VALIDATE_INT) ?: null)
+            : null;
+
+        if (! in_array($this->filter, self::FILTERS, true)) {
+            $this->filter = 'all';
+        }
     }
 
     public function updatingSearch(): void

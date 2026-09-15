@@ -15,9 +15,22 @@
      * bundle (Alpine only ever through Livewire's own copy — a second Alpine
      * wins the window.Alpine slot and kills every wire: binding on the page).
      *
-     * DOM order inside .shell is rail -> canvas -> dock -> top bar, and the
-     * grid puts the bar back on top. That is deliberate: Tab has to run
-     * skip link -> rail -> paper -> dock before it reaches the theme toggle.
+     * DOM order inside .shell MATCHES what is on screen: top bar, then rail,
+     * canvas, dock. The bar used to be last (the grid puts it back on top
+     * whatever the order), on the reasoning that Tab should reach the document
+     * before the chrome — but the bar stopped being a status readout in this
+     * redesign and became the page's primary navigation. Both panels default
+     * to COLLAPSED on the editor, and a collapsed panel is `display: none`, so
+     * the only controls that can open either one are up here: last in the tab
+     * order they were a keyboard reader's first visible control and their final
+     * tab stop, after the entire document. The skip link is what puts the
+     * document first for anyone who wants it there.
+     *
+     * It is also what lets the editor's floating toolbar be reached by Tab at
+     * all: it is appended to <body> (resources/js/editor/ui/bubble.js explains
+     * why it cannot live inside the canvas), so with the bar last, tabbing out
+     * of the paper hit the bar's rail toggle first and the toolbar hid itself
+     * before focus could ever come round to it.
      */
     $cookieTheme = request()->cookie('theme');
     $theme = $cookieTheme === 'dark' ? 'dark' : ($cookieTheme === 'light' ? 'light' : 'system');
@@ -91,6 +104,28 @@
     <a href="#canvas" class="skip-link">Skip to the document</a>
 
     <div class="shell" data-shell data-shell-context="{{ $isEditor ? 'editor' : 'page' }}">
+        <x-shell.topbar :rail-expanded="$railState === 'expanded'" :save-owner="$isEditor">
+            <x-slot:title>{{ $topbarTitle }}</x-slot:title>
+
+            <x-slot:actions>
+                <button type="button"
+                        class="topbar-action"
+                        data-shell-theme-toggle
+                        aria-pressed="{{ $theme === 'dark' ? 'true' : 'false' }}">
+                    <span data-shell-theme-word>{{ $theme === 'dark' ? 'Night' : 'Day' }}</span>
+                    <span class="sr-only">Switch to {{ $theme === 'dark' ? 'day' : 'night' }} mode</span>
+                </button>
+
+                <button type="button"
+                        class="topbar-action"
+                        data-shell-panel-toggle="dock"
+                        aria-controls="shell-dock"
+                        aria-expanded="{{ $dockState === 'expanded' ? 'true' : 'false' }}">
+                    <span data-shell-dock-word>{{ $dockState === 'expanded' ? 'Hide the tools' : 'Show the tools' }}</span>
+                </button>
+            </x-slot:actions>
+        </x-shell.topbar>
+
         {{-- The flash banner is a ROW of the grid, not a sibling above it:
              outside the 100dvh grid it pushed the shell down and gave the
              document a second scrollbar the moment a flash fired. --}}
@@ -117,28 +152,6 @@
         </main>
 
         <x-shell.dock :document="$shellDocument" :state="$dockState" />
-
-        <x-shell.topbar :rail-expanded="$railState === 'expanded'" :save-owner="$isEditor">
-            <x-slot:title>{{ $topbarTitle }}</x-slot:title>
-
-            <x-slot:actions>
-                <button type="button"
-                        class="topbar-action"
-                        data-shell-theme-toggle
-                        aria-pressed="{{ $theme === 'dark' ? 'true' : 'false' }}">
-                    <span data-shell-theme-word>{{ $theme === 'dark' ? 'Night' : 'Day' }}</span>
-                    <span class="sr-only">Switch to {{ $theme === 'dark' ? 'day' : 'night' }} mode</span>
-                </button>
-
-                <button type="button"
-                        class="topbar-action"
-                        data-shell-panel-toggle="dock"
-                        aria-controls="shell-dock"
-                        aria-expanded="{{ $dockState === 'expanded' ? 'true' : 'false' }}">
-                    <span data-shell-dock-word>{{ $dockState === 'expanded' ? 'Hide the tools' : 'Show the tools' }}</span>
-                </button>
-            </x-slot:actions>
-        </x-shell.topbar>
     </div>
 
     @stack('modals')

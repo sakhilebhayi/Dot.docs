@@ -319,7 +319,7 @@ const INKS = [
 
 /** The inverted surfaces — the pairs the token table was blind to. */
 const INVERTED = [
-    { surface: '.btn-primary', inks: ['.micro', '.status-word', '.list-sub', '.numeral'], note: 'primary button' },
+    { surface: '.btn-primary', inks: ['.micro', '.status-word', '.list-sub', '.field-label', '.numeral'], note: 'primary button' },
     { surface: ".tag[aria-pressed='true']", inks: ['.micro', '.status-word', '.numeral'], note: 'pressed tag' },
     { surface: '.tool.is-on', inks: ['.micro', '.status-word', '.numeral'], note: 'active tool' },
     { surface: '.dotdoc-panel-row.is-active', inks: ['.dotdoc-panel-hint', '.dotdoc-panel-label'], note: 'active palette row' },
