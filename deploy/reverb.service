@@ -1,0 +1,20 @@
+[Unit]
+Description=Dot.Doc Laravel Reverb WebSocket Server
+After=network.target postgresql.service
+
+[Service]
+User=www-data
+Group=www-data
+Restart=always
+# Binds to REVERB_SERVER_HOST/PORT from .env (loopback-only by default --
+# the web server terminates TLS and proxies wss:// traffic down to this
+# process). Path is substituted by bootstrap.yml from the DEPLOY_PATH
+# secret at install time -- do not hardcode a real path in this template.
+ExecStart=/usr/bin/php __DEPLOY_PATH__/artisan reverb:start
+# `reverb:restart` broadcasts a graceful-restart signal via the cache
+# rather than killing the process directly (used by deploys after config
+# changes); ExecReload lets `systemctl reload` do the same.
+ExecReload=/usr/bin/php __DEPLOY_PATH__/artisan reverb:restart
+
+[Install]
+WantedBy=multi-user.target

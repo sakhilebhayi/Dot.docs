@@ -1,0 +1,158 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: Test suite (PHP + JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: pdo_sqlite, sqlite3, bcmath, gd, zip, mbstring, intl, pcntl
+          coverage: none
+
+      - name: Install composer dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+        env:
+          # config/broadcasting.php defaults BROADCAST_CONNECTION to 'reverb';
+          # with no .env on the runner, package:discover (post-autoload-dump)
+          # would boot the app and try to construct that broadcaster.
+          BROADCAST_CONNECTION: log
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Node dependencies & build assets
+        run: |
+          npm ci --silent
+          npm run build
+
+      - name: Generate throwaway CI app key
+        run: echo "APP_KEY=base64:$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+
+      - name: Run PHP test suite
+        run: php artisan test --compact
+        env:
+          # phpunit.xml already forces sqlite/:memory: and AI_PROVIDER=mock,
+          # so no database service container or real API keys are needed here.
+          BROADCAST_CONNECTION: log
+
+      - name: Run JS test suite
+        run: node --test tests/js/*.test.js
+
+  code-style:
+    name: Pint (code style)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: bcmath, mbstring
+          coverage: none
+      - name: Install composer dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+        env:
+          BROADCAST_CONNECTION: log
+      - name: Run Pint (fail on style violations)
+        run: vendor/bin/pint --test
+
+  static-php:
+    name: PHPStan (static analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: bcmath, mbstring
+          coverage: none
+      - name: Install composer dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+        env:
+          BROADCAST_CONNECTION: log
+      - name: Run PHPStan
+        run: vendor/bin/phpstan analyse --memory-limit=1G --error-format=github
+
+  composer-audit:
+    name: Composer dependency audit
+    runs-on: ubuntu-latest
+    # Reports known advisories but never blocks the gate: PHP dependency
+    # upgrades (some of them major) are a deliberate, separate decision,
+    # not something this check should force on an unrelated PR. Check the
+    # Actions run for any newly-introduced advisory.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+      - name: Install composer dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+        env:
+          BROADCAST_CONNECTION: log
+      - name: composer audit
+        run: composer audit
+
+  npm-audit:
+    name: npm dependency audit
+    runs-on: ubuntu-latest
+    # Same rationale as composer-audit above: visible, never blocking.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --silent
+      - name: npm audit (high and critical only)
+        run: npm audit --audit-level=high
+
+  quality-gate:
+    name: Quality gate (all checks must pass)
+    runs-on: ubuntu-latest
+    # composer-audit and npm-audit deliberately do NOT gate this: they
+    # report known advisories on every run (see their own continue-on-error
+    # comments) but a pre-existing, unrelated advisory must never block an
+    # unrelated PR. Check their own job results in the Actions run.
+    needs: [tests, code-style, static-php]
+    if: always()
+    steps:
+      - name: Evaluate quality gate
+        run: |
+          declare -A results
+          results[tests]="${{ needs.tests.result }}"
+          results[code-style]="${{ needs.code-style.result }}"
+          results[static-php]="${{ needs.static-php.result }}"
+          failed=0
+          for job in "${!results[@]}"; do
+            if [ "${results[$job]}" != "success" ]; then
+              echo "FAILED: $job -> ${results[$job]}"
+              failed=1
+            else
+              echo "PASSED: $job"
+            fi
+          done
+          if [ $failed -eq 1 ]; then
+            echo ""
+            echo "Quality gate failed -- one or more required checks did not pass."
+            exit 1
+          fi
+          echo ""
+          echo "All quality gates passed."
