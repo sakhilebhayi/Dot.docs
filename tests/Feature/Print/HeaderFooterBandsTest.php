@@ -89,4 +89,18 @@ class HeaderFooterBandsTest extends TestCase
 
         $this->assertSame('A & B <em>', $segments['value']);
     }
+
+    public function test_a_substituted_variable_value_containing_literal_page_syntax_is_never_treated_as_a_field(): void
+    {
+        // Fields are classified from the TEMPLATE's own {{ }} tokens BEFORE
+        // substitution. A variable's value that literally contains "{{ page }}"
+        // is never re-scanned and misdetected as a field — it renders as
+        // literal text. The old PrintRenderer::band() had the opposite bug:
+        // it substituted first, then re-scanned the result, so a variable
+        // containing "{{ page }}" would be silently converted to a page number.
+        // This is the injection/corruption surface the extraction closes.
+        $segments = $this->bands()->segments('{{ title }}', ['title' => 'A {{ page }} B']);
+
+        $this->assertSame([['type' => 'text', 'value' => 'A {{ page }} B']], $segments);
+    }
 }

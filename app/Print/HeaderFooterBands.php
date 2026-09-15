@@ -23,6 +23,15 @@ namespace App\Print;
 class HeaderFooterBands
 {
     /**
+     * Splits a template into segments — fields are classified from the
+     * template's own `{{ }}` tokens BEFORE any substitution, not after.
+     * A variable's value that happens to contain literal `{{ page }}`/
+     * `{{ pages }}` text is never re-scanned and misdetected as a field;
+     * it renders as literal text. This closes the injection/corruption
+     * surface that existed in the pre-extraction PrintRenderer::band(),
+     * which substituted first, then re-scanned the result, allowing a
+     * variable's value to be silently converted to a page number.
+     *
      * @param  array<string,mixed>  $vars
      * @return list<array{type: 'text'|'field', value: string}>
      */
