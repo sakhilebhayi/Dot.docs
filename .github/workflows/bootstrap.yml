@@ -4,27 +4,27 @@ name: Bootstrap Production
 # established Dot.Mines/Dot.Memory pattern: manual dispatch with a typed
 # confirmation, SSH to an already-provisioned server, git-based release.
 #
-# Unlike Dot.Memory's SQLite deploy, this app runs the fuller stack (a
-# dedicated Postgres database, Reverb, and a persistent queue worker), so
-# this workflow also installs and enables the two systemd units under
-# deploy/. Safe to re-run: every step is idempotent, and the .env write is
-# skipped entirely once one already exists on the server.
+# Database: SQLite (mirroring Dot.Memory's production setup), not a
+# dedicated Postgres instance -- a deliberate "for now" simplification.
+# This app still runs Reverb and a persistent queue worker, so this
+# workflow installs and enables both systemd units under deploy/. Safe to
+# re-run: every step is idempotent, and the .env write is skipped entirely
+# once one already exists on the server.
 #
-# Secret values (DB password, API key) are written into a file on THIS
-# runner and transferred with scp -- never passed as SSH command-line
-# arguments. SSH concatenates remote-command arguments into one string
-# for the remote shell to re-parse, so a secret containing a shell
-# metacharacter (a $, backtick, or space) could corrupt or misparse the
-# remote command if passed that way. DEPLOY_PATH is passed as an argument
-# below because it's a value the deploy operator chooses, not
-# user-generated secret data -- the same convention every other Dot
-# product's deploy.yml already uses safely.
+# Secret values (API key) are written into a file on THIS runner and
+# transferred with scp -- never passed as SSH command-line arguments. SSH
+# concatenates remote-command arguments into one string for the remote
+# shell to re-parse, so a secret containing a shell metacharacter (a $, a
+# backtick, or a space) could corrupt or misparse the remote command if
+# passed that way. DEPLOY_PATH is passed as an argument below because
+# it's a value the deploy operator chooses, not user-generated secret
+# data -- the same convention every other Dot product's deploy.yml
+# already uses safely.
 #
 # Required repository secrets (set these before running -- see
 # deploy/README.md for the one-time manual steps this workflow does NOT
-# do, like provisioning the Postgres database itself):
+# do, like server provisioning):
 #   DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, DEPLOY_USER, DEPLOY_HOST, DEPLOY_PATH
-#   PROD_DB_HOST, PROD_DB_DATABASE, PROD_DB_USERNAME, PROD_DB_PASSWORD
 #   PROD_ANTHROPIC_API_KEY (optional -- AI_PROVIDER stays "mock" without it)
 on:
   workflow_dispatch:
@@ -74,10 +74,6 @@ jobs:
 
       - name: Write the production .env locally (never on the command line)
         env:
-          PROD_DB_HOST: ${{ secrets.PROD_DB_HOST }}
-          PROD_DB_DATABASE: ${{ secrets.PROD_DB_DATABASE }}
-          PROD_DB_USERNAME: ${{ secrets.PROD_DB_USERNAME }}
-          PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
           PROD_ANTHROPIC_API_KEY: ${{ secrets.PROD_ANTHROPIC_API_KEY }}
         run: |
           umask 077
@@ -100,12 +96,10 @@ jobs:
           LOG_CHANNEL=daily
           LOG_LEVEL=info
 
-          DB_CONNECTION=pgsql
-          DB_HOST=__PROD_DB_HOST__
-          DB_PORT=5432
-          DB_DATABASE=__PROD_DB_DATABASE__
-          DB_USERNAME=__PROD_DB_USERNAME__
-          DB_PASSWORD=__PROD_DB_PASSWORD__
+          # DB_DATABASE intentionally unset -- config/database.php defaults
+          # the sqlite connection to database_path('database.sqlite'), and
+          # the "Clone, install, migrate" step below creates that file.
+          DB_CONNECTION=sqlite
 
           SESSION_DRIVER=database
           SESSION_LIFETIME=120
@@ -151,10 +145,6 @@ jobs:
           reverb_app_secret="$(openssl rand -hex 20)"
 
           sed -i \
-            -e "s/__PROD_DB_HOST__/$(sed_escape "$PROD_DB_HOST")/" \
-            -e "s/__PROD_DB_DATABASE__/$(sed_escape "$PROD_DB_DATABASE")/" \
-            -e "s/__PROD_DB_USERNAME__/$(sed_escape "$PROD_DB_USERNAME")/" \
-            -e "s/__PROD_DB_PASSWORD__/$(sed_escape "$PROD_DB_PASSWORD")/" \
             -e "s/__PROD_ANTHROPIC_API_KEY__/$(sed_escape "$PROD_ANTHROPIC_API_KEY")/" \
             -e "s/__AI_PROVIDER__/$(sed_escape "$ai_provider")/" \
             -e "s/__REVERB_APP_KEY__/$(sed_escape "$reverb_app_key")/g" \
@@ -183,6 +173,9 @@ jobs:
           cd "$APP"
 
           composer install --no-interaction --optimize-autoloader --no-dev
+
+          mkdir -p database
+          touch database/database.sqlite
           BOOTSTRAP
 
       - name: Transfer .env (only if one doesn't already exist)
