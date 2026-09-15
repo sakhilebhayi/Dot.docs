@@ -1,5 +1,5 @@
 /*
-Dot.docs brand theme for Laravel's Markdown mail components. Matches welcome.blade.php's
+Dot.Doc brand theme for Laravel's Markdown mail components. Matches welcome.blade.php's
 :root tokens (--ink, --gold, --blue-deep, --paper). Hardcoded hex throughout — email clients
 don't reliably support CSS custom properties. Uses the platform's own pre-existing --gold-deep
 token directly for links, since it's already a correctly-deep, AA-contrast-safe gold.

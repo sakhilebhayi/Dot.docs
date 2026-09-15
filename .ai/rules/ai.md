@@ -1,0 +1,16 @@
+---
+paths:
+  - 'app/Ai/**'
+---
+
+# Ai
+
+## The AI client is mock by default and every call is accounted for
+App\Ai\Client is the ONLY seam to a language model - nothing else may call a provider SDK, and prism-php/prism v0.100 is the transport (Prism::text()->using($provider,$model)->withSystemPrompt()->withPrompt()->withMaxTokens()->asText(); structured() uses Prism::structured()->withSchema(new RawSchema(...))->asStructured()).
+config("ai.provider") defaults to "mock" and phpunit.xml forces AI_PROVIDER=mock for the whole suite, so no test can reach a real provider. Mock returns "[mock:{role}] " . Str::limit($user, 60) with zero tokens - deterministic by contract, which is what lets tests assert on AI-backed output.
+Every call - mock included - writes exactly ONE ai_model_usage row through App\Ai\Usage::record(), so usage accounting can never drift from what was actually asked. cost_usd comes from config("ai.pricing_per_million"), whose numbers are ILLUSTRATIVE PLACEHOLDERS: replace them with published vendor rates before any figure is shown to a customer or billed. A model missing from that table costs 0 - a missing price is never guessed.
+A role (draft|compose|quick) picks the model; the model prefix picks the Prism provider (claude- anthropic, gpt- or o+digit openai, gemini- gemini, which is Prism's key for Google, else ollama). Any exception walks config("ai.failover") in order and the LAST exception is rethrown if every leg fails.
+App\Models\AiModelUsage must keep its explicit $table = "ai_model_usage"; Eloquent's pluraliser looks for ai_model_usages.
+
+## Failover is accounted for and derives its provider from the model
+CLIENT FAILOVER (App\Ai\Client::chainFor/attemptChain). A config("ai.failover") leg is written [provider, model] for readability but the PROVIDER LITERAL IS NOT TRUSTED: chainFor() re-derives it with providerFor($model) for every leg, exactly as it does for the primary call, so repointing AI_MODEL_QUICK at another vendor can never post that model to the previous vendor endpoint. A leg may also be a bare model string. Every failed leg leaves a Log::warning naming provider/model/leg/exception (never prompt content) before the walk moves on. The logged `message` is ALWAYS `Str::limit($e->getMessage(), Client::MAX_LOGGED_EXCEPTION_MESSAGE_LENGTH)` (200 chars) - applied to every exception generically, not special-cased per class - because some provider exceptions (e.g. Prism\Prism\Exceptions\PrismStructuredDecodingException) embed the model's entire raw response text in their message, and structured() feeds document content to the model, so an uncapped log line could write document content into the shared application log. TOTAL EXHAUSTION STILL WRITES ONE ai_model_usage ROW - zero tokens, zero cost, the LAST leg attempted as provider/model, fallback_used true when more than one leg was tried - and only then rethrows the last exception. "Every call is accounted for" has to include the calls that never reached a model, or a whole-provider outage is the one event usage reporting cannot see. Covered by tests/Feature/Ai/ClientFailoverTest.php, which fakes the HTTP layer (Prism providers build on the Http facade via Prism\Prism\Concerns\InitializesClient) so the non-mock branch is exercised with no network.

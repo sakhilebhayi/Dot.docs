@@ -1,36 +1,33 @@
 <div>
-    {{-- ===== COMMAND PALETTE MODAL ===== --}}
-    @if($showPalette)
-        <div class="fixed inset-0 z-50 flex items-start justify-center pt-24 px-4"
-             x-data x-init="$el.querySelector('input').focus()">
-            <div class="absolute inset-0 bg-black/50" wire:click="closePalette"></div>
-            <div class="relative w-full max-w-xl bg-white dark:bg-gray-800 rounded-xl shadow-2xl overflow-hidden">
-                <div class="flex items-center border-b border-gray-200 dark:border-gray-700 px-4 py-3 gap-2">
-                    <span class="text-indigo-500 text-lg">⌘</span>
-                    <input wire:model="command"
-                           wire:keydown.enter="runCommand"
-                           wire:keydown.escape="closePalette"
-                           type="text"
-                           placeholder="Try /summarize, /grammar, /tone formal, /translate French…"
-                           class="flex-1 bg-transparent border-none focus:ring-0 text-sm text-gray-900 dark:text-white placeholder-gray-400" />
-                    @if($loading)
-                        <svg class="animate-spin h-4 w-4 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                        </svg>
+    {{-- Command palette --}}
+    @if ($showPalette)
+        <div class="scrim" style="align-items:flex-start;padding-top:12vh" role="dialog" aria-modal="true"
+             aria-label="Assistant commands" x-data x-init="$el.querySelector('input').focus()">
+            <div class="sheet" wire:click.outside="closePalette">
+                <div class="sheet-head">
+                    <label class="sr-only" for="ai-command">Command</label>
+                    <input id="ai-command" wire:model="command" wire:keydown.enter="runCommand"
+                           wire:keydown.escape="closePalette" type="text" class="field"
+                           placeholder="/summarize, /grammar, /tone formal, /translate French" />
+                    @if ($loading)
+                        <span class="toolbar" aria-live="polite">
+                            <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                            <span class="micro">Working</span>
+                        </span>
                     @else
-                        <button wire:click="runCommand"
-                                class="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700">Run</button>
+                        <button type="button" class="btn btn-primary" wire:click="runCommand">Run</button>
                     @endif
                 </div>
 
-                {{-- Command suggestions --}}
-                <ul class="divide-y divide-gray-100 dark:divide-gray-700 max-h-64 overflow-y-auto">
-                    @foreach($commandSuggestions as $cmd => $desc)
-                        <li wire:click="$set('command', '{{ $cmd }}')"
-                            class="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
-                            <code class="text-xs font-mono text-indigo-600 dark:text-indigo-400 w-36 shrink-0">{{ $cmd }}</code>
-                            <span class="text-xs text-gray-500 dark:text-gray-400">{{ $desc }}</span>
+                <ul class="list" style="max-height:46vh;overflow-y:auto">
+                    @foreach ($commandSuggestions as $cmd => $desc)
+                        <li>
+                            <button type="button" class="list-row" wire:click="$set('command', '{{ $cmd }}')">
+                                <span class="list-key">
+                                    <span class="micro">{{ $cmd }}</span>
+                                    <span class="list-sub">{{ $desc }}</span>
+                                </span>
+                            </button>
                         </li>
                     @endforeach
                 </ul>
@@ -38,23 +35,25 @@
         </div>
     @endif
 
-    {{-- ===== RESULT PANEL (bottom slide-up) ===== --}}
-    @if($showResult)
-        <div class="fixed bottom-0 left-0 right-0 z-40 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 shadow-2xl"
-             style="max-height: 40vh;">
-            <div class="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700">
-                <span class="text-xs font-semibold text-indigo-600 dark:text-indigo-400">AI Result — {{ ucfirst($action) }}</span>
-                <div class="flex items-center gap-2">
-                    <button wire:click="applyResult"
-                            class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded">
-                        Apply to document
-                    </button>
-                    <button wire:click="dismissResult"
-                            class="text-xs text-gray-500 hover:underline">Dismiss</button>
+    {{-- The result arrives in marker: the assistant's ink is visibly its own
+         until a person accepts it into the document. It is a SHEET, not a strip
+         fixed over the desk — it asks for a decision, and nothing in this
+         product floats except the paper. --}}
+    @if ($showResult)
+        <div class="scrim" role="dialog" aria-modal="true" aria-labelledby="ai-result-title"
+             x-data x-trap.inert.noscroll="true">
+            <div class="sheet sheet-wide">
+                <div class="sheet-head">
+                    <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
+                    <h2 class="h-panel" id="ai-result-title">In marker — {{ ucfirst($action) }}</h2>
                 </div>
-            </div>
-            <div class="overflow-y-auto p-4 prose prose-sm dark:prose-invert max-w-none" style="max-height: calc(40vh - 44px);">
-                {!! $result !!}
+                <div class="sheet-body ink-marker">
+                    {!! $result !!}
+                </div>
+                <div class="sheet-foot">
+                    <button type="button" class="btn" wire:click="dismissResult">Drop it</button>
+                    <button type="button" class="btn btn-primary" wire:click="applyResult">Accept it into the document</button>
+                </div>
             </div>
         </div>
     @endif

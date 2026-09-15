@@ -1,13 +1,7 @@
-<div class="md:col-span-1 flex justify-between">
-    <div class="px-4 sm:px-0">
-        <h3 class="text-lg font-medium text-gray-900">{{ $title }}</h3>
-
-        <p class="mt-1 text-sm text-gray-600">
-            {{ $description }}
-        </p>
-    </div>
-
-    <div class="px-4 sm:px-0">
-        {{ $aside ?? '' }}
-    </div>
+{{-- The heading of a settings panel: a quiet micro-heading and one line saying
+     what the panel is for. No gutter column, no card. --}}
+<div>
+    <h2 class="h-panel">{{ $title }}</h2>
+    <p class="page-lede">{{ $description }}</p>
 </div>
+{{ $aside ?? '' }}

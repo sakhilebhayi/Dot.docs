@@ -23,13 +23,14 @@
     <x-slot name="content">
         {{ $content }}
 
-        <div class="mt-4" x-data="{}" x-on:confirming-password.window="setTimeout(() => $refs.confirmable_password.focus(), 250)">
-            <x-input type="password" class="mt-1 block w-3/4" placeholder="{{ __('Password') }}" autocomplete="current-password"
+        <div class="field-row" x-data="{}" x-on:confirming-password.window="setTimeout(() => $refs.confirmable_password.focus(), 250)">
+            <label class="field-label" for="confirmable-password">{{ __('Password') }}</label>
+            <x-input id="confirmable-password" type="password" autocomplete="current-password"
                         x-ref="confirmable_password"
                         wire:model="confirmablePassword"
                         wire:keydown.enter="confirmPassword" />
 
-            <x-input-error for="confirmable_password" class="mt-2" />
+            <x-input-error for="confirmable_password" />
         </div>
     </x-slot>
 
@@ -38,7 +39,7 @@
             {{ __('Cancel') }}
         </x-secondary-button>
 
-        <x-button class="ms-3" dusk="confirm-password-button" wire:click="confirmPassword" wire:loading.attr="disabled">
+        <x-button dusk="confirm-password-button" wire:click="confirmPassword" wire:loading.attr="disabled">
             {{ $button }}
         </x-button>
     </x-slot>

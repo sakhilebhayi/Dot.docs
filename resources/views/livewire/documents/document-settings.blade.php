@@ -1,131 +1,209 @@
-<div class="py-8 max-w-2xl mx-auto px-4">
-    <div class="flex items-center gap-3 mb-6">
-        <a href="{{ route('documents.edit', $document->uuid) }}" class="text-gray-400 hover:text-gray-600 text-sm">← Back to editor</a>
-        <h1 class="text-xl font-bold text-gray-900 dark:text-white">Document Settings</h1>
+<div class="page page-narrow">
+    <div class="page-head">
+        <div>
+            <h1 class="page-title">Document settings</h1>
+            <p class="page-lede">Naming, filing, page setup and ownership for {{ $document->title }}.</p>
+        </div>
+        <a href="{{ route('documents.edit', $document->uuid) }}" class="btn">Back to the editor</a>
     </div>
 
-    @if(session('status'))
-        <div class="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm">
+    @if (session('status'))
+        <p class="note" role="status">
+            <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
             {{ session('status') }}
-        </div>
+        </p>
     @endif
 
-    {{-- General Settings --}}
-    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
-        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">General</h2>
-
-        <form wire:submit="save">
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
-                <input wire:model="title" type="text"
-                       class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-indigo-500 focus:border-indigo-500" />
-                @error('title') <p class="text-red-500 text-xs mt-1">{{ $message }}</p> @enderror
-            </div>
-
-            <div class="flex items-center gap-3 mb-4">
-                <input wire:model="isPublic" type="checkbox" id="is_public"
-                       class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                <label for="is_public" class="text-sm text-gray-700 dark:text-gray-300">
-                    Make document publicly accessible (shareable link)
-                </label>
-            </div>
-
-            <button type="submit"
-                    class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition">
-                Save Settings
-            </button>
-        </form>
-    </div>
-
-    {{-- Organization --}}
-    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
-        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Organization</h2>
-
-        <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Folder</label>
-            <div class="flex gap-2">
-                <select wire:model="folderId"
-                        class="flex-1 rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-indigo-500 focus:border-indigo-500">
-                    <option value="">No folder (root)</option>
-                    @foreach($this->availableFolders as $folder)
-                        <option value="{{ $folder->id }}">{{ $folder->name }}</option>
-                    @endforeach
-                </select>
-                <button wire:click="moveToFolder" type="button"
-                        class="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition">
-                    Move
-                </button>
-            </div>
-            @error('folderId') <p class="text-red-500 text-xs mt-1">{{ $message }}</p> @enderror
+    <section class="panel" aria-labelledby="set-general">
+        <div class="panel-head">
+            <h2 class="section-title" id="set-general">General</h2>
         </div>
+        <div class="panel-body">
+            <form wire:submit="save" class="stack">
+                <div class="field-row">
+                    <label class="field-label" for="set-title">Title</label>
+                    <input id="set-title" wire:model="title" type="text" class="field" />
+                    @error('title')
+                        <p class="field-error">{{ $message }}</p>
+                    @enderror
+                </div>
 
-        <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tags</label>
-            <div class="flex flex-wrap gap-2 mb-2">
-                @forelse($this->tags as $tag)
-                    <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs rounded-full">
-                        🏷️ {{ $tag->name }}
-                        <button wire:click="removeTag({{ $tag->id }})" class="text-indigo-400 hover:text-red-500">✕</button>
+                <label class="field-check" for="is_public">
+                    <input wire:model="isPublic" type="checkbox" id="is_public" class="field-box" />
+                    <span>
+                        Publish a read-only link
+                        <span class="list-sub">Anyone holding the link can read the document.</span>
                     </span>
-                @empty
-                    <span class="text-xs text-gray-400">No tags yet.</span>
-                @endforelse
-            </div>
-            <form wire:submit="addTag" class="flex gap-2">
-                <input wire:model="newTagName" type="text" placeholder="Add a tag…"
-                       class="flex-1 rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-indigo-500 focus:border-indigo-500" />
-                <button type="submit"
-                        class="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition">
-                    Add
-                </button>
+                </label>
+
+                <button type="submit" class="btn btn-primary">Save the settings</button>
             </form>
         </div>
-    </div>
+    </section>
 
-    {{-- Transfer Ownership --}}
-    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
-        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Transfer Ownership</h2>
-
-        <form wire:submit="transferOwnership">
-            <div class="mb-3">
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">New Owner Email</label>
-                <input wire:model="transferEmail" type="email" placeholder="user@example.com"
-                       class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-indigo-500 focus:border-indigo-500" />
-                @error('transferEmail') <p class="text-red-500 text-xs mt-1">{{ $message }}</p> @enderror
+    <section class="panel" aria-labelledby="set-filing">
+        <div class="panel-head">
+            <h2 class="section-title" id="set-filing">Filing</h2>
+        </div>
+        <div class="panel-body">
+            <div class="field-row">
+                <label class="field-label" for="set-folder">Folder</label>
+                <div class="toolbar">
+                    <select id="set-folder" wire:model="folderId" class="field" style="flex:1 1 auto">
+                        <option value="">The root of this workspace</option>
+                        @foreach ($this->availableFolders as $folder)
+                            <option value="{{ $folder['id'] }}">{{ $folder['label'] }}</option>
+                        @endforeach
+                    </select>
+                    <button type="button" class="btn" wire:click="moveToFolder">Move it</button>
+                </div>
+                @error('folderId')
+                    <p class="field-error">{{ $message }}</p>
+                @enderror
             </div>
-            <button type="submit"
-                    class="px-4 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 transition">
-                Transfer
-            </button>
-        </form>
-    </div>
 
-    {{-- Webhooks --}}
-    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
-        @livewire('documents.webhook-manager', ['document' => $document], key('webhook-manager'))
-    </div>
-
-    {{-- Danger Zone --}}
-    <div class="bg-white dark:bg-gray-800 rounded-xl border border-red-200 dark:border-red-900 p-6">
-        <h2 class="text-base font-semibold text-red-600 dark:text-red-400 mb-4">Danger Zone</h2>
-
-        @if(!$showDeleteConfirm)
-            <button wire:click="$set('showDeleteConfirm', true)"
-                    class="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition">
-                Delete Document
-            </button>
-        @else
-            <p class="text-sm text-gray-700 dark:text-gray-300 mb-3">Are you sure? This cannot be undone.</p>
-            <div class="flex gap-3">
-                <button wire:click="delete"
-                        class="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition">
-                    Yes, Delete
-                </button>
-                <button wire:click="$set('showDeleteConfirm', false)"
-                        class="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 transition">
-                    Cancel
-                </button>
+            <div class="field-row">
+                <span class="field-label" id="set-tags-label">Tags</span>
+                <div class="toolbar" aria-labelledby="set-tags-label" style="margin-bottom:var(--s3)">
+                    @forelse ($this->tags as $tag)
+                        <span class="tag">
+                            {{ $tag->name }}
+                            <button type="button" class="link" wire:click="removeTag({{ $tag->id }})"
+                                    aria-label="Remove the tag {{ $tag->name }}">Remove</button>
+                        </span>
+                    @empty
+                        <span class="list-sub">No tags on this document yet.</span>
+                    @endforelse
+                </div>
+                <form wire:submit="addTag" class="toolbar">
+                    <label class="sr-only" for="set-new-tag">New tag</label>
+                    <input id="set-new-tag" wire:model="newTagName" type="text" class="field" style="flex:1 1 auto"
+                           placeholder="A word you will search for later" />
+                    <button type="submit" class="btn">Add the tag</button>
+                </form>
             </div>
-        @endif
-    </div>
+        </div>
+    </section>
+
+    <section class="panel" aria-labelledby="set-page">
+        <div class="panel-head">
+            <h2 class="section-title" id="set-page">Page setup</h2>
+            <span class="micro">Used by print and PDF export</span>
+        </div>
+        <div class="panel-body">
+            <form wire:submit="savePageSetup" class="stack">
+                <div class="grid-2">
+                    <div class="field-row" style="margin-top:0">
+                        <label class="field-label" for="set-size">Paper size</label>
+                        <select id="set-size" wire:model="pageSize" class="field">
+                            <option value="A4">A4</option>
+                            <option value="A3">A3</option>
+                            <option value="Letter">Letter</option>
+                        </select>
+                        @error('pageSize')
+                            <p class="field-error">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    <div class="field-row" style="margin-top:0">
+                        <label class="field-label" for="set-orientation">Orientation</label>
+                        <select id="set-orientation" wire:model="orientation" class="field">
+                            <option value="portrait">Portrait</option>
+                            <option value="landscape">Landscape</option>
+                        </select>
+                        @error('orientation')
+                            <p class="field-error">{{ $message }}</p>
+                        @enderror
+                    </div>
+                </div>
+
+                <div class="grid-4">
+                    @foreach ([
+                        ['marginTop', 'Margin top', '25mm'],
+                        ['marginRight', 'Margin right', '20mm'],
+                        ['marginBottom', 'Margin bottom', '25mm'],
+                        ['marginLeft', 'Margin left', '20mm'],
+                    ] as [$model, $label, $placeholder])
+                        <div class="field-row" style="margin-top:0">
+                            <label class="field-label" for="set-{{ $model }}">{{ $label }}</label>
+                            <input id="set-{{ $model }}" wire:model="{{ $model }}" type="text" class="field field-mono"
+                                   placeholder="{{ $placeholder }}" />
+                            @error($model)
+                                <p class="field-error">{{ $message }}</p>
+                            @enderror
+                        </div>
+                    @endforeach
+                </div>
+
+                <div class="field-row">
+                    <label class="field-label" for="set-header">Running header</label>
+                    <input id="set-header" wire:model="header" type="text" class="field field-mono" placeholder="@{{ title }}" />
+                    @error('header')
+                        <p class="field-error">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                <div class="field-row">
+                    <label class="field-label" for="set-footer">Running footer</label>
+                    <input id="set-footer" wire:model="footer" type="text" class="field field-mono" placeholder="Page @{{ page }} of @{{ pages }}" />
+                    @error('footer')
+                        <p class="field-error">{{ $message }}</p>
+                    @enderror
+                    <p class="field-hint">
+                        Takes @{{ title }}, @{{ date }}, @{{ team }}, @{{ page }}, @{{ pages }} and any variable the document defines.
+                    </p>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Save the page setup</button>
+            </form>
+        </div>
+    </section>
+
+    <section class="panel" aria-labelledby="set-owner">
+        <div class="panel-head">
+            <h2 class="section-title" id="set-owner">Ownership</h2>
+        </div>
+        <div class="panel-body">
+            <form wire:submit="transferOwnership" class="stack">
+                <div class="field-row">
+                    <label class="field-label" for="set-transfer">Hand the document to</label>
+                    <input id="set-transfer" wire:model="transferEmail" type="email" class="field" placeholder="name@example.com" />
+                    @error('transferEmail')
+                        <p class="field-error">{{ $message }}</p>
+                    @enderror
+                    <p class="field-hint">They become the owner; you keep access as an editor.</p>
+                </div>
+                <button type="submit" class="btn">Transfer ownership</button>
+            </form>
+        </div>
+    </section>
+
+    <section class="panel" aria-labelledby="set-webhooks">
+        <div class="panel-head">
+            <h2 class="section-title" id="set-webhooks">Notifications</h2>
+        </div>
+        <div class="panel-body">
+            @livewire('documents.webhook-manager', ['document' => $document], key('webhook-manager'))
+        </div>
+    </section>
+
+    <section class="panel" aria-labelledby="set-delete">
+        <div class="panel-head">
+            <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
+            <h2 class="section-title" id="set-delete" style="flex:1 1 auto">Deleting this document</h2>
+        </div>
+        <div class="panel-body">
+            @if (! $showDeleteConfirm)
+                <p class="empty-line">Deleting removes the document and every version of it. There is no undo.</p>
+                <button type="button" class="btn btn-danger" wire:click="$set('showDeleteConfirm', true)">Delete this document</button>
+            @else
+                <p class="empty-line">Delete {{ $document->title }} and all of its history?</p>
+                <div class="toolbar">
+                    <button type="button" class="btn btn-danger" wire:click="delete">
+                        <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span> Yes, delete it
+                    </button>
+                    <button type="button" class="btn" wire:click="$set('showDeleteConfirm', false)">Keep it</button>
+                </div>
+            @endif
+        </div>
+    </section>
 </div>

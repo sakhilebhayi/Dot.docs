@@ -2,9 +2,8 @@
 
 namespace App\Livewire\Documents;
 
-use App\Models\Document;
+use App\Documents\DocumentStore;
 use App\Models\DocumentTemplate;
-use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -14,6 +13,15 @@ class TemplateGallery extends Component
     public bool $show = false;
 
     public string $activeCategory = 'all';
+
+    /**
+     * The navigator rail links to /documents?gallery=1, so the gallery has to
+     * be open on arrival - server-side, not after a JavaScript round trip.
+     */
+    public function mount(): void
+    {
+        $this->show = request()->boolean('gallery');
+    }
 
     #[On('open')]
     public function open(): void
@@ -29,7 +37,7 @@ class TemplateGallery extends Component
     #[Computed]
     public function categories(): array
     {
-        return ['all', 'resume', 'proposal', 'notes', 'blog', 'general'];
+        return ['all', 'resume', 'proposal', 'notes', 'blog', 'general', 'report'];
     }
 
     #[Computed]
@@ -38,15 +46,7 @@ class TemplateGallery extends Component
         $user = auth()->user();
 
         return DocumentTemplate::query()
-            ->where(function ($q) use ($user) {
-                $q->where('is_global', true);
-
-                if ($user->currentTeam) {
-                    $q->orWhere('team_id', $user->currentTeam->id);
-                }
-
-                $q->orWhere('created_by', $user->id);
-            })
+            ->visibleTo($user)
             ->when($this->activeCategory !== 'all', fn ($q) => $q->where('category', $this->activeCategory))
             ->orderBy('is_global', 'desc')
             ->orderBy('name')
@@ -61,25 +61,19 @@ class TemplateGallery extends Component
         // the user's own team, or authored by the user. Prevents an
         // authenticated user from pulling another team's private template
         // content by guessing/incrementing the templateId argument.
-        $template = DocumentTemplate::where('id', $templateId)
-            ->where(function ($q) use ($user) {
-                $q->where('is_global', true)
-                    ->orWhere('created_by', $user->id);
+        $template = DocumentTemplate::query()->visibleTo($user)->whereKey($templateId)->firstOrFail();
 
-                if ($user->currentTeam) {
-                    $q->orWhere('team_id', $user->currentTeam->id);
-                }
-            })
-            ->firstOrFail();
+        // Content goes in as JSON through DocumentStore, which renders the
+        // HTML, numbers the outline against the template's own style and
+        // fills search_text/word_count - see .ai/rules/app.md. The style and
+        // page setup travel with the content: a mining production report on
+        // the default portrait `report` style is not the template.
+        $attrs = ['style_key' => $template->style_key ?: 'report'];
+        if (is_array($template->page_setup) && $template->page_setup !== []) {
+            $attrs['page_setup'] = $template->page_setup;
+        }
 
-        $document = Document::create([
-            'uuid' => (string) Str::uuid(),
-            'title' => $template->name,
-            'content' => $template->content,
-            'owner_id' => $user->id,
-            'team_id' => $user->currentTeam?->id,
-            'version' => 1,
-        ]);
+        $document = app(DocumentStore::class)->create($user, $template->name, $template->contentJson(), $attrs);
 
         $this->redirect(route('documents.edit', $document->uuid), navigate: true);
     }

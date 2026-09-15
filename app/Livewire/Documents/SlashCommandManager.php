@@ -106,6 +106,7 @@ class SlashCommandManager extends Component
             ->get();
 
         return view('livewire.documents.slash-command-manager', compact('commands'))
-            ->layout('layouts.app');
+            ->layout('layouts.app')
+            ->title('Slash commands');
     }
 }

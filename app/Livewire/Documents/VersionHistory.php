@@ -2,9 +2,12 @@
 
 namespace App\Livewire\Documents;
 
+use App\Audit\AuditLogger;
+use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\DocumentVersion;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Auth;
 use Jfcherng\Diff\DiffHelper;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -92,12 +95,13 @@ class VersionHistory extends Component
         $version = DocumentVersion::where('document_id', $this->document->id)
             ->findOrFail($versionId);
 
-        $this->document->update([
-            'content' => $version->content_snapshot,
-            'version' => $this->document->version + 1,
+        $this->document = app(DocumentStore::class)->restore($this->document, $version, Auth::user());
+
+        app(AuditLogger::class)->record('version.restored', $this->document, [
+            'version_number' => $version->version_number,
         ]);
 
-        $this->dispatch('version-restored', content: $version->content_snapshot);
+        $this->dispatch('version-restored', content: $this->document->content);
         $this->previewId = null;
         $this->showDiff = false;
         $this->compareIds = [];
@@ -119,6 +123,6 @@ class VersionHistory extends Component
         return view('livewire.documents.version-history', [
             'versions' => $versions,
             'previewVersion' => $previewVersion,
-        ])->layout('layouts.app');
+        ])->layout('layouts.app')->title('Versions of '.$this->document->title);
     }
 }

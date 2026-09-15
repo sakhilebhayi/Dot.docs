@@ -19,6 +19,8 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <!-- No test may ever reach a real model provider. See App\Ai\Client. -->
+        <env name="AI_PROVIDER" value="mock" force="true"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null" force="true"/>

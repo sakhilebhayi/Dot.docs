@@ -1,9 +1,12 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="scroll-smooth">
+{{-- `light` pins this page to its own warm day palette: shell.css's night
+     guard is `html:not(.light)` under prefers-color-scheme: dark, and the
+     marketing and auth pages have never had a night mode of their own. --}}
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="scroll-smooth light">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Dot.docs — Real-time collaborative documents</title>
+        <title>Dot.Doc — Real-time collaborative documents</title>
         <meta name="description" content="Write together in real time with live cursors, threaded comments, full version history, and an AI writing assistant. Export to PDF, Word, or Markdown when you're done.">
 
         <!-- Favicon -->
@@ -101,7 +104,7 @@
                          --ink scrim at this exact position (unlike the
                          footer below, which sits on the page's light paper
                          and keeps the default logo). --}}
-                    <img src="{{ asset('images/logo-light.png') }}" alt="Dot.docs" class="h-14 sm:h-16 w-auto">
+                    <img src="{{ asset('images/logo-light.png') }}" alt="Dot.Doc" class="h-14 sm:h-16 w-auto">
                 </a>
 
                 <div class="hidden md:flex items-center gap-8 font-mono text-[13px] tracking-wide uppercase text-[var(--cream)]">
@@ -156,7 +159,7 @@
             <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(31,27,20,0.58) 0%, rgba(31,27,20,0.74) 45%, #1f1b14 92%);"></div>
             <div class="absolute inset-0" style="background: linear-gradient(90deg, #1f1b14 0%, rgba(31,27,20,0.55) 38%, transparent 68%);"></div>
 
-            <!-- Open-folder silhouette — line-art nod to the real folder icon in the Dot.docs mark -->
+            <!-- Open-folder silhouette — line-art nod to the real folder icon in the Dot.Doc mark -->
             <svg class="hidden lg:block absolute right-[6%] bottom-[14%] h-[54%] w-auto opacity-[0.14] pointer-events-none" viewBox="0 0 340 260" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <path d="M40,70 H150 L175,100 H300 V230 H40 Z" stroke="#f5efde" stroke-width="3" stroke-linejoin="round"/>
                 <path d="M40,230 L95,145 H255 L300,230" stroke="#f5efde" stroke-width="3" stroke-linejoin="round"/>
@@ -175,7 +178,7 @@
                     </h1>
 
                     <p class="text-lg text-[var(--cream-80)] leading-relaxed max-w-xl mb-10">
-                        Dot.docs is a real-time collaborative document platform: live cursors and presence, comments tied to the exact text, full version history with side-by-side diffs, and an AI assistant that drafts, rewrites, and summarizes without leaving the page.
+                        Dot.Doc is a real-time collaborative document platform: live cursors and presence, comments tied to the exact text, full version history with side-by-side diffs, and an AI assistant that drafts, rewrites, and summarizes without leaving the page.
                     </p>
 
                     @guest
@@ -247,7 +250,7 @@
                             Not everything has to live in a team
                         </h2>
                         <p class="text-[var(--ink-soft)] leading-relaxed max-w-sm">
-                            A document can be entirely personal, attached to a team, shared with named collaborators, or made public — Dot.docs doesn't force every file through the same door.
+                            A document can be entirely personal, attached to a team, shared with named collaborators, or made public — Dot.Doc doesn't force every file through the same door.
                         </p>
                     </div>
 
@@ -304,7 +307,7 @@
         <footer class="py-14 px-5 sm:px-8 border-t border-[var(--line)]">
             <div class="max-w-[1400px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
                 <a href="/" class="flex items-center gap-2.5">
-                    <img src="{{ asset('images/logo.png') }}" alt="Dot.docs" class="h-11 w-auto opacity-90">
+                    <img src="{{ asset('images/logo.png') }}" alt="Dot.Doc" class="h-11 w-auto opacity-90">
                 </a>
                 <div class="flex items-center gap-6 font-mono text-xs tracking-wide uppercase text-[var(--ink-soft)]">
                     <a href="{{ route('policy.show') }}" class="hover:text-[var(--ink)] transition-colors">Privacy</a>
@@ -312,7 +315,7 @@
                     <a href="{{ route('terms.show') }}" class="hover:text-[var(--ink)] transition-colors">Terms</a>
                 </div>
                 <p class="font-mono text-xs tracking-wide text-[var(--ink-soft)]">
-                    &copy; {{ date('Y') }} Dot.docs. Real-time collaborative documents.
+                    &copy; {{ date('Y') }} Dot.Doc. Real-time collaborative documents.
                 </p>
             </div>
         </footer>

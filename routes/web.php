@@ -1,15 +1,20 @@
 <?php
 
 use App\Http\Controllers\Auth\EcosystemAuthController;
+use App\Http\Controllers\DocumentAutosaveController;
 use App\Http\Controllers\DocumentExportController;
 use App\Http\Controllers\DocumentImageController;
 use App\Http\Controllers\DocumentImportController;
+use App\Http\Controllers\FileUploadController;
+use App\Http\Controllers\FileViewController;
+use App\Http\Controllers\PublishedDocumentController;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
 use App\Livewire\Documents\Index;
 use App\Livewire\Documents\ShareManager;
 use App\Livewire\Documents\SlashCommandManager;
 use App\Livewire\Documents\VersionHistory;
+use App\Livewire\Files\Navigator;
 use App\Models\AiSuggestion;
 use App\Models\Document;
 use App\Models\DocumentCollaborator;
@@ -52,6 +57,8 @@ Route::get('/shared/{uuid}', function (string $uuid) {
         return view('documents.shared-password', compact('document'));
     }
 
+    $document->recordView();
+
     return view('documents.shared', compact('document'));
 })->name('documents.shared');
 
@@ -70,8 +77,21 @@ Route::post('/shared/{uuid}', function (string $uuid, Request $request) {
         return back()->withErrors(['password' => 'Incorrect password.']);
     }
 
+    $document->recordView();
+
     return view('documents.shared', compact('document'));
-})->name('documents.shared.unlock');
+})->middleware('throttle:published-unlock')->name('documents.shared.unlock');
+
+// The published page. Same access rules as /shared/{uuid} above, on a name
+// the writer chose - see App\Http\Controllers\PublishedDocumentController.
+Route::get('/d/{slug}', [PublishedDocumentController::class, 'show'])
+    ->where('slug', '[a-z0-9-]+')
+    ->name('documents.published');
+
+Route::post('/d/{slug}', [PublishedDocumentController::class, 'unlock'])
+    ->where('slug', '[a-z0-9-]+')
+    ->middleware('throttle:published-unlock')
+    ->name('documents.published.unlock');
 
 Route::middleware([
     'auth:sanctum',
@@ -105,12 +125,38 @@ Route::middleware([
     Route::post('/documents/{uuid}/images', [DocumentImageController::class, 'store'])
         ->name('documents.images.store');
 
+    // Last-chance autosave. The editor flushes its pending document here with
+    // navigator.sendBeacon() on pagehide, where a Livewire request cannot be
+    // issued at all (CommitBus defers on a 5 ms timer the unloading page never
+    // runs). See App\Http\Controllers\DocumentAutosaveController.
+    Route::post('/documents/{uuid}/autosave', [DocumentAutosaveController::class, 'store'])
+        ->name('documents.autosave');
+
     // Export
     Route::get('/documents/{uuid}/export/{format}', [DocumentExportController::class, 'export'])
         ->where('format', 'pdf|word|html|markdown')
         ->name('documents.export');
 
+    // The same export, filed in the shared tree instead of downloaded.
+    Route::post('/documents/{uuid}/export/{format}/save-to-files', [DocumentExportController::class, 'saveToFiles'])
+        ->where('format', 'pdf|word|html|markdown')
+        ->name('documents.export.save-to-files');
+
+    // The shared Dot.Files tree
+    Route::get('/files', Navigator::class)->name('files.index');
+
+    Route::post('/files/{parent}/upload', [FileUploadController::class, 'store'])
+        ->name('files.upload');
+
     // Import
     Route::post('/documents/{uuid}/import', [DocumentImportController::class, 'store'])
         ->name('documents.import');
+
+    // Reading one file out of the private `files` disk. `signed` proves the
+    // link was minted here and has not expired (10 minutes); the controller
+    // then checks the viewer belongs to the FILE'S team, so a signed link
+    // is not a bearer token for anyone who happens to be logged in.
+    Route::get('/files/{file}/view', [FileViewController::class, 'show'])
+        ->middleware('signed')
+        ->name('files.view');
 });

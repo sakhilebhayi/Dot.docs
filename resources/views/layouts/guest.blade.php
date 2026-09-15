@@ -1,5 +1,8 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+{{-- `light` pins this page to its own warm day palette: shell.css's night
+     guard is `html:not(.light)` under prefers-color-scheme: dark, and the
+     marketing and auth pages have never had a night mode of their own. --}}
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,7 +11,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16x16.png') }}">
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
 
-    <title>{{ config('app.name', 'Dot.docs') }}</title>
+    <title>{{ config('app.name', 'Dot.Doc') }}</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

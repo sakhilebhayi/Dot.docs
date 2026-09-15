@@ -14,7 +14,7 @@ class EcosystemErrorPagesTest extends TestCase
 
         $response->assertStatus($code);
         $response->assertSee($expectedHeading);
-        $response->assertSee('Dot.docs', false);
+        $response->assertSee('Dot.Doc', false);
         $response->assertSee('the rest of the Dot Ecosystem', false);
     }
 

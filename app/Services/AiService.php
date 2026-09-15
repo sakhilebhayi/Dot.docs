@@ -2,20 +2,29 @@
 
 namespace App\Services;
 
+use App\Ai\Client;
 use App\Models\AiSuggestion;
 use App\Models\Document;
 use Illuminate\Support\Facades\RateLimiter;
-use OpenAI\Laravel\Facades\OpenAI;
 
+/**
+ * The editor's AI surface: the slash commands, the assistant panel and the
+ * chat rail all come through here.
+ *
+ * Every method's TRANSPORT is App\Ai\Client - never a provider SDK. The
+ * prompts, the sanitisation and the output shaping below are unchanged from
+ * the OpenAI-era implementation; only the call underneath moved, so the
+ * Livewire components calling these methods did not have to change at all.
+ *
+ * Roles follow the platform spec: `quick` for the cheap mechanical passes
+ * (grammar, translation), `draft` for everything that writes prose.
+ */
 class AiService
 {
-    private string $model;
-
     private HtmlSanitizer $sanitizer;
 
-    public function __construct()
+    public function __construct(private Client $client)
     {
-        $this->model = config('openai.model', 'gpt-4o');
         $this->sanitizer = app(HtmlSanitizer::class);
     }
 
@@ -26,7 +35,7 @@ class AiService
     {
         $key = "ai_rate:{$userId}";
 
-        return RateLimiter::attempt($key, 20, fn () => true, 3600);
+        return RateLimiter::attempt($key, config('ai.rate_limit_per_hour', 20), fn () => true, 3600);
     }
 
     /**
@@ -36,16 +45,14 @@ class AiService
     {
         $text = $this->sanitizer->toPlainText($html);
 
-        $response = OpenAI::chat()->create([
-            'model' => $this->model,
-            'messages' => [
-                ['role' => 'system', 'content' => 'You are a grammar and spelling editor. Return only the corrected text, preserving all original formatting. Do not add commentary.'],
-                ['role' => 'user',   'content' => $text],
-            ],
-            'max_tokens' => 2000,
-        ]);
+        $out = $this->client->text(
+            'quick',
+            'You are a grammar and spelling editor. Return only the corrected text, preserving all original formatting. Do not add commentary.',
+            $text,
+            ['operation' => 'grammar', 'max_tokens' => 2000],
+        )->text;
 
-        return $response->choices[0]->message->content ?? $html;
+        return $out !== '' ? $out : $html;
     }
 
     /**
@@ -55,16 +62,12 @@ class AiService
     {
         $text = $this->sanitizer->toPlainText($html);
 
-        $response = OpenAI::chat()->create([
-            'model' => $this->model,
-            'messages' => [
-                ['role' => 'system', 'content' => "Summarize the following document in {$maxWords} words or fewer. Be concise and capture the key points."],
-                ['role' => 'user',   'content' => $text],
-            ],
-            'max_tokens' => 400,
-        ]);
-
-        return $response->choices[0]->message->content ?? '';
+        return $this->client->text(
+            'draft',
+            "Summarize the following document in {$maxWords} words or fewer. Be concise and capture the key points.",
+            $text,
+            ['operation' => 'summarise', 'max_tokens' => 400],
+        )->text;
     }
 
     /**
@@ -74,16 +77,14 @@ class AiService
     {
         $text = $this->sanitizer->toPlainText($html);
 
-        $response = OpenAI::chat()->create([
-            'model' => $this->model,
-            'messages' => [
-                ['role' => 'system', 'content' => 'You are a writing assistant. Continue the following text naturally with one or two well-written paragraphs. Return only the new text, no preamble.'],
-                ['role' => 'user',   'content' => $text],
-            ],
-            'max_tokens' => 500,
-        ]);
+        $out = $this->client->text(
+            'draft',
+            'You are a writing assistant. Continue the following text naturally with one or two well-written paragraphs. Return only the new text, no preamble.',
+            $text,
+            ['operation' => 'continue', 'max_tokens' => 500],
+        )->text;
 
-        return '<p>'.nl2br(htmlspecialchars($response->choices[0]->message->content ?? '')).'</p>';
+        return '<p>'.nl2br(htmlspecialchars($out)).'</p>';
     }
 
     /**
@@ -96,16 +97,14 @@ class AiService
         $tones = ['formal', 'casual', 'persuasive', 'concise'];
         $tone = in_array($tone, $tones) ? $tone : 'formal';
 
-        $response = OpenAI::chat()->create([
-            'model' => $this->model,
-            'messages' => [
-                ['role' => 'system', 'content' => "Rewrite the following text in a {$tone} tone. Preserve the meaning. Return only the rewritten text."],
-                ['role' => 'user',   'content' => $text],
-            ],
-            'max_tokens' => 2000,
-        ]);
+        $out = $this->client->text(
+            'draft',
+            "Rewrite the following text in a {$tone} tone. Preserve the meaning. Return only the rewritten text.",
+            $text,
+            ['operation' => 'tone', 'max_tokens' => 2000],
+        )->text;
 
-        return $response->choices[0]->message->content ?? $html;
+        return $out !== '' ? $out : $html;
     }
 
     /**
@@ -115,16 +114,14 @@ class AiService
     {
         $text = $this->sanitizer->toPlainText($html);
 
-        $response = OpenAI::chat()->create([
-            'model' => $this->model,
-            'messages' => [
-                ['role' => 'system', 'content' => "Translate the following text to {$language}. Return only the translated text."],
-                ['role' => 'user',   'content' => $text],
-            ],
-            'max_tokens' => 3000,
-        ]);
+        $out = $this->client->text(
+            'quick',
+            "Translate the following text to {$language}. Return only the translated text.",
+            $text,
+            ['operation' => 'translate', 'max_tokens' => 3000],
+        )->text;
 
-        return $response->choices[0]->message->content ?? $html;
+        return $out !== '' ? $out : $html;
     }
 
     /**
@@ -174,16 +171,12 @@ class AiService
     {
         $text = $this->sanitizer->toPlainText($promptOrHtml);
 
-        $response = OpenAI::chat()->create([
-            'model' => $this->model,
-            'messages' => [
-                ['role' => 'system', 'content' => 'Generate a structured document outline in HTML using <h2> for main sections and <h3> for sub-sections and <p> for brief descriptions. Return only the HTML.'],
-                ['role' => 'user',   'content' => $text],
-            ],
-            'max_tokens' => 1000,
-        ]);
-
-        return $response->choices[0]->message->content ?? '';
+        return $this->client->text(
+            'draft',
+            'Generate a structured document outline in HTML using <h2> for main sections and <h3> for sub-sections and <p> for brief descriptions. Return only the HTML.',
+            $text,
+            ['operation' => 'outline', 'max_tokens' => 1000],
+        )->text;
     }
 
     /**
@@ -193,44 +186,48 @@ class AiService
     {
         $text = $this->sanitizer->toPlainText($documentHtml);
 
-        $response = OpenAI::chat()->create([
-            'model' => $this->model,
-            'messages' => [
-                ['role' => 'system', 'content' => 'You are an AI writing assistant embedded in a document editor. The user will give you instructions about the document. Respond helpfully and concisely.'],
-                ['role' => 'user',   'content' => "Document content:\n\n{$text}\n\nUser request: {$prompt}"],
-            ],
-            'max_tokens' => 1500,
-        ]);
-
-        return $response->choices[0]->message->content ?? '';
+        return $this->client->text(
+            'draft',
+            'You are an AI writing assistant embedded in a document editor. The user will give you instructions about the document. Respond helpfully and concisely.',
+            "Document content:\n\n{$text}\n\nUser request: {$prompt}",
+            ['operation' => 'free_prompt', 'max_tokens' => 1500],
+        )->text;
     }
 
     /**
      * Chat turn — maintains conversation about the document.
      * $history is array of ['role' => 'user'|'assistant', 'content' => '...']
+     *
+     * Client::text() takes one system block and one user block, so the prior
+     * turns are folded into the user block as a labelled transcript rather
+     * than sent as separate messages. The model sees the same conversation;
+     * what it does not see is any turn whose role is not user/assistant,
+     * which is the same filter the message-array version applied.
      */
     public function chat(string $message, string $documentHtml, array $history = []): string
     {
         $docText = $this->sanitizer->toPlainText($documentHtml);
-        $systemPrompt = "You are an AI assistant embedded in Dot.docs, a document editor. The user is asking questions or requesting help about the following document:\n\n{$docText}\n\nBe helpful, accurate, and concise.";
+        $systemPrompt = "You are an AI assistant embedded in Dot.Doc, a document editor. The user is asking questions or requesting help about the following document:\n\n{$docText}\n\nBe helpful, accurate, and concise.";
 
-        $messages = [['role' => 'system', 'content' => $systemPrompt]];
+        $transcript = [];
 
         foreach ($history as $turn) {
             if (in_array($turn['role'] ?? '', ['user', 'assistant'])) {
-                $messages[] = ['role' => $turn['role'], 'content' => $turn['content']];
+                $label = $turn['role'] === 'user' ? 'User' : 'Assistant';
+                $transcript[] = $label.': '.($turn['content'] ?? '');
             }
         }
 
-        $messages[] = ['role' => 'user', 'content' => $message];
+        $transcript[] = 'User: '.$message;
 
-        $response = OpenAI::chat()->create([
-            'model' => $this->model,
-            'messages' => $messages,
-            'max_tokens' => 800,
-        ]);
+        $out = $this->client->text(
+            'draft',
+            $systemPrompt,
+            implode("\n\n", $transcript),
+            ['operation' => 'chat', 'max_tokens' => 800],
+        )->text;
 
-        return $response->choices[0]->message->content ?? 'Sorry, I could not generate a response.';
+        return $out !== '' ? $out : 'Sorry, I could not generate a response.';
     }
 
     /**
@@ -242,16 +239,14 @@ class AiService
         $text = $this->sanitizer->toPlainText($html);
         $prompt = str_replace('{content}', $text, $promptTemplate);
 
-        $response = OpenAI::chat()->create([
-            'model' => $this->model,
-            'messages' => [
-                ['role' => 'system', 'content' => 'You are an AI writing assistant embedded in a document editor. Follow the user\'s instruction precisely.'],
-                ['role' => 'user',   'content' => $prompt],
-            ],
-            'max_tokens' => 2000,
-        ]);
+        $out = $this->client->text(
+            'draft',
+            'You are an AI writing assistant embedded in a document editor. Follow the user\'s instruction precisely.',
+            $prompt,
+            ['operation' => 'custom_command', 'max_tokens' => 2000],
+        )->text;
 
-        return ['type' => 'replace', 'content' => $response->choices[0]->message->content ?? ''];
+        return ['type' => 'replace', 'content' => $out];
     }
 
     /**

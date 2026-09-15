@@ -1,212 +1,326 @@
-<div class="py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    {{-- Header --}}
-    <div class="flex items-center justify-between mb-4">
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Documents</h1>
-        <div class="flex items-center gap-2">
-            <button wire:click="$set('showFolderModal', true)"
-                    class="inline-flex items-center px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition">
-                📁 New Folder
-            </button>
-            <button @click="$dispatch('open-template-gallery')"
-                    class="inline-flex items-center px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition">
-                📄 From Template
-            </button>
-            <button wire:click="$set('showCreateModal', true)"
-                    class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition">
-                + New Document
-            </button>
+<div class="page" x-data="{ renameTrigger: null, smartSaveTrigger: null }">
+    <div class="page-head">
+        <div>
+            <h1 class="page-title">Documents</h1>
+            <p class="page-lede">Folders and documents in {{ auth()->user()->currentTeam->name ?? 'your personal space' }}.</p>
+        </div>
+        <div class="toolbar">
+            <button type="button" class="btn" wire:click="$set('showFolderModal', true)">New folder</button>
+            <button type="button" class="btn" @click="$dispatch('open-template-gallery')">From a template</button>
+            <button type="button" class="btn btn-primary"
+                    @click="smartSaveTrigger = $el"
+                    wire:click="openSmartSave">New document</button>
         </div>
     </div>
 
-    {{-- Breadcrumbs --}}
-    <div class="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400 mb-6">
-        <button wire:click="openFolder(null)" class="hover:text-indigo-600 dark:hover:text-indigo-400 {{ ! $folderId ? 'font-semibold text-gray-900 dark:text-white' : '' }}">
-            All Documents
-        </button>
-        @foreach($this->breadcrumbs as $crumb)
-            <span>/</span>
-            <button wire:click="openFolder({{ $crumb->id }})" class="hover:text-indigo-600 dark:hover:text-indigo-400 {{ $crumb->id === $folderId ? 'font-semibold text-gray-900 dark:text-white' : '' }}">
-                {{ $crumb->name }}
-            </button>
+    {{-- Breadcrumbs: where in the tree this listing is standing. --}}
+    <nav class="toolbar" aria-label="Folder path" style="margin-bottom:var(--s4)">
+        <button type="button" wire:click="openFolder(null)"
+                class="btn btn-quiet btn-sm {{ ! $folderId ? 'is-current' : '' }}">All documents</button>
+        @foreach ($this->breadcrumbs as $crumb)
+            <span class="micro" aria-hidden="true">/</span>
+            <button type="button" wire:click="openFolder({{ $crumb->id }})" class="btn btn-quiet btn-sm">{{ $crumb->name() }}</button>
         @endforeach
-    </div>
+    </nav>
 
-    {{-- Template Gallery --}}
     @livewire('documents.template-gallery', key('template-gallery'))
 
-    {{-- Search & Filter --}}
-    <div class="flex flex-col sm:flex-row gap-3 mb-4">
-        <input wire:model.live.debounce.300ms="search"
-               type="search"
-               placeholder="Search documents…"
-               class="flex-1 rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm" />
-
-        <div class="flex gap-2">
-            @foreach(['all' => 'All', 'mine' => 'Mine', 'shared' => 'Shared', 'team' => 'Team'] as $key => $label)
-                <button wire:click="$set('filter', '{{ $key }}')"
-                        class="px-3 py-1.5 text-xs font-medium rounded-full transition
-                               {{ $filter === $key ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300' }}">
-                    {{ $label }}
-                </button>
-            @endforeach
+    <section class="panel" aria-labelledby="doc-filters">
+        <div class="panel-head">
+            <h2 class="section-title" id="doc-filters">Find</h2>
+            <span class="micro">
+                <x-shell.figure :value="$this->documents->total()" />&nbsp;listed
+            </span>
         </div>
-    </div>
+        <div class="panel-body">
+            <div class="field-row">
+                <label class="field-label" for="doc-search">Search titles and text</label>
+                {{-- `?focus=search` is what the editor's ⌘K "Search documents"
+                     row arrives with: without it that row landed on this page
+                     with the cursor nowhere, which is the same thing "Open
+                     another document" does. --}}
+                <input id="doc-search" wire:model.live.debounce.300ms="search" type="search" class="field"
+                       placeholder="A word you remember writing"
+                       @if (request()->query('focus') === 'search') autofocus @endif />
+            </div>
 
-    {{-- Tags --}}
-    @if($this->availableTags->isNotEmpty())
-        <div class="flex flex-wrap items-center gap-2 mb-6">
-            <span class="text-xs font-medium text-gray-400 uppercase tracking-wide">Tags:</span>
-            <button wire:click="filterByTag(null)"
-                    class="px-2.5 py-1 text-xs rounded-full transition {{ ! $tagId ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300' }}">
-                All
-            </button>
-            @foreach($this->availableTags as $tag)
-                <button wire:click="filterByTag({{ $tag->id }})"
-                        class="px-2.5 py-1 text-xs rounded-full transition {{ $tagId === $tag->id ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300' }}">
-                    🏷️ {{ $tag->name }}
-                </button>
-            @endforeach
-        </div>
-    @endif
+            <div class="field-row">
+                <span class="field-label" id="doc-scope">Scope</span>
+                <div class="toolbar" role="group" aria-labelledby="doc-scope">
+                    @foreach (['all' => 'All', 'mine' => 'Mine', 'shared' => 'Shared', 'team' => 'Team'] as $key => $label)
+                        <button type="button" class="tag" wire:click="$set('filter', '{{ $key }}')"
+                                aria-pressed="{{ $filter === $key ? 'true' : 'false' }}">{{ $label }}</button>
+                    @endforeach
+                </div>
+            </div>
 
-    {{-- Subfolders --}}
-    @if($this->subfolders->isNotEmpty() && ! $search && ! $tagId)
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-4">
-            @foreach($this->subfolders as $folder)
-                <div class="group flex items-center justify-between bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-4">
-                    <button wire:click="openFolder({{ $folder->id }})" class="flex items-center gap-3 flex-1 text-left min-w-0">
-                        <span class="text-xl flex-shrink-0">📁</span>
-                        <span class="font-medium text-gray-900 dark:text-white text-sm truncate">{{ $folder->name }}</span>
-                    </button>
-                    <div class="hidden group-hover:flex items-center gap-1 flex-shrink-0">
-                        <button onclick="const name = prompt('Rename folder', '{{ addslashes($folder->name) }}'); if (name) $wire.renameFolder({{ $folder->id }}, name)"
-                                class="text-gray-400 hover:text-indigo-600 text-xs px-1" title="Rename">✏️</button>
-                        <button wire:click="deleteFolder({{ $folder->id }})"
-                                wire:confirm="Delete this folder? Documents inside will move to the parent folder, not be deleted."
-                                class="text-gray-400 hover:text-red-500 text-xs px-1" title="Delete">✕</button>
+            @if ($this->availableTags->isNotEmpty())
+                <div class="field-row">
+                    <span class="field-label" id="doc-tags">Tags</span>
+                    <div class="toolbar" role="group" aria-labelledby="doc-tags">
+                        <button type="button" class="tag" wire:click="filterByTag(null)"
+                                aria-pressed="{{ ! $tagId ? 'true' : 'false' }}">Any</button>
+                        @foreach ($this->availableTags as $tag)
+                            <button type="button" class="tag" wire:click="filterByTag({{ $tag->id }})"
+                                    aria-pressed="{{ $tagId === $tag->id ? 'true' : 'false' }}">{{ $tag->name }}</button>
+                        @endforeach
                     </div>
                 </div>
-            @endforeach
-        </div>
-    @endif
-
-    {{-- Document Grid --}}
-    @if($this->documents->isEmpty() && $this->subfolders->isEmpty())
-        <div class="text-center py-20 text-gray-500 dark:text-gray-400">
-            <svg class="mx-auto h-12 w-12 mb-4 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-            </svg>
-            <p class="text-sm">No documents found. Create your first one!</p>
-        </div>
-    @elseif($this->documents->isNotEmpty())
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            @foreach($this->documents as $doc)
-                <a href="{{ route('documents.edit', $doc->uuid) }}"
-                   class="group block bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:shadow-md hover:border-indigo-400 transition">
-                    <div class="flex items-start justify-between mb-3">
-                        <div class="w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-lg flex items-center justify-center">
-                            <svg class="w-4 h-4 text-indigo-600 dark:text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/>
-                            </svg>
-                        </div>
-                        @if($doc->is_public)
-                            <span class="text-xs text-green-600 dark:text-green-400 font-medium">Public</span>
-                        @endif
-                    </div>
-                    <h3 class="font-semibold text-gray-900 dark:text-white text-sm truncate group-hover:text-indigo-600 transition">
-                        {{ $doc->title }}
-                    </h3>
-                    <p class="text-xs text-gray-400 mt-1">{{ $doc->updated_at->diffForHumans() }}</p>
-                </a>
-            @endforeach
-        </div>
-
-        <div class="mt-6">
-            @if($this->documents->hasMorePages())
-                {{-- Infinite scroll sentinel --}}
-                <div
-                    x-data
-                    x-init="
-                        const obs = new IntersectionObserver(entries => {
-                            if (entries[0].isIntersecting) $wire.loadMore();
-                        }, { rootMargin: '300px' });
-                        obs.observe($el);
-                        $wire.$cleanup(() => obs.disconnect());
-                    "
-                    class="h-4"
-                ></div>
-                <div wire:loading wire:target="loadMore"
-                     class="py-6 text-center text-sm text-gray-400 animate-pulse">
-                    Loading more…
-                </div>
-            @else
-                <p class="text-center text-xs text-gray-400 py-4">All documents loaded</p>
             @endif
         </div>
+    </section>
+
+    @if ($this->subfolders->isNotEmpty() && ! $search && ! $tagId)
+        <section class="panel" aria-labelledby="doc-folders">
+            <div class="panel-head">
+                <h2 class="section-title" id="doc-folders">Folders</h2>
+            </div>
+            @error('folder')
+                <div class="panel-body">
+                    <p class="field-error">{{ $message }}</p>
+                </div>
+            @enderror
+            <ul class="list">
+                @foreach ($this->subfolders as $folder)
+                    <li class="list-row">
+                        <button type="button" wire:click="openFolder({{ $folder->id }})"
+                                class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start">
+                            {{ $folder->name() }}
+                        </button>
+                        <button type="button" class="btn btn-quiet btn-sm"
+                                @click="renameTrigger = $el"
+                                wire:click="startRenamingFolder({{ $folder->id }})">
+                            Rename
+                        </button>
+                        <button type="button" class="btn btn-quiet btn-sm" wire:click="deleteFolder({{ $folder->id }})"
+                                wire:confirm="Delete this folder? It has to be empty first — nothing inside is ever deleted with it.">
+                            Delete
+                        </button>
+                    </li>
+                @endforeach
+            </ul>
+        </section>
     @endif
 
-    {{-- Open gallery via window event --}}
-    <div x-data @open-template-gallery.window="Livewire.dispatchTo('documents.template-gallery', 'open')" class="hidden"></div>
+    <section class="panel" aria-labelledby="doc-list">
+        <div class="panel-head">
+            <h2 class="section-title" id="doc-list">Documents</h2>
+            <span wire:loading wire:target="search,filter,filterByTag" class="micro">Filtering</span>
+        </div>
 
-    {{-- Create Modal --}}
-    @if($showCreateModal)
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" wire:click.self="$set('showCreateModal', false)">
-            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 w-full max-w-md mx-4">
-                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">New Document</h2>
+        @php
+            /*
+             * The empty state names what is ACTUALLY on, and offers a way out of
+             * each of it.
+             *
+             * Three filters can be active independently — the search box, a tag
+             * and the scope chips — so the sentence is composed from whichever
+             * are, rather than assuming the search box is the only one that can
+             * empty a list. The first pass interpolated $search into the
+             * sentence whenever ANY filter was on, so filtering by a tag from a
+             * rail link produced `Nothing here matches "".` and offered to clear
+             * a search that was already empty, leaving the tag on with no way
+             * out of this panel.
+             */
+            $scopeWords = ['mine' => 'Mine', 'shared' => 'Shared', 'team' => 'Team'];
 
-                <form wire:submit="createDocument">
-                    <input wire:model="newTitle"
-                           type="text"
-                           placeholder="Document title…"
-                           autofocus
-                           class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-indigo-500 focus:border-indigo-500 mb-4" />
-                    @error('newTitle')
-                        <p class="text-red-500 text-xs mb-3">{{ $message }}</p>
-                    @enderror
+            $activeFilters = [];
 
-                    <div class="flex justify-end gap-3">
-                        <button type="button" wire:click="$set('showCreateModal', false)"
-                                class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 transition">
-                            Cancel
-                        </button>
-                        <button type="submit"
-                                class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition">
-                            Create
-                        </button>
+            if ($search !== '') {
+                $activeFilters['search'] = '"'.$search.'"';
+            }
+
+            if ($tagId) {
+                $activeFilters['tag'] = 'the tag "'.($this->availableTags->firstWhere('id', $tagId)?->name ?? 'you chose').'"';
+            }
+
+            if (isset($scopeWords[$filter])) {
+                $activeFilters['scope'] = 'the '.$scopeWords[$filter].' scope';
+            }
+        @endphp
+
+        @if ($this->documents->isEmpty() && $activeFilters !== [])
+            <div class="empty">
+                <p class="empty-line">Nothing here matches {{ \Illuminate\Support\Arr::join($activeFilters, ', ', ' and ') }}.</p>
+                <div class="empty-actions">
+                    @if (isset($activeFilters['search']))
+                        <button type="button" class="btn" wire:click="$set('search', '')">Clear the search</button>
+                    @endif
+                    @if (isset($activeFilters['tag']))
+                        <button type="button" class="btn" wire:click="filterByTag(null)">Clear the tag filter</button>
+                    @endif
+                    @if (isset($activeFilters['scope']))
+                        <button type="button" class="btn" wire:click="$set('filter', 'all')">Show all documents</button>
+                    @endif
+                </div>
+            </div>
+        @elseif ($this->documents->isEmpty())
+            {{-- One sentence, then what to do about it. No illustration, no
+                 "No documents found." A third action, "Create with AI", is
+                 deliberately absent: nothing in this application generates a
+                 whole document from a prompt yet (App\Livewire\Documents\
+                 AiAssistant works on a document that already exists), and an
+                 action that does nothing is worse than an action that is not
+                 there. It belongs to whichever task ships that capability.
+
+                 A node holding only SUBFOLDERS says so rather than claiming
+                 this is where you begin: it used to fall straight through to
+                 the list branch below and render an empty <ul> with no sentence
+                 and no action at all. --}}
+            <div class="empty">
+                <p class="empty-line">{{ $this->subfolders->isEmpty() ? 'Start with an idea.' : 'Nothing is filed here yet.' }}</p>
+                <div class="empty-actions">
+                    <button type="button" class="btn btn-primary"
+                            @click="smartSaveTrigger = $el"
+                            wire:click="openSmartSave">Blank document</button>
+                    <button type="button" class="btn" @click="$dispatch('open-template-gallery')">Use a template</button>
+                </div>
+            </div>
+        @else
+            <ul class="list">
+                @foreach ($this->documents as $doc)
+                    <li>
+                        <a href="{{ route('documents.edit', $doc->uuid) }}" class="list-row">
+                            <span class="list-key">
+                                {{ $doc->title ?: 'Untitled' }}
+                                <span class="list-sub">Edited {{ $doc->updated_at->diffForHumans() }}</span>
+                            </span>
+                            @if ($doc->is_public)
+                                <x-shell.status-word tone="good" word="Public" />
+                            @endif
+                            <span class="list-val">
+                                <x-shell.figure :value="$doc->version" prefix="v" label="Version" />
+                            </span>
+                        </a>
+                    </li>
+                @endforeach
+            </ul>
+
+            <div class="panel-foot">
+                @if ($this->documents->hasMorePages())
+                    <div x-data
+                         x-init="
+                            const obs = new IntersectionObserver(entries => { if (entries[0].isIntersecting) $wire.loadMore(); }, { rootMargin: '300px' });
+                            obs.observe($el);
+                            $wire.$cleanup(() => obs.disconnect());
+                         "></div>
+                    <span class="micro" wire:loading wire:target="loadMore">Loading more</span>
+                    <button type="button" class="btn btn-sm" wire:click="loadMore">Load more</button>
+                @else
+                    <span class="micro">All of them are listed</span>
+                @endif
+            </div>
+        @endif
+    </section>
+
+    {{-- The gallery opens on ?gallery=1 at mount (see TemplateGallery::mount)
+         and on this window event from the "From a template" button. --}}
+    <div x-data @open-template-gallery.window="Livewire.dispatchTo('documents.template-gallery', 'open')"></div>
+
+    {{-- Smart save (spec §5): one sheet asks what it is called, what kind of
+         document it is, and where it goes. The old flow asked only for a name
+         and filed the document wherever the reader happened to be standing,
+         which made "put this somewhere else" a navigation job you had to do
+         BEFORE you knew you wanted a document.
+
+         Escape closes it and returns focus to the control that opened it, the
+         same convention every other dialog in this product keeps. --}}
+    @if ($showSmartSave)
+        <div class="scrim" wire:click.self="closeSmartSave" role="dialog" aria-modal="true" aria-labelledby="new-doc-title"
+             x-on:keydown.escape.window="$wire.closeSmartSave(); smartSaveTrigger && smartSaveTrigger.focus()">
+            <div class="sheet">
+                <div class="sheet-head">
+                    <h2 class="h-panel" id="new-doc-title">New document</h2>
+                </div>
+                <form wire:submit="createDocumentAtLocation">
+                    <div class="sheet-body">
+                        <div class="field-row">
+                            <label class="field-label" for="new-doc-name">Title</label>
+                            <input id="new-doc-name" wire:model="newDocumentName" type="text" class="field" autofocus
+                                   placeholder="What is it about?" />
+                            @error('newDocumentName')
+                                <p class="field-error">{{ $message }}</p>
+                            @enderror
+                        </div>
+
+                        <div class="field-row">
+                            <label class="field-label" for="new-doc-template">Start from</label>
+                            <select id="new-doc-template" wire:model="newDocumentTemplateId" class="field">
+                                <option value="">A blank document</option>
+                                @foreach ($this->newDocumentTemplates as $template)
+                                    <option value="{{ $template->id }}">{{ $template->name }}</option>
+                                @endforeach
+                            </select>
+                            @error('newDocumentTemplateId')
+                                <p class="field-error">{{ $message }}</p>
+                            @enderror
+                        </div>
+
+                        {{-- The location field is a component of its own so a
+                             later phase can add recents and favourites to what
+                             it offers without touching this sheet — spec §5's
+                             seam. It reports where it landed through the
+                             `location-chosen` event. --}}
+                        <livewire:documents.location-picker :current-folder-id="$newDocumentFolderId"
+                                                           :key="'smart-save-location'" />
+                    </div>
+                    <div class="sheet-foot">
+                        <button type="button" class="btn" wire:click="closeSmartSave">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Create the document</button>
                     </div>
                 </form>
             </div>
         </div>
     @endif
 
-    {{-- New Folder Modal --}}
-    @if($showFolderModal)
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" wire:click.self="$set('showFolderModal', false)">
-            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 w-full max-w-md mx-4">
-                <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                    New Folder @if($this->currentFolder) inside "{{ $this->currentFolder->name }}" @endif
-                </h2>
+    @if ($renamingFolderId)
+        <div class="scrim" wire:click.self="cancelRenamingFolder" role="dialog" aria-modal="true" aria-labelledby="rename-folder-title"
+             x-on:keydown.escape.window="$wire.cancelRenamingFolder(); renameTrigger && renameTrigger.focus()">
+            <div class="sheet">
+                <div class="sheet-head">
+                    <h2 class="h-panel" id="rename-folder-title">Rename the folder</h2>
+                </div>
+                <form wire:submit="renameFolder">
+                    <div class="sheet-body">
+                        <div class="field-row">
+                            <label class="field-label" for="rename-folder-name">Folder name</label>
+                            <input id="rename-folder-name" wire:model="renameFolderName" type="text" class="field" autofocus />
+                            @error('renameFolderName')
+                                <p class="field-error">{{ $message }}</p>
+                            @enderror
+                        </div>
+                    </div>
+                    <div class="sheet-foot">
+                        <button type="button" class="btn" wire:click="cancelRenamingFolder">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Rename it</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
 
+    @if ($showFolderModal)
+        <div class="scrim" wire:click.self="$set('showFolderModal', false)" role="dialog" aria-modal="true" aria-labelledby="new-folder-title">
+            <div class="sheet">
+                <div class="sheet-head">
+                    <h2 class="h-panel" id="new-folder-title">
+                        New folder @if ($this->currentFolder) in {{ $this->currentFolder->name() }} @endif
+                    </h2>
+                </div>
                 <form wire:submit="createFolder">
-                    <input wire:model="newFolderName"
-                           type="text"
-                           placeholder="Folder name…"
-                           autofocus
-                           class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-indigo-500 focus:border-indigo-500 mb-4" />
-                    @error('newFolderName')
-                        <p class="text-red-500 text-xs mb-3">{{ $message }}</p>
-                    @enderror
-
-                    <div class="flex justify-end gap-3">
-                        <button type="button" wire:click="$set('showFolderModal', false)"
-                                class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 transition">
-                            Cancel
-                        </button>
-                        <button type="submit"
-                                class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition">
-                            Create
-                        </button>
+                    <div class="sheet-body">
+                        <div class="field-row">
+                            <label class="field-label" for="new-folder-name">Folder name</label>
+                            <input id="new-folder-name" wire:model="newFolderName" type="text" class="field" autofocus
+                                   placeholder="What goes in it?" />
+                            @error('newFolderName')
+                                <p class="field-error">{{ $message }}</p>
+                            @enderror
+                        </div>
+                    </div>
+                    <div class="sheet-foot">
+                        <button type="button" class="btn" wire:click="$set('showFolderModal', false)">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Create the folder</button>
                     </div>
                 </form>
             </div>

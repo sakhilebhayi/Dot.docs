@@ -2,17 +2,27 @@
 
 namespace App\Livewire\Documents;
 
+use App\Audit\AuditLogger;
+use App\Documents\DocumentStore;
+use App\Documents\Import\HtmlToJson;
+use App\Documents\Outline\Outline;
 use App\Events\DocumentUpdated;
 use App\Events\UserJoinedDocument;
 use App\Events\UserLeftDocument;
+use App\Files\FilesService;
 use App\Models\AiSuggestion;
 use App\Models\Document;
-use App\Services\HtmlSanitizer;
+use App\Models\DocumentStyle;
+use App\Models\Files\Obj;
 use App\Services\PresenceService;
+use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use InvalidArgumentException;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -25,7 +35,8 @@ class Editor extends Component
 
     public string $title = '';
 
-    public string $content = '';
+    /** Current document content as Dot.Doc JSON (see App\Documents\Schema\DocumentSchema) */
+    public array $contentJson = [];
 
     public bool $saved = false;
 
@@ -40,13 +51,19 @@ class Editor extends Component
     /** Whether comment sidebar is open */
     public bool $commentSidebarOpen = false;
 
+    /** Whether the editor is showing the print/PDF stylesheet instead of the canvas one (see StyleEngine::css()) */
+    public bool $printPreview = false;
+
+    /** Whether the Move sheet - the tree's folder picker - is open. */
+    public bool $showMoveSheet = false;
+
     public function mount(string $uuid): void
     {
         $this->document = Document::where('uuid', $uuid)->firstOrFail();
         $this->authorize('view', $this->document);
 
         $this->title = $this->document->title;
-        $this->content = $this->document->content ?? '';
+        $this->contentJson = app(DocumentStore::class)->json($this->document);
 
         $presence = app(PresenceService::class);
         $presence->join($this->document, Auth::user());
@@ -59,43 +76,92 @@ class Editor extends Component
         }
 
         $this->loadPendingSuggestions();
+
+        // mount() runs once per page load, not on every Livewire round trip,
+        // so this is one row per opening of the document rather than one per
+        // keystroke. See .ai/rules/audit.md for the action vocabulary.
+        app(AuditLogger::class)->record('document.viewed', $this->document);
     }
 
-    public function saveContent(string $content): void
+    /**
+     * @return array{ok:bool,version:int} whether the document was stored, and
+     *                                    the version it is now at. $wire
+     *                                    actions resolve with the return
+     *                                    value, so the editor bridge awaits
+     *                                    both: it keeps the offline draft when
+     *                                    `ok` is false (a rejected save must
+     *                                    not quietly lose the writer's work)
+     *                                    and stamps `version` onto the draft
+     *                                    as its `baseVersion`, which is what
+     *                                    decides on the next load whether the
+     *                                    draft is still restorable or somebody
+     *                                    else has saved since.
+     */
+    public function saveContent(array $content): array
     {
         $this->authorize('update', $this->document);
 
-        $content = app(HtmlSanitizer::class)->clean($content);
+        $this->resetErrorBag('content');
 
-        if ($this->suggestionMode) {
-            // Store as a suggestion instead of saving directly
-            AiSuggestion::create([
-                'document_id' => $this->document->id,
-                'user_id' => Auth::id(),
-                'suggestion_text' => $content,
-                'created_at' => now(),
-            ]);
-            $this->loadPendingSuggestions();
-            $this->saved = true;
+        try {
+            $this->document = app(DocumentStore::class)->save($this->document, $content, Auth::user());
+        } catch (InvalidArgumentException $e) {
+            $this->addError('content', $e->getMessage());
+            $this->saved = false;
 
-            return;
+            return ['ok' => false, 'version' => $this->document->version];
         }
-
-        $this->content = $content;
-        $this->document->update([
-            'content' => $content,
-            'version' => $this->document->version + 1,
-        ]);
+        $this->contentJson = $this->document->content_json;
         $this->saved = true;
 
         try {
-            DocumentUpdated::dispatch($this->document, Auth::user(), $content, $this->document->version);
+            DocumentUpdated::dispatch($this->document, Auth::user(), $this->document->content, $this->document->content_json, $this->document->version);
         } catch (\Throwable) {
             // Broadcasting unavailable — continue without real-time sync
         }
         app(PresenceService::class)->heartbeat($this->document, Auth::user());
+
+        return ['ok' => true, 'version' => $this->document->version];
     }
 
+    /**
+     * Heading/figure numbers and the table of contents for the document as it
+     * is currently stored. Numbering is authoritative on the server (it
+     * depends on the style's numbering tokens - see .ai/rules/styles.md), so
+     * the editor asks for it after every save instead of computing its own.
+     *
+     * `figures` and `tables` are what the cross-reference picker offers
+     * besides headings - a figure or a table is referenced by its number and
+     * found by its caption, so both travel together.
+     *
+     * @return array{
+     *     numbers: array<string,string>,
+     *     toc: list<array{id:string,level:int,text:string,number:string}>,
+     *     figures: list<array{id:string,number:string,text:string}>,
+     *     tables: list<array{id:string,number:string,text:string}>,
+     * }
+     */
+    public function outline(): array
+    {
+        // Called straight from JS on every save round trip, so it carries its
+        // own authorisation rather than trusting mount()'s.
+        $this->authorize('view', $this->document);
+
+        $style = $this->document->resolvedStyle() ?? DocumentStyle::resolve('report');
+        $result = app(Outline::class)->build($this->document->content_json ?? [], $style?->tokens['numbering'] ?? []);
+
+        return [
+            'numbers' => $result->numbers,
+            'toc' => $result->toc,
+            'figures' => $result->figures,
+            'tables' => $result->tables,
+        ];
+    }
+
+    /**
+     * Suggestion / track-changes mode is rebuilt against the JSON document
+     * in Phase 3. This flag is kept as a no-op toggle for the toolbar UI.
+     */
     public function toggleSuggestionMode(): void
     {
         $this->suggestionMode = ! $this->suggestionMode;
@@ -106,6 +172,12 @@ class Editor extends Component
         $this->commentSidebarOpen = ! $this->commentSidebarOpen;
     }
 
+    /** Swaps $styleCss (see render()) between the canvas and print stylesheets, e.g. to preview @page margins/header/footer before exporting. */
+    public function togglePrintPreview(): void
+    {
+        $this->printPreview = ! $this->printPreview;
+    }
+
     public function acceptSuggestion(int $suggestionId): void
     {
         $this->authorize('update', $this->document);
@@ -114,17 +186,18 @@ class Editor extends Component
             ->whereNull('accepted_at')
             ->findOrFail($suggestionId);
 
-        $this->document->update([
-            'content' => $suggestion->suggestion_text,
-            'version' => $this->document->version + 1,
+        $json = app(HtmlToJson::class)->convert($suggestion->suggestion_text);
+        $this->document = app(DocumentStore::class)->save($this->document, $json, Auth::user(), [
+            'version' => 'named',
+            'label' => 'Accepted suggestion',
         ]);
-        $this->content = $suggestion->suggestion_text;
+        $this->contentJson = $this->document->content_json;
 
         $suggestion->update(['accepted_at' => now()]);
         $this->loadPendingSuggestions();
         $this->saved = true;
 
-        $this->dispatch('suggestion-accepted', content: $suggestion->suggestion_text);
+        $this->dispatch('suggestion-accepted', content: $this->contentJson);
     }
 
     public function rejectSuggestion(int $suggestionId): void
@@ -145,6 +218,121 @@ class Editor extends Component
         $this->validate(['title' => 'required|string|max:255']);
         $this->document->update(['title' => $this->title]);
         $this->saved = true;
+    }
+
+    /**
+     * Switch the document's style. Valid keys are the fourteen system
+     * styles or a team-owned custom style of the same key. Re-saves the
+     * document through DocumentStore so heading/figure numbering is
+     * rebuilt against the new style's numbering rules.
+     */
+    public function setStyle(string $key): void
+    {
+        $this->authorize('update', $this->document);
+
+        $engine = app(StyleEngine::class);
+        $valid = in_array($key, StyleEngine::systemKeys(), true)
+            || DocumentStyle::where('key', $key)->where('team_id', $this->document->team_id)->exists();
+
+        if (! $valid) {
+            $this->addError('style', 'Unknown style');
+
+            return;
+        }
+
+        $this->document->style_key = $key;
+        $this->document = app(DocumentStore::class)->save($this->document, $this->document->content_json, Auth::user(), ['version' => 'none']);
+        $this->contentJson = $this->document->content_json;
+
+        $this->dispatch('style-changed', css: $engine->css($engine->resolve($this->document), 'canvas'));
+    }
+
+    /**
+     * Where this document is filed, root first - the location chip in the
+     * bench. Empty when the document has no tree node at all, which only a
+     * factory-made account with no team can produce.
+     *
+     * @return list<Obj>
+     */
+    #[Computed]
+    public function locationCrumbs(): array
+    {
+        $node = $this->node();
+
+        if ($node === null) {
+            return [];
+        }
+
+        $parent = $node->parent;
+
+        return $parent === null ? [] : [...$parent->ancestors(), $parent];
+    }
+
+    /**
+     * Folders this document can be moved into, taken from the node's OWN
+     * team - never the session's current team.
+     *
+     * @return list<array{id:int,uuid:string,label:string,depth:int}>
+     */
+    #[Computed]
+    public function folderChoices(): array
+    {
+        $node = $this->node();
+
+        return $node === null ? [] : app(FilesService::class)->folderChoices($node->team_id);
+    }
+
+    /**
+     * File the document somewhere else. The sheet is the SAME APG pattern
+     * the documents index uses for rename - Escape closes it and returns
+     * focus - and it is the only move affordance: no drag-and-drop, so
+     * there is nothing a keyboard cannot reach.
+     */
+    public function moveTo(int $destinationId): void
+    {
+        $this->authorize('update', $this->document);
+
+        $node = $this->node();
+        $destination = Obj::find($destinationId);
+
+        if ($node === null || $destination === null || ! $destination->isFolder() || $destination->team_id !== $node->team_id) {
+            $this->addError('location', 'That folder is not available for this document.');
+
+            return;
+        }
+
+        try {
+            app(FilesService::class)->moveObject($node, $destination, Auth::user());
+        } catch (ValidationException $e) {
+            $this->addError('location', collect($e->errors())->flatten()->first() ?? 'That move is not allowed.');
+
+            return;
+        }
+
+        $this->showMoveSheet = false;
+        unset($this->locationCrumbs, $this->folderChoices);
+
+        session()->flash('status', 'Filed in '.$destination->name().'.');
+    }
+
+    /** This document's node in the shared tree, filed at its workspace root if it has none. */
+    private function node(): ?Obj
+    {
+        $node = $this->document->node()->first();
+
+        if ($node !== null) {
+            return $node;
+        }
+
+        $team = $this->document->team ?? $this->document->owner?->personalTeam();
+
+        if ($team === null) {
+            return null;
+        }
+
+        $files = app(FilesService::class);
+
+        return $files->registerDocument($this->document, $files->root($team));
     }
 
     public function heartbeat(): void
@@ -182,6 +370,18 @@ class Editor extends Component
 
     public function render(): View
     {
-        return view('livewire.documents.editor');
+        $engine = app(StyleEngine::class);
+        $styleCss = $engine->css($engine->resolve($this->document), $this->printPreview ? 'print' : 'canvas');
+
+        return view('livewire.documents.editor', [
+            'styleCss' => $styleCss,
+            // Seeds window.DotDoc.setOutline() at mount. Without it every page
+            // load paints its headings unnumbered until the first outline()
+            // round trip answers - the TOC and cross-references hide the gap
+            // (they fall back to the entries/label the server stamped into the
+            // JSON) but a heading number is decoration only, with nothing to
+            // fall back to.
+            'outline' => $this->outline(),
+        ])->title($this->document->title);
     }
 }
