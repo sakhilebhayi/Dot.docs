@@ -60,6 +60,8 @@ Given the usable page height (page height in px at 96dpi, minus top/bottom margi
 
 Breaks are rendered as ProseMirror **widget decorations** — DOM nodes inserted at computed positions that are not part of the document's JSON and are never saved. Each decoration renders: the previous page's footer band, a visual gap (background matching `--ground`, the token from the Fair Copy redesign), the paper-edge shadow on both adjacent page rectangles, and the next page's header band. This is what makes "Continuous Pages" mode look like genuinely separate sheets while the underlying document remains one flow.
 
+This boundary mechanism only ever describes a break *between* two pages, which structurally cannot reach either end of the document: nothing renders page 1's header (no boundary exists before it) or the last page's footer (no boundary exists after it). Two further widget decorations close that gap (Task 8), fixed at the document's start and end positions rather than at a computed break — each showing only its own single band (no gap, no shadow, since there is no adjoining page to shadow or gap against): one renders page 1's header at position `0`, the other the final page's footer at the document's end position. Both are always present whenever pagination has computed at least one page (which is always).
+
 ### 2.4 Header and footer bands
 
 `Editor::outline()` is extended to also return the resolved `PageSetup` (size, orientation, margins) and the header/footer templates pre-split into segments using the **same** `band()` logic `PrintRenderer` already uses server-side — extracted into a small shared class both consumers call, so the field-injection-safe substitution exists in exactly one place. Every segment is either literal text (already fully substituted — title, date, team, document variables) or one of the two live tokens (`PAGE`, `NUMPAGES`), which the client fills in per page from its own computed page index and total page count. No template substitution logic is reimplemented in JavaScript.
@@ -70,13 +72,13 @@ A `sectionBreak` node's `attrs.setup` can carry a page-size or orientation overr
 
 ## 3. View modes
 
-Once page boundaries are computed, five of the six modes the brief asks for are different arrangements of the same decoration set — no separate pagination logic per mode.
+Once page boundaries are computed, four of the six modes the brief asks for are different arrangements of the same decoration set — no separate pagination logic per mode. (Two Page shipped as a fifth mode was rejected during implementation and deferred, §7; Print Preview is the sixth and needs none of this section's engine at all.)
 
 | Mode | Implementation |
 |---|---|
 | **Continuous** (default) | Pages stacked vertically with the gap decorations; normal scroll. |
 | **Single Page** | Same DOM; CSS `scroll-snap-type: y mandatory` with one `scroll-snap-align` per page, plus a page-N-of-total control. |
-| **Two Page** | The canvas becomes a two-column grid (`grid-template-columns: repeat(2, <page width>)`); page 1 sits alone (facing blank) to match book-pagination convention, then pages flow in pairs. |
+| **Two Page** | **Deferred out of v1 (§7).** Not present in the view-mode `<select>`; a two-column grid was drafted during implementation and rejected before shipping because `.paper` is one continuous element for the whole document (§2), so it would put that single element in column 1 and leave column 2 permanently, visibly empty. |
 | **Multi-Page** | A zoomed-out grid of scaled page previews. **Shares its implementation with the page-thumbnails panel** (§4) — one CSS/rendering approach, presented either as a full-canvas overview or a persistent rail. |
 | **Focus** | Hides page-break decorations, headers/footers, and all chrome (rail/dock/topbar) — a single continuous scroll of prose, closest to the pre-pagination canvas. |
 | **Print Preview** | **Not computed live at all.** Embeds the real, already-generated PDF from the existing export route in an `<iframe>`. Preview and output are identical by construction — zero new rendering risk, and this mode needs no work from §2's engine. |
@@ -92,7 +94,7 @@ A rail panel (or the Multi-Page view's full-canvas form) listing every computed 
 | `resources/js/editor/pagination/measure.js` | Pure functions: given block descriptors (`{type, height}` in document order) and a usable page height, produce break positions. Zero DOM mutation — the same "pure decision, dependency-free, `node --test`-able" shape as `toolbarVariant.js`. |
 | `resources/js/editor/pagination/decorations.js` | Turns break positions into a ProseMirror `DecorationSet`; owns widget creation/teardown. |
 | `resources/js/editor/pagination/bands.js` | Renders header/footer band DOM from the server-supplied segments plus the live page index/total. |
-| `resources/js/editor/pagination/viewModes.js` | CSS class toggling and scroll behaviour for the six modes; owns the Multi-Page/thumbnails shared rendering. |
+| `resources/js/editor/pagination/viewModes.js` | CSS class toggling and scroll behaviour for the five shipped modes (`MODES`, §7 on Two Page); owns the Multi-Page/thumbnails shared rendering. |
 | `resources/js/editor/pagination/index.js` | Orchestrator: debounce timer, wiring into `editor.on('update')` and `applyRemote`, exposes `window.DotDoc.pagination = { mode, setMode, pageCount, currentPage, goToPage }`. |
 | `app/Print/HeaderFooterBands.php` (new, extracted from `PrintRenderer`) | The shared, security-hardened template-to-segments logic both `PrintRenderer` and `Editor::outline()`'s new payload call. |
 | `app/Livewire/Documents/Editor.php::outline()` (modified) | Response gains `pageSetup` and `headerSegments`/`footerSegments` alongside the existing `numbers`/`toc`. |
@@ -102,7 +104,7 @@ A rail panel (or the Multi-Page view's full-canvas form) listing every computed 
 - `measure.js`'s core algorithm is pure and unit-tested with `node --test`: given synthetic block-height arrays and a page height, assert break positions, keep-with-next behaviour (a heading with insufficient trailing room moves down), table splitting with header-row repetition, and forced breaks at `pageBreak`/`sectionBreak`.
 - `HeaderFooterBands` gets the same PHP test coverage `PrintRenderer::band()` already has (Task 10's field-injection regression test applies unchanged, since the logic is extracted, not rewritten).
 - `Editor::outline()`'s new response fields get a feature test.
-- Browser verification: a long document produces the expected page count and visible breaks; a manual page break forces a boundary regardless of remaining space; a table splits between rows with the header row repeated; switching each of the six view modes renders correctly in both night and day; Impeccable and the rendered-pair contrast script are re-run on the editor page with pagination active, matching the Fair Copy bar.
+- Browser verification: a long document produces the expected page count and visible breaks; a manual page break forces a boundary regardless of remaining space; a table splits between rows with the header row repeated; switching each of the five shipped view modes renders correctly in both night and day (Two Page deferred, §7); Impeccable and the rendered-pair contrast script are re-run on the editor page with pagination active, matching the Fair Copy bar.
 
 ## 7. Explicit deferral
 
@@ -114,6 +116,7 @@ Named now so it is not silently dropped later:
 - **Closing the `sectionBreak.attrs.setup` gap in the PDF/DOCX exporters** — a stretch goal (§2.5), not required this phase.
 - **Adopting Gotenberg (headless Chromium)** as the print engine to close the live-view/PDF divergence gap — explicitly declined for now (§"Three decisions").
 - **Incremental repagination** (re-measuring only from the edited point onward, reusing earlier pages' cached breaks) — v1 recomputes the whole document on each debounced pass; only worth building if a long real document proves this too slow in practice (YAGNI).
+- **Two Page mode showing two DIFFERENT pages side by side** (Task 8, confirmed during Task 7's review) — `.paper` is one continuous DOM element for the whole document (§2: decoration, not division), so it structurally cannot place two different pages in two grid columns without the same live Range-based content-extraction technique the page thumbnails use (§4, `viewModes.js`), applied to the editable canvas instead of a read-only clone. That is a materially bigger feature — it would mean this one mode shows read-only clones rather than the live editable canvas, unlike every other mode — not a v1 fix. Task 7 drafted a `grid-template-columns: repeat(2, <page width>)` rule that put the single `.paper` in column 1 and left column 2 permanently, visibly empty; rather than ship that, or a purely cosmetic "wider gutters" approximation that doesn't actually show two pages, `two-page` was removed from the view-mode `<select>` and from `viewModes.js`'s `MODES` for v1.
 
 ---
 

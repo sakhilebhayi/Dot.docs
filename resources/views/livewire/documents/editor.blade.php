@@ -527,7 +527,6 @@
                 x-model="viewMode" @change="window.DotDoc.pagination.setMode(viewMode)">
             <option value="continuous">Continuous</option>
             <option value="single">Single page</option>
-            <option value="two-page">Two page</option>
             <option value="multi-page">Multi-page</option>
             <option value="focus">Focus</option>
             <option value="print-preview">Print preview</option>

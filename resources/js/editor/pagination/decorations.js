@@ -243,6 +243,75 @@ function renderBoundaryWidget(renderBands) {
 }
 
 /**
+ * A single header OR footer band, with none of a boundary widget's other
+ * parts (no gap, no shadow) - used only for the two document-EDGE bands
+ * `renderBoundaryWidget()` above can never reach: page 1 has no PREVIOUS
+ * page, so no boundary ever renders FOR it (there is nothing to open one
+ * between); the last page has no NEXT page, so no boundary ever renders
+ * for it either. Design spec §2.3 only ever describes a boundary BETWEEN
+ * two pages - these two widgets are fixed at the document's start and end
+ * instead, entirely outside that mechanism (Task 8), reusing only the
+ * same `.dotdoc-page-band` DOM shape and the caller's `renderBands`/
+ * `renderBand()` call the boundary widget's own footer/header pieces
+ * already use.
+ *
+ * @param {'header'|'footer'} kind
+ * @param {(bandEl: HTMLElement) => void} populate
+ */
+function renderEdgeBandWidget(kind, populate) {
+    const el = document.createElement('div');
+    el.className = 'dotdoc-page-edge';
+    el.contentEditable = 'false';
+
+    const band = document.createElement('div');
+    band.className = `dotdoc-page-band dotdoc-page-${kind}`;
+    populate(band);
+
+    el.appendChild(band);
+
+    return el;
+}
+
+/**
+ * Pure mapping from a document's computed page count to the page number
+ * every header/footer band widget should display - both the
+ * `pageCount - 1` interior boundaries (previous page's footer, next
+ * page's header) AND the two document-edge bands neither boundary can
+ * reach (page 1's header, the last page's footer). Dependency-free and
+ * unit-tested without a real ProseMirror view/DOM
+ * (tests/js/pagination.decorations.test.js) - the same "pure decision"
+ * shape as measure.js's computeBreaks(). repaginate() below is the only
+ * caller, supplying the two DOM-derived numbers (a widget's resolved
+ * document position, the live doc's end position) this function has no
+ * way to know and does not need to.
+ *
+ * A boundary's own footerPage/headerPage is NOT `pageIndexAfterBoundary`
+ * and `pageIndexAfterBoundary - 1` (what this replaced): for the Nth
+ * boundary encountered walking the document (1-based - the boundary that
+ * closes page N and opens page N+1), the footer belongs to page N and the
+ * header to page N+1, i.e. `{footerPage: N, headerPage: N + 1}` directly -
+ * the previous shape passed the boundary's own 1-based sequence number
+ * straight through as `headerPage` and one less as `footerPage`, which
+ * rendered every band's `{{ PAGE }}` field one page too low (page 1's
+ * footer would have read "0").
+ *
+ * @param {number} pageCount
+ * @returns {{
+ *   boundaries: Array<{footerPage: number, headerPage: number}>,
+ *   edgeHeaderPage: number,
+ *   edgeFooterPage: number,
+ * }}
+ */
+export function pageBandNumbers(pageCount) {
+    const boundaries = [];
+    for (let page = 1; page < pageCount; page++) {
+        boundaries.push({ footerPage: page, headerPage: page + 1 });
+    }
+
+    return { boundaries, edgeHeaderPage: 1, edgeFooterPage: pageCount };
+}
+
+/**
  * A TipTap Extension, added to `buildExtensions(opts)` in resources/js/
  * editor/index.js (Task 7) - the SAME shape extensions/headingNumbered.js
  * already uses for its own widget-decoration plugin: a `Plugin` whose
@@ -286,7 +355,9 @@ export const PaginationExtension = Extension.create({
  *
  * @param {import('@tiptap/pm/view').EditorView} view
  * @param {() => {pageHeightPx: number, base: object, bandHeight: number}} getPageSetup
- * @param {(footerEl: HTMLElement, headerEl: HTMLElement, pageIndex: number, pageCount: number) => void} renderBands
+ * @param {(footerEl: HTMLElement | null, headerEl: HTMLElement | null, footerPage: number | null, headerPage: number | null, pageCount: number) => void} renderBands
+ *   Either element (and its matching page number) is null for the two
+ *   document-edge widgets below, which render only one band each.
  * @returns {number} the new total page count
  */
 export function repaginate(view, getPageSetup, renderBands) {
@@ -300,6 +371,7 @@ export function repaginate(view, getPageSetup, renderBands) {
     // repaginate() returns - a widget's factory runs DURING this map, so a
     // caller-side value can only ever be one generation behind.
     const pageCount = breakList.length + 1;
+    const { boundaries, edgeHeaderPage, edgeFooterPage } = pageBandNumbers(pageCount);
 
     let pageIndex = 0;
     const decorations = breakList.map((breakInfo) => {
@@ -313,10 +385,10 @@ export function repaginate(view, getPageSetup, renderBands) {
         const blockNode = view.state.doc.child(blockIndex);
         const pos = resolveBreakPosition(view, breakInfo, starts, blockNode, blockIndex);
         pageIndex += 1;
-        const thisPageIndex = pageIndex;
+        const { footerPage, headerPage } = boundaries[pageIndex - 1];
 
         return Decoration.widget(pos, () => renderBoundaryWidget(
-            (footerEl, headerEl) => renderBands(footerEl, headerEl, thisPageIndex, pageCount),
+            (footerEl, headerEl) => renderBands(footerEl, headerEl, footerPage, headerPage, pageCount),
         ), {
             side: -1,
             // pageCount is part of the key ON PURPOSE: ProseMirror reuses
@@ -333,6 +405,30 @@ export function repaginate(view, getPageSetup, renderBands) {
             key: `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}-${pageCount}`,
         });
     });
+
+    // Two ALWAYS-PRESENT edge widgets (pageCount is never less than 1),
+    // fixed at the document's very start and very end - entirely outside
+    // the breakList walk above, since neither edge is a break BETWEEN two
+    // pages the way every entry above is (Task 8 / design spec §2.3's gap:
+    // there is no boundary before page 1 or after the last page, so
+    // without these two, a document with a header/footer template
+    // configured shows no header on page 1 and no footer on the last
+    // page - the first thing anyone testing the feature would notice).
+    decorations.push(Decoration.widget(0, () => renderEdgeBandWidget(
+        'header',
+        (headerEl) => renderBands(null, headerEl, null, edgeHeaderPage, pageCount),
+    ), {
+        side: -1,
+        key: `dotdoc-page-edge-header-${pageCount}`,
+    }));
+
+    decorations.push(Decoration.widget(view.state.doc.content.size, () => renderEdgeBandWidget(
+        'footer',
+        (footerEl) => renderBands(footerEl, null, edgeFooterPage, null, pageCount),
+    ), {
+        side: 1,
+        key: `dotdoc-page-edge-footer-${pageCount}`,
+    }));
 
     const tr = view.state.tr.setMeta(paginationPluginKey, DecorationSet.create(view.state.doc, decorations));
     tr.setMeta('addToHistory', false);

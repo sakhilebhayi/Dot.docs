@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { MODES, classesForMode } from '../../resources/js/editor/pagination/viewModes.js';
 
-test('every mode is a known, exact set of six', () => {
-    assert.deepEqual(MODES, ['continuous', 'single', 'two-page', 'multi-page', 'focus', 'print-preview']);
+test('every mode is a known, exact set of five - two-page is deferred (design spec §7, Task 8)', () => {
+    assert.deepEqual(MODES, ['continuous', 'single', 'multi-page', 'focus', 'print-preview']);
 });
 
 test('continuous is the default: no special class beyond the base', () => {
@@ -15,8 +15,8 @@ test('single page mode adds scroll-snap', () => {
     assert.deepEqual(classesForMode('single'), ['dotdoc-paginated', 'dotdoc-mode-single']);
 });
 
-test('two page mode adds the facing-pages grid class', () => {
-    assert.deepEqual(classesForMode('two-page'), ['dotdoc-paginated', 'dotdoc-mode-two-page']);
+test('a removed/unknown mode like two-page falls back to continuous', () => {
+    assert.deepEqual(classesForMode('two-page'), ['dotdoc-paginated']);
 });
 
 test('multi page mode adds the overview grid class', () => {

@@ -5,6 +5,18 @@ import { applyMode, MODES, renderThumbnailGrid } from './viewModes';
 const REPAGINATE_DEBOUNCE_MS = 300;
 
 /**
+ * The two modes whose CSS (CssBuilder::paginationRule()) hides `.paper`
+ * entirely and replaces it with something else: Print Preview (the real
+ * exported PDF, in an iframe) and Multi-Page (a zoomed-out grid of scaled
+ * page previews, design spec §3 - the SAME "REPLACES the canvas" claim,
+ * the same bug when it wasn't, and so the same fix). `runRepaginate()`
+ * and `setMode()` below both need this set, not just one boolean, since
+ * switching directly between the two (or repeatedly into either) must
+ * still only resume measurement once `.paper` is actually visible again.
+ */
+const MODES_THAT_HIDE_PAPER = new Set(['print-preview', 'multi-page']);
+
+/**
  * Mount pagination for one editor instance. Called once from
  * resources/js/editor/index.js's mount(), alongside the ProseMirror editor
  * itself - there is exactly one document editor per page, so the returned
@@ -55,16 +67,29 @@ export function mountPagination(editor, canvasEl, opts = {}) {
         return { pageHeightPx, base: pageSetup, bandHeight: bandHeightPx() };
     }
 
-    function renderBandsForBoundary(footerEl, headerEl, pageIndexAfterBoundary, totalPages) {
-        // `totalPages` comes straight from repaginate()'s own freshly
-        // computed count, passed in at the moment each widget is built -
-        // NOT the closure's `pageCountValue`, which is still the PREVIOUS
-        // pass's value until repaginate() returns below. Reading the
-        // closure here would render every {{ pages }} band one generation
-        // stale on top of the DecorationSet-key staleness scheduleRepaginate
-        // already fixes for LATER passes (see repaginate()'s key comment).
-        renderBand(footerEl, footerSegments, pageIndexAfterBoundary - 1, totalPages);
-        renderBand(headerEl, headerSegments, pageIndexAfterBoundary, totalPages);
+    /**
+     * Renders whichever of the footer/header bands repaginate() actually
+     * asked for - both are present for an interior page-boundary widget,
+     * but only one is for either of the two document-edge widgets (Task
+     * 8: page 1's header has no footer counterpart at the very top of the
+     * document, and the last page's footer has no header counterpart at
+     * the very bottom), which pass `null` for the one they don't need.
+     */
+    function renderPageBands(footerEl, headerEl, footerPage, headerPage, totalPages) {
+        // `totalPages` and each page number come straight from
+        // repaginate()'s own freshly computed pass, passed in at the
+        // moment each widget is built - NOT the closure's `pageCountValue`,
+        // which is still the PREVIOUS pass's value until repaginate()
+        // returns below. Reading the closure here would render every
+        // {{ pages }} band one generation stale on top of the
+        // DecorationSet-key staleness scheduleRepaginate already fixes for
+        // LATER passes (see repaginate()'s key comment).
+        if (footerEl) {
+            renderBand(footerEl, footerSegments, footerPage, totalPages);
+        }
+        if (headerEl) {
+            renderBand(headerEl, headerSegments, headerPage, totalPages);
+        }
     }
 
     function scheduleRepaginate() {
@@ -76,19 +101,21 @@ export function mountPagination(editor, canvasEl, opts = {}) {
         if (editor.isDestroyed) {
             return;
         }
-        if (mode === 'print-preview') {
-            // Print Preview hides .paper entirely
+        if (MODES_THAT_HIDE_PAPER.has(mode)) {
+            // Print Preview AND Multi-Page both hide .paper entirely
             // (.editor-main.dotdoc-mode-print-preview .paper{display:none},
+            // .editor-main.dotdoc-mode-multi-page .paper{display:none} -
             // CssBuilder::paginationRule()) - measuring a display:none
             // subtree would wipe every page-boundary decoration to zero
             // breaks (getBoundingClientRect() on a hidden element reports
-            // all-zero rects). Skip the whole measurement/decoration/rail
-            // pass while this mode is active; setMode() below resumes it
-            // immediately on the way OUT of this mode, rather than leaving
-            // the canvas showing zero boundaries until the next edit.
+            // all-zero rects), corrupting pageCountValue for the rail and
+            // the grid both. Skip the whole measurement/decoration/rail
+            // pass while either mode is active; setMode() below resumes it
+            // immediately on the way OUT, rather than leaving the canvas
+            // showing zero boundaries until the next edit.
             return;
         }
-        pageCountValue = repaginate(editor.view, getPageSetupForMeasurement, renderBandsForBoundary);
+        pageCountValue = repaginate(editor.view, getPageSetupForMeasurement, renderPageBands);
         currentPageIndex = Math.min(currentPageIndex, pageCountValue);
         const modeOpts = {
             pdfPreviewUrl: opts.pdfPreviewUrl,
@@ -141,7 +168,7 @@ export function mountPagination(editor, canvasEl, opts = {}) {
             return mode;
         },
         setMode(next) {
-            const wasPrintPreview = mode === 'print-preview';
+            const paperWasHidden = MODES_THAT_HIDE_PAPER.has(mode);
             mode = MODES.includes(next) ? next : 'continuous';
             applyMode(canvasEl, mode, {
                 pdfPreviewUrl: opts.pdfPreviewUrl,
@@ -149,11 +176,11 @@ export function mountPagination(editor, canvasEl, opts = {}) {
                 currentPage: () => currentPageIndex,
                 goToPage,
             });
-            if (wasPrintPreview && mode !== 'print-preview') {
+            if (paperWasHidden && !MODES_THAT_HIDE_PAPER.has(mode)) {
                 // runRepaginate() skips its work entirely for as long as
-                // Print Preview is active (see above) - resume it now,
-                // rather than leaving the canvas with zero page-boundary
-                // decorations until the writer's next edit.
+                // Print Preview or Multi-Page is active (see above) -
+                // resume it now, rather than leaving the canvas with zero
+                // page-boundary decorations until the writer's next edit.
                 scheduleRepaginate();
             }
         },

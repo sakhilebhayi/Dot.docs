@@ -312,6 +312,13 @@ class CssBuilder
         return '.editor-main.dotdoc-paginated .paper{background:transparent;box-shadow:none}'.
             '.editor-main.dotdoc-paginated .paper>*{background:#fff}'.
             '.dotdoc-page-boundary{contain:layout;pointer-events:none}'.
+            // The two document-EDGE bands (page 1's header, the last
+            // page's footer - pagination/decorations.js's repaginate(),
+            // Task 8): fixed widgets outside the boundary mechanism, so
+            // they get their own (much smaller) wrapper rule rather than
+            // `.dotdoc-page-boundary`'s, which also owns gap/shadow layout
+            // neither edge band has.
+            '.dotdoc-page-edge{contain:layout;pointer-events:none}'.
             '.dotdoc-page-gap{height:2.5em;background:var(--ground)}'.
             '.dotdoc-page-shadow{height:.5em;background:linear-gradient(to bottom,rgba(0,0,0,.08),transparent)}'.
             '.dotdoc-page-shadow-below{transform:rotate(180deg)}'.
@@ -321,16 +328,51 @@ class CssBuilder
             // with the body text above/below it.
             ".dotdoc-page-band{background:#fff;padding:.4em {$h['right']} .4em {$h['left']};font-size:var(--doc-size-small);color:var(--doc-muted);pointer-events:auto}".
             '.editor-main.dotdoc-paginated .page-break,.editor-main.dotdoc-paginated .section-break{display:none}'.
-            '.editor-main.dotdoc-mode-focus .dotdoc-page-boundary,.editor-main.dotdoc-mode-focus .dotdoc-page-band{display:none}'.
+            '.editor-main.dotdoc-mode-focus .dotdoc-page-boundary,.editor-main.dotdoc-mode-focus .dotdoc-page-edge,.editor-main.dotdoc-mode-focus .dotdoc-page-band{display:none}'.
             '.editor-main.dotdoc-mode-focus .dotdoc-page-gap{background:transparent;height:0}'.
             '.editor-main.dotdoc-mode-single{scroll-snap-type:y mandatory;overflow-y:auto}'.
             '.editor-main.dotdoc-mode-single .paper{scroll-snap-align:start}'.
-            '.editor-main.dotdoc-mode-two-page{display:grid;grid-template-columns:repeat(2,210mm);gap:1em;justify-content:center}'.
+            // Two Page mode was removed from v1 (Task 8, design spec §7):
+            // `.paper` is one continuous element for the WHOLE document
+            // (design spec §2), so a two-column grid here would always
+            // place that single element in column 1 and leave column 2
+            // permanently, visibly empty - it cannot show two DIFFERENT
+            // pages side by side without the live Range-based extraction
+            // technique the thumbnails use (viewModes.js), which is a
+            // materially bigger feature than a CSS fix. No CSS rule
+            // exists for `dotdoc-mode-two-page` because `two-page` is no
+            // longer a selectable view mode (viewModes.js's MODES, the
+            // Blade `<select>`) - do not re-add a grid rule here without
+            // also re-adding that live-extraction rendering.
             '.dotdoc-multi-page-grid,.dotdoc-thumbnail-rail{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:var(--s3, 12px)}'.
+            // `.canvas` (paper.css) is a FLEX container, so without an
+            // explicit width `.dotdoc-multi-page-grid` (mounted inside it
+            // as `.paper`'s replacement, viewModes.js's applyMode()) sizes
+            // to its own min-content instead of the canvas's available
+            // width - collapsing `repeat(auto-fill, minmax(120px,1fr))`
+            // to a single column of 120px boxes rather than the "zoomed-
+            // out GRID of scaled page previews" design spec §3 promises.
+            // `.dotdoc-thumbnail-rail` needs no equivalent rule: it lives
+            // in the rail panel's own block-layout container, not inside
+            // this flex row.
+            '.dotdoc-multi-page-grid{width:100%}'.
             '.dotdoc-thumbnail{border:1px solid var(--line);border-radius:var(--r-control, 8px);overflow:hidden;cursor:pointer;position:relative;aspect-ratio:210/297}'.
             '.dotdoc-thumbnail.is-current{outline:2px solid var(--accent);outline-offset:2px}'.
             '.dotdoc-thumbnail-inner{transform-origin:top left;pointer-events:none}'.
             '.dotdoc-thumbnail-number{position:absolute;bottom:4px;right:4px;font-size:var(--doc-size-small, 11px);background:var(--surface);color:var(--ink-soft);padding:0 4px;border-radius:4px}'.
+            // Multi-Page mode REPLACES the canvas with "a zoomed-out grid
+            // of scaled page previews" (design spec §3), exactly the same
+            // claim Print Preview makes below about the PDF iframe - and
+            // the same bug Task 8's browser verification caught here:
+            // viewModes.js's applyMode() APPENDS `.dotdoc-multi-page-grid`
+            // as a sibling of `.paper` rather than replacing it, so without
+            // this rule the live continuous canvas kept rendering ABOVE the
+            // grid instead of being replaced by it. Mirrors the
+            // print-preview rule below exactly, including
+            // pagination/index.js's matching skip-while-hidden guard in
+            // `runRepaginate()` (measuring a `display:none` subtree
+            // reports zero-height rects and would wipe every decoration).
+            '.editor-main.dotdoc-mode-multi-page .paper{display:none}'.
             // Print Preview REPLACES the canvas with the real exported PDF
             // (design spec §3: "not computed live at all") - viewModes.js's
             // applyMode() appends the iframe as a SIBLING of .paper rather
