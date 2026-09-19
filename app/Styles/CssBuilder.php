@@ -311,6 +311,27 @@ class CssBuilder
 
         return '.editor-main.dotdoc-paginated .paper{background:transparent;box-shadow:none}'.
             '.editor-main.dotdoc-paginated .paper>*{background:#fff}'.
+            // A thumbnail clone (viewModes.js's renderThumbnail()) reuses
+            // the `paper` class so Document Style CSS applies to it - but
+            // that means it ALSO matches the transparent rule immediately
+            // above whenever the clone lives inside `.editor-main.
+            // dotdoc-paginated` (Multi-Page mode's grid), and it is a
+            // paper-shaped element with no other rule reaching it at all
+            // when it lives in the thumbnails RAIL (outside `.editor-main`
+            // entirely). Found live in Task 8's browser verification, made
+            // visible only once the off-screen Multi-Page bug elsewhere in
+            // this file was fixed: `--paper`/`--paper-ink` are the same
+            // never-inverting tokens `.canvas .paper` itself uses
+            // (paper.css) - a thumbnail is a miniature real page and must
+            // look like one regardless of which container it is mounted
+            // in. `.dotdoc-thumbnail .dotdoc-thumbnail-inner.paper` ties
+            // the transparent rule above on specificity (three classes
+            // each) and wins on source order since it comes later in this
+            // same string - deliberately NOT scoped under `.editor-main`,
+            // so the identical rule also reaches the rail's thumbnails,
+            // which sit outside `.editor-main` and have no other paper
+            // background/ink rule reaching them at all.
+            '.dotdoc-thumbnail .dotdoc-thumbnail-inner.paper{background:var(--paper);color:var(--paper-ink)}'.
             '.dotdoc-page-boundary{contain:layout;pointer-events:none}'.
             // The two document-EDGE bands (page 1's header, the last
             // page's footer - pagination/decorations.js's repaginate(),

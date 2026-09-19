@@ -66,9 +66,15 @@ test('pageBandNumbers: a three-page document numbers each interior boundary corr
     assert.equal(result.edgeFooterPage, 3, "the last page's own footer is always the final page count");
 });
 
-test('pageBandNumbers: every boundary footerPage/headerPage pair is consecutive', () => {
+test('pageBandNumbers: every boundary footerPage/headerPage pair is consecutive, starting at 1, one per gap', () => {
     const result = pageBandNumbers(5);
-    for (const { footerPage, headerPage } of result.boundaries) {
+    // A 5-page document has exactly 4 interior boundaries (one between
+    // each pair of pages) - asserting only "each pair is consecutive"
+    // below would still pass for a single wrong entry like
+    // [{footerPage: 7, headerPage: 8}], since that pair IS consecutive.
+    assert.equal(result.boundaries.length, 4);
+    result.boundaries.forEach(({ footerPage, headerPage }, i) => {
+        assert.equal(footerPage, i + 1, `boundary ${i}'s footerPage should be page ${i + 1}`);
         assert.equal(headerPage, footerPage + 1);
-    }
+    });
 });
