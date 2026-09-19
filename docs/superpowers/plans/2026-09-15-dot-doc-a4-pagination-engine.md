@@ -1640,10 +1640,13 @@ export function classesForMode(mode) {
 }
 
 /**
- * Apply a view mode to the canvas region. `canvasEl` is `.canvas-region`
+ * Apply a view mode to the canvas region. `canvasEl` is `.editor-main`
  * (the element wrapping `.paper`), not `.paper` itself, so print-preview's
  * iframe can fully replace the paginated DOM without pagination/index.js
- * having to tear anything down first.
+ * having to tear anything down first. (Not `.canvas-region` - that's the
+ * whole page's <main> content region in layouts/app.blade.php, also
+ * wrapping .doc-bar and the comments sidebar; applying a view mode's
+ * layout there would restyle the entire editor page, not just the paper.)
  *
  * @param {HTMLElement} canvasEl
  * @param {string} mode
@@ -1877,7 +1880,10 @@ const REPAGINATE_DEBOUNCE_MS = 300;
  * this editor's single active document).
  *
  * @param {import('@tiptap/core').Editor} editor
- * @param {HTMLElement} canvasEl - `.canvas-region`, the element wrapping `.paper`
+ * @param {HTMLElement} canvasEl - `.editor-main`, the element wrapping `.paper`
+ *   (NOT `.canvas-region` - the whole page's <main> content region, which
+ *   also wraps `.doc-bar` and the comments sidebar; a view mode's layout
+ *   applied there would restyle the entire editor page)
  * @param {{pageSetup?: object, headerSegments?: Array, footerSegments?: Array, pdfPreviewUrl?: string}} opts
  */
 export function mountPagination(editor, canvasEl, opts = {}) {
@@ -1937,7 +1943,7 @@ export function mountPagination(editor, canvasEl, opts = {}) {
         };
         applyMode(canvasEl, mode, modeOpts);
 
-        // The thumbnails RAIL (design spec §4) lives outside `.canvas-region`
+        // The thumbnails RAIL (design spec §4) lives outside `.editor-main`
         // (see the Blade bridge in Step 4) and is populated whenever it is
         // present, independent of the current view mode - unlike Multi-Page
         // mode's grid, which applyMode() only mounts inside the canvas
@@ -2023,8 +2029,19 @@ Register the extension in `buildExtensions()`, alongside the other behavioural (
 Inside `mount()`, after `const editor = new Editor({...})` finishes constructing but before the `handle` object is built (i.e., right after the existing `if (contentError || ...) failClosed(...)` block, so pagination never starts against a fail-closed, read-only document), add:
 
 ```js
-    const canvasRegion = element.closest('.canvas-region') || element.parentElement || element;
-    const pagination = mountPagination(editor, canvasRegion, {
+    // `.editor-main` (NOT `.canvas-region`, the whole page's <main> content
+    // region shared with .doc-bar and the comments sidebar) is the tight
+    // wrapper around `#doc-paper` in editor.blade.php. It carries its own
+    // `wire:ignore` (see Step 4's Blade change) for the same reason
+    // `#doc-paper` already does: pagination injects DOM siblings of
+    // `#doc-paper` (the Multi-Page grid, the Print Preview iframe) that
+    // Livewire's own render never produced - without that wire:ignore,
+    // the next Livewire morph (e.g. the ~1.2s autosave round trip) would
+    // treat them as extra nodes not in its rendered output and remove
+    // them, exactly the failure `#doc-paper`'s own wire:ignore already
+    // prevents for the ProseMirror subtree itself.
+    const editorMain = element.closest('.editor-main') || element.parentElement || element;
+    const pagination = mountPagination(editor, editorMain, {
         pageSetup: opts.pageSetup,
         headerSegments: opts.headerSegments,
         footerSegments: opts.footerSegments,
@@ -2120,10 +2137,12 @@ Add both methods (placed after `pageBreakRule()`):
      * The decoration-based pagination boundary (resources/js/editor/
      * pagination/decorations.js inserts one `.dotdoc-page-boundary` widget
      * per computed break). This CSS never appears unless pagination has
-     * actually run - `.dotdoc-paginated` is added to `.canvas-region` by
-     * viewModes.js's applyMode(), so a page that has not mounted the
-     * pagination bundle at all (or has JS disabled) sees the plain
-     * unbounded `.paper` exactly as it did before this phase.
+     * actually run - `.dotdoc-paginated` is added to `.editor-main` (the
+     * tight wrapper around `.paper` - NOT `.canvas-region`, the whole
+     * page's <main> content region also shared with `.doc-bar` and the
+     * comments sidebar) by viewModes.js's applyMode(), so a page that has
+     * not mounted the pagination bundle at all (or has JS disabled) sees
+     * the plain unbounded `.paper` exactly as it did before this phase.
      *
      * `--ground` is the Fair Copy app-background token (.ai/rules/views.md)
      * - the gap between two pages shows the desk behind the paper, not a
@@ -2145,8 +2164,8 @@ Add both methods (placed after `pageBreakRule()`):
 
         $h = $this->horizontalMargins();
 
-        return '.canvas-region.dotdoc-paginated .paper{background:transparent;box-shadow:none}'.
-            '.canvas-region.dotdoc-paginated .paper>*{background:#fff}'.
+        return '.editor-main.dotdoc-paginated .paper{background:transparent;box-shadow:none}'.
+            '.editor-main.dotdoc-paginated .paper>*{background:#fff}'.
             '.dotdoc-page-boundary{contain:layout;pointer-events:none}'.
             '.dotdoc-page-gap{height:2.5em;background:var(--ground)}'.
             '.dotdoc-page-shadow{height:.5em;background:linear-gradient(to bottom,rgba(0,0,0,.08),transparent)}'.
@@ -2156,12 +2175,12 @@ Add both methods (placed after `pageBreakRule()`):
             // the page's REAL left/right margin so the band's text aligns
             // with the body text above/below it.
             ".dotdoc-page-band{background:#fff;padding:.4em {$h['right']} .4em {$h['left']};font-size:var(--doc-size-small);color:var(--doc-muted);pointer-events:auto}".
-            '.canvas-region.dotdoc-paginated .page-break,.canvas-region.dotdoc-paginated .section-break{display:none}'.
-            '.canvas-region.dotdoc-mode-focus .dotdoc-page-boundary,.canvas-region.dotdoc-mode-focus .dotdoc-page-band{display:none}'.
-            '.canvas-region.dotdoc-mode-focus .dotdoc-page-gap{background:transparent;height:0}'.
-            '.canvas-region.dotdoc-mode-single{scroll-snap-type:y mandatory;overflow-y:auto}'.
-            '.canvas-region.dotdoc-mode-single .paper{scroll-snap-align:start}'.
-            '.canvas-region.dotdoc-mode-two-page{display:grid;grid-template-columns:repeat(2,210mm);gap:1em;justify-content:center}'.
+            '.editor-main.dotdoc-paginated .page-break,.editor-main.dotdoc-paginated .section-break{display:none}'.
+            '.editor-main.dotdoc-mode-focus .dotdoc-page-boundary,.editor-main.dotdoc-mode-focus .dotdoc-page-band{display:none}'.
+            '.editor-main.dotdoc-mode-focus .dotdoc-page-gap{background:transparent;height:0}'.
+            '.editor-main.dotdoc-mode-single{scroll-snap-type:y mandatory;overflow-y:auto}'.
+            '.editor-main.dotdoc-mode-single .paper{scroll-snap-align:start}'.
+            '.editor-main.dotdoc-mode-two-page{display:grid;grid-template-columns:repeat(2,210mm);gap:1em;justify-content:center}'.
             '.dotdoc-multi-page-grid,.dotdoc-thumbnail-rail{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:var(--s3, 12px)}'.
             '.dotdoc-thumbnail{border:1px solid var(--line);border-radius:var(--r-control, 8px);overflow:hidden;cursor:pointer;position:relative;aspect-ratio:210/297}'.
             '.dotdoc-thumbnail.is-current{outline:2px solid var(--accent);outline-offset:2px}'.
@@ -2174,6 +2193,27 @@ Add both methods (placed after `pageBreakRule()`):
 - [ ] **Step 4: Wire the Blade bridge**
 
 In `resources/views/livewire/documents/editor.blade.php`:
+
+Add `wire:ignore` to the existing `.editor-main` div (currently
+`<div class="editor-main">`, wrapping `#doc-paper`), for the same reason
+`#doc-paper` itself already carries `wire:ignore`: pagination (Task 7's
+`mountPagination`, via `viewModes.js`'s `applyMode()`) injects DOM
+siblings of `#doc-paper` inside `.editor-main` — the Multi-Page grid and
+the Print Preview iframe — that Livewire's own render never produced.
+Without `wire:ignore` on `.editor-main`, the next Livewire morph (e.g.
+the ~1.2s autosave round trip) would see those as extra nodes not in its
+rendered output and remove them:
+
+```blade
+        <div class="editor-main" wire:ignore>
+            <div id="doc-paper" x-ref="editorEl" wire:ignore class="canvas" data-outline="{{ json_encode($outline) }}"></div>
+        </div>
+```
+
+(the inner `wire:ignore` on `#doc-paper` was already there; only the
+outer one on `.editor-main` is new — `wire:ignore` does not need to
+appear on both for the protection to apply to `#doc-paper`, but leaving
+the original in place is harmless and avoids relying on that detail.)
 
 Add two properties to the top-level `x-data` object, near `showMoveSheet`:
 
@@ -2233,12 +2273,13 @@ Add a view-mode `<select>` beside the existing style picker in `.doc-bar` (after
                 @click="thumbnailsOpen = !thumbnailsOpen">Pages</button>
 ```
 
-Add the thumbnails rail as a sibling of `.editor-side`, inside `.editor-row` (thumbnails and comments can both be open at once — they serve different purposes and neither excludes the other):
+Add the thumbnails rail as a sibling of `.editor-side`, inside `.editor-row` (thumbnails and comments can both be open at once — they serve different purposes and neither excludes the other). `.dotdoc-thumbnail-rail` also needs `wire:ignore`, for the identical reason `.editor-main` does above: `runRepaginate()`'s `renderThumbnailGrid(rail, ...)` call (Step 1) populates it with JS-created thumbnail elements the server never rendered, which a Livewire morph would otherwise strip on the next round trip:
 
 ```blade
         <div class="editor-thumbnails" x-show="thumbnailsOpen" x-cloak
              aria-label="Page thumbnails">
-            <div class="dotdoc-thumbnail-rail" x-init="$nextTick(() => window.DotDoc.pagination.setMode(window.DotDoc.pagination.mode))"></div>
+            <div class="dotdoc-thumbnail-rail" wire:ignore
+                 x-init="$nextTick(() => window.DotDoc.pagination.setMode(window.DotDoc.pagination.mode))"></div>
         </div>
 ```
 

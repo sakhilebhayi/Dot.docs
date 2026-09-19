@@ -23,10 +23,13 @@ export function classesForMode(mode) {
 }
 
 /**
- * Apply a view mode to the canvas region. `canvasEl` is `.canvas-region`
+ * Apply a view mode to the canvas region. `canvasEl` is `.editor-main`
  * (the element wrapping `.paper`), not `.paper` itself, so print-preview's
  * iframe can fully replace the paginated DOM without pagination/index.js
- * having to tear anything down first.
+ * having to tear anything down first. (Not `.canvas-region` - that's the
+ * whole page's <main> content region in layouts/app.blade.php, also
+ * wrapping .doc-bar and the comments sidebar; applying a view mode's
+ * layout there would restyle the entire editor page, not just the paper.)
  *
  * @param {HTMLElement} canvasEl
  * @param {string} mode
