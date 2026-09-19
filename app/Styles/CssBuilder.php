@@ -348,6 +348,17 @@ class CssBuilder
             // the page's REAL left/right margin so the band's text aligns
             // with the body text above/below it.
             ".dotdoc-page-band{background:#fff;padding:.4em {$h['right']} .4em {$h['left']};font-size:var(--doc-size-small);color:var(--doc-muted);pointer-events:auto}".
+            // design spec §2.2: a table repeats its header row at the top
+            // of each continuation page. `decorations.js`'s
+            // `cloneTableHeaderRow()` builds this as a `display:flex` row
+            // of plain `<div>` cells, deliberately never a `<table>` (a
+            // real `<table>` nested inside the ORIGINAL table's own
+            // `<tbody>` was found live to feed back into that table's own
+            // auto-layout column-width computation, growing it wider on
+            // every repagination pass) - `flex` lays the per-cell fixed
+            // widths `cloneTableHeaderRow()` sets inline out in a single
+            // row without needing any table layout algorithm at all.
+            '.dotdoc-table-header-repeat{display:flex;background:#fff}'.
             '.editor-main.dotdoc-paginated .page-break,.editor-main.dotdoc-paginated .section-break{display:none}'.
             '.editor-main.dotdoc-mode-focus .dotdoc-page-boundary,.editor-main.dotdoc-mode-focus .dotdoc-page-edge,.editor-main.dotdoc-mode-focus .dotdoc-page-band{display:none}'.
             '.editor-main.dotdoc-mode-focus .dotdoc-page-gap{background:transparent;height:0}'.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveSectionPageHeight, mmToPx, pageBandNumbers } from '../../resources/js/editor/pagination/decorations.js';
+import { resolveSectionPageHeight, mmToPx, pageBandNumbers, findTableHeaderRow } from '../../resources/js/editor/pagination/decorations.js';
 
 test('mmToPx converts at 96dpi (1in = 25.4mm = 96px)', () => {
     assert.equal(Math.round(mmToPx('25.4mm')), 96);
@@ -77,4 +77,29 @@ test('pageBandNumbers: every boundary footerPage/headerPage pair is consecutive,
         assert.equal(footerPage, i + 1, `boundary ${i}'s footerPage should be page ${i + 1}`);
         assert.equal(headerPage, footerPage + 1);
     });
+});
+
+// Design spec §2.2's table-header-repeat: findTableHeaderRow() is the one
+// piece of that feature with no live-DOM geometry involved, so it is the
+// one piece a real unit test can hold accountable (see its own comment for
+// why the rest is browser-verified instead). A fake row is anything with a
+// `querySelector` - the real caller always passes live `<tr>` elements.
+function fakeRow(hasHeaderCell) {
+    return { querySelector: (sel) => (sel === 'th' && hasHeaderCell ? {} : null) };
+}
+
+test('findTableHeaderRow: the first row with a th cell is the header, whatever position it is in', () => {
+    const data1 = fakeRow(false);
+    const header = fakeRow(true);
+    const data2 = fakeRow(false);
+    assert.equal(findTableHeaderRow([header, data1, data2]), header);
+    assert.equal(findTableHeaderRow([data1, header, data2]), header, 'a header row need not be first - only measure.js/decorations.js assume it is, this function does not');
+});
+
+test('findTableHeaderRow: a table with no header row at all returns null, not the first data row', () => {
+    assert.equal(findTableHeaderRow([fakeRow(false), fakeRow(false)]), null);
+});
+
+test('findTableHeaderRow: an empty table (no rows yet) returns null', () => {
+    assert.equal(findTableHeaderRow([]), null);
 });

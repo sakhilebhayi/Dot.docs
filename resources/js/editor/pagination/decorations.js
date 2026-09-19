@@ -109,7 +109,7 @@ function measureBlocks(view, sectionSetups) {
             const rowEls = dom instanceof HTMLElement
                 ? Array.from(dom.querySelectorAll(':scope > table > tbody > tr, :scope > table > tr'))
                 : [];
-            const headerEl = rowEls.find((r) => r.querySelector('th'));
+            const headerEl = findTableHeaderRow(rowEls);
             const headerHeight = headerEl ? headerEl.getBoundingClientRect().height : 0;
             const rowHeights = rowEls
                 .filter((r) => r !== headerEl)
@@ -144,6 +144,192 @@ function measureBlocks(view, sectionSetups) {
 /** Whether `el` is a pagination-inserted widget rather than real document content. */
 function isPaginationWidget(el) {
     return el.classList?.contains('dotdoc-page-boundary') || el.classList?.contains('dotdoc-page-edge');
+}
+
+/**
+ * `view.nodeDOM(pos)` for a table node is `.tableWrapper`, not `<table>`
+ * (see measureBlocks() above) - shared here so a table's header row is
+ * found the same way whether the caller is measuring its height
+ * (measureBlocks()) or cloning it onto a mid-table split's continuation
+ * page (renderBoundaryWidget()/repaginate() below), rather than two
+ * queries that could silently drift apart.
+ *
+ * @param {HTMLElement} wrapperDom - `view.nodeDOM(tableStart)`
+ * @returns {HTMLElement | null}
+ */
+function findTableHeaderRowEl(wrapperDom) {
+    if (!(wrapperDom instanceof HTMLElement)) {
+        return null;
+    }
+    const rowEls = wrapperDom.querySelectorAll(':scope > table > tbody > tr, :scope > table > tr');
+
+    return findTableHeaderRow(Array.from(rowEls));
+}
+
+/**
+ * Exported (unlike its sibling helpers just below) purely so `node --test`
+ * can exercise this one, dependency-free decision without a real DOM - it
+ * takes a plain array and calls nothing but `.querySelector`, the same
+ * "pure decision, real-DOM-free" shape as measure.js's own functions. The
+ * REST of this file's table-header-repeat logic (`cloneTableHeaderRow()`,
+ * `buildTableHeaderClone()`) reads live `getBoundingClientRect()` geometry
+ * and cannot be meaningfully unit-tested the same way - jsdom (this
+ * project's `node --test` environment) never performs real layout, so a
+ * "test" of that code would only prove jsdom returns zeroes consistently,
+ * not that the feature works. That part is covered by live browser
+ * verification instead (see the SDD ledger and this feature's commit).
+ *
+ * @param {HTMLElement[]} rowEls - a table's own direct row children, in order
+ * @returns {HTMLElement | null} the one row with at least one `<th>` cell, or null if the table has no header row
+ */
+export function findTableHeaderRow(rowEls) {
+    return rowEls.find((r) => r.querySelector('th')) || null;
+}
+
+/** Inline-style properties copied from each live header cell onto its clone `<div>`, so the repeat LOOKS like the real header cell despite using no table-related tag at all (see cloneTableHeaderRow()'s own comment for why). Layout-affecting properties only - nothing here needs to track a future doc-table styling fix, because reading getComputedStyle() at clone time already captures whatever IS currently applied, however it got there. */
+const HEADER_CELL_STYLE_PROPS = [
+    'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+    'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+    'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
+    'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
+    'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight',
+    'color', 'backgroundColor', 'textAlign', 'whiteSpace', 'boxSizing',
+];
+
+/**
+ * A `display:flex` row of `<div>`s repeating `headerRowEl`'s content, for
+ * a page-boundary widget landing MID-TABLE (design spec §2.2: "splits
+ * between rows, repeating the header row... at the top of the
+ * continuation" - measure.js already RESERVES the header's height on
+ * every continuation page, but nothing rendered its DOM there until now,
+ * a named v1 gap closed here).
+ *
+ * Deliberately NOT a `<table>`, and not even a clone of the `<th>`/`<td>`
+ * elements themselves - only their CONTENT and enough of their computed
+ * style to look the same. A real `<table>` (even nested several levels
+ * inside a foreign `<div>`, several levels inside the ORIGINAL table's
+ * own `<tbody>`, which is where this widget lives for a mid-table split)
+ * turned out to feed back into the original table's own auto-layout
+ * column-width computation - confirmed live: editing the header row's
+ * text repeatedly and watching both the real table's and a `<table>`-
+ * based clone's measured column widths grow on EVERY repagination pass,
+ * each one wider than the last, no natural ceiling - inserting the clone
+ * was itself widening the very table it was measuring, which then
+ * widened the NEXT clone built from it, and so on. `<th>`/`<td>` carry
+ * the same risk even outside a literal `<table>` tag, since the UA
+ * stylesheet defaults them to `display:table-cell`, which can trigger
+ * the same anonymous-table-object generation a real `<table>` does.
+ * Plain `<div>`s laid out with `flex` never participate in ANY table
+ * layout algorithm, however deeply nested inside a real one.
+ *
+ * Column widths are still copied from the header row's own LIVE rendered
+ * cells, applied as each `<div>`'s own fixed `width`/`flex-basis` -
+ * TipTap's resizable Table extension writes `min-width` on the ORIGINAL
+ * table's `<colgroup>`, not a fixed `width` (confirmed live), so an
+ * unresized table's columns lay out from CONTENT and only the rendered
+ * rect knows what that settled on.
+ *
+ * Copies each cell's CONTENT (`cloneNode(true)` on its child nodes -
+ * paragraphs, text, marks) rather than rebuilding it from the
+ * ProseMirror node, so whatever the row's live rendering looks like is
+ * exactly what gets repeated, with no risk of the two drifting apart.
+ * `data-id` (the block-id every node carries, .ai/rules/editor.md) is
+ * stripped from the whole cloned subtree: `dom.js`'s `blockSelector()`
+ * turns a stored block id into a `document.querySelector()` lookup
+ * elsewhere in the app (comment anchors, cross-references), and a
+ * DUPLICATE id left on this decorative, non-editable clone would make
+ * such a lookup a coin flip between the real cell and this one.
+ *
+ * @param {HTMLElement} headerRowEl - the live `<tr>` this table's real header
+ * @returns {HTMLElement} a `<div class="dotdoc-table-header-repeat">`
+ */
+function cloneTableHeaderRow(headerRowEl) {
+    const cells = Array.from(headerRowEl.children);
+    const widths = cells.map((cell) => cell.getBoundingClientRect().width);
+
+    const row = document.createElement('div');
+    row.className = 'dotdoc-table-header-repeat';
+    row.setAttribute('role', 'presentation');
+    row.setAttribute('aria-hidden', 'true');
+
+    cells.forEach((cell, i) => {
+        const cellClone = document.createElement('div');
+        cellClone.className = 'dotdoc-table-header-repeat-cell';
+        cellClone.style.width = `${widths[i]}px`;
+        cellClone.style.flex = `0 0 ${widths[i]}px`;
+
+        const computed = getComputedStyle(cell);
+        HEADER_CELL_STYLE_PROPS.forEach((prop) => {
+            cellClone.style[prop] = computed[prop];
+        });
+
+        // Copies the cell's CONTENT (its paragraph(s), text, marks), never
+        // the `<th>`/`<td>` element itself - a real `<table>` (even one
+        // this small, even nested several levels deep inside a DIFFERENT
+        // foreign `<div>`) turned out to feed back into the ORIGINAL
+        // table's own auto-layout column-width computation: confirmed
+        // live by editing the header row's text repeatedly and watching
+        // both the real table's and the clone's measured column widths
+        // grow on EVERY repagination pass, each one wider than the last,
+        // with no natural ceiling - inserting the clone was itself
+        // widening the very table it was measuring. `<th>`/`<td>` (and
+        // any element the UA stylesheet defaults to `display:table-cell`)
+        // risk the exact same anonymous-table-object generation a real
+        // `<table>` tag does; plain `<div>`s laid out with `display:flex`
+        // never participate in ANY table layout algorithm, however
+        // deeply they are nested inside a real one.
+        Array.from(cell.childNodes).forEach((child) => {
+            const childClone = child.cloneNode(true);
+            if (childClone.nodeType === Node.ELEMENT_NODE) {
+                childClone.removeAttribute('data-id');
+                childClone.querySelectorAll('[data-id]').forEach((el) => el.removeAttribute('data-id'));
+            }
+            cellClone.appendChild(childClone);
+        });
+
+        row.appendChild(cellClone);
+    });
+
+    return row;
+}
+
+/**
+ * `cloneTableHeaderRow()`'s entry point from `repaginate()` below: resolves
+ * the table's own live header row from its ProseMirror start position (the
+ * same `view.nodeDOM()` -> `.tableWrapper` shape `measureBlocks()` reads),
+ * and returns null (no clone) for a table with no header row at all -
+ * `measure.js` never reserves height for a header in that case either, so
+ * there is nothing to repeat.
+ *
+ * The column widths this reads can be imprecise, and this is a KNOWN,
+ * accepted gap rather than something this function tries to correct:
+ * an auto-layout table (TipTap's un-resized default) with a wide foreign
+ * block child of its own `<tbody>` - which is exactly what a mid-table
+ * page-boundary widget is - can measure its OWN columns differently on
+ * successive reflows, with no guaranteed fixed point (confirmed live: a
+ * version of this feature that re-measured and rewrote the clone's width
+ * on every repagination pass made the reading GROW on every single edit
+ * anywhere in the document, unboundedly, because each rewrite was itself
+ * a reflow-triggering DOM mutation feeding the next reading). Reading
+ * live cell widths ONCE, only when the header's own key changes (see
+ * `repaginate()`'s key comment), and never writing back to correct a
+ * "settled" value that keeps not settling, is what keeps this feature
+ * from making that pre-existing instability worse - at the cost of the
+ * clone occasionally being a few pixels off the table's own current
+ * width rather than pixel-perfect on every keystroke.
+ *
+ * @param {import('@tiptap/pm/view').EditorView} view
+ * @param {number} tableStart
+ * @returns {HTMLElement | null}
+ */
+function buildTableHeaderClone(view, tableStart) {
+    const wrapperDom = view.nodeDOM(tableStart);
+    const headerRowEl = findTableHeaderRowEl(wrapperDom);
+    if (!headerRowEl) {
+        return null;
+    }
+
+    return cloneTableHeaderRow(headerRowEl);
 }
 
 /**
@@ -317,8 +503,20 @@ function resolveBreakPosition(view, breakInfo, starts, blockNode, blockIndex) {
     return coords ? coords.pos : blockStart;
 }
 
-/** One page-boundary widget: the previous page's footer, a gap, a shadow on both edges, the next page's header. */
-function renderBoundaryWidget(renderBands) {
+/**
+ * One page-boundary widget: the previous page's footer, a gap, a shadow on
+ * both edges, the next page's header - plus, when this boundary lands
+ * MID-TABLE (`tableHeaderClone` non-null), a repeated header row directly
+ * beneath the new page's header band, before the table's continuation
+ * rows. Appending it INSIDE this same widget, rather than as a second,
+ * separate decoration at the same position, is what keeps it out of
+ * viewModes.js's `pageContentFragment()` thumbnail extraction for free:
+ * that Range-based clone already starts AFTER one boundary widget and
+ * ends BEFORE the next, so anything nested INSIDE a boundary widget is
+ * excluded from every page's thumbnail the same way the widget's own
+ * bands already are, with no extra skip-logic needed there.
+ */
+function renderBoundaryWidget(renderBands, tableHeaderClone) {
     const el = document.createElement('div');
     el.className = 'dotdoc-page-boundary';
     el.contentEditable = 'false';
@@ -337,6 +535,10 @@ function renderBoundaryWidget(renderBands) {
     renderBands(footer, header);
 
     el.append(shadowAbove, footer, gap, header, shadowBelow);
+
+    if (tableHeaderClone) {
+        el.appendChild(tableHeaderClone);
+    }
 
     return el;
 }
@@ -486,8 +688,25 @@ export function repaginate(view, getPageSetup, renderBands) {
         pageIndex += 1;
         const { footerPage, headerPage } = boundaries[pageIndex - 1];
 
+        // offset === 0 for a table means the WHOLE table starts fresh on
+        // the new page (measure.js: it didn't fit in the space remaining
+        // on the current page, but fits a full fresh one) - its own real
+        // header is already right there at the top, nothing to repeat.
+        // Only a non-zero offset is an actual MID-table split.
+        const isTableSplit = blockNode.type.name === 'table' && breakInfo.offset > 0;
+        // Read once, eagerly, so it can go straight into this decoration's
+        // KEY below - see that comment for why. Cheap even though it runs
+        // on every pass: a single textContent read on one row, not the
+        // per-cell getBoundingClientRect() work cloneTableHeaderRow() does,
+        // which only actually happens when the key change below decides a
+        // rebuild is warranted.
+        const headerRowText = isTableSplit
+            ? findTableHeaderRowEl(view.nodeDOM(starts[blockIndex]))?.textContent ?? ''
+            : '';
+
         return Decoration.widget(pos, () => renderBoundaryWidget(
             (footerEl, headerEl) => renderBands(footerEl, headerEl, footerPage, headerPage, pageCount),
+            isTableSplit ? buildTableHeaderClone(view, starts[blockIndex]) : null,
         ), {
             side: -1,
             // pageCount is part of the key ON PURPOSE: ProseMirror reuses
@@ -501,7 +720,30 @@ export function repaginate(view, getPageSetup, renderBands) {
             // which is the only way a {{ pages }} field ever gets to show
             // the current total rather than freezing at whatever total was
             // in effect the first time that specific boundary appeared.
-            key: `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}-${pageCount}`,
+            //
+            // A table-split boundary ALSO folds in the header row's own
+            // live text - its cloned header can go stale (wrong text) from
+            // an edit that changes neither blockIndex/offset nor pageCount,
+            // which pageCount alone cannot catch the way it catches
+            // {{ pages }}. This is deliberately NOT "rebuild on every
+            // pass" (an earlier version folded in a per-repaginate()-call
+            // counter instead): a table nested inside `<tbody>` sits next
+            // to a genuine, pre-existing CSS auto-layout instability
+            // (`.ai/rules/editor.md` - a wide foreign block child of
+            // `<tbody>` can make an auto-layout table's own measured
+            // column widths drift under REPEATED reflows, with no
+            // guaranteed fixed point) that every extra rebuild's own
+            // getBoundingClientRect() reads and DOM writes feed further -
+            // confirmed live: forcing a rebuild every pass grew the
+            // measured width on every single edit anywhere in the
+            // document, unboundedly, never settling. Keying on the header
+            // text instead rebuilds only when there is an actual reason
+            // to (the text itself changed), which is both correct for the
+            // staleness this exists to fix and doesn't go looking for
+            // trouble the rest of the time.
+            key: isTableSplit
+                ? `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}-${pageCount}-hdr:${headerRowText}`
+                : `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}-${pageCount}`,
         });
     });
 

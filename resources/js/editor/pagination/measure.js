@@ -21,8 +21,8 @@
  * @property {number} [headerHeight] - table only: header row height in px
  * @property {number[]} [rowHeights] - table only: one entry per DATA row
  *   (the header is not in this array - its height is reserved on every
- *   continuation page, though the header's own DOM is not yet visually
- *   cloned there for v1, see design spec §7)
+ *   continuation page, and `decorations.js`'s `cloneTableHeaderRow()`
+ *   separately clones its DOM onto that continuation)
  * @property {number[]} [itemHeights] - list types only: one entry per item
  * @property {number} [newPageHeight] - sectionBreak only: the usable page
  *   height every subsequent block should be measured against
