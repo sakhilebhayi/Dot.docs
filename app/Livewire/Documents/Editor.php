@@ -14,6 +14,8 @@ use App\Models\AiSuggestion;
 use App\Models\Document;
 use App\Models\DocumentStyle;
 use App\Models\Files\Obj;
+use App\Print\HeaderFooterBands;
+use App\Print\PageSetup;
 use App\Services\PresenceService;
 use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -125,10 +127,21 @@ class Editor extends Component
     }
 
     /**
-     * Heading/figure numbers and the table of contents for the document as it
-     * is currently stored. Numbering is authoritative on the server (it
-     * depends on the style's numbering tokens - see .ai/rules/styles.md), so
-     * the editor asks for it after every save instead of computing its own.
+     * Heading/figure numbers, the table of contents, and the resolved page
+     * shape for the document as it is currently stored. Numbering and page
+     * setup are both authoritative on the server (numbering depends on the
+     * style's numbering tokens, see .ai/rules/styles.md; page setup merges
+     * the document's own override over its style, see App\Print\PageSetup),
+     * so the editor asks for both after every save instead of computing
+     * either on its own.
+     *
+     * `headerSegments`/`footerSegments` are pre-split by
+     * App\Print\HeaderFooterBands — the SAME class PrintRenderer uses for
+     * the PDF export — so the live pagination view (resources/js/editor/
+     * pagination/bands.js) never re-parses a `{{ }}` template itself. Each
+     * segment is either literal text (already fully substituted) or one of
+     * the two live fields ('PAGE'/'NUMPAGES'), which the client fills in
+     * per page from its own computed page index and total.
      *
      * `figures` and `tables` are what the cross-reference picker offers
      * besides headings - a figure or a table is referenced by its number and
@@ -139,6 +152,9 @@ class Editor extends Component
      *     toc: list<array{id:string,level:int,text:string,number:string}>,
      *     figures: list<array{id:string,number:string,text:string}>,
      *     tables: list<array{id:string,number:string,text:string}>,
+     *     pageSetup: array{size:string,orientation:string,margins:array{top:string,right:string,bottom:string,left:string},header:string,footer:string},
+     *     headerSegments: list<array{type:'text'|'field',value:string}>,
+     *     footerSegments: list<array{type:'text'|'field',value:string}>,
      * }
      */
     public function outline(): array
@@ -150,11 +166,28 @@ class Editor extends Component
         $style = $this->document->resolvedStyle() ?? DocumentStyle::resolve('report');
         $result = app(Outline::class)->build($this->document->content_json ?? [], $style?->tokens['numbering'] ?? []);
 
+        // PageSetup::fromDocument() requires a non-null DocumentStyle;
+        // StyleEngine::resolve() is the guaranteed-non-null resolver
+        // render() already uses two lines below in this same class, so
+        // page setup and CSS are resolved from the same style either way.
+        $resolvedStyle = app(StyleEngine::class)->resolve($this->document);
+        $setup = PageSetup::fromDocument($this->document, $resolvedStyle);
+
+        $vars = array_merge($this->document->variables ?? [], [
+            'title' => $this->document->title,
+            'date' => now()->format('Y-m-d'),
+            'team' => $this->document->team->name ?? '',
+        ]);
+        $bands = app(HeaderFooterBands::class);
+
         return [
             'numbers' => $result->numbers,
             'toc' => $result->toc,
             'figures' => $result->figures,
             'tables' => $result->tables,
+            'pageSetup' => $setup->toArray(),
+            'headerSegments' => $bands->segments($setup->header, $vars),
+            'footerSegments' => $bands->segments($setup->footer, $vars),
         ];
     }
 
