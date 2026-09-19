@@ -47,6 +47,23 @@
 }
 
 .canvas .paper {
+    /* The positioning context for a mid-table page-boundary widget
+     * (`.dotdoc-page-boundary-in-table`, App\Styles\CssBuilder::
+     * paginationRule()) - that widget is deliberately absolutely
+     * positioned, out of the split table's own normal flow entirely (see
+     * .ai/rules/editor.md's "wide foreign block child of <tbody>" rule),
+     * and needs a containing block that spans the whole page width
+     * regardless of which table column it happens to sit next to in the
+     * DOM. `position:relative` with no offset has no visual effect on
+     * `.paper` itself - it only establishes this as the nearest positioned
+     * ancestor for that one descendant, ahead of `.canvas-region`'s own
+     * `container-type: inline-size` (.ai/rules/views.md), which would
+     * otherwise become the containing block instead. Confirmed live not
+     * to disturb the floating toolbar or the slash menu (both are
+     * appended to `<body>`, entirely outside `.paper`, so neither one's
+     * `position:absolute` positioning is affected by this at all).
+     */
+    position: relative;
     background: var(--paper);
     color: var(--paper-ink);
     width: 210mm;

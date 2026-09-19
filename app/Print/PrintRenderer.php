@@ -35,6 +35,7 @@ class PrintRenderer
         private StyleEngine $engine,
         private Outline $outline,
         private HtmlRenderer $renderer,
+        private HeaderFooterBands $bands,
     ) {}
 
     public function html(Document $doc): string
@@ -107,41 +108,48 @@ class PrintRenderer
     }
 
     /**
-     * Substitutes {{ key }} tokens with raw (unescaped) values so the
-     * result can be branched into either an HTML-escaped DOM string or a
-     * PHP-literal string for the page_text() script - {{ page }}/{{ pages }}
-     * are left untouched here; dompdf resolves those.
+     * Turns a header/footer template into either a fully-substituted HTML
+     * string, or — when it contains {{ page }}/{{ pages }} — the raw text
+     * dompdf's page_text() canvas draw needs (with those two tokens
+     * rewritten to dompdf's own {PAGE_NUM}/{PAGE_COUNT} placeholders).
+     * HeaderFooterBands::segments() is the shared, field-injection-safe
+     * split; this method only reassembles it into PrintRenderer's own
+     * {html, pageText} shape, so a header/footer that mixes literal text
+     * with a page number renders ENTIRELY via page_text() (dompdf only
+     * knows the page number while it paginates the PDF, so the whole band
+     * has to wait for that, not just the number itself) — exactly the
+     * binary split this method already made before the extraction.
      *
      * @param  array<string,string>  $vars
      * @return array{html:string,pageText:?string}
      */
     private function band(string $template, array $vars): array
     {
-        if ($template === '') {
+        $segments = $this->bands->segments($template, $vars);
+
+        if ($segments === []) {
             return ['html' => '', 'pageText' => null];
         }
 
-        $substituted = preg_replace_callback('/\{\{\s*(\w+)\s*\}\}/', function (array $m) use ($vars) {
-            $key = $m[1];
-            if ($key === 'page' || $key === 'pages') {
-                return $m[0];
-            }
+        $hasField = collect($segments)->contains(fn (array $s) => $s['type'] === 'field');
 
-            $value = $vars[$key] ?? '';
-
-            return is_scalar($value) ? (string) $value : '';
-        }, $template);
-
-        $needsPageNumber = (bool) preg_match('/\{\{\s*pages?\s*\}\}/', $substituted);
-
-        if ($needsPageNumber) {
-            $pageText = preg_replace('/\{\{\s*page\s*\}\}/', '{PAGE_NUM}', $substituted);
-            $pageText = preg_replace('/\{\{\s*pages\s*\}\}/', '{PAGE_COUNT}', $pageText);
+        if ($hasField) {
+            $pageText = implode('', array_map(
+                fn (array $s) => $s['type'] === 'field'
+                    ? ($s['value'] === 'PAGE' ? '{PAGE_NUM}' : '{PAGE_COUNT}')
+                    : $s['value'],
+                $segments,
+            ));
 
             return ['html' => '', 'pageText' => $pageText];
         }
 
-        return ['html' => htmlspecialchars($substituted, ENT_QUOTES | ENT_HTML5, 'UTF-8'), 'pageText' => null];
+        $html = implode('', array_map(
+            fn (array $s) => htmlspecialchars($s['value'], ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+            $segments,
+        ));
+
+        return ['html' => $html, 'pageText' => null];
     }
 
     /**

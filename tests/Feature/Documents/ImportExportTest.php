@@ -489,6 +489,70 @@ class ImportExportTest extends TestCase
             ->assertForbidden();
     }
 
+    /**
+     * documents.preview-pdf exists SPECIFICALLY so the pagination editor's
+     * Print Preview <iframe> can render a PDF inline — an `attachment`
+     * disposition (documents.export's own PDF response) makes every browser
+     * abort an <iframe>'s navigation outright rather than display it.
+     */
+    public function test_preview_pdf_uses_inline_disposition_not_attachment(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($user, 'R');
+
+        $this->actingAs($user)->get(route('documents.preview-pdf', $doc->uuid))
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf')
+            ->assertHeader('content-disposition', 'inline');
+    }
+
+    public function test_preview_pdf_denies_a_user_who_cannot_view_the_document(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $owner = User::factory()->create();
+        $stranger = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($owner, 'Private');
+
+        $this->actingAs($stranger)
+            ->get(route('documents.preview-pdf', $doc->uuid))
+            ->assertForbidden();
+    }
+
+    /**
+     * The preview route spends its OWN rate-limit budget, never the
+     * export/download one — switching Print Preview on and off repeatedly
+     * must not lock a writer out of a real "Export → PDF" download, and
+     * vice versa.
+     */
+    public function test_preview_pdf_and_export_spend_separate_rate_limit_budgets(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($user, 'R');
+
+        for ($i = 0; $i < 10; $i++) {
+            $this->actingAs($user)->get(route('documents.export', [$doc->uuid, 'markdown']))->assertOk();
+        }
+        $this->actingAs($user)->get(route('documents.export', [$doc->uuid, 'markdown']))->assertStatus(429);
+
+        // The export budget above is exhausted; the preview budget is untouched.
+        $this->actingAs($user)->get(route('documents.preview-pdf', $doc->uuid))->assertOk();
+    }
+
+    public function test_preview_pdf_route_is_rate_limited(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($user, 'R');
+
+        for ($i = 0; $i < 30; $i++) {
+            $this->actingAs($user)->get(route('documents.preview-pdf', $doc->uuid))->assertOk();
+        }
+
+        $this->actingAs($user)->get(route('documents.preview-pdf', $doc->uuid))->assertStatus(429);
+    }
+
     public function test_docx_round_trips_every_inline_mark(): void
     {
         $this->seed(DocumentStyleSeeder::class);

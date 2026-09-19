@@ -19,6 +19,8 @@
         selection: { blockId: null, type: null },
         aiError: '',
         tick: 0,
+        thumbnailsOpen: false,
+        viewMode: 'continuous',
 
         // The editor is NEVER stored in Alpine's reactive data: a reactivity
         // proxy around it hands every command a proxied EditorState and
@@ -69,6 +71,16 @@
             const handle = window.DotDoc.mount(host, {
                 content: @js($contentJson),
                 vars: @js($document->variables ?? []),
+                pageSetup: @js($outline['pageSetup']),
+                headerSegments: @js($outline['headerSegments']),
+                footerSegments: @js($outline['footerSegments']),
+                // NOT documents.export: that route answers with `attachment`
+                // disposition, which every browser aborts inside an <iframe>
+                // rather than rendering. documents.preview-pdf is the same
+                // PDF with `inline` disposition and its own rate-limit
+                // budget, separate from the export/download budget (see
+                // DocumentExportController::previewPdf(), .ai/rules/documents-io.md).
+                pdfPreviewUrl: '{{ route('documents.preview-pdf', $document->uuid) }}',
                 uploadUrl: '{{ route('documents.images.store', $document->uuid) }}',
                 // The pagehide/destroy flush POSTs here with navigator.sendBeacon:
                 // Livewire cannot issue a request during unload at all.
@@ -189,7 +201,9 @@
         // Pull the fresh numbers after every save and hand them to the bundle.
         refreshOutline() {
             return @this.outline().then((outline) => {
-                if (outline) window.DotDoc.setOutline(outline);
+                if (!outline) return;
+                window.DotDoc.setOutline(outline);
+                window.DotDoc.pagination.setPageSetup(outline.pageSetup, outline.headerSegments, outline.footerSegments);
             });
         },
 
@@ -514,6 +528,20 @@
             <span class="field-error">{{ $message }}</span>
         @enderror
 
+        <label class="sr-only" for="doc-view-mode">Page view</label>
+        <select id="doc-view-mode" class="tool-select"
+                x-model="viewMode" @change="window.DotDoc.pagination.setMode(viewMode)">
+            <option value="continuous">Continuous</option>
+            <option value="single">Single page</option>
+            <option value="multi-page">Multi-page</option>
+            <option value="focus">Focus</option>
+            <option value="print-preview">Print preview</option>
+        </select>
+
+        <button type="button" class="tool tool-mono" aria-pressed="false"
+                x-bind:aria-pressed="thumbnailsOpen ? 'true' : 'false'"
+                @click="thumbnailsOpen = !thumbnailsOpen; if (thumbnailsOpen) $nextTick(() => window.DotDoc.pagination.refreshThumbnails())">Pages</button>
+
         {{-- Everything structural — headings, lists, tables, images, callouts,
              columns, breaks, cross-references, exports, the assistant — is in
              the registry, which this button and the `/` menu both list. --}}
@@ -694,9 +722,25 @@
     <div class="editor-row">
         {{-- wire:ignore keeps Livewire's DOM morph out of the ProseMirror
              subtree, which it did not render and must not diff. data-outline
-             seeds the numbering before the first save round trip. --}}
-        <div class="editor-main">
+             seeds the numbering before the first save round trip. The outer
+             wire:ignore on .editor-main protects the pagination DOM siblings
+             of #doc-paper (the Multi-Page grid, the Print Preview iframe)
+             that Livewire's own render never produced - without it, the
+             next morph would strip them as extra nodes. --}}
+        <div class="editor-main" wire:ignore>
             <div id="doc-paper" x-ref="editorEl" wire:ignore class="canvas" data-outline="{{ json_encode($outline) }}"></div>
+        </div>
+
+        {{-- Populated by the "Pages" button's @click above the moment the
+             panel opens (pagination.refreshThumbnails()), and kept current
+             after that by every repagination pass while it stays open
+             (see refreshRailIfVisible() in pagination/index.js) - not by
+             any init hook here, since this div is already in the DOM
+             (just hidden) when Alpine initialises, well before the writer
+             ever opens it. --}}
+        <div class="editor-thumbnails" x-show="thumbnailsOpen" x-cloak
+             aria-label="Page thumbnails">
+            <div class="dotdoc-thumbnail-rail" wire:ignore></div>
         </div>
 
         @if ($commentSidebarOpen)

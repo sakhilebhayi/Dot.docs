@@ -52,6 +52,24 @@ class AuditLogTest extends TestCase
         $this->assertSame('user', $exported->actor_type);
     }
 
+    /**
+     * documents.preview-pdf (Print Preview mode's <iframe>) renders the
+     * same PDF bytes documents.export does, but is not a real export - it
+     * fires on every view-mode switch, so writing an audit row (or firing
+     * the on_export webhook, see .ai/rules/documents-io.md) for each one
+     * would spam both with something the writer never chose to do.
+     */
+    public function test_previewing_a_pdf_does_not_write_an_exported_audit_row(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'R');
+
+        $this->actingAs($user)->get(route('documents.preview-pdf', $doc->uuid))->assertOk();
+
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'document.exported']);
+    }
+
     public function test_share_changes_write_a_share_updated_row(): void
     {
         $user = User::factory()->withPersonalTeam()->create();
