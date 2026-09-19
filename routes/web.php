@@ -137,6 +137,12 @@ Route::middleware([
         ->where('format', 'pdf|word|html|markdown')
         ->name('documents.export');
 
+    // Print Preview mode's <iframe> - the same PDF, inline disposition and
+    // its own rate-limit budget, never the download route (see
+    // DocumentExportController::previewPdf() and .ai/rules/documents-io.md).
+    Route::get('/documents/{uuid}/preview.pdf', [DocumentExportController::class, 'previewPdf'])
+        ->name('documents.preview-pdf');
+
     // The same export, filed in the shared tree instead of downloaded.
     Route::post('/documents/{uuid}/export/{format}/save-to-files', [DocumentExportController::class, 'saveToFiles'])
         ->where('format', 'pdf|word|html|markdown')

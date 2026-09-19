@@ -74,7 +74,13 @@
                 pageSetup: @js($outline['pageSetup']),
                 headerSegments: @js($outline['headerSegments']),
                 footerSegments: @js($outline['footerSegments']),
-                pdfPreviewUrl: '{{ route('documents.export', [$document->uuid, 'pdf']) }}',
+                // NOT documents.export: that route answers with `attachment`
+                // disposition, which every browser aborts inside an <iframe>
+                // rather than rendering. documents.preview-pdf is the same
+                // PDF with `inline` disposition and its own rate-limit
+                // budget, separate from the export/download budget (see
+                // DocumentExportController::previewPdf(), .ai/rules/documents-io.md).
+                pdfPreviewUrl: '{{ route('documents.preview-pdf', $document->uuid) }}',
                 uploadUrl: '{{ route('documents.images.store', $document->uuid) }}',
                 // The pagehide/destroy flush POSTs here with navigator.sendBeacon:
                 // Livewire cannot issue a request during unload at all.

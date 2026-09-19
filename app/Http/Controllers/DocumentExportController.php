@@ -74,6 +74,49 @@ class DocumentExportController extends Controller
     }
 
     /**
+     * The same PDF `export('pdf')` produces, streamed for the pagination
+     * editor's Print Preview mode to embed in an <iframe> instead of
+     * downloaded. This is a SEPARATE route from `export()`, not that route
+     * with its disposition flipped — `export()` answers "Export → PDF" for
+     * every caller of it, and changing what that route DOES would be a much
+     * bigger change than adding a second way to read the same bytes (see
+     * .ai/rules/documents-io.md).
+     *
+     * Two differences from `export('pdf')`, both deliberate:
+     *   - `inline` disposition, not `attachment` — an `attachment`
+     *     disposition makes every browser abort an <iframe>'s navigation
+     *     outright rather than render it, which is exactly what left Print
+     *     Preview mode permanently blank (found live in Task 8's browser
+     *     verification: `net::ERR_ABORTED` on a 200 OK response).
+     *   - its OWN rate-limit budget, `preview-pdf:<user>`, not the export
+     *     budget `export:<user>` — a preview isn't a real export (no
+     *     `document.exported` audit row, no `on_export` webhook fires
+     *     here), and switching view modes back and forth must not spend
+     *     down the same 10/hour budget a writer needs for real downloads.
+     *     Kept generous (30/hour) since it is the SAME PDF render cost as a
+     *     real export and this route is reachable only by an authorized
+     *     viewer of the document, not a public endpoint.
+     */
+    public function previewPdf(string $uuid): SymfonyResponse
+    {
+        $document = Document::where('uuid', $uuid)->firstOrFail();
+        $this->authorize('view', $document);
+
+        $key = 'preview-pdf:'.auth()->id();
+        if (! RateLimiter::attempt($key, 30, fn () => true, 3600)) {
+            $seconds = RateLimiter::availableIn($key);
+            abort(429, "Preview limit reached. Try again in {$seconds} seconds.");
+        }
+
+        $pdf = app(PrintRenderer::class)->pdf($document);
+
+        return response($pdf, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline',
+        ]);
+    }
+
+    /**
      * The same export, filed in the shared Dot.Files tree instead of
      * downloaded.
      *
