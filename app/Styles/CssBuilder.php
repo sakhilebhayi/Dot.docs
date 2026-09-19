@@ -393,18 +393,36 @@ class CssBuilder
             // pagination/index.js's matching skip-while-hidden guard in
             // `runRepaginate()` (measuring a `display:none` subtree
             // reports zero-height rects and would wipe every decoration).
-            '.editor-main.dotdoc-mode-multi-page .paper{display:none}'.
+            //
+            // `.canvas>.paper`, NOT a bare `.paper` descendant selector:
+            // `.paper` and `#doc-paper`/`.canvas` are NOT the same element -
+            // TipTap mounts a genuinely separate child div (class
+            // `tiptap ProseMirror paper`) INSIDE the `#doc-paper.canvas`
+            // host, confirmed live via getComputedStyle after this bug was
+            // found. A thumbnail clone (viewModes.js's renderThumbnail())
+            // ALSO carries the `paper` class and sits nested several levels
+            // inside this same `.editor-main.dotdoc-mode-multi-page`
+            // subtree (inside `.dotdoc-multi-page-grid`, itself inside
+            // `.canvas` too) - a bare `.paper` descendant selector matches
+            // it as well as the real canvas, silently hiding every
+            // thumbnail's content and leaving Multi-Page mode showing
+            // empty bordered boxes. The real editable canvas is always a
+            // DIRECT child of `.canvas`; no clone ever is - `>` is what
+            // makes this rule hide only the one element it is meant to.
+            '.editor-main.dotdoc-mode-multi-page .canvas>.paper{display:none}'.
             // Print Preview REPLACES the canvas with the real exported PDF
             // (design spec §3: "not computed live at all") - viewModes.js's
             // applyMode() appends the iframe as a SIBLING of .paper rather
             // than removing .paper from the DOM, so without this rule both
-            // would render at once. .paper and #doc-paper are the same
-            // element (TipTap's editorProps.attributes adds the `paper`
-            // class onto the host element index.js mounts into), so hiding
-            // `.paper` hides the whole editable canvas; ProseMirror's
-            // document state is unaffected by CSS visibility, so switching
-            // back to any other mode restores it with nothing lost.
-            '.editor-main.dotdoc-mode-print-preview .paper{display:none}'.
+            // would render at once. `.canvas>.paper`, not a bare `.paper`
+            // descendant selector, for the same reason as the multi-page
+            // rule above - the iframe itself carries no `paper` class today,
+            // so this specific mode has no active collision yet, but the
+            // scoped selector costs nothing and stays correct if that ever
+            // changes. Hiding the real canvas does not affect ProseMirror's
+            // document state, so switching back to any other mode restores
+            // it with nothing lost.
+            '.editor-main.dotdoc-mode-print-preview .canvas>.paper{display:none}'.
             '.dotdoc-print-preview-frame{width:100%;height:80vh;border:none}';
     }
 
