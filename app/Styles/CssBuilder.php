@@ -63,6 +63,7 @@ class CssBuilder
         $parts[] = $this->numRules();
         $parts[] = $this->columnsRule();
         $parts[] = $this->pageBreakRule();
+        $parts[] = $this->paginationRule();
 
         if ($this->mode === 'print') {
             $parts[] = $this->pageRule();
@@ -255,6 +256,82 @@ class CssBuilder
 
         return '.paper .page-break{border-top:1px dashed var(--doc-rule);text-align:center;margin:2em 0;position:relative}'.
             '.paper .page-break::after{content:"page break";position:relative;top:-.6em;background:#fff;padding:0 .6em;font-size:var(--doc-size-small);color:var(--doc-muted)}';
+    }
+
+    /**
+     * Just the left/right margin, TokenGuard-validated the same way
+     * margins() validates all four - a header/footer BAND needs its text
+     * to align with the page's own left/right margin, but must NOT take
+     * the page's full top/bottom margin as its own padding (that would
+     * make a one-line band as tall as the page margin itself).
+     *
+     * @return array{left:string,right:string}
+     */
+    private function horizontalMargins(): array
+    {
+        $m = $this->tokens['page']['margins'] ?? [];
+        $fb = $this->fallback['page']['margins'];
+
+        return [
+            'left' => TokenGuard::length($m['left'] ?? null, $fb['left']),
+            'right' => TokenGuard::length($m['right'] ?? null, $fb['right']),
+        ];
+    }
+
+    /**
+     * The decoration-based pagination boundary (resources/js/editor/
+     * pagination/decorations.js inserts one `.dotdoc-page-boundary` widget
+     * per computed break). This CSS never appears unless pagination has
+     * actually run - `.dotdoc-paginated` is added to `.editor-main` (the
+     * tight wrapper around `.paper` - NOT `.canvas-region`, the whole
+     * page's <main> content region also shared with `.doc-bar` and the
+     * comments sidebar) by viewModes.js's applyMode(), so a page that has
+     * not mounted the pagination bundle at all (or has JS disabled) sees
+     * the plain unbounded `.paper` exactly as it did before this phase.
+     *
+     * `--ground` is the Fair Copy app-background token (.ai/rules/views.md)
+     * - the gap between two pages shows the desk behind the paper, not a
+     * colour invented for this feature. The shadow is a soft edge on BOTH
+     * sides of the gap, echoing the single box-shadow `.paper` itself
+     * already carries (Fair Copy's "one shadow only" rule) rather than
+     * adding a second, differently-styled shadow convention.
+     *
+     * `.page-break`/`.section-break` (the plain node markers) hide their
+     * own decorative line while pagination is active: the real page-
+     * boundary widget now renders exactly where a forced break falls, so
+     * showing both would be two markers for one break.
+     */
+    private function paginationRule(): string
+    {
+        if ($this->mode !== 'canvas') {
+            return '';
+        }
+
+        $h = $this->horizontalMargins();
+
+        return '.editor-main.dotdoc-paginated .paper{background:transparent;box-shadow:none}'.
+            '.editor-main.dotdoc-paginated .paper>*{background:#fff}'.
+            '.dotdoc-page-boundary{contain:layout;pointer-events:none}'.
+            '.dotdoc-page-gap{height:2.5em;background:var(--ground)}'.
+            '.dotdoc-page-shadow{height:.5em;background:linear-gradient(to bottom,rgba(0,0,0,.08),transparent)}'.
+            '.dotdoc-page-shadow-below{transform:rotate(180deg)}'.
+            // A 4-value padding shorthand (top right bottom left): a small
+            // fixed vertical padding appropriate for a one-line band, and
+            // the page's REAL left/right margin so the band's text aligns
+            // with the body text above/below it.
+            ".dotdoc-page-band{background:#fff;padding:.4em {$h['right']} .4em {$h['left']};font-size:var(--doc-size-small);color:var(--doc-muted);pointer-events:auto}".
+            '.editor-main.dotdoc-paginated .page-break,.editor-main.dotdoc-paginated .section-break{display:none}'.
+            '.editor-main.dotdoc-mode-focus .dotdoc-page-boundary,.editor-main.dotdoc-mode-focus .dotdoc-page-band{display:none}'.
+            '.editor-main.dotdoc-mode-focus .dotdoc-page-gap{background:transparent;height:0}'.
+            '.editor-main.dotdoc-mode-single{scroll-snap-type:y mandatory;overflow-y:auto}'.
+            '.editor-main.dotdoc-mode-single .paper{scroll-snap-align:start}'.
+            '.editor-main.dotdoc-mode-two-page{display:grid;grid-template-columns:repeat(2,210mm);gap:1em;justify-content:center}'.
+            '.dotdoc-multi-page-grid,.dotdoc-thumbnail-rail{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:var(--s3, 12px)}'.
+            '.dotdoc-thumbnail{border:1px solid var(--line);border-radius:var(--r-control, 8px);overflow:hidden;cursor:pointer;position:relative;aspect-ratio:210/297}'.
+            '.dotdoc-thumbnail.is-current{outline:2px solid var(--accent);outline-offset:2px}'.
+            '.dotdoc-thumbnail-inner{transform-origin:top left;pointer-events:none}'.
+            '.dotdoc-thumbnail-number{position:absolute;bottom:4px;right:4px;font-size:var(--doc-size-small, 11px);background:var(--surface);color:var(--ink-soft);padding:0 4px;border-radius:4px}'.
+            '.dotdoc-print-preview-frame{width:100%;height:80vh;border:none}';
     }
 
     private function pageRule(): string
