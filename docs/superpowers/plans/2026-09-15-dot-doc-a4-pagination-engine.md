@@ -1321,7 +1321,7 @@ export const PaginationExtension = Extension.create({
  *
  * @param {import('@tiptap/pm/view').EditorView} view
  * @param {() => {pageHeightPx: number, base: object, bandHeight: number}} getPageSetup
- * @param {(footerEl: HTMLElement, headerEl: HTMLElement, pageIndex: number) => void} renderBands
+ * @param {(footerEl: HTMLElement, headerEl: HTMLElement, pageIndex: number, pageCount: number) => void} renderBands
  * @returns {number} the new total page count
  */
 export function repaginate(view, getPageSetup, renderBands) {
@@ -1329,6 +1329,12 @@ export function repaginate(view, getPageSetup, renderBands) {
     const { blocks, starts } = measureBlocks(view, { base: setup.base, bandHeight: setup.bandHeight });
     const usable = setup.pageHeightPx - setup.bandHeight;
     const breakList = computeBreaks(blocks, usable);
+    // Computed BEFORE building widgets, and passed straight into
+    // renderBands below, rather than left for the caller to read back off
+    // its own (still-stale, not-yet-updated) pageCountValue variable after
+    // repaginate() returns - a widget's factory runs DURING this map, so a
+    // caller-side value can only ever be one generation behind.
+    const pageCount = breakList.length + 1;
 
     let pageIndex = 0;
     const decorations = breakList.map((breakInfo) => {
@@ -1345,15 +1351,29 @@ export function repaginate(view, getPageSetup, renderBands) {
         const thisPageIndex = pageIndex;
 
         return Decoration.widget(pos, () => renderBoundaryWidget(
-            (footerEl, headerEl) => renderBands(footerEl, headerEl, thisPageIndex),
-        ), { side: -1, key: `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}` });
+            (footerEl, headerEl) => renderBands(footerEl, headerEl, thisPageIndex, pageCount),
+        ), {
+            side: -1,
+            // pageCount is part of the key ON PURPOSE: ProseMirror reuses
+            // an existing widget's DOM (never re-invoking its factory,
+            // hence never re-rendering its {{ pages }} band) whenever a
+            // later pass produces the SAME key at the SAME position - which
+            // happens constantly, since a boundary's blockIndex/offset
+            // often doesn't move between edits even though the document's
+            // TOTAL page count does. Folding pageCount into the key forces
+            // every boundary to re-render whenever the total changes,
+            // which is the only way a {{ pages }} field ever gets to show
+            // the current total rather than freezing at whatever total was
+            // in effect the first time that specific boundary appeared.
+            key: `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}-${pageCount}`,
+        });
     });
 
     const tr = view.state.tr.setMeta(paginationPluginKey, DecorationSet.create(view.state.doc, decorations));
     tr.setMeta('addToHistory', false);
     view.dispatch(tr);
 
-    return breakList.length + 1;
+    return pageCount;
 }
 ```
 
@@ -1857,15 +1877,16 @@ thumbnails rail share, per design spec §3-4."
 - Modify: `resources/js/editor/index.js` (wire pagination into `mount()`/`destroy()`)
 - Modify: `resources/views/livewire/documents/editor.blade.php` (view-mode select, thumbnails toggle/panel, `refreshOutline()` feeds pagination, pass `pdfPreviewUrl`)
 - Modify: `app/Styles/CssBuilder.php` (`canvas` mode gap/shadow/page CSS; hide the plain `pageBreak`/`sectionBreak` divider styling while pagination is active)
+- Modify: `resources/css/shell.css` (`.editor-thumbnails` layout — app chrome, so it lives beside `.editor-side` in the static shell stylesheet, not regenerated per Document Style in `CssBuilder`)
 
 **Interfaces:**
-- Consumes: `PaginationExtension`/`repaginate`/`resolveSectionPageHeight`/`mmToPx` (Task 4), `renderBand` (Task 5), `applyMode`/`MODES`/`renderThumbnailGrid` (Task 6), `pageSetup`/`headerSegments`/`footerSegments` (Task 1/2, arriving via `outline()`'s response).
+- Consumes: `PaginationExtension`/`repaginate`/`resolveSectionPageHeight` (Task 4 — `resolveSectionPageHeight`, not a second hand-rolled page-size table, is also how `pagination/index.js` computes the document's own usable page height, the same source of truth `measureBlocks()` uses for a `sectionBreak`'s override), `renderBand` (Task 5), `applyMode`/`MODES`/`renderThumbnailGrid` (Task 6), `pageSetup`/`headerSegments`/`footerSegments` (Task 1/2, arriving via `outline()`'s response).
 - Produces: `window.DotDoc.pagination = { mode, setMode(mode), pageCount, currentPage, goToPage(n) }` (per design spec §5) plus an internal `setPageSetup(pageSetup, headerSegments, footerSegments)` the Blade bridge calls.
 
 - [ ] **Step 1: Write `pagination/index.js`**
 
 ```js
-import { repaginate, mmToPx } from './decorations';
+import { repaginate, resolveSectionPageHeight } from './decorations';
 import { renderBand } from './bands';
 import { applyMode, MODES, renderThumbnailGrid } from './viewModes';
 
@@ -1911,17 +1932,27 @@ export function mountPagination(editor, canvasEl, opts = {}) {
     }
 
     function getPageSetupForMeasurement() {
-        const heightMm = pageSetup.orientation === 'landscape'
-            ? { A4: 210, A3: 297, Letter: 215.9 }[pageSetup.size] || 210
-            : { A4: 297, A3: 420, Letter: 279.4 }[pageSetup.size] || 297;
-        const pageHeightPx = mmToPx(`${heightMm}mm`) - mmToPx(pageSetup.margins.top) - mmToPx(pageSetup.margins.bottom);
+        // resolveSectionPageHeight(pageSetup) with no override IS exactly
+        // "this page setup's own height minus its own margins" - reusing
+        // it here (rather than a second, hand-rolled A4/A3/Letter table)
+        // is what keeps the document's OWN page height and a sectionBreak's
+        // overridden height (measureBlocks() in decorations.js, which calls
+        // this same function) computed by the same one source of truth.
+        const pageHeightPx = resolveSectionPageHeight(pageSetup);
 
         return { pageHeightPx, base: pageSetup, bandHeight: bandHeightPx() };
     }
 
-    function renderBandsForBoundary(footerEl, headerEl, pageIndexAfterBoundary) {
-        renderBand(footerEl, footerSegments, pageIndexAfterBoundary - 1, pageCountValue);
-        renderBand(headerEl, headerSegments, pageIndexAfterBoundary, pageCountValue);
+    function renderBandsForBoundary(footerEl, headerEl, pageIndexAfterBoundary, totalPages) {
+        // `totalPages` comes straight from repaginate()'s own freshly
+        // computed count, passed in at the moment each widget is built -
+        // NOT the closure's `pageCountValue`, which is still the PREVIOUS
+        // pass's value until repaginate() returns below. Reading the
+        // closure here would render every {{ pages }} band one generation
+        // stale on top of the DecorationSet-key staleness scheduleRepaginate
+        // already fixes for LATER passes (see repaginate()'s key comment).
+        renderBand(footerEl, footerSegments, pageIndexAfterBoundary - 1, totalPages);
+        renderBand(headerEl, headerSegments, pageIndexAfterBoundary, totalPages);
     }
 
     function scheduleRepaginate() {
@@ -1931,6 +1962,18 @@ export function mountPagination(editor, canvasEl, opts = {}) {
 
     function runRepaginate() {
         if (editor.isDestroyed) {
+            return;
+        }
+        if (mode === 'print-preview') {
+            // Print Preview hides .paper entirely
+            // (.editor-main.dotdoc-mode-print-preview .paper{display:none},
+            // CssBuilder::paginationRule()) - measuring a display:none
+            // subtree would wipe every page-boundary decoration to zero
+            // breaks (getBoundingClientRect() on a hidden element reports
+            // all-zero rects). Skip the whole measurement/decoration/rail
+            // pass while this mode is active; setMode() below resumes it
+            // immediately on the way OUT of this mode, rather than leaving
+            // the canvas showing zero boundaries until the next edit.
             return;
         }
         pageCountValue = repaginate(editor.view, getPageSetupForMeasurement, renderBandsForBoundary);
@@ -1961,11 +2004,20 @@ export function mountPagination(editor, canvasEl, opts = {}) {
     }
 
     // Triggers, per design spec §2.1:
-    //  - a debounced idle pause after any edit — covers local typing AND a
-    //    remote update applied via applyRemote(), since TipTap's onUpdate
-    //    fires on any transaction with docChanged regardless of its meta.
+    //  - a debounced idle pause after any edit. This covers local typing
+    //    directly (TipTap's onUpdate fires on any transaction with
+    //    docChanged). It does NOT itself cover a remote update applied via
+    //    applyRemote() - that call uses `emitUpdate: false` specifically so
+    //    a collaborator's edit never fires the LOCAL autosave/update chain
+    //    (see .ai/rules/editor.md's applyRemote() rule) - so `update` alone
+    //    never fires for it. What actually covers a remote update is the
+    //    Blade bridge's Echo listener, which already calls refreshOutline()
+    //    immediately after every successful applyRemote() (independent of
+    //    this `update` listener), and refreshOutline() calls setPageSetup()
+    //    below, which schedules a pass - so the guarantee holds, just via
+    //    that path rather than this one.
     //  - a document style change / page-setup change — both already flow
-    //    through the Blade bridge's refreshOutline(), which calls
+    //    through the same Blade bridge's refreshOutline(), which calls
     //    setPageSetup() below with the fresh values before the next
     //    scheduled pass; no separate event wiring is needed for either.
     editor.on('update', scheduleRepaginate);
@@ -1977,6 +2029,7 @@ export function mountPagination(editor, canvasEl, opts = {}) {
             return mode;
         },
         setMode(next) {
+            const wasPrintPreview = mode === 'print-preview';
             mode = MODES.includes(next) ? next : 'continuous';
             applyMode(canvasEl, mode, {
                 pdfPreviewUrl: opts.pdfPreviewUrl,
@@ -1984,6 +2037,13 @@ export function mountPagination(editor, canvasEl, opts = {}) {
                 currentPage: () => currentPageIndex,
                 goToPage,
             });
+            if (wasPrintPreview && mode !== 'print-preview') {
+                // runRepaginate() skips its work entirely for as long as
+                // Print Preview is active (see above) - resume it now,
+                // rather than leaving the canvas with zero page-boundary
+                // decorations until the writer's next edit.
+                scheduleRepaginate();
+            }
         },
         get pageCount() {
             return pageCountValue;
@@ -2279,7 +2339,7 @@ Add a view-mode `<select>` beside the existing style picker in `.doc-bar` (after
             <option value="print-preview">Print preview</option>
         </select>
 
-        <button type="button" class="tool tool-mono" aria-pressed="{{ 'false' }}"
+        <button type="button" class="tool tool-mono" aria-pressed="false"
                 x-bind:aria-pressed="thumbnailsOpen ? 'true' : 'false'"
                 @click="thumbnailsOpen = !thumbnailsOpen">Pages</button>
 ```
@@ -2296,12 +2356,48 @@ Add the thumbnails rail as a sibling of `.editor-side`, inside `.editor-row` (th
 
 The rail's own thumbnail population is already wired in Step 1's `runRepaginate()` above (it populates `.dotdoc-thumbnail-rail` whenever the element is present, independent of view mode) — no further change is needed here.
 
-- [ ] **Step 5: Manual browser check (no automated test — this step is pure wiring)**
+- [ ] **Step 5: Give `.editor-thumbnails` real layout in `shell.css`**
+
+Without this, the rail has no width/scroll constraint of its own and stretches `.editor-row` instead of scrolling internally on a long document — `.dotdoc-multi-page-grid`/`.dotdoc-thumbnail-rail`'s own `repeat(auto-fill, minmax(120px,1fr))` (from `CssBuilder::paginationRule()`) otherwise dictates the rail's width with nothing to contain it.
+
+In `resources/css/shell.css`, immediately after the existing `.editor-side > *` rule (the comment-sidebar block), add a matching rule for the thumbnails rail — same pattern as `.editor-side` immediately above it (fixed flex-basis, its own scroll, a rule against `.editor-main`, not a stretch):
+
+```css
+/*
+ * The thumbnails rail scrolls on its own, exactly like .editor-side above:
+ * the column clips, the rail's own grid inside it takes the leftover and
+ * scrolls, so a long document's page count doesn't grow the row itself
+ * and squeeze .editor-main.
+ */
+.editor-thumbnails {
+    flex: 0 0 200px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    border-left: 1px solid var(--line);
+    background: var(--surface);
+    padding: var(--s3);
+}
+```
+
+And inside the existing `@media (max-width: 900px)` block, immediately after the `.editor-side` override there, add the matching narrow-viewport treatment:
+
+```css
+    .editor-thumbnails {
+        flex: 1 1 100%;
+        overflow: visible;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+    }
+```
+
+- [ ] **Step 6: Manual browser check (no automated test — this step is pure wiring)**
 
 Run: `npm run build` (or confirm `npm run dev`/`composer run dev` is already running)
 Open an existing document in the editor. Verify in the browser console: `window.DotDoc.pagination.pageCount` is a number, `window.DotDoc.pagination.setMode('single')` visibly changes the canvas layout, and the "Pages" button toggles the thumbnails rail.
 
-- [ ] **Step 6: Run the full test suite**
+- [ ] **Step 7: Run the full test suite**
 
 Run: `npm test`
 Run: `php artisan test --compact`
@@ -2309,21 +2405,29 @@ Run: `vendor/bin/pint --dirty --format agent`
 Run: `vendor/bin/phpstan analyse --memory-limit=1G`
 Expected: all PASS, no new static-analysis findings.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add resources/js/editor/pagination/index.js resources/js/editor/index.js \
-        resources/views/livewire/documents/editor.blade.php app/Styles/CssBuilder.php
+        resources/views/livewire/documents/editor.blade.php app/Styles/CssBuilder.php \
+        resources/css/shell.css
 git commit -m "feat(pagination): orchestrator + editor bundle, Blade, and CssBuilder wiring
 
 window.DotDoc.pagination exposes {mode, setMode, pageCount, currentPage,
-goToPage} per design spec §5. Debounced repagination on every editor
-update (covers local edits and applyRemote alike, since TipTap's onUpdate
-fires on any doc-changing transaction); style/page-setup changes flow
-through the existing refreshOutline() round trip. A view-mode <select>
-and a thumbnails rail toggle land in .doc-bar; CssBuilder's canvas mode
-gains the gap/shadow/band CSS the decorations render into, scoped behind
-.dotdoc-paginated so a page that never mounts pagination is unaffected."
+goToPage} per design spec §5. Debounced repagination on local edits via
+editor.on('update'); a remote update's own path (applyRemote() -> the
+Blade bridge's existing refreshOutline() call) and a style/page-setup
+change both flow through the same refreshOutline() -> setPageSetup()
+round trip, so neither needs separate wiring here. Print Preview mode
+suspends repagination entirely while active (measuring a hidden .paper
+would wipe every boundary) and resumes it on the way out. A view-mode
+<select> and a thumbnails rail toggle land in .doc-bar, wire:ignore'd
+alongside #doc-paper so Livewire's morph leaves pagination's injected
+DOM (the Multi-Page grid, the Print Preview iframe, the rail's
+thumbnails) alone. CssBuilder's canvas mode gains the gap/shadow/band
+CSS the decorations render into, scoped behind .dotdoc-paginated so a
+page that never mounts pagination is unaffected; shell.css gives the
+thumbnails rail its own scroll, matching .editor-side's pattern."
 ```
 
 ---
@@ -2352,7 +2456,8 @@ Using a real document with a long paragraph, a table with more rows than fit one
 4. Switch through all six view modes (`Continuous`, `Single page`, `Two page`, `Multi-page`, `Focus`, `Print preview`) and confirm each renders correctly in both `html.dark` and default (day) mode.
 5. Open the thumbnails rail and confirm clicking a thumbnail scrolls the corresponding page into view.
 6. Confirm Focus mode hides page-break decorations, headers/footers, and the rail/dock/topbar chrome.
-7. Confirm Print Preview's iframe shows the actual exported PDF (same content the "Export → PDF" menu item downloads).
+7. Confirm Print Preview's iframe shows the actual exported PDF (same content the "Export → PDF" menu item downloads), that switching INTO it hides the live canvas rather than showing both at once, and that switching back OUT of it immediately restores the page-boundary decorations (not just on the next edit).
+8. **Two Page mode, specifically:** `.paper` stays one continuous element (decoration, not division — design spec §2), so Task 7's CSS grid puts the single paper in column 1 and leaves column 2 permanently empty — it cannot show two DIFFERENT pages side by side without the same Range-based content-extraction technique `viewModes.js`'s thumbnails already use, applied live (a materially bigger feature: it would mean this mode shows read-only clones rather than the live editable canvas, unlike every other mode). Confirmed during Task 7's review, deliberately left as-is for this step to decide rather than being redesigned under review pressure: either (a) accept the current CSS as an honest v1 limitation and simplify it so the second column doesn't render visibly empty/broken (e.g. drop the grid, center `.paper` with wider gutters instead — a cosmetic-only "facing page" approximation, not a functional one), or (b) remove `two-page` from the `<select>` for v1 and add it to design spec §7's deferral list instead. Do not ship the CSS exactly as drafted (a literal empty second grid column) — pick (a) or (b) here.
 
 - [ ] **Step 3: Impeccable + contrast gate on the editor page, per .ai/rules/views.md's GATE**
 
