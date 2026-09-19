@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveSectionPageHeight, mmToPx, pageBandNumbers, findTableHeaderRow } from '../../resources/js/editor/pagination/decorations.js';
+import { resolveSectionPageHeight, mmToPx, pageBandNumbers, findTableHeaderRow, findDataRowCellRanges } from '../../resources/js/editor/pagination/decorations.js';
 
 test('mmToPx converts at 96dpi (1in = 25.4mm = 96px)', () => {
     assert.equal(Math.round(mmToPx('25.4mm')), 96);
@@ -102,4 +102,91 @@ test('findTableHeaderRow: a table with no header row at all returns null, not th
 
 test('findTableHeaderRow: an empty table (no rows yet) returns null', () => {
     assert.equal(findTableHeaderRow([]), null);
+});
+
+// findDataRowCellRanges() is the position arithmetic behind a mid-table
+// split's Decoration.node() gap reservation (.ai/rules/editor.md's "mid-
+// table page-boundary widget is position:absolute" rule) - an off-by-one
+// here once positioned the split's overlay a full row too early, visibly
+// overlapping real content, and was only caught by live browser
+// measurement. A fake ProseMirror node needs only what this function
+// actually calls: `.forEach((child, offset) => ...)` and `.nodeSize` on
+// each child, `.firstChild.type.name` on a row. Row/cell nodeSize here is
+// deliberately just the sum of a row's own cell sizes (real ProseMirror
+// nodes add open/close tokens too) - the exact numbers don't matter, only
+// that they are consistent enough to hand-verify the resulting offsets.
+function fakeCell(size, isHeaderCell = false) {
+    return { nodeSize: size, type: { name: isHeaderCell ? 'tableHeader' : 'tableCell' } };
+}
+
+function fakeTableRow(cellSizes, { header = false } = {}) {
+    const cells = cellSizes.map((size) => fakeCell(size, header));
+
+    return {
+        nodeSize: cellSizes.reduce((sum, s) => sum + s, 0),
+        firstChild: cells[0] ?? null,
+        forEach(fn) {
+            let offset = 0;
+            cells.forEach((cell, index) => {
+                fn(cell, offset, index);
+                offset += cell.nodeSize;
+            });
+        },
+    };
+}
+
+function fakeTable(rows) {
+    return {
+        forEach(fn) {
+            let offset = 0;
+            rows.forEach((row, index) => {
+                fn(row, offset, index);
+                offset += row.nodeSize;
+            });
+        },
+    };
+}
+
+test('findDataRowCellRanges: returns every cell of the requested data row, positioned relative to tableStart', () => {
+    const header = fakeTableRow([10, 12], { header: true }); // nodeSize 22
+    const row0 = fakeTableRow([5, 7]); // nodeSize 12
+    const row1 = fakeTableRow([6, 8]); // nodeSize 14
+    const table = fakeTable([header, row0, row1]);
+
+    // row1 starts at tableStart(100) + 1 (enter table) + header(22) + row0(12) = 135
+    // its first cell starts at rowStart + 1 (enter row) = 136
+    const ranges = findDataRowCellRanges(table, 100, 1);
+
+    assert.deepEqual(ranges, [
+        { from: 136, to: 142 },
+        { from: 142, to: 150 },
+    ]);
+});
+
+test('findDataRowCellRanges: the header row is never counted as a data row, whatever its own width', () => {
+    const header = fakeTableRow([10], { header: true });
+    const row0 = fakeTableRow([5]);
+    const table = fakeTable([header, row0]);
+
+    // data row index 0 must resolve to row0, not the header - even though
+    // the header is table.forEach()'s first callback.
+    assert.deepEqual(findDataRowCellRanges(table, 0, 0), [{ from: 12, to: 17 }]);
+});
+
+test('findDataRowCellRanges: an out-of-range data row index returns no ranges, not a crash', () => {
+    const header = fakeTableRow([10], { header: true });
+    const row0 = fakeTableRow([5]);
+    const table = fakeTable([header, row0]);
+
+    assert.deepEqual(findDataRowCellRanges(table, 0, 5), []);
+});
+
+test('findDataRowCellRanges: a table with no header row at all still counts every row as a data row', () => {
+    const row0 = fakeTableRow([4]);
+    const row1 = fakeTableRow([9]);
+    const table = fakeTable([row0, row1]);
+
+    // row1 starts at tableStart(0) + 1 + row0(4) = 5; its cell starts at
+    // rowStart + 1 = 6.
+    assert.deepEqual(findDataRowCellRanges(table, 0, 1), [{ from: 6, to: 15 }]);
 });

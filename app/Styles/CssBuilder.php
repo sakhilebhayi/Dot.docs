@@ -359,6 +359,56 @@ class CssBuilder
             // widths `cloneTableHeaderRow()` sets inline out in a single
             // row without needing any table layout algorithm at all.
             '.dotdoc-table-header-repeat{display:flex;background:#fff}'.
+            // A mid-table page-boundary widget (decorations.js's
+            // `renderBoundaryWidget()`, called for a break whose offset
+            // lands INSIDE a table rather than between top-level blocks)
+            // is a direct child of that table's own `<tbody>` - a wide
+            // foreign block there was found live to measurably distort an
+            // auto-layout table's own column-width computation, worse on
+            // every repagination pass, with no stable fixed point
+            // (.ai/rules/editor.md's "wide foreign block child of
+            // `<tbody>`" rule). `position:absolute` removes it from the
+            // table's layout algorithm entirely (CSS 2.1 §17.2.1: an
+            // out-of-flow child of a table-row-group never gets wrapped
+            // in the anonymous row/cell that would otherwise fold it into
+            // column-width computation) - confirmed live, restoring the
+            // table's true, un-distorted columns the instant this rule
+            // applies. A normal (non-table) boundary is an in-flow CHILD
+            // of `.paper` (paper.css's `.canvas .paper{position:relative}`),
+            // so it inherits `.paper`'s own `padding: {$this->margins()}`
+            // for free, confining it to the content column - but CSS
+            // positions an ABSOLUTELY positioned descendant relative to
+            // its containing block's PADDING BOX (CSS 2.1 §10.3.7: the
+            // containing block is the padding edge of the nearest
+            // positioned ancestor), which spans `.paper`'s full width
+            // INCLUDING that padding. `left/right:0` therefore bled the
+            // widget across the page's margins entirely (confirmed live:
+            // its header/footer band measured full paper width, edge to
+            // edge, instead of the ~560px content column every normal
+            // boundary's band measures) - `$h['left']`/`$h['right']` (the
+            // same page-margin values `.dotdoc-page-band`'s own padding
+            // below already uses) put it back at the content column's
+            // actual edges. `top` is set inline per instance
+            // (`decorations.js`'s `tableSplitOverlayTopPx()`), since it
+            // depends on exactly where in that specific table the split
+            // falls.
+            ".dotdoc-page-boundary.dotdoc-page-boundary-in-table{position:absolute;left:{$h['left']};right:{$h['right']}}".
+            // Taking the widget out of flow means nothing reserves the
+            // vertical space it used to occupy by simply sitting there -
+            // without this, the table's own next row renders directly
+            // under the (now purely visual) widget instead of after it.
+            // `decorations.js`'s `buildTableSplitGapDecorations()` reserves
+            // it instead, via a REAL `Decoration.node()` on the row
+            // immediately before the split (never a raw DOM write - see
+            // that function's own comment for why one survives ProseMirror's
+            // reconciliation and the other does not). `padding-bottom`,
+            // not `margin-bottom`: padding is what table row layout
+            // actually honours on a cell; a margin here would be ignored.
+            // The amount travels as a CSS custom property, not a literal
+            // value, so `decorations.js`'s `rowSplitGapPx()` can read the
+            // SAME number back out on the next pass and subtract it back
+            // out of this row's own measured height.
+            '.dotdoc-table-split-gap-cell{padding-bottom:var(--dotdoc-split-gap,0px)}'.
             '.editor-main.dotdoc-paginated .page-break,.editor-main.dotdoc-paginated .section-break{display:none}'.
             '.editor-main.dotdoc-mode-focus .dotdoc-page-boundary,.editor-main.dotdoc-mode-focus .dotdoc-page-edge,.editor-main.dotdoc-mode-focus .dotdoc-page-band{display:none}'.
             '.editor-main.dotdoc-mode-focus .dotdoc-page-gap{background:transparent;height:0}'.

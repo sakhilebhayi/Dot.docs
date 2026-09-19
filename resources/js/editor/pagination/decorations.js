@@ -113,7 +113,7 @@ function measureBlocks(view, sectionSetups) {
             const headerHeight = headerEl ? headerEl.getBoundingClientRect().height : 0;
             const rowHeights = rowEls
                 .filter((r) => r !== headerEl)
-                .map((r) => r.getBoundingClientRect().height);
+                .map((r) => r.getBoundingClientRect().height - rowSplitGapPx(r));
             blocks.push({ type: 'table', height: rect.height, headerHeight, rowHeights });
             return;
         }
@@ -144,6 +144,31 @@ function measureBlocks(view, sectionSetups) {
 /** Whether `el` is a pagination-inserted widget rather than real document content. */
 function isPaginationWidget(el) {
     return el.classList?.contains('dotdoc-page-boundary') || el.classList?.contains('dotdoc-page-edge');
+}
+
+/**
+ * How much of `rowEl`'s OWN rendered height, right now, is a synthetic
+ * gap `buildTableSplitGapDecorations()` below reserved on a PREVIOUS
+ * pass (via a `Decoration.node()` `--dotdoc-split-gap` custom property on
+ * its cells - see that function's own comment for why a real decoration,
+ * not a raw DOM write, is what makes this survive at all). Subtracted
+ * back out here so `measureBlocks()`'s own row-height reading reflects
+ * the row's TRUE content height, not the synthetic space reserved for a
+ * mid-table split's now-absolutely-positioned overlay sitting next to
+ * it - left uncorrected, a later pass would read the INFLATED height
+ * back in, treat that as the row's real content, and potentially
+ * re-derive a wrong break position or re-inflate the gap further.
+ *
+ * @param {HTMLElement} rowEl
+ * @returns {number}
+ */
+function rowSplitGapPx(rowEl) {
+    const cell = rowEl.children[0];
+    if (!cell) {
+        return 0;
+    }
+
+    return parseFloat(getComputedStyle(cell).getPropertyValue('--dotdoc-split-gap')) || 0;
 }
 
 /**
@@ -301,22 +326,22 @@ function cloneTableHeaderRow(headerRowEl) {
  * `measure.js` never reserves height for a header in that case either, so
  * there is nothing to repeat.
  *
- * The column widths this reads can be imprecise, and this is a KNOWN,
- * accepted gap rather than something this function tries to correct:
- * an auto-layout table (TipTap's un-resized default) with a wide foreign
- * block child of its own `<tbody>` - which is exactly what a mid-table
- * page-boundary widget is - can measure its OWN columns differently on
- * successive reflows, with no guaranteed fixed point (confirmed live: a
- * version of this feature that re-measured and rewrote the clone's width
- * on every repagination pass made the reading GROW on every single edit
- * anywhere in the document, unboundedly, because each rewrite was itself
- * a reflow-triggering DOM mutation feeding the next reading). Reading
- * live cell widths ONCE, only when the header's own key changes (see
- * `repaginate()`'s key comment), and never writing back to correct a
- * "settled" value that keeps not settling, is what keeps this feature
- * from making that pre-existing instability worse - at the cost of the
- * clone occasionally being a few pixels off the table's own current
- * width rather than pixel-perfect on every keystroke.
+ * The column widths this reads used to be only approximately reliable,
+ * back when a mid-table page-boundary widget was still a wide, normal-
+ * flow child of the table's own `<tbody>`: that widget's mere presence
+ * measurably distorted the table's own auto-layout column computation
+ * (confirmed live - removing it shrank the table's columns back down),
+ * and repeated reflows could drift the reading further with no
+ * guaranteed fixed point. `repaginate()`'s boundary widget for a
+ * mid-table split is now `position:absolute` instead (`.ai/rules/
+ * editor.md`'s "wide foreign block child of `<tbody>`" rule has the
+ * full story, including why that alone isn't enough and what
+ * `buildTableSplitGapDecorations()` does to reserve the vertical space
+ * the widget no longer occupies by sitting there) - removing it from
+ * the table's own layout algorithm entirely, so the width this function
+ * reads is genuinely the table's own true, undistorted column width,
+ * confirmed stable (not merely bounded) across repeated unrelated edits
+ * live.
  *
  * @param {import('@tiptap/pm/view').EditorView} view
  * @param {number} tableStart
@@ -419,6 +444,50 @@ function measureLines(dom, height) {
     const contentHeight = lineRects.reduce((sum, r) => sum + r.height, 0);
 
     return { lines, lineHeight: contentHeight / lines, height: contentHeight };
+}
+
+/**
+ * The document position range of each CELL in one DATA row (0-based,
+ * header excluded) of a table node - used to place a `Decoration.node()`
+ * on every cell of the row immediately before a mid-table split, so that
+ * row's own rendered height reserves space for the split's now-
+ * absolutely-positioned overlay widget (see `buildTableSplitGapDecorations()`
+ * below for the full picture of why). Targets CELLS, not the row itself:
+ * `padding` on a bare `<tr>` has no rendered effect in table layout -
+ * only `<td>`/`<th>` honour it - so a `Decoration.node()` on the row
+ * node alone would silently do nothing.
+ *
+ * Exported (unlike its sibling helpers around it) purely so `node --test`
+ * can exercise this one, dependency-free position arithmetic without a
+ * real DOM or ProseMirror view - it takes a plain ProseMirror node and
+ * calls only `.forEach()`/`.nodeSize`, the same "pure decision" shape as
+ * `findTableHeaderRow()` and measure.js's own functions.
+ *
+ * @param {import('@tiptap/pm/model').Node} tableNode
+ * @param {number} tableStart
+ * @param {number} dataRowIndex
+ * @returns {Array<{from: number, to: number}>}
+ */
+export function findDataRowCellRanges(tableNode, tableStart, dataRowIndex) {
+    const ranges = [];
+    let dataRowsSeen = 0;
+
+    tableNode.forEach((row, rOffset) => {
+        const isHeaderRow = row.firstChild && row.firstChild.type.name === 'tableHeader';
+        if (isHeaderRow) {
+            return;
+        }
+        if (dataRowsSeen === dataRowIndex) {
+            const rowStart = tableStart + 1 + rOffset;
+            row.forEach((cell, cOffset) => {
+                const cellStart = rowStart + 1 + cOffset;
+                ranges.push({ from: cellStart, to: cellStart + cell.nodeSize });
+            });
+        }
+        dataRowsSeen += 1;
+    });
+
+    return ranges;
 }
 
 /**
@@ -544,6 +613,50 @@ function renderBoundaryWidget(renderBands, tableHeaderClone) {
 }
 
 /**
+ * `el`'s natural rendered height, measured by inserting it off-screen
+ * (`position:absolute`, `visibility:hidden`, far past the left edge)
+ * just long enough to read `getBoundingClientRect().height`, then
+ * removing it and restoring whatever inline styles it had before -
+ * needed BEFORE this pass's decorations are finalised, since a mid-
+ * table split's row-before gap (`buildTableSplitGapDecorations()` below)
+ * must reserve EXACTLY this much space, and that decoration is built in
+ * the SAME pass, before `el` is ever inserted at its real document
+ * position (see that function's own comment for the full picture).
+ *
+ * @param {HTMLElement} el
+ * @returns {number}
+ */
+function measureOverlayHeight(el, paperEl) {
+    const prev = { position: el.style.position, visibility: el.style.visibility, left: el.style.left, top: el.style.top };
+
+    el.style.position = 'absolute';
+    el.style.visibility = 'hidden';
+    el.style.left = '-99999px';
+    el.style.top = '0';
+    // Appended to `.paper` itself, not `document.body`: `.dotdoc-page-
+    // band`'s font-size/colour (App\Styles\CssBuilder::paginationRule())
+    // read `var(--doc-size-small)`/`var(--doc-muted)`, CSS custom
+    // properties DECLARED ON `.paper` (CssBuilder::paperRule()) - a
+    // document-style-driven token, not a `:root` global. Measuring
+    // outside `.paper` entirely (document.body, an ANCESTOR, never a
+    // descendant of `.paper`) left those custom properties undefined at
+    // measurement time, silently falling back to `font-size`'s own
+    // initial value instead of the document style's actual configured
+    // size - confirmed live: it produced a DIFFERENT (wrong) height than
+    // the same content rendered for real inside `.paper` moments later.
+    paperEl.appendChild(el);
+    const height = el.getBoundingClientRect().height;
+    paperEl.removeChild(el);
+
+    el.style.position = prev.position;
+    el.style.visibility = prev.visibility;
+    el.style.left = prev.left;
+    el.style.top = prev.top;
+
+    return height;
+}
+
+/**
  * A single header OR footer band, with none of a boundary widget's other
  * parts (no gap, no shadow) - used only for the two document-EDGE bands
  * `renderBoundaryWidget()` above can never reach: page 1 has no PREVIOUS
@@ -650,6 +763,91 @@ export const PaginationExtension = Extension.create({
 });
 
 /**
+ * The `.paper`-relative pixel Y where a mid-table split's overlay should
+ * render, computed PURELY from already-measured geometry (`measureBlocks()`'s
+ * `headerHeight`/`rowHeights` for this table, plus the table's own live
+ * top) rather than by reading any OTHER widget's current DOM position.
+ * That matters here specifically: the overlay is `position:absolute` (see
+ * `.ai/rules/editor.md`'s "wide foreign block child of `<tbody>`" rule for
+ * why it has to be), so it no longer has a normal-flow position of its
+ * own to read back - and reading the STILL-in-flow position of anything
+ * ELSE nearby (the row before, say) is fragile exactly BECAUSE that
+ * element's own flow position depends on whatever ELSE is or isn't
+ * occupying space around it in that same pass. A pure sum of this
+ * table's own already-known row heights has no such dependency.
+ *
+ * `view.dom` is `.paper` itself, not merely inside it - confirmed live
+ * earlier in this project (TipTap's editable root carries the class
+ * directly, per `editorProps: {attributes: {class: 'paper'}}` in
+ * resources/js/editor/index.js) - so its own bounding rect IS the
+ * containing block's origin, once `.paper` is `position:relative`
+ * (resources/css/paper.css).
+ *
+ * @param {import('@tiptap/pm/view').EditorView} view
+ * @param {import('./measure').MeasuredBlock} tableBlock
+ * @param {number} tableStart
+ * @param {number} dataRowOffset - `breakInfo.offset`: the 0-based data row the continuation begins at
+ * @returns {number}
+ */
+function tableSplitOverlayTopPx(view, tableBlock, tableStart, dataRowOffset) {
+    const tableDom = view.nodeDOM(tableStart);
+    const tableTop = tableDom instanceof HTMLElement ? tableDom.getBoundingClientRect().top : 0;
+    const heightBeforeSplit = tableBlock.headerHeight
+        + tableBlock.rowHeights.slice(0, dataRowOffset).reduce((sum, h) => sum + h, 0);
+    const paperTop = view.dom.getBoundingClientRect().top;
+
+    return tableTop + heightBeforeSplit - paperTop;
+}
+
+/**
+ * A `Decoration.node()` on every cell of the data row immediately BEFORE
+ * a mid-table split, reserving exactly `overlayHeightPx` of vertical
+ * space for the split's overlay - which, being `position:absolute`, no
+ * longer occupies any space of its own in the table's normal flow (see
+ * `.ai/rules/editor.md`'s "wide foreign block child of `<tbody>`" rule:
+ * that removal from flow is WHY the auto-layout instability the overlay
+ * used to cause is gone, but it also means something else now has to
+ * hold the gap open, or the next row renders directly under the
+ * overlay's own visual content instead of after it).
+ *
+ * A REAL `Decoration.node()`, never a raw `element.style.paddingBottom =`
+ * write: confirmed live that ProseMirror reverts an externally-applied
+ * style OR class on a real content node within about one repagination
+ * cycle - its own view-tree reconciliation treats the DOM of a document
+ * node as something IT owns and will silently correct back to what the
+ * node's own schema/decorations say it should be, discarding anything
+ * else. A node decoration is the opposite: it IS part of what
+ * ProseMirror itself considers this cell's expected render, so it
+ * survives exactly the reconciliation that discards a raw DOM write.
+ *
+ * Targets CELLS, not the row: `padding` on a bare `<tr>` has no rendered
+ * effect in table layout, only `<td>`/`<th>` honour it.
+ *
+ * The reserved amount travels as a `--dotdoc-split-gap` CSS custom
+ * property (`.dotdoc-table-split-gap-cell{padding-bottom:var(--dotdoc-split-gap,0px)}`,
+ * `CssBuilder::paginationRule()`) rather than a literal `padding-bottom`
+ * value, specifically so `rowSplitGapPx()` can read it back out again on
+ * the NEXT pass and subtract it from `measureBlocks()`'s own row-height
+ * reading - left uncorrected, that next pass would read this row's
+ * height as its real content PLUS the synthetic gap, treat the inflated
+ * number as real, and feed a wrong height into `computeBreaks()`.
+ *
+ * @param {import('@tiptap/pm/model').Node} tableNode
+ * @param {number} tableStart
+ * @param {number} dataRowOffset - `breakInfo.offset`; the row reserving space is `dataRowOffset - 1`
+ * @param {number} overlayHeightPx
+ * @returns {import('@tiptap/pm/view').Decoration[]}
+ */
+function buildTableSplitGapDecorations(tableNode, tableStart, dataRowOffset, overlayHeightPx) {
+    const cellRanges = findDataRowCellRanges(tableNode, tableStart, dataRowOffset - 1);
+
+    return cellRanges.map(({ from, to }) => Decoration.node(from, to, {
+        class: 'dotdoc-table-split-gap-cell',
+        style: `--dotdoc-split-gap:${overlayHeightPx}px`,
+    }));
+}
+
+/**
  * Recompute page breaks against the live DOM and dispatch the resulting
  * DecorationSet as this plugin's meta. Called by pagination/index.js
  * (Task 7) after its debounce timer fires.
@@ -675,7 +873,7 @@ export function repaginate(view, getPageSetup, renderBands) {
     const { boundaries, edgeHeaderPage, edgeFooterPage } = pageBandNumbers(pageCount);
 
     let pageIndex = 0;
-    const decorations = breakList.map((breakInfo) => {
+    const decorations = breakList.flatMap((breakInfo) => {
         // Clamped ONCE and reused for both the doc-child lookup and the
         // position resolver below - passing the raw, unclamped
         // breakInfo.blockIndex to resolveBreakPosition while only the
@@ -694,57 +892,77 @@ export function repaginate(view, getPageSetup, renderBands) {
         // header is already right there at the top, nothing to repeat.
         // Only a non-zero offset is an actual MID-table split.
         const isTableSplit = blockNode.type.name === 'table' && breakInfo.offset > 0;
-        // Read once, eagerly, so it can go straight into this decoration's
-        // KEY below - see that comment for why. Cheap even though it runs
-        // on every pass: a single textContent read on one row, not the
-        // per-cell getBoundingClientRect() work cloneTableHeaderRow() does,
-        // which only actually happens when the key change below decides a
-        // rebuild is warranted.
-        const headerRowText = isTableSplit
-            ? findTableHeaderRowEl(view.nodeDOM(starts[blockIndex]))?.textContent ?? ''
-            : '';
 
-        return Decoration.widget(pos, () => renderBoundaryWidget(
+        if (!isTableSplit) {
+            return [Decoration.widget(pos, () => renderBoundaryWidget(
+                (footerEl, headerEl) => renderBands(footerEl, headerEl, footerPage, headerPage, pageCount),
+                null,
+            ), {
+                side: -1,
+                // pageCount is part of the key ON PURPOSE: ProseMirror
+                // reuses an existing widget's DOM (never re-invoking its
+                // factory, hence never re-rendering its {{ pages }} band)
+                // whenever a later pass produces the SAME key at the SAME
+                // position - which happens constantly, since a boundary's
+                // blockIndex/offset often doesn't move between edits even
+                // though the document's TOTAL page count does. Folding
+                // pageCount into the key forces every boundary to
+                // re-render whenever the total changes, which is the only
+                // way a {{ pages }} field ever gets to show the current
+                // total rather than freezing at whatever total was in
+                // effect the first time that specific boundary appeared.
+                key: `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}-${pageCount}`,
+            })];
+        }
+
+        // A mid-table split builds its overlay content EAGERLY (not
+        // behind a lazy widget factory the way every other boundary
+        // above is) because `buildTableSplitGapDecorations()` below needs
+        // its rendered HEIGHT before this pass's decorations are even
+        // finished being built - see that function's own comment for the
+        // full picture of why a mid-table split needs a second,
+        // companion decoration at all.
+        const overlay = renderBoundaryWidget(
             (footerEl, headerEl) => renderBands(footerEl, headerEl, footerPage, headerPage, pageCount),
-            isTableSplit ? buildTableHeaderClone(view, starts[blockIndex]) : null,
-        ), {
+            buildTableHeaderClone(view, starts[blockIndex]),
+        );
+        const overlayHeight = measureOverlayHeight(overlay, view.dom);
+        const overlayTopPx = tableSplitOverlayTopPx(view, blocks[blockIndex], starts[blockIndex], breakInfo.offset);
+
+        overlay.classList.add('dotdoc-page-boundary-in-table');
+        overlay.style.top = `${overlayTopPx}px`;
+
+        const headerRowText = findTableHeaderRowEl(view.nodeDOM(starts[blockIndex]))?.textContent ?? '';
+
+        const widgetDecoration = Decoration.widget(pos, () => overlay, {
             side: -1,
-            // pageCount is part of the key ON PURPOSE: ProseMirror reuses
-            // an existing widget's DOM (never re-invoking its factory,
-            // hence never re-rendering its {{ pages }} band) whenever a
-            // later pass produces the SAME key at the SAME position - which
-            // happens constantly, since a boundary's blockIndex/offset
-            // often doesn't move between edits even though the document's
-            // TOTAL page count does. Folding pageCount into the key forces
-            // every boundary to re-render whenever the total changes,
-            // which is the only way a {{ pages }} field ever gets to show
-            // the current total rather than freezing at whatever total was
-            // in effect the first time that specific boundary appeared.
-            //
-            // A table-split boundary ALSO folds in the header row's own
-            // live text - its cloned header can go stale (wrong text) from
-            // an edit that changes neither blockIndex/offset nor pageCount,
-            // which pageCount alone cannot catch the way it catches
-            // {{ pages }}. This is deliberately NOT "rebuild on every
-            // pass" (an earlier version folded in a per-repaginate()-call
-            // counter instead): a table nested inside `<tbody>` sits next
-            // to a genuine, pre-existing CSS auto-layout instability
-            // (`.ai/rules/editor.md` - a wide foreign block child of
-            // `<tbody>` can make an auto-layout table's own measured
-            // column widths drift under REPEATED reflows, with no
-            // guaranteed fixed point) that every extra rebuild's own
-            // getBoundingClientRect() reads and DOM writes feed further -
-            // confirmed live: forcing a rebuild every pass grew the
-            // measured width on every single edit anywhere in the
-            // document, unboundedly, never settling. Keying on the header
-            // text instead rebuilds only when there is an actual reason
-            // to (the text itself changed), which is both correct for the
-            // staleness this exists to fix and doesn't go looking for
-            // trouble the rest of the time.
-            key: isTableSplit
-                ? `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}-${pageCount}-hdr:${headerRowText}`
-                : `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}-${pageCount}`,
+            // This widget's content is ALREADY fully built, fresh, by the
+            // time we get here - EVERY pass, unconditionally (see the
+            // comment above `overlay`'s own construction). But building a
+            // fresh `overlay` object does nothing on its own: ProseMirror
+            // only calls this factory - only ever LOOKS at this pass's
+            // `overlay` at all - when the KEY differs from whatever
+            // widget is ALREADY at this position from the LAST pass; a
+            // matching key means it reuses the OLD cached DOM node
+            // UNCHANGED, silently discarding the fresh one this pass just
+            // built. Since `position:absolute` no longer has ANY normal-
+            // flow position of its own that the browser keeps in sync
+            // automatically (unlike every other boundary, which is still
+            // normal-flow and always visually correct for free), an
+            // EXPLICIT `top` value that goes stale is now possible in a
+            // way it never was before - confirmed live: editing content
+            // BEFORE this table (shifting the table's own position on the
+            // page) left this widget rendered exactly where it USED to
+            // be, ~28px off from where the split ACTUALLY falls now,
+            // because neither header text nor blockIndex/offset/pageCount
+            // happened to change from that edit. Folding `overlayTopPx`
+            // into the key directly is what closes this: ANY change to
+            // the computed position is, by definition, a reason to
+            // rebuild.
+            key: `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}-${pageCount}-hdr:${headerRowText}-top:${overlayTopPx}`,
         });
+
+        return [widgetDecoration, ...buildTableSplitGapDecorations(blockNode, starts[blockIndex], breakInfo.offset, overlayHeight)];
     });
 
     // Two ALWAYS-PRESENT edge widgets (pageCount is never less than 1),
