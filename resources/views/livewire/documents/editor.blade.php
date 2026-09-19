@@ -533,7 +533,7 @@
             <option value="print-preview">Print preview</option>
         </select>
 
-        <button type="button" class="tool tool-mono" aria-pressed="{{ 'false' }}"
+        <button type="button" class="tool tool-mono" aria-pressed="false"
                 x-bind:aria-pressed="thumbnailsOpen ? 'true' : 'false'"
                 @click="thumbnailsOpen = !thumbnailsOpen">Pages</button>
 

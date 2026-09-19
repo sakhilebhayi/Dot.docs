@@ -1397,6 +1397,23 @@ button.list-row {
     min-height: 0;
 }
 
+/*
+ * The thumbnails rail scrolls on its own, exactly like .editor-side above:
+ * the column clips, the rail's own grid inside it takes the leftover and
+ * scrolls, so a long document's page count doesn't grow the row itself
+ * and squeeze .editor-main.
+ */
+.editor-thumbnails {
+    flex: 0 0 200px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    border-left: 1px solid var(--line);
+    background: var(--surface);
+    padding: var(--s3);
+}
+
 .comment-thread {
     display: flex;
     flex-direction: column;
@@ -1701,6 +1718,13 @@ button.list-row {
     }
 
     .editor-side {
+        flex: 1 1 100%;
+        overflow: visible;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+    }
+
+    .editor-thumbnails {
         flex: 1 1 100%;
         overflow: visible;
         border-left: 0;

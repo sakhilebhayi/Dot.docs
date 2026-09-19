@@ -286,7 +286,7 @@ export const PaginationExtension = Extension.create({
  *
  * @param {import('@tiptap/pm/view').EditorView} view
  * @param {() => {pageHeightPx: number, base: object, bandHeight: number}} getPageSetup
- * @param {(footerEl: HTMLElement, headerEl: HTMLElement, pageIndex: number) => void} renderBands
+ * @param {(footerEl: HTMLElement, headerEl: HTMLElement, pageIndex: number, pageCount: number) => void} renderBands
  * @returns {number} the new total page count
  */
 export function repaginate(view, getPageSetup, renderBands) {
@@ -294,6 +294,12 @@ export function repaginate(view, getPageSetup, renderBands) {
     const { blocks, starts } = measureBlocks(view, { base: setup.base, bandHeight: setup.bandHeight });
     const usable = setup.pageHeightPx - setup.bandHeight;
     const breakList = computeBreaks(blocks, usable);
+    // Computed BEFORE building widgets, and passed straight into
+    // renderBands below, rather than left for the caller to read back off
+    // its own (still-stale, not-yet-updated) pageCountValue variable after
+    // repaginate() returns - a widget's factory runs DURING this map, so a
+    // caller-side value can only ever be one generation behind.
+    const pageCount = breakList.length + 1;
 
     let pageIndex = 0;
     const decorations = breakList.map((breakInfo) => {
@@ -310,13 +316,27 @@ export function repaginate(view, getPageSetup, renderBands) {
         const thisPageIndex = pageIndex;
 
         return Decoration.widget(pos, () => renderBoundaryWidget(
-            (footerEl, headerEl) => renderBands(footerEl, headerEl, thisPageIndex),
-        ), { side: -1, key: `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}` });
+            (footerEl, headerEl) => renderBands(footerEl, headerEl, thisPageIndex, pageCount),
+        ), {
+            side: -1,
+            // pageCount is part of the key ON PURPOSE: ProseMirror reuses
+            // an existing widget's DOM (never re-invoking its factory,
+            // hence never re-rendering its {{ pages }} band) whenever a
+            // later pass produces the SAME key at the SAME position - which
+            // happens constantly, since a boundary's blockIndex/offset
+            // often doesn't move between edits even though the document's
+            // TOTAL page count does. Folding pageCount into the key forces
+            // every boundary to re-render whenever the total changes,
+            // which is the only way a {{ pages }} field ever gets to show
+            // the current total rather than freezing at whatever total was
+            // in effect the first time that specific boundary appeared.
+            key: `dotdoc-page-${breakInfo.blockIndex}-${breakInfo.offset}-${pageCount}`,
+        });
     });
 
     const tr = view.state.tr.setMeta(paginationPluginKey, DecorationSet.create(view.state.doc, decorations));
     tr.setMeta('addToHistory', false);
     view.dispatch(tr);
 
-    return breakList.length + 1;
+    return pageCount;
 }

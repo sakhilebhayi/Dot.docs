@@ -1,4 +1,4 @@
-import { repaginate, mmToPx } from './decorations';
+import { repaginate, resolveSectionPageHeight } from './decorations';
 import { renderBand } from './bands';
 import { applyMode, MODES, renderThumbnailGrid } from './viewModes';
 
@@ -44,17 +44,27 @@ export function mountPagination(editor, canvasEl, opts = {}) {
     }
 
     function getPageSetupForMeasurement() {
-        const heightMm = pageSetup.orientation === 'landscape'
-            ? { A4: 210, A3: 297, Letter: 215.9 }[pageSetup.size] || 210
-            : { A4: 297, A3: 420, Letter: 279.4 }[pageSetup.size] || 297;
-        const pageHeightPx = mmToPx(`${heightMm}mm`) - mmToPx(pageSetup.margins.top) - mmToPx(pageSetup.margins.bottom);
+        // resolveSectionPageHeight(pageSetup) with no override IS exactly
+        // "this page setup's own height minus its own margins" - reusing
+        // it here (rather than a second, hand-rolled A4/A3/Letter table)
+        // is what keeps the document's OWN page height and a sectionBreak's
+        // overridden height (measureBlocks() in decorations.js, which calls
+        // this same function) computed by the same one source of truth.
+        const pageHeightPx = resolveSectionPageHeight(pageSetup);
 
         return { pageHeightPx, base: pageSetup, bandHeight: bandHeightPx() };
     }
 
-    function renderBandsForBoundary(footerEl, headerEl, pageIndexAfterBoundary) {
-        renderBand(footerEl, footerSegments, pageIndexAfterBoundary - 1, pageCountValue);
-        renderBand(headerEl, headerSegments, pageIndexAfterBoundary, pageCountValue);
+    function renderBandsForBoundary(footerEl, headerEl, pageIndexAfterBoundary, totalPages) {
+        // `totalPages` comes straight from repaginate()'s own freshly
+        // computed count, passed in at the moment each widget is built -
+        // NOT the closure's `pageCountValue`, which is still the PREVIOUS
+        // pass's value until repaginate() returns below. Reading the
+        // closure here would render every {{ pages }} band one generation
+        // stale on top of the DecorationSet-key staleness scheduleRepaginate
+        // already fixes for LATER passes (see repaginate()'s key comment).
+        renderBand(footerEl, footerSegments, pageIndexAfterBoundary - 1, totalPages);
+        renderBand(headerEl, headerSegments, pageIndexAfterBoundary, totalPages);
     }
 
     function scheduleRepaginate() {
@@ -64,6 +74,18 @@ export function mountPagination(editor, canvasEl, opts = {}) {
 
     function runRepaginate() {
         if (editor.isDestroyed) {
+            return;
+        }
+        if (mode === 'print-preview') {
+            // Print Preview hides .paper entirely
+            // (.editor-main.dotdoc-mode-print-preview .paper{display:none},
+            // CssBuilder::paginationRule()) - measuring a display:none
+            // subtree would wipe every page-boundary decoration to zero
+            // breaks (getBoundingClientRect() on a hidden element reports
+            // all-zero rects). Skip the whole measurement/decoration/rail
+            // pass while this mode is active; setMode() below resumes it
+            // immediately on the way OUT of this mode, rather than leaving
+            // the canvas showing zero boundaries until the next edit.
             return;
         }
         pageCountValue = repaginate(editor.view, getPageSetupForMeasurement, renderBandsForBoundary);
@@ -94,11 +116,20 @@ export function mountPagination(editor, canvasEl, opts = {}) {
     }
 
     // Triggers, per design spec §2.1:
-    //  - a debounced idle pause after any edit — covers local typing AND a
-    //    remote update applied via applyRemote(), since TipTap's onUpdate
-    //    fires on any transaction with docChanged regardless of its meta.
+    //  - a debounced idle pause after any edit. This covers local typing
+    //    directly (TipTap's onUpdate fires on any transaction with
+    //    docChanged). It does NOT itself cover a remote update applied via
+    //    applyRemote() - that call uses `emitUpdate: false` specifically so
+    //    a collaborator's edit never fires the LOCAL autosave/update chain
+    //    (see .ai/rules/editor.md's applyRemote() rule) - so `update` alone
+    //    never fires for it. What actually covers a remote update is the
+    //    Blade bridge's Echo listener, which already calls refreshOutline()
+    //    immediately after every successful applyRemote() (independent of
+    //    this `update` listener), and refreshOutline() calls setPageSetup()
+    //    below, which schedules a pass - so the guarantee holds, just via
+    //    that path rather than this one.
     //  - a document style change / page-setup change — both already flow
-    //    through the Blade bridge's refreshOutline(), which calls
+    //    through the same Blade bridge's refreshOutline(), which calls
     //    setPageSetup() below with the fresh values before the next
     //    scheduled pass; no separate event wiring is needed for either.
     editor.on('update', scheduleRepaginate);
@@ -110,6 +141,7 @@ export function mountPagination(editor, canvasEl, opts = {}) {
             return mode;
         },
         setMode(next) {
+            const wasPrintPreview = mode === 'print-preview';
             mode = MODES.includes(next) ? next : 'continuous';
             applyMode(canvasEl, mode, {
                 pdfPreviewUrl: opts.pdfPreviewUrl,
@@ -117,6 +149,13 @@ export function mountPagination(editor, canvasEl, opts = {}) {
                 currentPage: () => currentPageIndex,
                 goToPage,
             });
+            if (wasPrintPreview && mode !== 'print-preview') {
+                // runRepaginate() skips its work entirely for as long as
+                // Print Preview is active (see above) - resume it now,
+                // rather than leaving the canvas with zero page-boundary
+                // decorations until the writer's next edit.
+                scheduleRepaginate();
+            }
         },
         get pageCount() {
             return pageCountValue;
