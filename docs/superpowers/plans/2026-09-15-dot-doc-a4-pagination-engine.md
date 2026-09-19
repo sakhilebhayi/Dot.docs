@@ -1563,7 +1563,7 @@ via textContent-equivalent (createTextNode), never innerHTML."
 - Test: `tests/js/pagination.viewModes.test.js` (new, covers the pure mode-to-class mapping only)
 
 **Interfaces:**
-- Produces: `MODES = ['continuous', 'single', 'two-page', 'multi-page', 'focus', 'print-preview']`, `classesForMode(mode: string): string[]` (pure — the only part this task unit-tests), `applyMode(canvasEl: HTMLElement, mode: string, opts): void` (DOM side effect: toggles classes, mounts/unmounts the print-preview iframe, mounts/unmounts the multi-page thumbnail grid), `renderThumbnail(pageEl: HTMLElement | null, scale: number): HTMLElement` (the scaled-clone technique shared by the rail panel and multi-page mode).
+- Produces: `MODES = ['continuous', 'single', 'two-page', 'multi-page', 'focus', 'print-preview']`, `classesForMode(mode: string): string[]` (pure — the only part this task unit-tests), `applyMode(canvasEl: HTMLElement, mode: string, opts): void` (DOM side effect: toggles classes, mounts/unmounts the print-preview iframe, mounts/unmounts the multi-page thumbnail grid), `renderThumbnail(pageContent: DocumentFragment | null, scale: number): HTMLElement` and `renderThumbnailGrid(container, canvasEl, opts, scale): void` (the scaled-clone technique shared by the rail panel and multi-page mode — extracts each page's actual rendered content via the DOM `Range` API between `.dotdoc-page-boundary` widgets, since `.paper` stays one continuous DOM tree with no discrete per-page element to select).
 
 - [ ] **Step 1: Write the failing test for the pure mapping**
 
@@ -1680,34 +1680,95 @@ export function applyMode(canvasEl, mode, opts) {
 }
 
 /**
+ * The rendered DOM content belonging to one computed page, as a
+ * DocumentFragment - extracted by ranging between two consecutive
+ * `.dotdoc-page-boundary` widgets (pagination/decorations.js's own
+ * boundary decorations - already real DOM nodes in document order, so
+ * this needs no attribute decorations.js would otherwise have to add
+ * purely for this purpose). `.paper` stays ONE continuous DOM tree
+ * (decoration, not division - design spec §2), so there is no discrete
+ * per-page element to `querySelectorAll` for; the native `Range` API is
+ * what "a slice of a continuous tree, however deeply nested each end is"
+ * actually means here - a boundary widget for a between-blocks break
+ * sits as a direct child of `.paper`, but a mid-paragraph line split's
+ * widget sits nested inside that `<p>`, and `Range.setStartAfter`/
+ * `setEndBefore` resolve correctly regardless of that difference, same
+ * as `Range.cloneContents()` correctly reconstructs a partial ancestor
+ * (half a paragraph) when a range's endpoints fall mid-element.
+ *
+ * @param {HTMLElement} paper
+ * @param {number} pageIndex - 1-based
+ * @param {number} totalPages
+ * @returns {DocumentFragment | null} null when the live DOM's boundary
+ *   count doesn't yet match `totalPages - 1` (a repagination pass is
+ *   still mid-flight) or `.paper` has no content - the caller renders an
+ *   empty placeholder box for that one pass rather than throwing.
+ */
+function pageContentFragment(paper, pageIndex, totalPages) {
+    const boundaries = Array.from(paper.querySelectorAll('.dotdoc-page-boundary'));
+    if (boundaries.length !== totalPages - 1 || !paper.firstChild) {
+        return null;
+    }
+
+    const range = document.createRange();
+
+    if (pageIndex === 1) {
+        range.setStartBefore(paper.firstChild);
+    } else {
+        range.setStartAfter(boundaries[pageIndex - 2]);
+    }
+
+    if (pageIndex === totalPages) {
+        range.setEndAfter(paper.lastChild);
+    } else {
+        range.setEndBefore(boundaries[pageIndex - 1]);
+    }
+
+    try {
+        return range.cloneContents();
+    } catch (_) {
+        // A malformed range (e.g. start after end, from a boundary list
+        // that shifted mid-computation) - fall back to a placeholder
+        // rather than letting a thrown DOMException break repagination.
+        return null;
+    }
+}
+
+/**
  * A scaled, non-editable, non-interactive CLONE of the live page content -
  * not a screenshot (this project carries no rasteriser), and not a blank
  * placeholder either, so the thumbnail actually shows what the page holds.
  * `transform: scale()` rather than a `zoom` CSS property, because `zoom`
  * also rescales the element's own box for layout purposes in a way that
  * fights a fixed thumbnail size; `transform` leaves the box where the CSS
- * grid puts it and only rescales what is drawn inside.
+ * grid puts it and only rescales what is drawn inside. The inner wrapper
+ * carries the `paper` class (not just `dotdoc-thumbnail-inner`) so
+ * `App\Styles\CssBuilder`'s Document Style rules (`.paper h1`, `.paper p`,
+ * table/figure/callout styling, ...) apply to the cloned content exactly
+ * as they do in the real canvas - a wrapper without that class would
+ * render the clone as unstyled plain markup. The resulting oversized
+ * (210mm-wide) box is what `.dotdoc-thumbnail`'s own `overflow:hidden`
+ * clips down to the thumbnail's actual size, the standard technique for a
+ * scaled preview.
  *
- * @param {HTMLElement | null} pageContentEl - the DOM slice for one page
- *   (a `.paper` clone bounded to that page's rendered content); null draws
- *   an empty placeholder rather than throwing, since a page whose content
- *   has not rendered yet (mid-repagination) must still get a thumbnail box.
+ * @param {DocumentFragment | null} pageContent - from `pageContentFragment()`;
+ *   null draws an empty placeholder rather than throwing, since a page
+ *   whose content has not rendered yet (mid-repagination) must still get
+ *   a thumbnail box.
  * @param {number} scale
  * @returns {HTMLElement}
  */
-export function renderThumbnail(pageContentEl, scale) {
+export function renderThumbnail(pageContent, scale) {
     const box = document.createElement('div');
     box.className = 'dotdoc-thumbnail';
 
     const inner = document.createElement('div');
-    inner.className = 'dotdoc-thumbnail-inner';
+    inner.className = 'dotdoc-thumbnail-inner paper';
+    inner.setAttribute('aria-hidden', 'true');
     inner.style.transform = `scale(${scale})`;
 
-    if (pageContentEl) {
-        const clone = pageContentEl.cloneNode(true);
-        clone.removeAttribute('contenteditable');
-        clone.setAttribute('aria-hidden', 'true');
-        inner.appendChild(clone);
+    if (pageContent) {
+        inner.appendChild(pageContent);
     }
 
     box.appendChild(inner);
@@ -1732,13 +1793,13 @@ export function renderThumbnailGrid(container, canvasEl, opts, scale) {
         container.removeChild(container.firstChild);
     }
 
-    const pageEls = Array.from(canvasEl.querySelectorAll('[data-dotdoc-page]'));
+    const paper = canvasEl.querySelector('.paper');
     const total = opts.pageCount();
     const current = opts.currentPage();
 
     for (let i = 1; i <= total; i++) {
-        const pageEl = pageEls[i - 1] || null;
-        const thumb = renderThumbnail(pageEl, scale);
+        const content = paper ? pageContentFragment(paper, i, total) : null;
+        const thumb = renderThumbnail(content, scale);
         thumb.classList.toggle('is-current', i === current);
         thumb.setAttribute('role', 'button');
         thumb.setAttribute('tabindex', '0');
@@ -1795,7 +1856,7 @@ thumbnails rail share, per design spec §3-4."
 - Modify: `app/Styles/CssBuilder.php` (`canvas` mode gap/shadow/page CSS; hide the plain `pageBreak`/`sectionBreak` divider styling while pagination is active)
 
 **Interfaces:**
-- Consumes: `createPaginationPlugin`/`repaginate`/`resolveSectionPageHeight`/`mmToPx` (Task 4), `renderBand` (Task 5), `applyMode`/`MODES` (Task 6), `pageSetup`/`headerSegments`/`footerSegments` (Task 1/2, arriving via `outline()`'s response).
+- Consumes: `PaginationExtension`/`repaginate`/`resolveSectionPageHeight`/`mmToPx` (Task 4), `renderBand` (Task 5), `applyMode`/`MODES`/`renderThumbnailGrid` (Task 6), `pageSetup`/`headerSegments`/`footerSegments` (Task 1/2, arriving via `outline()`'s response).
 - Produces: `window.DotDoc.pagination = { mode, setMode(mode), pageCount, currentPage, goToPage(n) }` (per design spec §5) plus an internal `setPageSetup(pageSetup, headerSegments, footerSegments)` the Blade bridge calls.
 
 - [ ] **Step 1: Write `pagination/index.js`**
