@@ -20,7 +20,9 @@
  *   construction; per-line variation is out of scope, see design spec §7)
  * @property {number} [headerHeight] - table only: header row height in px
  * @property {number[]} [rowHeights] - table only: one entry per DATA row
- *   (the header is not in this array - it always repeats on a continuation)
+ *   (the header is not in this array - its height is reserved on every
+ *   continuation page, though the header's own DOM is not yet visually
+ *   cloned there for v1, see design spec §7)
  * @property {number[]} [itemHeights] - list types only: one entry per item
  * @property {number} [newPageHeight] - sectionBreak only: the usable page
  *   height every subsequent block should be measured against
@@ -29,9 +31,9 @@
  * @property {number} blockIndex - index into `blocks` where the new page begins
  * @property {number} offset - 0 for a break BEFORE `blocks[blockIndex]`; for
  *   a split paragraph/blockquote, the 0-based line at which the new page's
- *   content resumes; for a split table, the 0-based DATA row (the header
- *   always repeats at the top, so it is never counted in `offset`); for a
- *   split list, the 0-based item.
+ *   content resumes; for a split table, the 0-based DATA row (the header's
+ *   height is reserved at the top of every continuation, so it is never
+ *   counted in `offset`); for a split list, the 0-based item.
  */
 
 const ATOMIC_TYPES = new Set(['figure', 'image', 'callout', 'horizontalRule', 'toc', 'columns', 'heading']);

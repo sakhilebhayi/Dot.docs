@@ -110,13 +110,16 @@ export function applyMode(canvasEl, mode, opts) {
  * @param {HTMLElement} paper
  * @param {number} pageIndex - 1-based
  * @param {number} totalPages
- * @returns {DocumentFragment | null} null when the live DOM's boundary
- *   count doesn't yet match `totalPages - 1` (a repagination pass is
- *   still mid-flight) or `.paper` has no content - the caller renders an
- *   empty placeholder box for that one pass rather than throwing.
+ * @param {HTMLElement[]} boundaries - every `.dotdoc-page-boundary` in
+ *   `paper`, in document order - hoisted out to a single query by the
+ *   caller (`renderThumbnailGrid`) rather than re-queried once per page,
+ *   since this function already runs once per page in that loop.
+ * @returns {DocumentFragment | null} null when `boundaries`' count
+ *   doesn't yet match `totalPages - 1` (a repagination pass is still
+ *   mid-flight) or `.paper` has no content - the caller renders an empty
+ *   placeholder box for that one pass rather than throwing.
  */
-function pageContentFragment(paper, pageIndex, totalPages) {
-    const boundaries = Array.from(paper.querySelectorAll('.dotdoc-page-boundary'));
+function pageContentFragment(paper, pageIndex, totalPages, boundaries) {
     if (boundaries.length !== totalPages - 1 || !paper.firstChild) {
         return null;
     }
@@ -250,11 +253,12 @@ export function renderThumbnailGrid(container, canvasEl, opts, scale) {
     }
 
     const paper = canvasEl.querySelector('.paper');
+    const boundaries = paper ? Array.from(paper.querySelectorAll('.dotdoc-page-boundary')) : [];
     const total = opts.pageCount();
     const current = opts.currentPage();
 
     for (let i = 1; i <= total; i++) {
-        const content = paper ? pageContentFragment(paper, i, total) : null;
+        const content = paper ? pageContentFragment(paper, i, total, boundaries) : null;
         const thumb = renderThumbnail(content, scale);
         thumb.classList.toggle('is-current', i === current);
         thumb.setAttribute('role', 'button');

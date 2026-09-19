@@ -77,10 +77,13 @@ test('keep-with-next is skipped when a forced break immediately follows the head
     assert.deepEqual(computeBreaks(blocks, PAGE), [{ blockIndex: 3, offset: 0 }]);
 });
 
-test('a table splits between rows and repeats the header on the continuation', () => {
+test('a table splits between rows, reserving the header height on the continuation', () => {
     // header 50 + 12 rows of 100 = 1250; page is 1000 -> header(50) + 9
     // rows(900) = 950 fits, 10th row does not (would be 1050) -> breaks
-    // before row index 9, continuation repeats the header.
+    // before row index 9, the continuation's usable height again starts
+    // with the header's own height reserved (visually cloning the header
+    // row itself onto the continuation is a named v1 deferral, design
+    // spec §7 - this test only covers the break-position math).
     const blocks = [{
         type: 'table',
         height: 1250,

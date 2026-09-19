@@ -88,13 +88,20 @@ function measureBlocks(view, sectionSetups) {
         }
 
         if (node.type.name === 'paragraph' || node.type.name === 'blockquote') {
-            const { lines, lineHeight } = measureLines(dom, rect.height);
-            blocks.push({ type: node.type.name, height: rect.height, lines, lineHeight });
+            const { lines, lineHeight, height } = measureLines(dom, rect.height);
+            blocks.push({ type: node.type.name, height, lines, lineHeight });
             return;
         }
 
         if (node.type.name === 'table') {
-            const rowEls = dom instanceof HTMLElement ? Array.from(dom.querySelectorAll('tr')) : [];
+            // `:scope > tbody > tr, :scope > tr`, not a bare `tr`
+            // descendant query: a table nested inside a cell (reachable
+            // via DOCX/HTML import) would otherwise have its own rows
+            // counted as this table's, while resolveBreakPosition() below
+            // only ever walks this table's own direct row children.
+            const rowEls = dom instanceof HTMLElement
+                ? Array.from(dom.querySelectorAll(':scope > tbody > tr, :scope > tr'))
+                : [];
             const headerEl = rowEls.find((r) => r.querySelector('th'));
             const headerHeight = headerEl ? headerEl.getBoundingClientRect().height : 0;
             const rowHeights = rowEls
@@ -105,7 +112,17 @@ function measureBlocks(view, sectionSetups) {
         }
 
         if (node.type.name === 'bulletList' || node.type.name === 'orderedList' || node.type.name === 'taskList') {
-            const itemEls = dom instanceof HTMLElement ? Array.from(dom.children) : [];
+            // A mid-list-item split is treated as atomic for v1 (design
+            // spec §7), so a break's widget only ever lands BETWEEN two
+            // `<li>` siblings, never inside one - but it is still one of
+            // `dom.children`, and left uncounted it would be read back as
+            // a phantom, zero-content list item on this element's NEXT
+            // repagination pass. `measure.js` never reads this block's own
+            // `height` for the list branch (only `itemHeights`), so no
+            // equivalent filtering is needed there.
+            const itemEls = dom instanceof HTMLElement
+                ? Array.from(dom.children).filter((el) => !isPaginationWidget(el))
+                : [];
             const itemHeights = itemEls.map((el) => el.getBoundingClientRect().height);
             blocks.push({ type: node.type.name, height: rect.height, itemHeights });
             return;
@@ -117,26 +134,70 @@ function measureBlocks(view, sectionSetups) {
     return { blocks, starts };
 }
 
+/** Whether `el` is a pagination-inserted widget rather than real document content. */
+function isPaginationWidget(el) {
+    return el.classList?.contains('dotdoc-page-boundary') || el.classList?.contains('dotdoc-page-edge');
+}
+
 /**
- * Number of wrapped lines and the (uniform) height per line for a
- * paragraph/blockquote's rendered DOM: every distinct `top` a Range over
- * its full text reports is one visual line. Falls back to a single line
- * spanning the whole block when the element holds no measurable text
- * (an empty paragraph) - `getClientRects()` returns nothing for an empty
- * Range, and a zero-line block would divide by zero in measure.js.
+ * `dom`'s own content rects (one per visual line), excluding any leftover
+ * `.dotdoc-page-boundary`/`.dotdoc-page-edge` widget's rects. A mid-
+ * paragraph line split (design spec §2.2's line-boundary case) re-inserts
+ * its OWN widget as a DOM child of the very paragraph it split - a gap,
+ * two shadows and two bands, tens of px tall - so measuring or resolving
+ * a position against this paragraph's RAW rects on a later pass would
+ * count the widget as extra "lines" and could resolve a position INSIDE
+ * the widget itself instead of the paragraph's actual text. Both callers
+ * below (measuring a block's height/line count, and resolving a specific
+ * line's position for a NEW break) need the exact same exclusion, or the
+ * two could disagree about which line index means what.
+ *
+ * @param {HTMLElement} dom
+ * @returns {DOMRect[]}
  */
-function measureLines(dom, height) {
-    if (!(dom instanceof HTMLElement) || !dom.firstChild) {
-        return { lines: 1, lineHeight: height || 1 };
-    }
+function contentClientRects(dom) {
+    const widgets = Array.from(dom.children).filter(isPaginationWidget);
+    const widgetRects = widgets.flatMap((w) => Array.from(w.getClientRects()));
+    const isWidgetRect = (r) => widgetRects.some(
+        (w) => Math.abs(w.top - r.top) < 1 && Math.abs(w.bottom - r.bottom) < 1,
+    );
 
     const range = document.createRange();
     range.selectNodeContents(dom);
-    const rects = Array.from(range.getClientRects());
+
+    return Array.from(range.getClientRects()).filter((r) => !isWidgetRect(r));
+}
+
+/**
+ * Number of wrapped lines and the (uniform) height per line for a
+ * paragraph/blockquote's rendered DOM: every distinct `top` among
+ * `contentClientRects()` is one visual line. Also returns the block's own
+ * CONTENT height (top of its first content line to bottom of its last),
+ * which the caller uses instead of the raw `getBoundingClientRect()`
+ * height it passed in - that raw height would include a leftover
+ * widget's own rendered size the same way an unfiltered rect list would.
+ * Falls back to a single line spanning the whole block when the element
+ * holds no measurable content (an empty paragraph, or one holding only a
+ * widget) - `getClientRects()` returns nothing for an empty Range, and a
+ * zero-line block would divide by zero in measure.js.
+ */
+function measureLines(dom, height) {
+    if (!(dom instanceof HTMLElement) || !dom.firstChild) {
+        return { lines: 1, lineHeight: height || 1, height: height || 0 };
+    }
+
+    const rects = contentClientRects(dom);
+    if (rects.length === 0) {
+        return { lines: 1, lineHeight: height || 1, height: height || 0 };
+    }
+
     const tops = [...new Set(rects.map((r) => Math.round(r.top)))];
     const lines = tops.length || 1;
+    const contentTop = Math.min(...rects.map((r) => r.top));
+    const contentBottom = Math.max(...rects.map((r) => r.bottom));
+    const contentHeight = contentBottom - contentTop;
 
-    return { lines, lineHeight: height / lines };
+    return { lines, lineHeight: contentHeight / lines, height: contentHeight };
 }
 
 /**
@@ -203,16 +264,19 @@ function resolveBreakPosition(view, breakInfo, starts, blockNode, blockIndex) {
     if (!(dom instanceof HTMLElement) || !dom.firstChild) {
         return blockStart;
     }
-    const range = document.createRange();
-    range.selectNodeContents(dom);
-    const rects = Array.from(range.getClientRects());
+    // Same widget-excluding rects measureLines() uses to decide the break
+    // in the first place - reading raw, unfiltered rects here could
+    // disagree with that decision (a different "line count") or resolve
+    // a position INSIDE a leftover widget instead of the paragraph text.
+    const rects = contentClientRects(dom);
     const tops = [...new Set(rects.map((r) => Math.round(r.top)))].sort((a, b) => a - b);
     const targetTop = tops[breakInfo.offset];
     if (targetTop === undefined) {
         return blockStart;
     }
-    const paperRect = dom.closest('.paper')?.getBoundingClientRect();
-    const left = paperRect ? paperRect.left + 1 : dom.getBoundingClientRect().left + 1;
+    // A point over the paragraph's own text column, not the page's left
+    // margin - `dom`'s own left edge is exactly that column's start.
+    const left = dom.getBoundingClientRect().left + 1;
     const coords = view.posAtCoords({ left, top: targetTop + 1 });
 
     return coords ? coords.pos : blockStart;

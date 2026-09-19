@@ -127,11 +127,18 @@ export function mountPagination(editor, canvasEl, opts = {}) {
 
         // The thumbnails RAIL (design spec §4) lives outside `.editor-main`
         // (see the Blade bridge in Step 4) and is populated whenever it is
-        // present, independent of the current view mode - unlike Multi-Page
+        // OPEN, independent of the current view mode - unlike Multi-Page
         // mode's grid, which applyMode() only mounts inside the canvas
-        // itself while that mode is active.
+        // itself while that mode is active. `offsetParent !== null` is the
+        // standard cheap visibility check (null for a display:none element
+        // or ancestor, which is exactly what Alpine's x-show sets while
+        // the panel is closed) - without it, every debounced repagination
+        // pass re-ran a full Range.cloneContents() per page (whole-branch
+        // review finding) even while nobody had the rail open, which is
+        // the common case: real cost on every keystroke pause for work a
+        // closed panel never shows.
         const rail = document.querySelector('.dotdoc-thumbnail-rail');
-        if (rail) {
+        if (rail && rail.offsetParent !== null) {
             renderThumbnailGrid(rail, canvasEl, modeOpts, 0.18);
         }
     }
