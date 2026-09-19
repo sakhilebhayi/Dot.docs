@@ -1403,15 +1403,34 @@ import test from 'node:test';
 
 import { renderBand } from '../../resources/js/editor/pagination/bands.js';
 
-// This module touches the DOM (container.textContent, appendChild) but
+// This module touches the DOM (firstChild/removeChild/appendChild) but
 // needs no ProseMirror/TipTap import, so a minimal hand-rolled DOM stand-in
 // is enough - no jsdom dependency required (none exists in package.json).
+// firstChild/removeChild are implemented for real (not stubbed as
+// undefined/no-ops): renderBand()'s own clearing loop uses exactly these
+// two, and a fake that didn't support them would let a broken "clear the
+// container first" implementation pass every test below anyway, since
+// each test here starts from a fresh, already-empty container.
 function fakeContainer() {
     const children = [];
     return {
-        children,
-        textContent: '',
-        appendChild(node) { children.push(node); },
+        get children() {
+            return children;
+        },
+        get firstChild() {
+            return children[0] ?? null;
+        },
+        removeChild(node) {
+            const index = children.indexOf(node);
+            if (index !== -1) {
+                children.splice(index, 1);
+            }
+            return node;
+        },
+        appendChild(node) {
+            children.push(node);
+            return node;
+        },
         get renderedText() {
             return children.map((c) => c.text ?? '').join('');
         },
@@ -1456,6 +1475,20 @@ test('every piece is appended as a TEXT NODE, never innerHTML - segments are nev
     renderBand(el, [{ type: 'text', value: '<b>not markup</b>' }], 1, 1);
     assert.equal(el.renderedText, '<b>not markup</b>', 'the angle brackets must survive as literal text');
     assert.equal(el.children.every((c) => c.nodeType === 3), true);
+});
+
+test('a second render call clears whatever the container held before', () => {
+    // decorations.js calls renderBand() on the SAME footer/header DOM
+    // elements every repagination pass - without a real clear, stale text
+    // from an earlier page count/index would accumulate instead of being
+    // replaced.
+    const el = fakeContainer();
+    renderBand(el, [{ type: 'text', value: 'Page ' }, { type: 'field', value: 'PAGE' }], 1, 5);
+    assert.equal(el.renderedText, 'Page 1');
+
+    renderBand(el, [{ type: 'text', value: 'Page ' }, { type: 'field', value: 'PAGE' }], 2, 5);
+    assert.equal(el.renderedText, 'Page 2', 'the previous render must not remain alongside the new one');
+    assert.equal(el.children.length, 2, 'exactly this render\'s two segments, not an accumulation');
 });
 ```
 
@@ -1503,7 +1536,7 @@ export function renderBand(container, segments, page, pages) {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `node --test tests/js/pagination.bands.test.js`
-Expected: PASS (5 cases)
+Expected: PASS (6 cases)
 
 - [ ] **Step 5: Run the full JS suite**
 
