@@ -1,6 +1,6 @@
 [Unit]
 Description=Dot.Doc Laravel Reverb WebSocket Server
-After=network.target postgresql.service
+After=network.target
 
 [Service]
 User=www-data
