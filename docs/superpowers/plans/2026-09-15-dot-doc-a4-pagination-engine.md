@@ -1186,8 +1186,13 @@ function measureLines(dom, height) {
  * line's exact start (this is the same "a single stranded line is
  * possible" trade-off named in the design spec's "Three decisions" #2.
  */
-function resolveBreakPosition(view, breakInfo, starts, blockNode) {
-    const blockStart = starts[breakInfo.blockIndex];
+function resolveBreakPosition(view, breakInfo, starts, blockNode, blockIndex) {
+    // `blockIndex` is a SEPARATE parameter from `breakInfo.blockIndex`,
+    // already clamped by the caller to a valid `starts`/doc-child index -
+    // never read `breakInfo.blockIndex` directly here, or an out-of-range
+    // value (defensively clamped for `blockNode` below but not for this
+    // lookup) would return `undefined`/`NaN` and crash `Decoration.widget()`.
+    const blockStart = starts[blockIndex];
 
     if (breakInfo.offset === 0) {
         return blockStart;
@@ -1327,8 +1332,15 @@ export function repaginate(view, getPageSetup, renderBands) {
 
     let pageIndex = 0;
     const decorations = breakList.map((breakInfo) => {
-        const blockNode = view.state.doc.child(breakInfo.blockIndex < blocks.length ? breakInfo.blockIndex : blocks.length - 1);
-        const pos = resolveBreakPosition(view, breakInfo, starts, blockNode);
+        // Clamped ONCE and reused for both the doc-child lookup and the
+        // position resolver below - passing the raw, unclamped
+        // breakInfo.blockIndex to resolveBreakPosition while only the
+        // blockNode lookup was clamped is exactly how this used to produce
+        // an out-of-range starts[] lookup (undefined/NaN) instead of
+        // degrading to the last real block, as intended.
+        const blockIndex = breakInfo.blockIndex < blocks.length ? breakInfo.blockIndex : blocks.length - 1;
+        const blockNode = view.state.doc.child(blockIndex);
+        const pos = resolveBreakPosition(view, breakInfo, starts, blockNode, blockIndex);
         pageIndex += 1;
         const thisPageIndex = pageIndex;
 
