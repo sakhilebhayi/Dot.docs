@@ -820,7 +820,14 @@ export function computeBreaks(blocks, pageHeight) {
             const keepWithNextViolated = Boolean(next) && !nextIsForced
                 && (remaining - block.height) < minimumFirstChunk(next);
 
-            if (doesNotFit || keepWithNextViolated) {
+            // `used > 0` guards every unconditional-overflow branch below,
+            // for the same reason the forced-break branch above already
+            // checks it: a break with NOTHING accumulated yet would insert
+            // a bogus, empty leading page before the very first thing in
+            // the document. There is no "page before position 0" to
+            // separate from - the oversized/violating block is simply
+            // placed on the (empty) current page and allowed to overflow.
+            if (used > 0 && (doesNotFit || keepWithNextViolated)) {
                 startNewPage(i, 0);
             }
 
@@ -829,7 +836,7 @@ export function computeBreaks(blocks, pageHeight) {
         }
 
         if (ATOMIC_TYPES.has(block.type)) {
-            if (block.height > usable - used) {
+            if (used > 0 && block.height > usable - used) {
                 startNewPage(i, 0);
             }
             used += block.height;
@@ -841,8 +848,9 @@ export function computeBreaks(blocks, pageHeight) {
                 // Pathological: even a fresh, empty page can't fit one
                 // line. No break could ever help - place the whole block
                 // and let it overflow, the same fallback an oversized
-                // atomic block gets above.
-                if (block.height > usable - used) {
+                // atomic block gets above (`used > 0` guard for the same
+                // reason: never break before the very first block).
+                if (used > 0 && block.height > usable - used) {
                     startNewPage(i, 0);
                 }
                 used += block.height;
@@ -931,7 +939,7 @@ export function computeBreaks(blocks, pageHeight) {
 
         // An unrecognised type is treated as atomic - the safe default for
         // any node type this algorithm has not been taught about yet.
-        if (block.height > usable - used) {
+        if (used > 0 && block.height > usable - used) {
             startNewPage(i, 0);
         }
         used += block.height;
