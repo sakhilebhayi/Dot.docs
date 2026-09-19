@@ -44,6 +44,43 @@ class StyleEngineTest extends TestCase
         }
     }
 
+    /**
+     * Design spec §3: Focus mode hides "all chrome (rail/dock/topbar)", not
+     * just the page-break decorations - `.editor-main.dotdoc-mode-focus`
+     * cannot reach any of the three with a descendant selector, since they
+     * are its own ancestor's siblings inside `.shell` (layouts/app.blade.
+     * php), so the fix reaches them via `:has()` instead. Only `canvas`
+     * mode carries a `.shell` at all (the editor's own chrome) - `share`
+     * (the published page) and `print` (export/PDF) render no topbar/rail/
+     * dock, so the rule has nothing to do there and paginationRule() only
+     * ever emits it for `canvas` regardless.
+     */
+    public function test_focus_mode_hides_the_topbar_rail_and_dock(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $engine = app(StyleEngine::class);
+        $style = DocumentStyle::where('is_system', true)->first();
+
+        $canvasCss = $engine->css($style, 'canvas');
+        foreach (['.topbar', '.rail', '.dock'] as $chrome) {
+            $this->assertStringContainsString(
+                ".shell:has(.editor-main.dotdoc-mode-focus) {$chrome}",
+                $canvasCss,
+                "canvas CSS is missing the Focus-mode hide rule for {$chrome}",
+            );
+        }
+        $this->assertStringContainsString(
+            '.shell:has(.editor-main.dotdoc-mode-focus){grid-template-rows:0 auto minmax(0,1fr)}',
+            $canvasCss,
+            'canvas CSS is missing the Focus-mode topbar row collapse - .topbar{display:none} alone leaves its fixed-height grid row reserved',
+        );
+
+        foreach (['print', 'share'] as $mode) {
+            $css = $engine->css($style, $mode);
+            $this->assertStringNotContainsString('dotdoc-mode-focus', $css, "{$mode} CSS should carry no pagination view-mode rules at all");
+        }
+    }
+
     public function test_team_style_overrides_system_and_editor_can_switch(): void
     {
         $this->seed(DocumentStyleSeeder::class);

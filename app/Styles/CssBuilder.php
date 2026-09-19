@@ -351,6 +351,47 @@ class CssBuilder
             '.editor-main.dotdoc-paginated .page-break,.editor-main.dotdoc-paginated .section-break{display:none}'.
             '.editor-main.dotdoc-mode-focus .dotdoc-page-boundary,.editor-main.dotdoc-mode-focus .dotdoc-page-edge,.editor-main.dotdoc-mode-focus .dotdoc-page-band{display:none}'.
             '.editor-main.dotdoc-mode-focus .dotdoc-page-gap{background:transparent;height:0}'.
+            // Design spec §3: Focus mode hides "all chrome (rail/dock/
+            // topbar) - a single continuous scroll of prose", not just the
+            // page-break decorations above. `.editor-main` cannot reach any
+            // of the three with an ordinary descendant selector - they are
+            // its OWN ancestor's siblings inside `.shell` (layouts/
+            // app.blade.php's grid: topbar/rail/canvas/dock), several
+            // levels above this rule's own injection point (editor.blade.
+            // php's `<style id="doc-style">`, itself nested inside
+            // `#canvas`). `:has()` is the only pure-CSS way to react, from
+            // an ancestor, to a class living on a DESCENDANT of a
+            // different branch of that ancestor's subtree.
+            //
+            // This deliberately does NOT touch `data-panel-state`/
+            // `data-panel-user` (.ai/rules/views.md's rail/dock state
+            // machine) at all - it only ever hides, never opens or closes,
+            // a panel. A panel the writer had open before switching to
+            // Focus mode keeps recording itself as open the whole time;
+            // leaving Focus mode (viewModes.js's applyMode() removing the
+            // class on any other mode) needs no restore step, because
+            // nothing here ever changed what was being restored - the
+            // panel reappears with whatever state it already had, exactly
+            // per "a trigger never closes a panel somebody opened on
+            // purpose" (this just isn't a trigger).
+            '.shell:has(.editor-main.dotdoc-mode-focus) .topbar,'.
+            '.shell:has(.editor-main.dotdoc-mode-focus) .rail,'.
+            '.shell:has(.editor-main.dotdoc-mode-focus) .dock{display:none}'.
+            // `.rail`/`.dock` sit in `auto`-sized grid columns (shell.css'
+            // own comment on `.shell`: "A collapsed panel is display:none,
+            // which empties its column, which collapses the track to zero"),
+            // so hiding them above is already enough - no separate rule
+            // needed. `.topbar`'s ROW is not `auto` though: `grid-template-
+            // rows: var(--topbar-h) auto minmax(0, 1fr)` fixes it at 52px
+            // regardless of what is inside it, so `.topbar{display:none}`
+            // alone leaves an empty 52px band of bare `--ground` at the top
+            // instead of the "single continuous scroll" design spec §3
+            // promises - confirmed live (`getComputedStyle(shell).
+            // gridTemplateRows` still read "52px ..." with the topbar
+            // hidden). Collapsing the row itself here is scoped to the SAME
+            // `:has()` condition, so it only ever fires alongside the
+            // content hide immediately above.
+            '.shell:has(.editor-main.dotdoc-mode-focus){grid-template-rows:0 auto minmax(0,1fr)}'.
             '.editor-main.dotdoc-mode-single{scroll-snap-type:y mandatory;overflow-y:auto}'.
             '.editor-main.dotdoc-mode-single .paper{scroll-snap-align:start}'.
             // Two Page mode was removed from v1 (Task 8, design spec §7):
