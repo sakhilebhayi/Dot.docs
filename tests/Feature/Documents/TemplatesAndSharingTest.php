@@ -236,7 +236,14 @@ class TemplatesAndSharingTest extends TestCase
         // .ai/rules/views.md: a chrome colour is never a literal in a view.
         // The Document Style CSS inside <style id="doc-style"> is the one
         // place hex colours legitimately appear, so it is cut out first.
+        // Blade's HTML-escaped numeric character references (e.g. `&#039;`
+        // for an apostrophe in a Faker-generated owner name like "O'Keefe")
+        // are also cut out: decimal digits are valid hex digits too, so
+        // `&#039;` false-matches the hex-colour pattern below - confirmed
+        // flaky in CI, where a random owner name containing an apostrophe
+        // failed this assertion even though the page has no literal colour.
         $chrome = preg_replace('#<style id="doc-style">.*?</style>#s', '', $response->getContent());
+        $chrome = preg_replace('/&#x?[0-9a-fA-F]+;/', '', (string) $chrome);
         $this->assertDoesNotMatchRegularExpression('/#[0-9a-fA-F]{3,8}\b/', (string) $chrome);
     }
 
