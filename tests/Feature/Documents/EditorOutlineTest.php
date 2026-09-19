@@ -52,4 +52,28 @@ class EditorOutlineTest extends TestCase
         $this->assertArrayHasKey('figures', $result);
         $this->assertArrayHasKey('tables', $result);
     }
+
+    public function test_outline_does_not_crash_when_the_documents_team_has_been_deleted(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Orphaned document', null, [
+            'page_setup' => [
+                'header' => '{{ team }}',
+                'footer' => 'Team: {{ team }}',
+            ],
+        ]);
+
+        // Simulate team deletion by setting team_id to null
+        $doc->update(['team_id' => null]);
+
+        // Should not throw an error when team is null
+        $result = Livewire::actingAs($user)->test(Editor::class, ['uuid' => $doc->uuid])->instance()->outline();
+
+        // Team variable safely defaults to empty string, and empty text segments are skipped
+        // Header: '{{ team }}' with team='' renders to empty, no segments
+        // Footer: 'Team: {{ team }}' with team='' renders to 'Team: ', one text segment
+        $this->assertSame([], $result['headerSegments']);
+        $this->assertSame([['type' => 'text', 'value' => 'Team: ']], $result['footerSegments']);
+    }
 }

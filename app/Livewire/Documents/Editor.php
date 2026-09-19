@@ -176,7 +176,7 @@ class Editor extends Component
         $vars = array_merge($this->document->variables ?? [], [
             'title' => $this->document->title,
             'date' => now()->format('Y-m-d'),
-            'team' => $this->document->team->name ?? '',
+            'team' => $this->document->team?->name ?? '',
         ]);
         $bands = app(HeaderFooterBands::class);
 
