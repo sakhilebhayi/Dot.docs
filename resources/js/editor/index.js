@@ -18,6 +18,7 @@ import { HeadingNumbered } from './extensions/headingNumbered';
 import { DocImage } from './extensions/image';
 import { PageBreak } from './extensions/pageBreak';
 import { SectionBreak } from './extensions/sectionBreak';
+import { DocTableView } from './extensions/table';
 import { Align } from './extensions/textAlign';
 import { DocTextStyle } from './extensions/textStyle';
 import { Toc } from './extensions/toc';
@@ -64,7 +65,12 @@ function buildExtensions(opts) {
         DocTextStyle,
         DocImage.configure({ inline: false, allowBase64: false }),
         Placeholder.configure({ placeholder: 'Start writing, or press / for commands…' }),
-        Table.configure({ resizable: true }),
+        // HTMLAttributes covers `renderHTML()` (a non-editable/non-
+        // resizable render path, if one ever exists); View: DocTableView
+        // is what actually matters here - it's what `resizable: true`
+        // makes the LIVE editable canvas use instead, and HTMLAttributes
+        // alone never reaches it (see extensions/table.js).
+        Table.configure({ resizable: true, View: DocTableView, HTMLAttributes: { class: 'doc-table' } }),
         TableRow,
         TableHeader,
         TableCell,
