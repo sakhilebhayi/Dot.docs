@@ -995,7 +995,8 @@ import { resolveSectionPageHeight, mmToPx } from '../../resources/js/editor/pagi
 
 test('mmToPx converts at 96dpi (1in = 25.4mm = 96px)', () => {
     assert.equal(Math.round(mmToPx('25.4mm')), 96);
-    assert.equal(Math.round(mmToPx('297mm')), 1122);
+    // 297/25.4*96 = 1122.5196..., which rounds to 1123, not 1122.
+    assert.equal(Math.round(mmToPx('297mm')), 1123);
 });
 
 test('mmToPx passes through a value already in px', () => {
