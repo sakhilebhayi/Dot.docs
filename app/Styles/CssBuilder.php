@@ -331,6 +331,17 @@ class CssBuilder
             '.dotdoc-thumbnail.is-current{outline:2px solid var(--accent);outline-offset:2px}'.
             '.dotdoc-thumbnail-inner{transform-origin:top left;pointer-events:none}'.
             '.dotdoc-thumbnail-number{position:absolute;bottom:4px;right:4px;font-size:var(--doc-size-small, 11px);background:var(--surface);color:var(--ink-soft);padding:0 4px;border-radius:4px}'.
+            // Print Preview REPLACES the canvas with the real exported PDF
+            // (design spec §3: "not computed live at all") - viewModes.js's
+            // applyMode() appends the iframe as a SIBLING of .paper rather
+            // than removing .paper from the DOM, so without this rule both
+            // would render at once. .paper and #doc-paper are the same
+            // element (TipTap's editorProps.attributes adds the `paper`
+            // class onto the host element index.js mounts into), so hiding
+            // `.paper` hides the whole editable canvas; ProseMirror's
+            // document state is unaffected by CSS visibility, so switching
+            // back to any other mode restores it with nothing lost.
+            '.editor-main.dotdoc-mode-print-preview .paper{display:none}'.
             '.dotdoc-print-preview-frame{width:100%;height:80vh;border:none}';
     }
 
