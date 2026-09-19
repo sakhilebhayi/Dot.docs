@@ -117,30 +117,48 @@ export function mountPagination(editor, canvasEl, opts = {}) {
         }
         pageCountValue = repaginate(editor.view, getPageSetupForMeasurement, renderPageBands);
         currentPageIndex = Math.min(currentPageIndex, pageCountValue);
-        const modeOpts = {
+        applyMode(canvasEl, mode, currentModeOpts());
+        refreshRailIfVisible();
+    }
+
+    /**
+     * The thumbnails RAIL (design spec §4) lives outside `.editor-main`
+     * (see the Blade bridge in Step 4) and is populated whenever it is
+     * OPEN, independent of the current view mode - unlike Multi-Page
+     * mode's grid, which applyMode() only mounts inside the canvas itself
+     * while that mode is active. `offsetParent !== null` is the standard
+     * cheap visibility check (null for a display:none element or
+     * ancestor, which is exactly what Alpine's x-show sets while the
+     * panel is closed) - without it, every debounced repagination pass
+     * re-ran a full Range.cloneContents() per page (whole-branch review
+     * finding) even while nobody had the rail open, which is the common
+     * case: real cost on every keystroke pause for work a closed panel
+     * never shows.
+     *
+     * Called from two places: every completed repagination pass above
+     * (so the rail stays current while it IS open), and directly from
+     * the Blade bridge's toggle button via `pagination.refreshThumbnails()`
+     * (public method below) the MOMENT the panel opens - `runRepaginate()`
+     * alone is not enough for that second case, since opening the panel
+     * is pure Alpine state (`x-show`) with no edit/save/mode-change of
+     * its own to trigger a fresh pass, so without this second call site
+     * the rail would stay empty until the writer's next edit (whole-
+     * branch review's fix-wave re-review finding).
+     */
+    function refreshRailIfVisible() {
+        const rail = document.querySelector('.dotdoc-thumbnail-rail');
+        if (rail && rail.offsetParent !== null) {
+            renderThumbnailGrid(rail, canvasEl, currentModeOpts(), 0.18);
+        }
+    }
+
+    function currentModeOpts() {
+        return {
             pdfPreviewUrl: opts.pdfPreviewUrl,
             pageCount: () => pageCountValue,
             currentPage: () => currentPageIndex,
             goToPage,
         };
-        applyMode(canvasEl, mode, modeOpts);
-
-        // The thumbnails RAIL (design spec §4) lives outside `.editor-main`
-        // (see the Blade bridge in Step 4) and is populated whenever it is
-        // OPEN, independent of the current view mode - unlike Multi-Page
-        // mode's grid, which applyMode() only mounts inside the canvas
-        // itself while that mode is active. `offsetParent !== null` is the
-        // standard cheap visibility check (null for a display:none element
-        // or ancestor, which is exactly what Alpine's x-show sets while
-        // the panel is closed) - without it, every debounced repagination
-        // pass re-ran a full Range.cloneContents() per page (whole-branch
-        // review finding) even while nobody had the rail open, which is
-        // the common case: real cost on every keystroke pause for work a
-        // closed panel never shows.
-        const rail = document.querySelector('.dotdoc-thumbnail-rail');
-        if (rail && rail.offsetParent !== null) {
-            renderThumbnailGrid(rail, canvasEl, modeOpts, 0.18);
-        }
     }
 
     function goToPage(n) {
@@ -198,6 +216,15 @@ export function mountPagination(editor, canvasEl, opts = {}) {
             return currentPageIndex;
         },
         goToPage,
+        /**
+         * Called by the Blade bridge's thumbnails-panel toggle the moment
+         * it opens (`x-show="thumbnailsOpen"` has no edit/save/mode-change
+         * of its own to trigger a repagination pass) - see
+         * `refreshRailIfVisible()`'s doc comment above for why the
+         * debounced pass alone leaves the rail empty until the writer's
+         * next edit otherwise.
+         */
+        refreshThumbnails: refreshRailIfVisible,
         /** Called by the Blade bridge's refreshOutline() after every save and after a style change. */
         setPageSetup(nextPageSetup, nextHeaderSegments, nextFooterSegments) {
             pageSetup = nextPageSetup || pageSetup;

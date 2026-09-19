@@ -94,13 +94,20 @@ function measureBlocks(view, sectionSetups) {
         }
 
         if (node.type.name === 'table') {
-            // `:scope > tbody > tr, :scope > tr`, not a bare `tr`
-            // descendant query: a table nested inside a cell (reachable
-            // via DOCX/HTML import) would otherwise have its own rows
-            // counted as this table's, while resolveBreakPosition() below
-            // only ever walks this table's own direct row children.
+            // `view.nodeDOM(pos)` for a table node is `.tableWrapper`
+            // (TipTap's `@tiptap/extension-table` with `resizable: true`
+            // wraps every table in one, confirmed live: `.tableWrapper >
+            // table > colgroup, tbody`), NOT the `<table>` element itself
+            // - so the query must reach two levels down (`> table >
+            // tbody > tr` / `> table > tr` for a table with no explicit
+            // tbody), not one. Still bounded to exactly those two shapes,
+            // not a bare `tr` descendant query: a table nested inside a
+            // cell (reachable via DOCX/HTML import) would otherwise have
+            // its own rows counted as THIS table's too, while
+            // resolveBreakPosition() below only ever walks this table's
+            // own direct row children.
             const rowEls = dom instanceof HTMLElement
-                ? Array.from(dom.querySelectorAll(':scope > tbody > tr, :scope > tr'))
+                ? Array.from(dom.querySelectorAll(':scope > table > tbody > tr, :scope > table > tr'))
                 : [];
             const headerEl = rowEls.find((r) => r.querySelector('th'));
             const headerHeight = headerEl ? headerEl.getBoundingClientRect().height : 0;
@@ -140,42 +147,63 @@ function isPaginationWidget(el) {
 }
 
 /**
- * `dom`'s own content rects (one per visual line), excluding any leftover
- * `.dotdoc-page-boundary`/`.dotdoc-page-edge` widget's rects. A mid-
- * paragraph line split (design spec §2.2's line-boundary case) re-inserts
- * its OWN widget as a DOM child of the very paragraph it split - a gap,
- * two shadows and two bands, tens of px tall - so measuring or resolving
- * a position against this paragraph's RAW rects on a later pass would
- * count the widget as extra "lines" and could resolve a position INSIDE
- * the widget itself instead of the paragraph's actual text. Both callers
- * below (measuring a block's height/line count, and resolving a specific
- * line's position for a NEW break) need the exact same exclusion, or the
- * two could disagree about which line index means what.
+ * `dom`'s own content rects (one per visual line), excluding any rect
+ * that falls INSIDE a leftover `.dotdoc-page-boundary`/`.dotdoc-page-edge`
+ * widget - not just the widget's own outer box, but everything nested
+ * inside it (its shadows, its header/footer bands, and - when a header/
+ * footer template is configured - the TEXT NODES those bands render,
+ * which `Range.getClientRects()` reports as their own separate rects a
+ * bare "does this rect equal the widget's own rect" check would miss
+ * entirely). A mid-paragraph line split (design spec §2.2's line-
+ * boundary case) re-inserts its own widget as a DOM child of the very
+ * paragraph it split, so measuring or resolving a position against this
+ * paragraph's RAW rects on a later pass would count the widget's
+ * contents as extra "lines" and could resolve a position INSIDE a band's
+ * text instead of the paragraph's own. Both callers below (measuring a
+ * block's height/line count, and resolving a specific line's position
+ * for a NEW break) need the exact same exclusion, or the two could
+ * disagree about which line index means what.
+ *
+ * A rect is "inside" a widget when it falls within that widget's own
+ * `getBoundingClientRect()` span (its OUTER box, covering everything
+ * nested inside it, not `getClientRects()`, which for a widget spanning
+ * multiple internal elements would itself need the same containment
+ * logic this function exists to provide).
  *
  * @param {HTMLElement} dom
  * @returns {DOMRect[]}
  */
 function contentClientRects(dom) {
     const widgets = Array.from(dom.children).filter(isPaginationWidget);
-    const widgetRects = widgets.flatMap((w) => Array.from(w.getClientRects()));
-    const isWidgetRect = (r) => widgetRects.some(
-        (w) => Math.abs(w.top - r.top) < 1 && Math.abs(w.bottom - r.bottom) < 1,
+    const widgetBoxes = widgets.map((w) => w.getBoundingClientRect());
+    const isInsideAWidget = (r) => widgetBoxes.some(
+        (w) => r.top >= w.top - 0.5 && r.bottom <= w.bottom + 0.5,
     );
 
     const range = document.createRange();
     range.selectNodeContents(dom);
 
-    return Array.from(range.getClientRects()).filter((r) => !isWidgetRect(r));
+    return Array.from(range.getClientRects()).filter((r) => !isInsideAWidget(r));
 }
 
 /**
  * Number of wrapped lines and the (uniform) height per line for a
- * paragraph/blockquote's rendered DOM: every distinct `top` among
- * `contentClientRects()` is one visual line. Also returns the block's own
- * CONTENT height (top of its first content line to bottom of its last),
+ * paragraph/blockquote's rendered DOM, both derived from
+ * `contentClientRects()`. Also returns the block's own CONTENT height,
  * which the caller uses instead of the raw `getBoundingClientRect()`
  * height it passed in - that raw height would include a leftover
  * widget's own rendered size the same way an unfiltered rect list would.
+ *
+ * Height is the SUM of each surviving line's own height, not the span
+ * from the first surviving line's top to the last one's bottom: a
+ * leftover widget sitting BETWEEN two real lines would still leave a
+ * gap between them even after its own rects are excluded above, and a
+ * top-to-bottom span still counts that gap as part of this paragraph's
+ * height. Rects sharing the same rounded `top` (mixed inline marks on
+ * one visual line producing more than one rect at the same position)
+ * count once, at whichever rect is tallest, so a mix of font sizes on
+ * one line doesn't inflate the line count.
+ *
  * Falls back to a single line spanning the whole block when the element
  * holds no measurable content (an empty paragraph, or one holding only a
  * widget) - `getClientRects()` returns nothing for an empty Range, and a
@@ -191,11 +219,18 @@ function measureLines(dom, height) {
         return { lines: 1, lineHeight: height || 1, height: height || 0 };
     }
 
-    const tops = [...new Set(rects.map((r) => Math.round(r.top)))];
-    const lines = tops.length || 1;
-    const contentTop = Math.min(...rects.map((r) => r.top));
-    const contentBottom = Math.max(...rects.map((r) => r.bottom));
-    const contentHeight = contentBottom - contentTop;
+    const tallestPerLine = new Map();
+    for (const r of rects) {
+        const key = Math.round(r.top);
+        const existing = tallestPerLine.get(key);
+        if (!existing || r.height > existing.height) {
+            tallestPerLine.set(key, r);
+        }
+    }
+
+    const lineRects = [...tallestPerLine.values()];
+    const lines = lineRects.length || 1;
+    const contentHeight = lineRects.reduce((sum, r) => sum + r.height, 0);
 
     return { lines, lineHeight: contentHeight / lines, height: contentHeight };
 }

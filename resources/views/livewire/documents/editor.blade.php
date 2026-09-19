@@ -540,7 +540,7 @@
 
         <button type="button" class="tool tool-mono" aria-pressed="false"
                 x-bind:aria-pressed="thumbnailsOpen ? 'true' : 'false'"
-                @click="thumbnailsOpen = !thumbnailsOpen">Pages</button>
+                @click="thumbnailsOpen = !thumbnailsOpen; if (thumbnailsOpen) $nextTick(() => window.DotDoc.pagination.refreshThumbnails())">Pages</button>
 
         {{-- Everything structural — headings, lists, tables, images, callouts,
              columns, breaks, cross-references, exports, the assistant — is in
@@ -731,10 +731,16 @@
             <div id="doc-paper" x-ref="editorEl" wire:ignore class="canvas" data-outline="{{ json_encode($outline) }}"></div>
         </div>
 
+        {{-- Populated by the "Pages" button's @click above the moment the
+             panel opens (pagination.refreshThumbnails()), and kept current
+             after that by every repagination pass while it stays open
+             (see refreshRailIfVisible() in pagination/index.js) - not by
+             any init hook here, since this div is already in the DOM
+             (just hidden) when Alpine initialises, well before the writer
+             ever opens it. --}}
         <div class="editor-thumbnails" x-show="thumbnailsOpen" x-cloak
              aria-label="Page thumbnails">
-            <div class="dotdoc-thumbnail-rail" wire:ignore
-                 x-init="$nextTick(() => window.DotDoc.pagination.setMode(window.DotDoc.pagination.mode))"></div>
+            <div class="dotdoc-thumbnail-rail" wire:ignore></div>
         </div>
 
         @if ($commentSidebarOpen)
