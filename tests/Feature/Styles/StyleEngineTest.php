@@ -44,6 +44,84 @@ class StyleEngineTest extends TestCase
         }
     }
 
+    /**
+     * Design spec §3: Focus mode hides "all chrome (rail/dock/topbar)", not
+     * just the page-break decorations - `.editor-main.dotdoc-mode-focus`
+     * cannot reach any of the three with a descendant selector, since they
+     * are its own ancestor's siblings inside `.shell` (layouts/app.blade.
+     * php), so the fix reaches them via `:has()` instead. Only `canvas`
+     * mode carries a `.shell` at all (the editor's own chrome) - `share`
+     * (the published page) and `print` (export/PDF) render no topbar/rail/
+     * dock, so the rule has nothing to do there and paginationRule() only
+     * ever emits it for `canvas` regardless.
+     */
+    public function test_focus_mode_hides_the_topbar_rail_and_dock(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $engine = app(StyleEngine::class);
+        $style = DocumentStyle::where('is_system', true)->first();
+
+        $canvasCss = $engine->css($style, 'canvas');
+        foreach (['.topbar', '.rail', '.dock'] as $chrome) {
+            $this->assertStringContainsString(
+                ".shell:has(.editor-main.dotdoc-mode-focus) {$chrome}",
+                $canvasCss,
+                "canvas CSS is missing the Focus-mode hide rule for {$chrome}",
+            );
+        }
+        $this->assertStringContainsString(
+            '.shell:has(.editor-main.dotdoc-mode-focus){grid-template-rows:0 auto minmax(0,1fr)}',
+            $canvasCss,
+            'canvas CSS is missing the Focus-mode topbar row collapse - .topbar{display:none} alone leaves its fixed-height grid row reserved',
+        );
+
+        foreach (['print', 'share'] as $mode) {
+            $css = $engine->css($style, $mode);
+            $this->assertStringNotContainsString('dotdoc-mode-focus', $css, "{$mode} CSS should carry no pagination view-mode rules at all");
+        }
+    }
+
+    /**
+     * A mid-table page-boundary widget is `position:absolute` inside
+     * `.paper` (.ai/rules/editor.md's "mid-table page-boundary widget"
+     * rule), so its `left`/`right` are resolved against `.paper`'s
+     * containing block, which - per CSS 2.1 §10.3.7 - is the PADDING box
+     * of the nearest positioned ancestor. `.paper` carries the page
+     * margins as its own `padding`, so `left:0;right:0` would span that
+     * padding too, bleeding the widget's header/footer band across the
+     * full page instead of stopping at the content column every normal
+     * (non-table) boundary's band already respects. This asserts the
+     * mid-table rule uses the exact same margin values `.dotdoc-page-band`
+     * already keys its own padding off, rather than hardcoded zeros.
+     */
+    public function test_mid_table_page_boundary_aligns_with_the_page_margins_not_the_full_paper_width(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $engine = app(StyleEngine::class);
+        $style = DocumentStyle::where('is_system', true)->first();
+
+        $canvasCss = $engine->css($style, 'canvas');
+
+        $this->assertStringNotContainsString(
+            '.dotdoc-page-boundary.dotdoc-page-boundary-in-table{position:absolute;left:0;right:0}',
+            $canvasCss,
+            'a mid-table split boundary must not span the full .paper width - see this test\'s own docblock',
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/\.dotdoc-page-band\{background:#fff;padding:\.4em ([^ ]+) \.4em ([^;]+);/',
+            $canvasCss,
+        );
+        preg_match('/\.dotdoc-page-band\{background:#fff;padding:\.4em ([^ ]+) \.4em ([^;]+);/', $canvasCss, $bandMatch);
+        [, $bandRight, $bandLeft] = $bandMatch;
+
+        $this->assertStringContainsString(
+            ".dotdoc-page-boundary.dotdoc-page-boundary-in-table{position:absolute;left:{$bandLeft};right:{$bandRight}}",
+            $canvasCss,
+            'the mid-table boundary\'s left/right insets must match the same page-margin values .dotdoc-page-band already uses',
+        );
+    }
+
     public function test_team_style_overrides_system_and_editor_can_switch(): void
     {
         $this->seed(DocumentStyleSeeder::class);

@@ -26,6 +26,8 @@ import { commands, run as runCommand } from './commands/registry';
 import { documentsDiffer, stripDerived } from './derived';
 import { blockInsert, blockInsertPosition, isInCaption } from './guards';
 import { outline, setOutline } from './outline';
+import { PaginationExtension } from './pagination/decorations';
+import { mountPagination } from './pagination/index';
 import { installBubble } from './ui/bubble';
 import { installPalette, openPalette } from './ui/palette';
 import { SlashMenu } from './ui/slash';
@@ -80,6 +82,7 @@ function buildExtensions(opts) {
         Variable.configure({ vars: opts.vars || {} }),
         DocAttrs,
         SlashMenu,
+        PaginationExtension,
         // Last, so its global `id` attribute is registered over every node
         // type the extensions above contributed.
         BlockId,
@@ -279,6 +282,25 @@ function mount(element, opts = {}) {
         failClosed(contentError ?? new Error('Document contains nodes or marks this editor does not register'));
     }
 
+    // `.editor-main` (NOT `.canvas-region`, the whole page's <main> content
+    // region shared with .doc-bar and the comments sidebar) is the tight
+    // wrapper around `#doc-paper` in editor.blade.php. It carries its own
+    // `wire:ignore` (see Step 4's Blade change) for the same reason
+    // `#doc-paper` already does: pagination injects DOM siblings of
+    // `#doc-paper` (the Multi-Page grid, the Print Preview iframe) that
+    // Livewire's own render never produced - without that wire:ignore,
+    // the next Livewire morph (e.g. the ~1.2s autosave round trip) would
+    // treat them as extra nodes not in its rendered output and remove
+    // them, exactly the failure `#doc-paper`'s own wire:ignore already
+    // prevents for the ProseMirror subtree itself.
+    const editorMain = element.closest('.editor-main') || element.parentElement || element;
+    const pagination = mountPagination(editor, editorMain, {
+        pageSetup: opts.pageSetup,
+        headerSegments: opts.headerSegments,
+        footerSegments: opts.footerSegments,
+        pdfPreviewUrl: opts.pdfPreviewUrl,
+    });
+
     /** Host hooks the extensions and the registry read off the editor. */
     editor.dotdoc = {
         vars: opts.vars || {},
@@ -436,6 +458,7 @@ function mount(element, opts = {}) {
 
     const handle = {
         editor,
+        pagination,
 
         run: (name, params = {}) => runCommand(editor, name, params),
 
@@ -589,6 +612,7 @@ function mount(element, opts = {}) {
             closeList();
             teardownPalette();
             teardownBubble();
+            pagination.destroy();
             editor.destroy();
             if (element.__dotdoc === handle) {
                 element.__dotdoc = null;
@@ -625,6 +649,13 @@ export const DotDoc = {
     // anything.
     stripDerived,
     documentsDiffer,
+    /** The single active editor's pagination controller, or a safe no-op stand-in before mount(). */
+    get pagination() {
+        const el = document.querySelector('[wire\\:ignore].canvas, #doc-paper');
+        return el?.__dotdoc?.pagination || {
+            mode: 'continuous', setMode() {}, pageCount: 1, currentPage: 1, goToPage() {}, setPageSetup() {},
+        };
+    },
 };
 
 window.DotDoc = DotDoc;
