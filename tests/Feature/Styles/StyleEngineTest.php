@@ -122,6 +122,49 @@ class StyleEngineTest extends TestCase
         );
     }
 
+    /**
+     * An earlier version of paginationRule() made `.paper` itself
+     * `background:transparent` while paginated (so the true page-gap
+     * decoration could show `--ground` through) and repainted only
+     * `.paper>*` - each direct child - `#fff`. That distorted every page,
+     * not just the gaps: `.paper`'s own padding (the page's margins) and
+     * the space BETWEEN two ordinary children (a paragraph's own
+     * `margin-bottom`) are not covered by any `.paper>*` child either, so
+     * the whole document rendered as a scatter of separate white text
+     * blocks on bare canvas instead of one continuous A4 sheet - confirmed
+     * live, in every screenshot taken of the editor while that rule was in
+     * place. Locks in that `.paper` keeps its ordinary background (and
+     * `.paper>*` is gone entirely) even while paginated, so the live
+     * canvas renders as one continuous page again; the thumbnail-specific
+     * rule (a real, still-needed fix for a DIFFERENT problem - a thumbnail
+     * clone reaching no other background/ink rule at all in the rail) must
+     * still be present.
+     */
+    public function test_the_live_canvas_paper_keeps_its_ordinary_background_while_paginated(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $engine = app(StyleEngine::class);
+        $style = DocumentStyle::where('is_system', true)->first();
+
+        $canvasCss = $engine->css($style, 'canvas');
+
+        $this->assertStringNotContainsString(
+            '.editor-main.dotdoc-paginated .paper{background:transparent',
+            $canvasCss,
+            'the live canvas .paper must not go transparent while paginated - see this test\'s own docblock',
+        );
+        $this->assertStringNotContainsString(
+            '.paper>*{background:#fff}',
+            $canvasCss,
+            'the per-child re-white workaround should be gone entirely, not just unused',
+        );
+        $this->assertStringContainsString(
+            '.dotdoc-thumbnail .dotdoc-thumbnail-inner.paper{background:var(--paper);color:var(--paper-ink)}',
+            $canvasCss,
+            'the thumbnail clone background fix is a separate, still-needed rule and must survive this change',
+        );
+    }
+
     public function test_team_style_overrides_system_and_editor_can_switch(): void
     {
         $this->seed(DocumentStyleSeeder::class);

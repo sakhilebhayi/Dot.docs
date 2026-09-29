@@ -291,10 +291,32 @@ class CssBuilder
      *
      * `--ground` is the Fair Copy app-background token (.ai/rules/views.md)
      * - the gap between two pages shows the desk behind the paper, not a
-     * colour invented for this feature. The shadow is a soft edge on BOTH
-     * sides of the gap, echoing the single box-shadow `.paper` itself
-     * already carries (Fair Copy's "one shadow only" rule) rather than
-     * adding a second, differently-styled shadow convention.
+     * colour invented for this feature.
+     *
+     * `.paper` keeps its ordinary background and box-shadow (paper.css's
+     * `.canvas .paper{background:var(--paper);...}`, higher specificity
+     * than this file's own inline `.paper{background:#fff}` fallback)
+     * AT ALL TIMES, paginated or not - an EARLIER version of this rule
+     * made `.paper` `background:transparent` while paginated and
+     * repainted only `.paper>*` (each direct child) `#fff`, on the theory
+     * that the true page-gap gap needed `.paper` itself to have no
+     * background for `--ground` to show through. That distorted every
+     * page, not just the gaps: `.paper`'s own padding (the page's margins)
+     * and the space BETWEEN two ordinary children (a paragraph's own
+     * `margin-bottom`) are not covered by any `.paper>*` child either, so
+     * the whole document rendered as a scatter of separate white text
+     * blocks on bare canvas, margins included, instead of one continuous
+     * A4 sheet - confirmed live (real product feedback, not a hunch): every
+     * screenshot taken of the live editor during this feature's testing
+     * showed exactly that. Fixed by leaving `.paper` alone: the gap/shadow
+     * widgets below are already OPAQUE, normal-flow children inserted
+     * exactly at the break point, so they interrupt the paper's own
+     * continuous background where a break genuinely falls, without
+     * needing the whole element to go transparent to make that happen.
+     * The shadow is a soft edge on BOTH sides of the gap, echoing the
+     * single box-shadow `.paper` itself already carries (Fair Copy's "one
+     * shadow only" rule) rather than adding a second, differently-styled
+     * shadow convention.
      *
      * `.page-break`/`.section-break` (the plain node markers) hide their
      * own decorative line while pagination is active: the real page-
@@ -309,28 +331,23 @@ class CssBuilder
 
         $h = $this->horizontalMargins();
 
-        return '.editor-main.dotdoc-paginated .paper{background:transparent;box-shadow:none}'.
-            '.editor-main.dotdoc-paginated .paper>*{background:#fff}'.
+        return
             // A thumbnail clone (viewModes.js's renderThumbnail()) reuses
-            // the `paper` class so Document Style CSS applies to it - but
-            // that means it ALSO matches the transparent rule immediately
-            // above whenever the clone lives inside `.editor-main.
-            // dotdoc-paginated` (Multi-Page mode's grid), and it is a
-            // paper-shaped element with no other rule reaching it at all
-            // when it lives in the thumbnails RAIL (outside `.editor-main`
-            // entirely). Found live in Task 8's browser verification, made
-            // visible only once the off-screen Multi-Page bug elsewhere in
-            // this file was fixed: `--paper`/`--paper-ink` are the same
-            // never-inverting tokens `.canvas .paper` itself uses
-            // (paper.css) - a thumbnail is a miniature real page and must
-            // look like one regardless of which container it is mounted
-            // in. `.dotdoc-thumbnail .dotdoc-thumbnail-inner.paper` ties
-            // the transparent rule above on specificity (three classes
-            // each) and wins on source order since it comes later in this
-            // same string - deliberately NOT scoped under `.editor-main`,
-            // so the identical rule also reaches the rail's thumbnails,
-            // which sit outside `.editor-main` and have no other paper
-            // background/ink rule reaching them at all.
+            // the `paper` class so Document Style CSS applies to it, but a
+            // clone mounted in the thumbnails RAIL sits outside `.canvas`
+            // entirely - paper.css's `.canvas .paper{background:var(
+            // --paper)}` never reaches it, and neither does this file's own
+            // `.paper{background:#fff}` fallback once something more
+            // specific is present. Found live in Task 8's browser
+            // verification, in dark mode: a `.paper`-classed clone with no
+            // explicit background of its own inherits the dark chrome
+            // behind it. `.dotdoc-thumbnail .dotdoc-thumbnail-inner.paper`
+            // reaches the SAME DOM shape `renderThumbnail()` produces
+            // everywhere it is mounted (the grid and the rail alike, one
+            // rule for both) and is deliberately NOT scoped under
+            // `.editor-main`, for exactly that reason - a thumbnail is a
+            // miniature real page and must look like one wherever it ends
+            // up living.
             '.dotdoc-thumbnail .dotdoc-thumbnail-inner.paper{background:var(--paper);color:var(--paper-ink)}'.
             '.dotdoc-page-boundary{contain:layout;pointer-events:none}'.
             // The two document-EDGE bands (page 1's header, the last
