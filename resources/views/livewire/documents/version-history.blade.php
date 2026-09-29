@@ -98,6 +98,19 @@
                 <div class="panel-body">
                     <div class="diff-wrapper">{!! $diffHtml !!}</div>
                 </div>
+            @elseif ($showDiff)
+                {{-- VersionHistory::runDiff() ran (showDiff is only ever set
+                     true there) but DiffHelper::calculate() returned an
+                     empty string, which it does when the two versions'
+                     stripped text is byte-identical - confirmed live
+                     comparing two saves with the same text (an edit
+                     immediately undone still bumps the version number).
+                     Falling through to the "nothing picked yet" empty state
+                     below would be actively misleading here: the writer DID
+                     pick two versions and DID ask to compare them. --}}
+                <div class="empty">
+                    <p class="empty-line">These two versions have no textual differences.</p>
+                </div>
             @elseif ($previewVersion)
                 <div class="panel-body">
                     <div class="split">

@@ -1061,7 +1061,21 @@ button.list-row {
 .scrim {
     position: fixed;
     inset: 0;
-    z-index: 60;
+    /* Below 1180px (this file's own .dock/.rail media queries further
+       down), .dock and .rail become position:fixed overlays at z-index:60
+       too - the SAME value .scrim used here. Two fixed siblings at an
+       equal z-index paint in DOM order, and .dock/.rail come after
+       .scrim's usual mount point (livewire:documents.ai-assistant, e.g.,
+       sits inside .editor, itself before .dock in the .shell grid), so
+       the panel painted OVER the modal - confirmed live: opening the dock
+       and triggering a Quick Pass action produced a fully-populated,
+       correctly-styled .scrim (verified via its own wire:snapshot) that
+       was completely invisible, exactly at and below that breakpoint. A
+       modal must always sit above a persistent panel, at every viewport
+       width, so this needs to beat both of them outright rather than
+       happen to win a DOM-order tiebreak that depends on which page the
+       modal's own markup happens to be mounted on. */
+    z-index: 100;
     background: color-mix(in srgb, var(--ground) 78%, transparent);
     display: flex;
     align-items: center;

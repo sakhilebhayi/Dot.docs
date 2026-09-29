@@ -125,25 +125,9 @@
     </div>
 </div>
 
-@push('scripts')
-<script>
-document.addEventListener('alpine:init', () => {
-    Alpine.data('mentionInput', (valueEntangle, onSearch) => ({
-        value: valueEntangle,
-        handleInput(e) {
-            const val = e.target.value;
-            const match = val.match(/@(\w*)$/);
-            if (match) {
-                onSearch(match[1]);
-            } else {
-                onSearch('');
-            }
-        },
-        insertMention(name) {
-            this.value = this.value.replace(/@\w*$/, '@' + name + ' ');
-            onSearch('');
-        }
-    }));
-});
-</script>
-@endpush
+{{-- `mentionInput`'s Alpine.data() registration lives in resources/js/app.js,
+     not a @push('scripts') block here: this component only ever renders
+     after the writer opens comments (a Livewire AJAX update, never the
+     initial full-page load, since $commentSidebarOpen defaults to false),
+     and @push/@stack only ever get flushed once, at that initial load -
+     see app.js's own comment on the registration for the full story. --}}

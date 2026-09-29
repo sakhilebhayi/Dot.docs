@@ -112,3 +112,27 @@ adding it to the inner list and to `INKS`.
 3. Render each page a SECOND time with the `@media (max-width: 900px)` and `(max-width: 1180px)` blocks flattened into unconditional rules, and scan those too — it is the layout most of the product's readers are on. Be honest about what this buys: the detector reads declarations INSIDE an at-rule as well as outside it, so a text-level rule (`overused-font` and the rest) finds nothing in the flattened render it would have missed in the wide one — measured in Task 3's fix round by injecting a banned face into a rule that only applies below 900px and watching BOTH variants report it. The flattened pass is for any rule that reasons about which layout is in FORCE, and it is cheap; it is not a second opinion on fonts or colour.
 4. `node scripts/design/contrast-dom.mjs` prints ALL PASS, and `--canary` proves it is not vacuous. Measuring by eye, or measuring token pairs only, does not count.
 5. Delete the throwaway test and public/__design/ before committing; neither is ever committed.
+
+## A modal can render correctly and still be completely invisible, below 1180px
+`.scrim` (shell.css, the class every modal dialog in the product shares - the
+smart-save sheet, the AI result sheet, notifications, etc.) and `.dock`/`.rail`
+carry the SAME `z-index: 60` - fine above the 1180px breakpoint, where
+`.dock`/`.rail` are ordinary CSS-grid children with no `position` or `z-index`
+of their own at all, but NOT below it: `@media (max-width: 1180px)` (and the
+900px rule below it) turns `.dock`/`.rail` into `position: fixed` overlays,
+at that same `z-index: 60`. Two `position: fixed` elements at an EQUAL
+z-index paint in DOM order, and `.dock` sits after wherever a modal's own
+markup happens to be mounted (`<livewire:documents.ai-assistant>`, e.g., is
+inside `.editor`, itself before `.dock` in the `.shell` grid) - so the panel
+paints OVER the modal, not the other way around. Confirmed live: opening the
+dock and triggering a Quick Pass action produced a fully-populated, correctly
+state-managed `.scrim` (verified via its own `wire:snapshot` - `showResult:
+true`, the mock result text, everything correct) that was completely
+invisible on screen, at and below that breakpoint, with no error, no console
+warning, nothing - the feature looked simply dead. Above 1180px the identical
+click worked and was visible every time, which is what made this easy to
+miss in normal desktop testing. Fixed by giving `.scrim` `z-index: 100` -
+higher than `.dock`/`.rail` can ever reach, at any width, rather than relying
+on a DOM-order tiebreak that depends on which page's markup a given modal
+happens to be mounted inside. A modal must outrank a persistent panel
+outright, not conditionally on where it was declared.
