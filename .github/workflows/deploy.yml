@@ -103,7 +103,18 @@ jobs:
           # exit; systemd's Restart=always then spins up a fresh one --
           # zero-downtime, no direct process kill.
           $PHP artisan queue:restart
-          sudo systemctl reload dot-doc-reverb.service
+
+          # Reverb serves compiled code from boot; reload it if sudoers
+          # allows (VPS only -- on shared hosting `sudo` may not even exist
+          # as a binary, which exits 127, not just "permission denied", so
+          # this is guarded the same way either way). Mirrors Dot.Mines'
+          # deploy.yml, the reference implementation for this same shared
+          # cPanel account.
+          if sudo -n systemctl reload dot-doc-reverb.service 2>/dev/null; then
+            echo "Reverb reloaded."
+          else
+            echo "::warning::Reverb was not reloaded (no sudo/systemd here). If a Reverb process runs on this host it is still serving the PREVIOUS release until reloaded manually."
+          fi
 
           $PHP artisan up
           echo "== Deployed: $(git rev-parse --short HEAD)"
