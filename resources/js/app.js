@@ -67,4 +67,42 @@ document.addEventListener('alpine:init', () => {
             }
         }
     }));
+
+    /**
+     * The comment composer's @-mention input (resources/views/livewire/
+     * documents/comment-thread.blade.php). Registered HERE, not in that
+     * view's own @push('scripts') block, because the comment thread only
+     * ever renders after the writer opens it - $commentSidebarOpen defaults
+     * to false (App\Livewire\Documents\Editor), so the component mounts for
+     * the first time through a Livewire AJAX update, never the initial
+     * full-page load. @push/@stack are resolved once, at Blade's initial
+     * full-page compile, so a <script> pushed from a component that only
+     * ever arrives via a later Livewire morph never reaches the page at all
+     * - confirmed live: window.Alpine's registry has no 'mentionInput' entry
+     * and the rendered HTML has no trace of the script, every time, in every
+     * real usage path. That left `x-data="mentionInput(...)"` throwing
+     * "mentionInput is not defined" the instant anyone opened comments,
+     * taking x-model/@input down with it (see comment-thread.blade.php's
+     * own docblock for the full mechanism). voiceTyping above never hit
+     * this because app.js loads once, up front, on every page - the fix is
+     * to register every Alpine component that a Livewire subcomponent's
+     * x-data might reference the same way, regardless of when that
+     * subcomponent itself first mounts.
+     */
+    Alpine.data('mentionInput', (valueEntangle, onSearch) => ({
+        value: valueEntangle,
+        handleInput(e) {
+            const val = e.target.value;
+            const match = val.match(/@(\w*)$/);
+            if (match) {
+                onSearch(match[1]);
+            } else {
+                onSearch('');
+            }
+        },
+        insertMention(name) {
+            this.value = this.value.replace(/@\w*$/, '@' + name + ' ');
+            onSearch('');
+        }
+    }));
 });
