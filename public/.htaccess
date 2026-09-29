@@ -1,3 +1,23 @@
+# LiteSpeed's LSCache (server-level, cPanel-side - not configured
+# anywhere in this repo) full-page-caches HTML responses regardless of
+# this app's own `Cache-Control: no-cache, private` header, which
+# Laravel sends on every dynamic response already - confirmed live on
+# doc.infodot.co.za: a fresh, uniquely-querystringed request kept
+# returning byte-identical HTML referencing asset hashes from an
+# EARLIER deploy, minutes after a newer deploy had already replaced
+# those files on disk (`rsync --delete` in .github/workflows/
+# deploy.yml removes the old hashed files each deploy, so the cached
+# page's <script>/<link> tags pointed at files that no longer existed
+# - a 404, not just stale styling). This app is a real-time
+# collaborative editor - authenticated, per-user, constantly-changing
+# content - there is no page here LSCache should ever be allowed to
+# serve from cache. `CacheLookup off` is LiteSpeed's own documented
+# `.htaccess`-level opt-out and applies to every request under
+# `public/`, unconditionally.
+<IfModule LiteSpeed>
+    CacheLookup off
+</IfModule>
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes
