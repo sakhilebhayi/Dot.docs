@@ -1,11 +1,20 @@
 name: Deploy to Production
 
-# Manual-only, mirroring Dot.Mines' and Dot.Memory's pipelines: trigger
-# from the Actions tab (or `gh workflow run deploy.yml -f confirm=deploy`)
-# when a release on main is ready. Run bootstrap.yml once, first, on a new
-# server -- this workflow assumes .env, the database, and the two systemd
-# services already exist.
+# Deploys automatically on every push to main (i.e. every merge), and can
+# also be triggered manually from the Actions tab (or
+# `gh workflow run deploy.yml -f confirm=deploy`) to redeploy the current
+# main without a new merge - e.g. after a manual server-side fix. Run
+# bootstrap.yml once, first, on a new server -- this workflow assumes
+# .env, the database, and the two systemd services already exist.
+#
+# The "Quality gate (all checks must pass)" status check is REQUIRED on
+# main's branch protection specifically because of the line above: with
+# auto-deploy on, a merge IS a deploy, so a red CI run must never be
+# mergeable in the first place - the gate is the only thing standing
+# between a broken PR and production.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       confirm:
@@ -23,8 +32,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Refuse unconfirmed runs
-        if: ${{ github.event.inputs.confirm != 'deploy' }}
+      - name: Refuse unconfirmed manual runs
+        # Only gates workflow_dispatch: a push event carries no `inputs` at
+        # all (the merge itself is the confirmation), so this step is a
+        # no-op there rather than refusing every automatic deploy outright.
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.confirm != 'deploy' }}
         run: |
           echo '::error::Confirmation input was not "deploy" -- aborting.'
           exit 1
