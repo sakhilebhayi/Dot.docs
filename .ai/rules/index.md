@@ -13,6 +13,7 @@ Before planning or editing, find EVERY row whose globs match the file's path and
 | app/Files/**, app/Models/Files/**, app/Console/Commands/AdoptFilesTree.php, app/Policies/ObjPolicy.php, app/Livewire/Files/**, app/Http/Controllers/FileUploadController.php, app/Http/Controllers/FileViewController.php, app/Actions/Jetstream/DeleteUser.php | .ai/rules/files.md |
 | resources/views/livewire/** | .ai/rules/livewire.md |
 | database/migrations/** | .ai/rules/migrations.md |
+| app/Notifications/**, app/Events/**, app/Livewire/Documents/CommentThread.php, app/Support/MailText.php, routes/console.php | .ai/rules/notifications.md |
 | app/Documents/Outline/** | .ai/rules/outline.md |
 | app/Print/** | .ai/rules/print.md |
 | app/Livewire/Documents/TemplateGallery.php, app/Livewire/Documents/SaveAsTemplate.php, app/Livewire/Documents/ShareManager.php, app/Http/Controllers/PublishedDocumentController.php, app/Providers/AppServiceProvider.php, app/Observers/DocumentObserver.php, routes/web.php, resources/views/documents/published.blade.php, resources/views/documents/published-password.blade.php, resources/views/documents/shared-password.blade.php, resources/views/documents/_password-gate.blade.php | .ai/rules/publishing.md |

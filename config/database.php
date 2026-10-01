@@ -38,10 +38,15 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
+            // The cron queue worker and web requests write to this one file
+            // at the same time. With a DEFERRED transaction SQLite does not
+            // wait when a read lock has to become a write lock - the worker's
+            // job pop fails at once with "database is locked". IMMEDIATE takes
+            // the write lock up front, and busy_timeout makes it wait for it.
+            'busy_timeout' => 5000,
             'journal_mode' => null,
             'synchronous' => null,
-            'transaction_mode' => 'DEFERRED',
+            'transaction_mode' => 'IMMEDIATE',
         ],
 
         'mysql' => [

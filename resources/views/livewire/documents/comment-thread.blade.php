@@ -80,6 +80,9 @@
                         <label class="sr-only" for="reply-{{ $comment->id }}">Your reply</label>
                         <textarea id="reply-{{ $comment->id }}" wire:model="replyContent" rows="2" class="field"
                                   placeholder="Type @ to mention somebody"></textarea>
+                        @error('replyContent')
+                            <p class="field-error">{{ $message }}</p>
+                        @enderror
                         <div class="toolbar" style="margin-top:var(--s2)">
                             <button type="button" class="btn btn-sm btn-primary" wire:click="postReply">Post the reply</button>
                             <button type="button" class="btn btn-sm" wire:click="cancelReply">Cancel</button>
@@ -109,6 +112,9 @@
             <textarea id="new-comment" x-model="value" @input="handleInput($event)"
                       @keydown.enter.ctrl.prevent="$wire.postComment()" rows="3" class="field"
                       placeholder="Type @ to mention a collaborator"></textarea>
+            @error('newComment')
+                <p class="field-error">{{ $message }}</p>
+            @enderror
 
             @if (count($mentionResults) > 0)
                 <ul class="menu-list" style="position:static;margin-top:var(--s2)">

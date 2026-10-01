@@ -1,0 +1,22 @@
+---
+paths:
+  - 'app/Notifications/**'
+  - 'app/Events/**'
+  - 'app/Livewire/Documents/CommentThread.php'
+  - 'app/Support/MailText.php'
+  - 'routes/console.php'
+---
+
+# Notifications, broadcasts and the queue
+
+## The queue is drained once a minute by cron - nothing "live" may go through it
+Production is shared cPanel hosting with no sudo/systemd, so there is no persistent queue worker and there never can be (`deploy/queue-worker.service` cannot be installed there). `routes/console.php` schedules `queue:work --queue=mail,default --stop-when-empty --max-time=55` every minute with `withoutOverlapping(2)` (2 minutes, NOT the 24h default: a process the host kills mid-run would otherwise leave a lock that stops all queued mail for a day), driven by one cron line running `schedule:run`. Anything pushed onto the queue therefore waits up to a minute. Two things queue themselves without being asked: (1) every event implementing `ShouldBroadcast` - use `ShouldBroadcastNow` (all four in `app/Events` do; a queued `DocumentUpdated` would hand editors a minute-old document through `applyRemote()`), and (2) the notification `broadcast` channel, which wraps its message in a `ShouldBroadcast` event even when the notification itself is not `ShouldQueue` - return `(new BroadcastMessage(...))->onConnection('sync')` from `toBroadcast()`. `CommentNotificationsTest::test_posting_a_comment_notifies_the_owner_inline_and_queues_only_the_email` runs against the real `database` queue and fails if any broadcast is left waiting. Because broadcasts now run inside the web request, `config/broadcasting.php` caps Reverb at 1s connect / 2s total, and every dispatch site catches the failure (`CommentThread::notifySafely()`, the try/catch around each `::dispatch()`).
+
+## The bell is synchronous; the email is a separate, delayed, cancellable notification
+`CommentPostedNotification` / `MentionedInCommentNotification` are the bell only (`database` + `broadcast`, no `ShouldQueue`). `CommentPostedEmailNotification` / `MentionedInCommentEmailNotification` extend `CommentEmailNotification`: queued on the `mail` queue, held ~2 minutes by `withDelay()`, and `shouldSend()` - which runs when the job is PROCESSED, not when it is dispatched - cancels the email if the matching bell row is already read, if the recipient lost access during the delay, or if that recipient has had 30 comment emails this hour. The bell row is matched by notification class + `data['comment_id']` compared in PHP: `NotificationSender` overwrites `$notification->id` with a fresh UUID per send so the two cannot share an id, and a `data->comment_id` JSON path only works on the TEXT `data` column in SQLite (PostgreSQL rejects it). A new notification type that should email follows the same split.
+
+## Who may be notified: participants, never "can view" and never a name lookup
+`Document::participants()` (owner, collaborators, team members) is uncached on purpose. Do not use `$user->can('view', $document)` to pick recipients: it is true for every account on the platform once `is_public` is set, and a notification is a push to that person, not a page they chose to open. Mentions are resolved by matching each participant's FULL name in the comment text, longest first (`CommentThread::mentionedAmong()`) - never by extracting `@word` and looking it up across all users: names are free text and not unique. One comment produces at most one notification per person (mention beats "commented"); the owner/parent-author recipients must still be able to open the document.
+
+## Text from users goes into mail through MailText
+`MailMessage` lines are rendered as Markdown, so `[text](url)` in a comment or a display name becomes a live link in an email carrying this app's name. `MailText::plain()` entity-encodes everything that is not a letter, digit or space - wrap the finished line in `HtmlString`. Entities, not backslash escapes: Laravel decodes entities for the text/plain part, whereas backslashes would show there. Subjects use `MailText::subject()` (bounded, no control characters) and lead with the app's own words, never a user's name. Posting comments is rate limited (20/minute per user) because every comment can send mail.

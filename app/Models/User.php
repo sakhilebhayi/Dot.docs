@@ -12,6 +12,9 @@ use Laravel\Jetstream\HasProfilePhoto;
 use Laravel\Jetstream\HasTeams;
 use Laravel\Sanctum\HasApiTokens;
 
+/**
+ * @property-read string $profile_photo_url Jetstream's HasProfilePhoto accessor.
+ */
 class User extends Authenticatable
 {
     use HasApiTokens;

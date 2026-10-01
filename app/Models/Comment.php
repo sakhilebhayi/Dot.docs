@@ -28,6 +28,7 @@ class Comment extends Model
         return $this->belongsTo(Document::class);
     }
 
+    /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
@@ -46,13 +47,5 @@ class Comment extends Model
     public function isResolved(): bool
     {
         return $this->resolved_at !== null;
-    }
-
-    /** Extract @mentioned usernames from comment content */
-    public function extractMentions(): array
-    {
-        preg_match_all('/@(\w+)/', $this->content, $matches);
-
-        return $matches[1] ?? [];
     }
 }
