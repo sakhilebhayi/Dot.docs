@@ -4,7 +4,6 @@ namespace App\Policies;
 
 use App\Models\Document;
 use App\Models\User;
-use Illuminate\Support\Facades\Cache;
 
 class DocumentPolicy
 {
@@ -20,6 +19,14 @@ class DocumentPolicy
     /**
      * Determine whether the user can view the document.
      * Owner, team members, collaborators, or public documents.
+     *
+     * Answered from the database every time, never from a cache. This used
+     * to be remembered per user for fifteen minutes, and nothing that
+     * changes access forgot it: a removed collaborator or team member kept
+     * getting in, and somebody refused once stayed refused after being
+     * invited. Access changes in too many places to chase with forget()
+     * calls - Jetstream's own team screens among them - and the lookup is
+     * one indexed query, cheaper than reading a database-backed cache.
      */
     public function view(User $user, Document $document): bool
     {
@@ -31,17 +38,11 @@ class DocumentPolicy
             return true;
         }
 
-        return Cache::remember(
-            "doc.view.{$user->id}.{$document->id}",
-            900,
-            function () use ($user, $document) {
-                if ($document->team_id && $user->belongsToTeam($document->team)) {
-                    return true;
-                }
+        if ($document->team_id && $user->belongsToTeam($document->team)) {
+            return true;
+        }
 
-                return $document->collaborators()->where('user_id', $user->id)->exists();
-            }
-        );
+        return $document->collaborators()->where('user_id', $user->id)->exists();
     }
 
     /**
@@ -55,6 +56,8 @@ class DocumentPolicy
     /**
      * Determine whether the user can update the document.
      * Owner, team admins/editors, or collaborators with editor role.
+     *
+     * Never cached - see view().
      */
     public function update(User $user, Document $document): bool
     {
@@ -62,22 +65,16 @@ class DocumentPolicy
             return true;
         }
 
-        return Cache::remember(
-            "doc.update.{$user->id}.{$document->id}",
-            900,
-            function () use ($user, $document) {
-                if ($document->team_id && $user->belongsToTeam($document->team)) {
-                    $role = $user->teamRole($document->team);
+        if ($document->team_id && $user->belongsToTeam($document->team)) {
+            $role = $user->teamRole($document->team);
 
-                    return $role && in_array($role->key, ['admin', 'editor']);
-                }
+            return $role && in_array($role->key, ['admin', 'editor']);
+        }
 
-                return $document->collaborators()
-                    ->where('user_id', $user->id)
-                    ->whereIn('role', ['editor', 'admin'])
-                    ->exists();
-            }
-        );
+        return $document->collaborators()
+            ->where('user_id', $user->id)
+            ->whereIn('role', ['editor', 'admin'])
+            ->exists();
     }
 
     /**
