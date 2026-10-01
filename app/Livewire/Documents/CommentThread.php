@@ -6,7 +6,9 @@ use App\Events\CommentPosted;
 use App\Models\Comment;
 use App\Models\Document;
 use App\Models\User;
+use App\Notifications\CommentPostedEmailNotification;
 use App\Notifications\CommentPostedNotification;
+use App\Notifications\MentionedInCommentEmailNotification;
 use App\Notifications\MentionedInCommentNotification;
 use App\Services\HtmlSanitizer;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -156,25 +158,31 @@ class CommentThread extends Component
     {
         $mentions = $comment->extractMentions();
 
-        // Notify document owner (if not commenter)
-        if ($this->document->owner_id !== Auth::id()) {
-            $this->notifySafely($this->document->owner, new CommentPostedNotification($this->document, $comment));
-        }
+        // One comment, one notification per person: every notification here
+        // now carries an email, so the owner replying-to-themselves overlap
+        // (owner AND parent author) or an @mentioned owner would otherwise
+        // get two emails about the same comment. A mention is the more
+        // specific notice, so it wins over the generic "commented" one.
+        $mentioned = empty($mentions)
+            ? collect()
+            : User::whereIn('name', $mentions)->where('id', '!=', Auth::id())->get();
 
-        // Notify parent comment author on reply
-        if ($parent && $parent->user_id !== Auth::id()) {
-            $this->notifySafely($parent->user, new CommentPostedNotification($this->document, $comment));
-        }
+        $mentioned->each(function (User $user) use ($comment) {
+            $this->notifySafely($user, new MentionedInCommentNotification($this->document, $comment));
+            $this->notifySafely($user, new MentionedInCommentEmailNotification($this->document, $comment));
+        });
 
-        // Notify @mentioned users
-        if (! empty($mentions)) {
-            User::whereIn('name', $mentions)
-                ->where('id', '!=', Auth::id())
-                ->get()
-                ->each(function (User $user) use ($comment) {
-                    $this->notifySafely($user, new MentionedInCommentNotification($this->document, $comment));
-                });
-        }
+        // The document owner and, on a reply, the parent comment's author.
+        // whereIn() collapses the two into one row when they are the same
+        // person.
+        $recipientIds = collect([$this->document->owner_id, $parent?->user_id])
+            ->filter()
+            ->reject(fn ($id) => $id === Auth::id() || $mentioned->contains('id', $id));
+
+        User::whereIn('id', $recipientIds)->get()->each(function (User $user) use ($comment) {
+            $this->notifySafely($user, new CommentPostedNotification($this->document, $comment));
+            $this->notifySafely($user, new CommentPostedEmailNotification($this->document, $comment));
+        });
     }
 
     /**

@@ -37,12 +37,6 @@ parameters:
 			path: app/Audit/AuditLogger.php
 
 		-
-			message: '#^Access to an undefined property App\\Models\\User\:\:\$profile_photo_url\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Broadcasting/DocumentPresenceChannel.php
-
-		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$created_at\.$#'
 			identifier: property.notFound
 			count: 1
@@ -217,36 +211,6 @@ parameters:
 			path: app/Documents/Render/HtmlRenderer.php
 
 		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Events/CommentPosted.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$name\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Events/CommentPosted.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$profile_photo_url\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Events/CommentPosted.php
-
-		-
-			message: '#^Access to an undefined property App\\Models\\User\:\:\$profile_photo_url\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Events/DocumentUpdated.php
-
-		-
-			message: '#^Access to an undefined property App\\Models\\User\:\:\$profile_photo_url\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Events/UserJoinedDocument.php
-
-		-
 			message: '#^Method App\\Files\\FilesService\:\:children\(\) should return Illuminate\\Support\\Collection\<int, App\\Models\\Files\\Obj\> but returns Illuminate\\Database\\Eloquent\\Collection\<int, Illuminate\\Database\\Eloquent\\Model\>\.$#'
 			identifier: return.type
 			count: 1
@@ -299,12 +263,6 @@ parameters:
 			identifier: property.notFound
 			count: 2
 			path: app/Livewire/Documents/AiAssistant.php
-
-		-
-			message: '#^Call to an undefined method Illuminate\\Database\\Eloquent\\Model\:\:notify\(\)\.$#'
-			identifier: method.notFound
-			count: 2
-			path: app/Livewire/Documents/CommentThread.php
 
 		-
 			message: '#^Call to an undefined method Illuminate\\Database\\Eloquent\\Model\:\:personalTeam\(\)\.$#'
@@ -445,18 +403,6 @@ parameters:
 			path: app/Models/User.php
 
 		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$name\.$#'
-			identifier: property.notFound
-			count: 2
-			path: app/Notifications/CommentPostedNotification.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$name\.$#'
-			identifier: property.notFound
-			count: 3
-			path: app/Notifications/MentionedInCommentNotification.php
-
-		-
 			message: '#^Call to an undefined method Illuminate\\Database\\Eloquent\\Model\:\:personalTeam\(\)\.$#'
 			identifier: method.notFound
 			count: 1
@@ -479,9 +425,3 @@ parameters:
 			identifier: property.notFound
 			count: 1
 			path: app/Search/DocumentSearch.php
-
-		-
-			message: '#^Access to an undefined property App\\Models\\User\:\:\$profile_photo_url\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Services/PresenceService.php
