@@ -7,6 +7,7 @@ Before planning or editing, find EVERY row whose globs match the file's path and
 | app/Ai/** | .ai/rules/ai.md |
 | app/** | .ai/rules/app.md |
 | app/Audit/** | .ai/rules/audit.md |
+| .github/workflows/*.yml, public/index.php, public/.htaccess | .ai/rules/deploy.md |
 | app/Documents/Import/**, app/Documents/Export/**, app/Http/Controllers/DocumentImportController.php, app/Http/Controllers/DocumentExportController.php | .ai/rules/documents-io.md |
 | resources/js/editor/** | .ai/rules/editor.md |
 | app/Files/**, app/Models/Files/**, app/Console/Commands/AdoptFilesTree.php, app/Policies/ObjPolicy.php, app/Livewire/Files/**, app/Http/Controllers/FileUploadController.php, app/Http/Controllers/FileViewController.php, app/Actions/Jetstream/DeleteUser.php | .ai/rules/files.md |

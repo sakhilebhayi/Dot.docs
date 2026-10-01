@@ -91,13 +91,47 @@ jobs:
           $PHP artisan event:cache
           DEPLOY
 
-      - name: Transfer built assets
+      - name: Transfer public assets to the real docroot
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
-            public/build/ \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$DEPLOY_PATH/public/build/"
+          set -euo pipefail
+          SSH='ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes'
+          DEST="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
+
+          # This account's docroot for doc.infodot.co.za is DEPLOY_PATH's
+          # PARENT directory, not DEPLOY_PATH/public - confirmed live via
+          # `uapi DomainInfo single_domain_data`. It's a shared-hosting
+          # "flattened" Laravel layout: a hand-written index.php sits
+          # directly at the docroot and boots DEPLOY_PATH's vendor/
+          # bootstrap by a DIFFERENT relative path than this repo's own
+          # public/index.php uses - NEVER sync index.php here, it would
+          # break every request on the site instantly. Every other static
+          # file (build/, favicons, robots.txt, sw.js, images/) has its own
+          # untouched copy sitting directly at the docroot, dated from the
+          # original manual deploy - this step used to sync public/build/
+          # to DEPLOY_PATH/public/build/, a path the webserver never serves
+          # at all, so Laravel kept correctly reading ITS OWN current
+          # manifest.json and emitting correct hashes while the BROWSER'S
+          # request for those exact asset URLs 404'd against the real,
+          # never-updated docroot copy - looked exactly like a stale cache
+          # for days; it was a wrong rsync destination the whole time.
+          REAL_DOCROOT=$(dirname "$DEPLOY_PATH")
+
+          # build/ gets its own --delete-scoped sync so old content-hashed
+          # files (renamed every time their source changes) don't
+          # accumulate forever. --delete here only ever touches files
+          # already under $REAL_DOCROOT/build/, nothing else at the docroot.
+          rsync -az --delete -e "$SSH" public/build/ "$DEST:$REAL_DOCROOT/build/"
+
+          # Everything else under public/ EXCEPT index.php and build/
+          # (handled above). No --delete: the docroot also holds doc/ (this
+          # app's own source - DEPLOY_PATH itself lives there), an old
+          # Dot.docs.tar.gz, and .well-known (ACME/SSL) - none of which
+          # exist under this repo's public/, so a --delete sync of the
+          # whole docroot would wipe all three.
+          rsync -az -e "$SSH" --exclude='index.php' --exclude='build' \
+            public/ "$DEST:$REAL_DOCROOT/"
 
       - name: Restart services and go live
         env:
@@ -132,13 +166,12 @@ jobs:
           echo "== Deployed: $(git rev-parse --short HEAD)"
 
           # LiteSpeed's LSCache (server-level, cPanel-side) full-page-caches
-          # HTML responses regardless of this app's own Cache-Control header
-          # - without this, a deploy that changes any hashed asset filename
-          # leaves the cached page pointing at files `rsync --delete` above
-          # just removed (a 404, not just stale styling - see public/
-          # .htaccess and PurgeLiteSpeedCache). Requesting the signed purge
-          # URL makes LiteSpeed see the X-LiteSpeed-Purge response header and
-          # drop every cached page immediately.
+          # HTML responses regardless of this app's own Cache-Control header.
+          # public/.htaccess opts the app out (CacheLookup off), but that
+          # .htaccess only reaches the real docroot now that the step above
+          # syncs it there - requesting the signed purge URL here is cheap
+          # defense in depth in case anything was cached before that applied.
+          # See public/.htaccess and PurgeLiteSpeedCache.
           PURGE_URL=$($PHP artisan cache:purge-litespeed)
           if curl -fsS -o /dev/null "$PURGE_URL"; then
             echo "LSCache purge requested."
