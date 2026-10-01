@@ -109,9 +109,9 @@ class Document extends Model
      * collaborators and the members of its team.
      *
      * Deliberately NOT "anyone who can view" - is_public makes that every
-     * account on the platform - and never cached, unlike DocumentPolicy:
-     * this decides who is sent a comment's text, so access taken away a
-     * minute ago has to count already.
+     * account on the platform - and never cached: this decides who is sent
+     * a comment's text, so access taken away a minute ago has to count
+     * already.
      *
      * @return EloquentCollection<int, User>
      */

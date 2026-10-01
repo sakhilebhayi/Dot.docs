@@ -220,8 +220,8 @@ class CommentThread extends Component
             ->reject(fn ($id) => $id === Auth::id() || $mentioned->contains('id', $id));
 
         // The author of an old comment may have lost access since writing
-        // it. Checked against participants(), which is never cached, rather
-        // than the view policy, which caches its answer for fifteen minutes.
+        // it, so they must still be able to open the document: a
+        // participant, or anyone at all while it is link-shared.
         User::whereIn('id', $recipientIds)
             ->get()
             ->filter(fn (User $user) => $this->document->is_public || $participants->contains('id', $user->id))
