@@ -36,6 +36,18 @@ class VersionHistory extends Component
         $this->authorize('view', $this->document);
     }
 
+    /**
+     * mount() runs once, when the page is first opened. Every later request
+     * from that same open page starts here instead - and without this, a
+     * person removed from the document could go on previewing and diffing
+     * its versions (including ones saved after they were removed) for as
+     * long as they left the tab open.
+     */
+    public function hydrate(): void
+    {
+        $this->authorize('view', $this->document);
+    }
+
     public function preview(int $versionId): void
     {
         $this->previewId = $versionId;

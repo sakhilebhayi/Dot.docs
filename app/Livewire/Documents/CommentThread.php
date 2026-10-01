@@ -39,6 +39,18 @@ class CommentThread extends Component
         $this->document = $document;
     }
 
+    /**
+     * This component is mounted inside the editor, which has already
+     * checked access - but only for that first page load. Every later
+     * request from the open page starts here, so somebody removed from the
+     * document stops receiving its comments at once rather than when they
+     * eventually close the tab.
+     */
+    public function hydrate(): void
+    {
+        $this->authorize('view', $this->document);
+    }
+
     public function postComment(): void
     {
         $this->authorize('view', $this->document);

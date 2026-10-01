@@ -3,12 +3,17 @@
 namespace Tests\Feature\Documents;
 
 use App\Documents\DocumentStore;
+use App\Livewire\Documents\CommentThread;
 use App\Livewire\Documents\Editor;
 use App\Livewire\Documents\ShareManager;
+use App\Livewire\Documents\VersionHistory;
+use App\Models\Comment;
 use App\Models\Document;
 use App\Models\DocumentCollaborator;
+use App\Models\DocumentVersion;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Jetstream\Contracts\AddsTeamMembers;
 use Laravel\Jetstream\Http\Livewire\TeamMemberManager;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -128,9 +133,72 @@ class DocumentAccessFreshnessTest extends TestCase
 
         $this->assertFalse($newMember->can('view', $doc));
 
-        $owner->currentTeam->users()->attach($newMember, ['role' => 'viewer']);
+        app(AddsTeamMembers::class)->add($owner, $owner->currentTeam, $newMember->email, 'viewer');
 
         $this->assertTrue($newMember->fresh()->can('view', $doc->fresh()));
+    }
+
+    public function test_someone_who_leaves_the_documents_team_is_refused_at_once(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $member = User::factory()->withPersonalTeam()->create();
+        $owner->currentTeam->users()->attach($member, ['role' => 'editor']);
+        $doc = $this->privateDocument($owner);
+
+        $this->assertTrue($member->can('view', $doc));
+
+        Livewire::actingAs($member)->test(TeamMemberManager::class, ['team' => $owner->currentTeam])
+            ->call('leaveTeam');
+
+        $this->assertFalse($member->fresh()->can('view', $doc->fresh()));
+    }
+
+    /**
+     * Losing access has to reach a page that is ALREADY open, not only the
+     * next page load: a Livewire component that checks the policy in
+     * mount() alone goes on answering every later request from that tab -
+     * here, previewing a version saved after the person was removed.
+     */
+    public function test_an_already_open_version_history_stops_working_once_access_is_removed(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $collaborator = User::factory()->withPersonalTeam()->create();
+        $doc = $this->privateDocument($owner);
+        DocumentCollaborator::create(['document_id' => $doc->id, 'user_id' => $collaborator->id, 'role' => 'viewer']);
+
+        $history = Livewire::actingAs($collaborator)->test(VersionHistory::class, ['uuid' => $doc->uuid])
+            ->assertOk();
+
+        $this->collaboratorRow($doc, $collaborator)->delete();
+        $later = DocumentVersion::create([
+            'document_id' => $doc->id,
+            'content_snapshot' => '<p>Written after they were removed.</p>',
+            'version_number' => 99,
+            'created_by' => $owner->id,
+            'created_at' => now(),
+        ]);
+
+        $history->call('preview', $later->id)
+            ->assertForbidden()
+            ->assertDontSee('Written after they were removed.');
+    }
+
+    public function test_an_already_open_comment_thread_stops_working_once_access_is_removed(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $collaborator = User::factory()->withPersonalTeam()->create();
+        $doc = $this->privateDocument($owner);
+        DocumentCollaborator::create(['document_id' => $doc->id, 'user_id' => $collaborator->id, 'role' => 'viewer']);
+
+        $thread = Livewire::actingAs($collaborator)->test(CommentThread::class, ['document' => $doc])
+            ->assertOk();
+
+        $this->collaboratorRow($doc, $collaborator)->delete();
+        Comment::create(['document_id' => $doc->id, 'user_id' => $owner->id, 'content' => 'Said after they were removed.']);
+
+        $thread->call('$refresh')
+            ->assertForbidden()
+            ->assertDontSee('Said after they were removed.');
     }
 
     public function test_changing_a_team_members_role_takes_effect_at_once(): void
