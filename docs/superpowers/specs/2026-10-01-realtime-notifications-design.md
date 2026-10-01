@@ -185,3 +185,30 @@ near-real-time email is the replacement.
   helpers, whichever this codebase already has precedent for — check
   existing scheduler tests, if any, before picking an approach).
 - Remove `tests/Feature/...DailyDigest...` tests alongside the deleted code.
+
+## Changes made during implementation and review
+
+An independent review of the first implementation confirmed several defects
+in the design above. What shipped differs as follows; `.ai/rules/notifications.md`
+is the standing record.
+
+- **Dropping `ShouldQueue` was not enough to make the bell live.** The
+  notification `broadcast` channel and every `ShouldBroadcast` event queue
+  themselves regardless. The bell now broadcasts on the `sync` connection
+  and all four events in `app/Events` are `ShouldBroadcastNow`, with Reverb
+  capped at 1s connect / 2s total since the call is now in the request.
+- **Recipients are participants, not "anyone who can view".** Mentions are
+  matched against the document's participants by full name; the
+  owner/parent-author recipients must still be able to open the document;
+  access is re-checked when the email is due. One notification per person
+  per comment.
+- **The "seen" check compares the comment id in PHP**, not with a JSON path
+  in SQL, which PostgreSQL rejects on the TEXT `data` column.
+- **Email hardening:** user text is entity-encoded for mail lines
+  (`MailText`), subjects are bounded and lead with the app's words, comment
+  posting is rate limited, and each recipient is capped at 30 comment
+  emails an hour.
+- **Queue robustness:** email has its own `mail` queue drained first, three
+  tries with backoff, jobs for a deleted comment are discarded, failed jobs
+  are pruned weekly, and SQLite uses IMMEDIATE transactions with a 5s busy
+  timeout so the cron worker and web requests do not collide.

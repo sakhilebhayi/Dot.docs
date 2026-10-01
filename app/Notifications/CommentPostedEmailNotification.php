@@ -2,61 +2,39 @@
 
 namespace App\Notifications;
 
-use App\Models\Comment;
-use App\Models\Document;
+use App\Models\User;
 use App\Support\MailText;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
-use Illuminate\Notifications\Notification;
+use Illuminate\Support\HtmlString;
 
 /**
- * The email half of a comment notification. CommentPostedNotification
- * handles the instant bell update; this one is queued with a short delay
- * and cancels itself if the recipient has already read that bell
- * notification by the time it's due to send - so an active user never
- * gets double-notified for the same comment.
+ * Sent to the document's owner and, on a reply, to the author of the
+ * comment being replied to. See CommentEmailNotification for the delay and
+ * the conditions under which it is not sent at all.
  */
-class CommentPostedEmailNotification extends Notification implements ShouldQueue
+class CommentPostedEmailNotification extends CommentEmailNotification
 {
-    use Queueable;
-
-    public function __construct(
-        public readonly Document $document,
-        public readonly Comment $comment,
-    ) {}
-
-    public function via(object $notifiable): array
+    protected function bellNotification(): string
     {
-        return ['mail'];
-    }
-
-    public function withDelay(object $notifiable): array
-    {
-        return ['mail' => now()->addMinutes(2)];
+        return CommentPostedNotification::class;
     }
 
     /**
-     * Runs when the queued job is processed (after the delay), not when it
-     * is dispatched. Matched on the bell row's type + comment id rather
-     * than its own id: NotificationSender assigns every notification a
-     * fresh UUID at send time, so the two dispatches cannot share one.
+     * Somebody who commented on a link-shared document can still open it,
+     * so they may hear about a reply; on a private one they must still be
+     * a participant.
      */
-    public function shouldSend(object $notifiable, string $channel): bool
+    protected function mayReceive(User $user): bool
     {
-        return ! $notifiable->notifications()
-            ->where('data->type', 'comment')
-            ->where('data->comment_id', $this->comment->id)
-            ->whereNotNull('read_at')
-            ->exists();
+        return $this->document->is_public || $this->document->isParticipant($user);
     }
 
     public function toMail(object $notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject('New comment on "'.$this->document->title.'"')
-            ->line(MailText::plain($this->comment->user->name).' commented on your document.')
-            ->line('"'.MailText::plain($this->comment->content, 120).'"')
+            ->subject('New comment on "'.MailText::subject($this->document->title, 60).'"')
+            ->line(new HtmlString(MailText::plain($this->comment->user->name, 40).' commented on &quot;'.MailText::plain($this->document->title, 60).'&quot;.'))
+            ->line(new HtmlString('&quot;'.MailText::plain($this->comment->content, 120).'&quot;'))
             ->action('View Document', route('documents.edit', $this->document->uuid));
     }
 }

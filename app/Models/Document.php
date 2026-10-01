@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Files\Folder;
 use App\Models\Files\Obj;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -101,6 +102,35 @@ class Document extends Model
     public function collaborators(): HasMany
     {
         return $this->hasMany(DocumentCollaborator::class);
+    }
+
+    /**
+     * Everyone with a real relationship to this document: its owner, its
+     * collaborators and the members of its team.
+     *
+     * Deliberately NOT "anyone who can view" - is_public makes that every
+     * account on the platform - and never cached, unlike DocumentPolicy:
+     * this decides who is sent a comment's text, so access taken away a
+     * minute ago has to count already.
+     *
+     * @return EloquentCollection<int, User>
+     */
+    public function participants(): EloquentCollection
+    {
+        $ids = $this->collaborators()->pluck('user_id')->push($this->owner_id);
+
+        $team = $this->team_id ? Team::find($this->team_id) : null;
+
+        if ($team !== null) {
+            $ids = $ids->merge($team->allUsers()->pluck('id'));
+        }
+
+        return User::whereIn('id', $ids->unique())->get();
+    }
+
+    public function isParticipant(User $user): bool
+    {
+        return $this->participants()->contains('id', $user->id);
     }
 
     public function versions(): HasMany

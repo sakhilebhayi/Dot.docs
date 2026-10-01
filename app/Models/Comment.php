@@ -48,12 +48,4 @@ class Comment extends Model
     {
         return $this->resolved_at !== null;
     }
-
-    /** Extract @mentioned usernames from comment content */
-    public function extractMentions(): array
-    {
-        preg_match_all('/@(\w+)/', $this->content, $matches);
-
-        return $matches[1] ?? [];
-    }
 }

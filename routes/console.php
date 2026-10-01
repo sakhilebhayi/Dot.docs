@@ -18,6 +18,13 @@ Artisan::command('inspire', function () {
 // 24-hour default: a shared host can kill a process mid-run without it
 // ever releasing its lock, and a stuck 24h lock would silently stop every
 // queued email for a day.
-Schedule::command('queue:work --stop-when-empty --max-time=55')
+//
+// --queue=mail,default drains email first, so a backlog of anything else
+// on the default queue can never hold a notification email back.
+Schedule::command('queue:work --queue=mail,default --stop-when-empty --max-time=55')
     ->everyMinute()
     ->withoutOverlapping(2);
+
+// Nothing else ever removes a failed job, and each one carries a full stack
+// trace in the same SQLite file as the documents.
+Schedule::command('queue:prune-failed --hours=168')->daily();

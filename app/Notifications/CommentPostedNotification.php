@@ -40,8 +40,15 @@ class CommentPostedNotification extends Notification
         ];
     }
 
+    /**
+     * onConnection('sync') is what actually makes the bell live. Dropping
+     * ShouldQueue from this class only makes the `database` channel inline:
+     * the broadcast channel wraps its message in a ShouldBroadcast event,
+     * which Laravel pushes onto the DEFAULT queue regardless - and that
+     * queue is drained once a minute here.
+     */
     public function toBroadcast(object $notifiable): BroadcastMessage
     {
-        return new BroadcastMessage($this->toArray($notifiable));
+        return (new BroadcastMessage($this->toArray($notifiable)))->onConnection('sync');
     }
 }

@@ -41,8 +41,14 @@ return [
                 'scheme' => env('REVERB_SCHEME', 'https'),
                 'useTLS' => env('REVERB_SCHEME', 'https') === 'https',
             ],
+            // Broadcasts run inside the web request (ShouldBroadcastNow and
+            // the bell's sync connection), so a Reverb that is hanging rather
+            // than refusing must fail fast: the defaults are 10s to connect
+            // and 30s in total, which would stall posting a comment or an
+            // autosave for that long. Every dispatch site catches the failure.
             'client_options' => [
-                // Guzzle client options: https://docs.guzzlephp.org/en/stable/request-options.html
+                'connect_timeout' => 1,
+                'timeout' => 2,
             ],
         ],
 

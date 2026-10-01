@@ -2,52 +2,37 @@
 
 namespace App\Notifications;
 
-use App\Models\Comment;
-use App\Models\Document;
+use App\Models\User;
 use App\Support\MailText;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
-use Illuminate\Notifications\Notification;
+use Illuminate\Support\HtmlString;
 
 /**
- * The email half of a mention notification - see
- * CommentPostedEmailNotification's docblocks for the delay/cancel mechanism.
+ * Sent to somebody @mentioned in a comment. See CommentEmailNotification
+ * for the delay and the conditions under which it is not sent at all.
  */
-class MentionedInCommentEmailNotification extends Notification implements ShouldQueue
+class MentionedInCommentEmailNotification extends CommentEmailNotification
 {
-    use Queueable;
-
-    public function __construct(
-        public readonly Document $document,
-        public readonly Comment $comment,
-    ) {}
-
-    public function via(object $notifiable): array
+    protected function bellNotification(): string
     {
-        return ['mail'];
+        return MentionedInCommentNotification::class;
     }
 
-    public function withDelay(object $notifiable): array
+    /**
+     * A mention only ever reaches a participant - never "anyone who can
+     * view", which on a link-shared document is every account there is.
+     */
+    protected function mayReceive(User $user): bool
     {
-        return ['mail' => now()->addMinutes(2)];
-    }
-
-    public function shouldSend(object $notifiable, string $channel): bool
-    {
-        return ! $notifiable->notifications()
-            ->where('data->type', 'mention')
-            ->where('data->comment_id', $this->comment->id)
-            ->whereNotNull('read_at')
-            ->exists();
+        return $this->document->isParticipant($user);
     }
 
     public function toMail(object $notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject($this->comment->user->name.' mentioned you in "'.$this->document->title.'"')
-            ->line(MailText::plain($this->comment->user->name).' mentioned you in a comment.')
-            ->line('"'.MailText::plain($this->comment->content, 120).'"')
+            ->subject('You were mentioned in "'.MailText::subject($this->document->title, 60).'"')
+            ->line(new HtmlString(MailText::plain($this->comment->user->name, 40).' mentioned you in a comment on &quot;'.MailText::plain($this->document->title, 60).'&quot;.'))
+            ->line(new HtmlString('&quot;'.MailText::plain($this->comment->content, 120).'&quot;'))
             ->action('View Document', route('documents.edit', $this->document->uuid));
     }
 }
