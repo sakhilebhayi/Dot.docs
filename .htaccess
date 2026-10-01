@@ -1,0 +1,19 @@
+# Nothing in this directory is ever served over the web.
+#
+# On doc.infodot.co.za the application lives INSIDE the web root: the
+# domain's document root is this directory's parent, and a hand-written
+# index.php there boots the app from here (see .ai/rules/deploy.md). Without
+# this file every plain file under it is a public URL - confirmed live:
+# /doc/database/database.sqlite (the whole database) and
+# /doc/storage/logs/laravel.log were both downloadable by anyone.
+#
+# PHP's require/include read the filesystem, not the web, so the app itself
+# is unaffected. On a conventional layout (document root = public/) this
+# file sits outside the web root and does nothing.
+#
+# Both forms on purpose: `Require` is the access rule, and the rewrite is a
+# second lock that does not depend on which access module the server honours.
+Require all denied
+
+RewriteEngine On
+RewriteRule ^ - [F,L]
