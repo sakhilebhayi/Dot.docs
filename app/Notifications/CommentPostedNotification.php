@@ -4,17 +4,18 @@ namespace App\Notifications;
 
 use App\Models\Comment;
 use App\Models\Document;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\BroadcastMessage;
-use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Str;
 
-class CommentPostedNotification extends Notification implements ShouldQueue
+/**
+ * The bell only - database + broadcast, dispatched synchronously (this
+ * class does NOT implement ShouldQueue) so the bell updates the instant a
+ * comment is posted, with no queue hop in between. The email side lives in
+ * CommentPostedEmailNotification, which IS queued and delayed.
+ */
+class CommentPostedNotification extends Notification
 {
-    use Queueable;
-
     public function __construct(
         public readonly Document $document,
         public readonly Comment $comment,
@@ -23,15 +24,6 @@ class CommentPostedNotification extends Notification implements ShouldQueue
     public function via(object $notifiable): array
     {
         return ['database', 'broadcast'];
-    }
-
-    public function toMail(object $notifiable): MailMessage
-    {
-        return (new MailMessage)
-            ->subject('New comment on "'.$this->document->title.'"')
-            ->line($this->comment->user->name.' commented on your document.')
-            ->line('"'.Str::limit($this->comment->content, 120).'"')
-            ->action('View Document', route('documents.edit', $this->document->uuid));
     }
 
     public function toArray(object $notifiable): array

@@ -10,6 +10,7 @@ use App\Notifications\CommentPostedNotification;
 use App\Notifications\MentionedInCommentNotification;
 use App\Services\HtmlSanitizer;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -157,16 +158,12 @@ class CommentThread extends Component
 
         // Notify document owner (if not commenter)
         if ($this->document->owner_id !== Auth::id()) {
-            $this->document->owner->notify(
-                new CommentPostedNotification($this->document, $comment)
-            );
+            $this->notifySafely($this->document->owner, new CommentPostedNotification($this->document, $comment));
         }
 
         // Notify parent comment author on reply
         if ($parent && $parent->user_id !== Auth::id()) {
-            $parent->user->notify(
-                new CommentPostedNotification($this->document, $comment)
-            );
+            $this->notifySafely($parent->user, new CommentPostedNotification($this->document, $comment));
         }
 
         // Notify @mentioned users
@@ -174,9 +171,27 @@ class CommentThread extends Component
             User::whereIn('name', $mentions)
                 ->where('id', '!=', Auth::id())
                 ->get()
-                ->each(fn ($user) => $user->notify(
-                    new MentionedInCommentNotification($this->document, $comment)
-                ));
+                ->each(function (User $user) use ($comment) {
+                    $this->notifySafely($user, new MentionedInCommentNotification($this->document, $comment));
+                });
+        }
+    }
+
+    /**
+     * CommentPostedNotification and MentionedInCommentNotification dispatch
+     * synchronously now (no ShouldQueue), so a Reverb outage would
+     * otherwise propagate straight out of $user->notify() - Laravel's
+     * NotificationSender fires NotificationFailed but then re-throws - and
+     * break posting a comment entirely. Catching per notification, same as
+     * the CommentPosted::dispatch() guard above, so one recipient's
+     * broadcast hiccup never stops the others from being notified.
+     */
+    private function notifySafely(User $user, Notification $notification): void
+    {
+        try {
+            $user->notify($notification);
+        } catch (\Throwable) {
+            // Notification channel unavailable (e.g. Reverb unreachable)
         }
     }
 
