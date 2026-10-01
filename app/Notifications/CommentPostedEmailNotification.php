@@ -4,11 +4,11 @@ namespace App\Notifications;
 
 use App\Models\Comment;
 use App\Models\Document;
+use App\Support\MailText;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
-use Illuminate\Support\Str;
 
 /**
  * The email half of a comment notification. CommentPostedNotification
@@ -55,8 +55,8 @@ class CommentPostedEmailNotification extends Notification implements ShouldQueue
     {
         return (new MailMessage)
             ->subject('New comment on "'.$this->document->title.'"')
-            ->line($this->comment->user->name.' commented on your document.')
-            ->line('"'.Str::limit($this->comment->content, 120).'"')
+            ->line(MailText::plain($this->comment->user->name).' commented on your document.')
+            ->line('"'.MailText::plain($this->comment->content, 120).'"')
             ->action('View Document', route('documents.edit', $this->document->uuid));
     }
 }

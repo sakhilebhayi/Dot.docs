@@ -4,11 +4,11 @@ namespace App\Notifications;
 
 use App\Models\Comment;
 use App\Models\Document;
+use App\Support\MailText;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
-use Illuminate\Support\Str;
 
 /**
  * The email half of a mention notification - see
@@ -46,8 +46,8 @@ class MentionedInCommentEmailNotification extends Notification implements Should
     {
         return (new MailMessage)
             ->subject($this->comment->user->name.' mentioned you in "'.$this->document->title.'"')
-            ->line($this->comment->user->name.' mentioned you in a comment.')
-            ->line('"'.Str::limit($this->comment->content, 120).'"')
+            ->line(MailText::plain($this->comment->user->name).' mentioned you in a comment.')
+            ->line('"'.MailText::plain($this->comment->content, 120).'"')
             ->action('View Document', route('documents.edit', $this->document->uuid));
     }
 }

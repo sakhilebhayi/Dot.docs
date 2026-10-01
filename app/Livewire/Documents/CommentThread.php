@@ -163,9 +163,16 @@ class CommentThread extends Component
         // (owner AND parent author) or an @mentioned owner would otherwise
         // get two emails about the same comment. A mention is the more
         // specific notice, so it wins over the generic "commented" one.
+        // Only people who could open the document themselves: a mention
+        // emails the comment's text, and names are matched across every
+        // account, so anything looser would let a commenter mail a private
+        // document's words to a stranger.
         $mentioned = empty($mentions)
             ? collect()
-            : User::whereIn('name', $mentions)->where('id', '!=', Auth::id())->get();
+            : User::whereIn('name', $mentions)
+                ->where('id', '!=', Auth::id())
+                ->get()
+                ->filter(fn (User $user) => $user->can('view', $this->document));
 
         $mentioned->each(function (User $user) use ($comment) {
             $this->notifySafely($user, new MentionedInCommentNotification($this->document, $comment));

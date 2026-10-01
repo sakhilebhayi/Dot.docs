@@ -90,6 +90,25 @@ class CommentNotificationsTest extends TestCase
         $this->assertSame('mention', $notifications->first()->data['type']);
     }
 
+    /**
+     * A mention now emails the comment's text, so it must not reach someone
+     * who could not open the document themselves.
+     */
+    public function test_mentioning_someone_without_access_to_a_private_document_notifies_nobody(): void
+    {
+        Queue::fake();
+
+        $owner = User::factory()->withPersonalTeam()->create(['name' => 'docowner']);
+        $outsider = User::factory()->withPersonalTeam()->create(['name' => 'outsider']);
+        $doc = app(DocumentStore::class)->create($owner, 'Private doc');
+
+        Livewire::actingAs($owner)->test(CommentThread::class, ['document' => $doc])
+            ->set('newComment', 'Hey @outsider look at this')
+            ->call('postComment');
+
+        $this->assertSame(0, $outsider->fresh()->notifications()->count());
+    }
+
     public function test_a_broadcast_failure_does_not_prevent_the_comment_from_posting(): void
     {
         Notification::extend('broadcast', fn () => new class

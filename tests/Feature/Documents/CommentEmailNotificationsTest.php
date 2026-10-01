@@ -86,6 +86,28 @@ class CommentEmailNotificationsTest extends TestCase
         $this->assertFalse($notification->shouldSend($owner, 'mail'));
     }
 
+    /**
+     * A mail line is rendered as Markdown, and the comment is somebody
+     * else's text: it must arrive as plain words, never as a live link or
+     * markup of the commenter's choosing.
+     */
+    public function test_comment_text_cannot_inject_links_or_markup_into_the_email(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $comment = $this->commentOn($owner);
+        $comment->forceFill(['content' => '<b>Urgent</b> [reset your password](https://evil.example/phish)'])->save();
+
+        $html = (string) (new CommentPostedEmailNotification($comment->document, $comment))->toMail($owner)->render();
+
+        $this->assertStringNotContainsString('href="https://evil.example/phish"', $html);
+        $this->assertStringNotContainsString('<b>Urgent</b>', $html);
+        $this->assertStringContainsString('reset your password', $html);
+
+        $html = (string) (new MentionedInCommentEmailNotification($comment->document, $comment))->toMail($owner)->render();
+
+        $this->assertStringNotContainsString('href="https://evil.example/phish"', $html);
+    }
+
     public function test_email_delay_is_about_two_minutes(): void
     {
         $owner = User::factory()->withPersonalTeam()->create();
