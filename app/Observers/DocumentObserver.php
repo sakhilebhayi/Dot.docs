@@ -87,17 +87,6 @@ class DocumentObserver
 
     private function bustDocumentCache(Document $document): void
     {
-        // Forget all per-user permission cache entries for this document.
-        // We iterate over users who have a relationship with this document.
-        $userIds = collect([$document->owner_id])
-            ->merge($document->collaborators()->pluck('user_id'))
-            ->unique();
-
-        foreach ($userIds as $userId) {
-            Cache::forget("doc.view.{$userId}.{$document->id}");
-            Cache::forget("doc.update.{$userId}.{$document->id}");
-        }
-
         Cache::forget("doc.content.{$document->uuid}");
     }
 }
