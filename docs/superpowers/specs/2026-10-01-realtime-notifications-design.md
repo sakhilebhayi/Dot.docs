@@ -72,7 +72,7 @@ bursts instead of a persistent worker. `routes/console.php` gets:
 ```php
 Schedule::command('queue:work --stop-when-empty --max-time=55')
     ->everyMinute()
-    ->withoutOverlapping();
+    ->withoutOverlapping(2);
 ```
 
 One new cPanel cron entry drives Laravel's own scheduler, which is the only
@@ -82,8 +82,10 @@ thing that needs installing on the server for this phase:
 * * * * * php /home/infodotc/doc.infodot.co.za/doc/artisan schedule:run >> /dev/null 2>&1
 ```
 
-`withoutOverlapping()` prevents a slow-draining minute from starting a
-second overlapping worker. `--stop-when-empty` means each invocation exits
+`withoutOverlapping(2)` prevents a slow-draining minute from starting a
+second overlapping worker; the lock expires after 2 minutes rather than
+the 24-hour default, so a process the host kills mid-run can't leave a
+stuck lock that silently halts the queue for a day. `--stop-when-empty` means each invocation exits
 as soon as the queue is drained rather than idling, so there's no risk of
 two processes fighting over the same SQLite-backed `jobs` table for long.
 
