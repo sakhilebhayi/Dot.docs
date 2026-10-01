@@ -40,6 +40,19 @@ Route::get('/cookies', function () {
     ]);
 })->name('cookies');
 
+// Deploy-triggered LSCache purge. Visiting this URL makes LiteSpeed's LSCache
+// module (server-level, cPanel-side — see .ai/rules for why this app can
+// never be served from cache) see the X-LiteSpeed-Purge response header and
+// purge every cached page; the client never sees that header, LiteSpeed
+// strips it. `signed` proves the link was minted on this server with
+// APP_KEY, the same way `files.view` does, so nothing outside the deploy
+// pipeline can trigger a purge. See PurgeLiteSpeedCache (`cache:purge-
+// litespeed`), which mints this URL, and .github/workflows/deploy.yml,
+// which requests it as the last step of every deploy.
+Route::get('/ops/purge-cache', function () {
+    return response()->noContent()->header('X-LiteSpeed-Purge', '*');
+})->middleware('signed')->name('ops.purge-cache');
+
 // Public shared document view (with optional password & expiry enforcement)
 
 Route::get('/shared/{uuid}', function (string $uuid) {

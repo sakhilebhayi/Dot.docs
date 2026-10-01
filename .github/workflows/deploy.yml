@@ -130,4 +130,19 @@ jobs:
 
           $PHP artisan up
           echo "== Deployed: $(git rev-parse --short HEAD)"
+
+          # LiteSpeed's LSCache (server-level, cPanel-side) full-page-caches
+          # HTML responses regardless of this app's own Cache-Control header
+          # - without this, a deploy that changes any hashed asset filename
+          # leaves the cached page pointing at files `rsync --delete` above
+          # just removed (a 404, not just stale styling - see public/
+          # .htaccess and PurgeLiteSpeedCache). Requesting the signed purge
+          # URL makes LiteSpeed see the X-LiteSpeed-Purge response header and
+          # drop every cached page immediately.
+          PURGE_URL=$($PHP artisan cache:purge-litespeed)
+          if curl -fsS -o /dev/null "$PURGE_URL"; then
+            echo "LSCache purge requested."
+          else
+            echo "::warning::LSCache purge request failed -- the live site may still serve a stale cached page until it is purged some other way."
+          fi
           RESTART
