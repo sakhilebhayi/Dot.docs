@@ -128,8 +128,8 @@ class Editor extends Component
 
         $opts = ['expectedVersion' => $baseVersion];
         if ($overwrite) {
-            // The label column holds 120 characters.
-            $opts['keepReplacedAs'] = 'Before '.Str::limit(Auth::user()->name, 80, '').' kept their version';
+            // The same label the unload beacon uses for the same choice.
+            $opts['keepReplacedAs'] = DocumentStore::overwriteLabel(Auth::user());
         }
 
         try {

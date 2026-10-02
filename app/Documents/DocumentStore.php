@@ -15,6 +15,7 @@ use App\Models\Files\Obj;
 use App\Models\User;
 use App\Services\WebhookService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 class DocumentStore
@@ -157,6 +158,20 @@ class DocumentStore
         app(WebhookService::class)->fire($doc, 'on_save');
 
         return $doc;
+    }
+
+    /**
+     * The `keepReplacedAs` label for a writer who saves over a newer
+     * version on purpose (the editor's "Keep mine" and "Put it back").
+     *
+     * Two writers send that save - the Livewire action and the unload
+     * beacon - and both take the label from here, so the history reads the
+     * same whichever of them carried it. The name is cut so the whole
+     * label fits the 120-character column.
+     */
+    public static function overwriteLabel(User $writer): string
+    {
+        return 'Before '.Str::limit($writer->name, 80, '').' kept their version';
     }
 
     /**

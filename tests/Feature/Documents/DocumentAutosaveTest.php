@@ -4,6 +4,7 @@ namespace Tests\Feature\Documents;
 
 use App\Documents\DocumentStore;
 use App\Documents\Schema\BlockId;
+use App\Models\DocumentVersion;
 use App\Models\User;
 use Database\Seeders\DocumentStyleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -88,6 +89,104 @@ class DocumentAutosaveTest extends TestCase
             ->assertOk();
 
         $this->assertSame(0, $doc->versions()->count());
+    }
+
+    /**
+     * The page owes an overwrite ("Keep mine" or "Put it back": the writer
+     * is replacing a newer version their base is on) and is closed before
+     * its Livewire save goes out. The beacon is then the save that replaces
+     * that version, so it has to say so, and the replaced document must be
+     * kept exactly as Editor::saveContent() keeps it - the other person's
+     * save may have cut no version of its own.
+     */
+    public function test_a_beacon_that_says_it_overwrites_keeps_the_version_it_replaces(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create(['name' => 'Thandi']);
+        $doc = $this->doc($user);
+
+        // Somebody else's save, with no version cut for it.
+        app(DocumentStore::class)->save($doc->fresh(), $this->docJson('Theirs'), $user, ['version' => 'none']);
+
+        $this->actingAs($user)
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Mine'), 'base_version' => 2, 'overwrite' => true])
+            ->assertOk()
+            ->assertExactJson(['version' => 3]);
+
+        $this->assertSame('Mine', $doc->fresh()->search_text);
+
+        // The one row is the kept one: the beacon still cuts no version of its own.
+        $kept = DocumentVersion::where('document_id', $doc->id)->sole();
+
+        $this->assertSame('named', $kept->kind);
+        $this->assertSame(DocumentStore::overwriteLabel($user), $kept->label);
+        $this->assertSame('Before Thandi kept their version', $kept->label);
+        $this->assertSame(2, $kept->version_number);
+        $this->assertSame('Theirs', $kept->content_json['content'][0]['content'][0]['text']);
+    }
+
+    public function test_a_beacon_that_does_not_say_it_overwrites_keeps_nothing(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        app(DocumentStore::class)->save($doc->fresh(), $this->docJson('Before'), $user, ['version' => 'none']);
+
+        $this->actingAs($user)
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Typed on'), 'base_version' => 2])
+            ->assertOk();
+
+        $this->actingAs($user)
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('And on'), 'base_version' => 3, 'overwrite' => false])
+            ->assertOk();
+
+        $this->assertSame('And on', $doc->fresh()->search_text);
+        $this->assertSame(0, DocumentVersion::where('document_id', $doc->id)->count());
+    }
+
+    /** A refused beacon replaced nothing, so it keeps nothing, whatever it said. */
+    public function test_a_stale_beacon_that_says_it_overwrites_is_refused_and_keeps_nothing(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        app(DocumentStore::class)->save($doc->fresh(), $this->docJson('Theirs'), $user, ['version' => 'none']);
+        app(DocumentStore::class)->save($doc->fresh(), $this->docJson('Theirs, again'), $user, ['version' => 'none']);
+
+        $this->actingAs($user)
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Mine'), 'base_version' => 2, 'overwrite' => true])
+            ->assertStatus(409)
+            ->assertExactJson(['conflict' => true, 'version' => 3]);
+
+        $this->assertSame('Theirs, again', $doc->fresh()->search_text);
+        $this->assertSame(0, DocumentVersion::where('document_id', $doc->id)->count());
+    }
+
+    public function test_an_overwrite_flag_that_is_not_a_boolean_is_rejected_with_422(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $this->actingAs($user)
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Mine'), 'base_version' => 1, 'overwrite' => 'please'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('overwrite');
+
+        $this->assertSame(1, $doc->fresh()->version);
+    }
+
+    /**
+     * Both overwriting writers - the Livewire save and the beacon - take
+     * the label from one place, and it fits the 120-character column
+     * whatever the writer is called.
+     */
+    public function test_the_overwrite_label_is_cut_to_fit_the_label_column(): void
+    {
+        $short = User::factory()->make(['name' => 'Thandi']);
+        $long = User::factory()->make(['name' => str_repeat('N', 200)]);
+
+        $this->assertSame('Before Thandi kept their version', DocumentStore::overwriteLabel($short));
+        $this->assertSame('Before '.str_repeat('N', 80).' kept their version', DocumentStore::overwriteLabel($long));
+        $this->assertLessThanOrEqual(120, mb_strlen(DocumentStore::overwriteLabel($long)));
     }
 
     public function test_invalid_document_json_is_rejected_with_422(): void
