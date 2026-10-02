@@ -50,9 +50,10 @@
         // (Load theirs, a moment ago in this tab) or 'draft' (a draft found
         // at page load that the document has moved past: its text may
         // already be part of the document). Put it back asks first when the
-        // source is a draft or baseVersion is no longer setAsideBase. Both
-        // are null while nothing is set aside, and everything that clears
-        // setAside clears them with it.
+        // source is a draft, when baseVersion is no longer setAsideBase, or
+        // when the page holds text that is not saved yet. Both are null
+        // while nothing is set aside, and everything that clears setAside
+        // clears them with it.
         setAsideFrom: null,
         setAsideBase: null,
         // A reason the page can no longer stay in step (signed out, access

@@ -901,9 +901,11 @@ export function createSyncHost(view, env) {
 
     /**
      * Discard: the writer does not want the text that was set aside. Only
-     * the offer goes. Nothing is sent, the page is not touched, and the
-     * copy parked under stale-<uuid> stays for its 7 days, so declining
-     * loses nothing.
+     * the offer goes. Nothing is sent and the page is not touched. The copy
+     * that was parked under stale-<uuid> when the text was set aside is
+     * left alone and stays for its 7 days, so in a browser that keeps
+     * drafts declining loses nothing. (A browser that cannot keep drafts
+     * parked nothing: there the text is gone with the offer.)
      */
     function discardSetAside() {
         forgetSetAside();
