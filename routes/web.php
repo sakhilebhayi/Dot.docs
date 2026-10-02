@@ -5,6 +5,7 @@ use App\Http\Controllers\DocumentAutosaveController;
 use App\Http\Controllers\DocumentExportController;
 use App\Http\Controllers\DocumentImageController;
 use App\Http\Controllers\DocumentImportController;
+use App\Http\Controllers\DocumentSyncController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\FileViewController;
 use App\Http\Controllers\PublishedDocumentController;
@@ -144,6 +145,13 @@ Route::middleware([
     // runs). See App\Http\Controllers\DocumentAutosaveController.
     Route::post('/documents/{uuid}/autosave', [DocumentAutosaveController::class, 'store'])
         ->name('documents.autosave');
+
+    // What an open editor polls to stay in step: the current version, who
+    // is here, and the document itself when the caller's copy is behind.
+    // No throttle middleware: it is called every second or two by design.
+    // See App\Http\Controllers\DocumentSyncController.
+    Route::post('/documents/{uuid}/sync', [DocumentSyncController::class, 'store'])
+        ->name('documents.sync');
 
     // Export
     Route::get('/documents/{uuid}/export/{format}', [DocumentExportController::class, 'export'])
