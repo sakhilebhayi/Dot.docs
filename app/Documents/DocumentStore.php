@@ -89,10 +89,16 @@ class DocumentStore
      * returned. Anything else the caller changed on `$doc` before calling
      * (a title, say) is written with it, as Eloquent's save() would.
      *
-     * `keepReplacedAs` is for a writer that replaces a newer version on
-     * purpose (the editor's "Keep mine" and "Put it back"). The stored
-     * document is first kept as a `named` version with this label, inside
-     * the same transaction as the write that replaces it. A save that is
+     * `keepReplacedAs` is for a writer that replaces the stored document on
+     * purpose: the editor's "Keep mine" and "Put it back" (which replace a
+     * newer version their base is on), a restore, an import and an accepted
+     * suggestion. Whoever wrote the stored document is not asked, their
+     * open tab follows the replacement, and their save may have cut no
+     * version of its own (see shouldCut()). So the stored document is first
+     * kept as a `named` version with this label, inside the same
+     * transaction as the write that replaces it - unless a version row for
+     * the stored version number already exists, in which case the text is
+     * in the history already and nothing more is cut. A save that is
      * refused, or whose content the schema rejects, keeps nothing.
      *
      * @param  array{version?:string,label?:string|null,expectedVersion?:int,keepReplacedAs?:string}  $opts
@@ -119,11 +125,16 @@ class DocumentStore
                 throw new StaleDocumentException($current);
             }
 
-            // "Keep mine": the caller is replacing a newer version on
-            // purpose. Keep what is stored, as a named version, inside the
-            // same transaction as the write that replaces it - so it exists
-            // only if this save is stored, and holds exactly what it replaced.
-            if (isset($opts['keepReplacedAs'])) {
+            // The caller is replacing the stored document on purpose. Keep
+            // what is stored, as a named version, inside the same
+            // transaction as the write that replaces it - so it exists only
+            // if this save is stored, and holds exactly what it replaced.
+            // Not when the stored version already has a row of its own: the
+            // text is in the history then. That is asked HERE, about the
+            // version read under the lock; asked by the caller beforehand,
+            // an autosave landing in between would leave a newer head that
+            // is in no row and is then replaced unkept.
+            if (isset($opts['keepReplacedAs']) && ! $this->hasVersion($stored)) {
                 $this->cutVersion($stored, $actor, 'named', $opts['keepReplacedAs']);
             }
 
@@ -238,12 +249,21 @@ class DocumentStore
         ]);
     }
 
+    /**
+     * Replace the document with one of its earlier versions. The document
+     * being replaced is kept first (`keepReplacedAs`, see save()): a restore
+     * states no base, so it goes through over whatever is stored.
+     */
     public function restore(Document $doc, DocumentVersion $version, User $actor): Document
     {
         abort_unless($version->document_id === $doc->id, 404);
         $json = $version->content_json ?? $this->legacy->convert($version->content_snapshot);
 
-        return $this->save($doc, $json, $actor, ['version' => 'restore', 'label' => 'Restored v'.$version->version_number]);
+        return $this->save($doc, $json, $actor, [
+            'version' => 'restore',
+            'label' => 'Restored v'.$version->version_number,
+            'keepReplacedAs' => 'Before restoring v'.$version->version_number,
+        ]);
     }
 
     /**
@@ -255,6 +275,18 @@ class DocumentStore
     {
         $this->fill($doc, $json);
         $doc->saveQuietly();
+    }
+
+    /**
+     * Whether the document, at the version it is at, is already in its
+     * history. A version row carries the version number of the document it
+     * was cut from, so a row with this number holds this content.
+     */
+    private function hasVersion(Document $doc): bool
+    {
+        return DocumentVersion::where('document_id', $doc->getKey())
+            ->where('version_number', $doc->version)
+            ->exists();
     }
 
     private function shouldCut(Document $doc, User $actor, string $kind): bool

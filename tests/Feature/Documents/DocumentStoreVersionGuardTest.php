@@ -211,6 +211,42 @@ class DocumentStoreVersionGuardTest extends TestCase
         $this->assertSame('Theirs', $doc->fresh()->search_text);
     }
 
+    /**
+     * `keepReplacedAs` exists so the replaced text is somewhere in the
+     * history. When the head already has a version row of its own it IS
+     * there, and a second copy of it would only be noise. The check is made
+     * inside the save's transaction, on the version read under the lock.
+     */
+    public function test_nothing_more_is_kept_when_the_replaced_head_already_has_a_version(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $store = app(DocumentStore::class);
+
+        $store->save($doc, $this->para('Old'), $user, ['version' => 'named', 'label' => 'Old']);
+        $old = DocumentVersion::where('document_id', $doc->id)->sole();
+        $store->save(Document::findOrFail($doc->id), $this->para('Head, with a version of its own'), $user, ['version' => 'named', 'label' => 'Head']);
+
+        // A restore replaces version 3, which has a row: nothing more is kept.
+        $store->restore(Document::findOrFail($doc->id), $old, $user);
+
+        $this->assertSame(
+            [[2, 'named', 'Old'], [3, 'named', 'Head'], [4, 'restore', 'Restored v2']],
+            DocumentVersion::where('document_id', $doc->id)->orderBy('id')->get()
+                ->map(fn (DocumentVersion $row) => [$row->version_number, $row->kind, $row->label])->all(),
+        );
+
+        // "Keep mine" over version 4, which the restore cut a row for: the same.
+        $store->save(Document::findOrFail($doc->id), $this->para('Mine'), $user, [
+            'version' => 'none',
+            'expectedVersion' => 4,
+            'keepReplacedAs' => 'Before Thandi kept their version',
+        ]);
+
+        $this->assertSame(5, $doc->fresh()->version);
+        $this->assertSame(3, DocumentVersion::where('document_id', $doc->id)->count());
+    }
+
     public function test_the_webhook_fires_once_after_the_save_has_committed(): void
     {
         $user = User::factory()->withPersonalTeam()->create();

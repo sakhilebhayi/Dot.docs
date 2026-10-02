@@ -227,10 +227,14 @@ class Editor extends Component
             ->whereNull('accepted_at')
             ->findOrFail($suggestionId);
 
+        // No base is stated: accepting replaces whatever is stored, which
+        // may be somebody else's save from a moment ago. The store keeps
+        // that first (see DocumentStore::save()).
         $json = app(HtmlToJson::class)->convert($suggestion->suggestion_text);
         $this->document = app(DocumentStore::class)->save($this->document, $json, Auth::user(), [
             'version' => 'named',
             'label' => 'Accepted suggestion',
+            'keepReplacedAs' => 'Before accepted suggestion',
         ]);
         $this->contentJson = $this->document->content_json;
 
