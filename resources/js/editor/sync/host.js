@@ -68,7 +68,9 @@ export function createTabId({ crypto, random, now }) {
  *           exactly what the editor holds has been confirmed by the server
  * @property {boolean} resave a save is owed; resendIfOwed() sends it
  * @property {string|null} confirmed the document, as a JSON string, as the
- *           server last confirmed it
+ *           server last confirmed it; null before the editor is mounted, and
+ *           again from the moment one of this tab's saves goes unanswered
+ *           until the server has said what it holds
  * @property {boolean} overwriteOwed the next save puts this tab's own text
  *           back over a version it loaded, so it goes as an overwrite
  * @property {{version: number, ready: boolean}|null} conflict
@@ -124,12 +126,21 @@ export function createSyncHost(view, env) {
      * nothing else runs: resendIfOwed() is reached from a poll, and a tab
      * whose polls are blocked must still be able to save.
      *
+     * A save that is given up on may still have been STORED: only its
+     * answer is known to be lost. From then on what the server holds is not
+     * known, so nothing counts as confirmed (`confirmed` is null) until a
+     * save is accepted or a server document is applied. Without that, an
+     * edit sent, stored, never answered and then undone would find the
+     * editor back at the last confirmed document, be written off as Saved,
+     * and the next poll would bring the undone text back.
+     *
      * @returns {boolean}
      */
     function saveInTheAir() {
         if (view.saving > 0 && env.now() - view.savingSince >= SAVE_EXPIRY_MS) {
             view.saving = 0;
             view.resave = true;
+            view.confirmed = null;
         }
 
         return view.saving > 0;
@@ -257,7 +268,10 @@ export function createSyncHost(view, env) {
             },
             () => {
                 // The save itself failed: the request was never answered.
+                // Whether the server stored it is not known, so nothing
+                // counts as confirmed any more (see saveInTheAir()).
                 view.saving = Math.max(0, view.saving - 1);
+                view.confirmed = null;
                 env.report('danger', 'Not saved');
                 env.engine()?.retry();
             }
@@ -337,7 +351,9 @@ export function createSyncHost(view, env) {
      * or not: the engine's `onPolled` tick) and when the browser comes back
      * online. It only ever sends text that is still
      * unsaved HERE (`unsaved`); it never sends a copy the writer has not
-     * touched.
+     * touched, and that includes a copy the writer changed and changed
+     * back: on every call it first checks whether the editor is back at
+     * what the server last confirmed.
      */
     function resendIfOwed() {
         const handle = env.handle();
@@ -346,7 +362,17 @@ export function createSyncHost(view, env) {
             return;
         }
 
-        if (saveInTheAir() || !view.resave) {
+        if (saveInTheAir()) {
+            return;
+        }
+
+        // The writer may have undone what was unsaved. Here, after the
+        // save-in-the-air check and before anything is sent, so that every
+        // tick runs it and a document the writer did not change is never
+        // sent (see settleIfBackAtConfirmed()).
+        settleIfBackAtConfirmed(handle);
+
+        if (!view.resave) {
             return;
         }
 
@@ -402,6 +428,49 @@ export function createSyncHost(view, env) {
     }
 
     /**
+     * Nothing is unsaved after all: the editor is back at exactly what the
+     * server last confirmed.
+     *
+     * An edit undone again inside the bundle's debounce never reaches
+     * persist(): the bundle finds nothing to send, so no save would ever
+     * answer to clear `unsaved`. The tab would say Editing for good, stop
+     * following, raise a conflict over text it does not hold, and send a
+     * document its writer did not change the next time the browser came
+     * back online. So this runs on every tick: from resendIfOwed(), which
+     * the engine reaches after every completed poll and backOnline() calls,
+     * and from syncState(). It says Saved only when it takes the tab from
+     * unsaved to nothing unsaved, so an idle reader says nothing.
+     *
+     * Both callers run it AFTER saveInTheAir() has answered no, never
+     * before. While a save is in the air the server may be about to hold
+     * something other than `confirmed`: type x, the save of it leaves,
+     * delete x, and the editor is back at `confirmed` while the server is
+     * about to store the x. Settling there would drop the owed save of the
+     * deletion and say Saved over a document the server does not hold. The
+     * `saving` test below is the same guard for a caller that forgets.
+     * And once a save has gone unanswered, `confirmed` is null and nothing
+     * is settled until the server has said what it holds.
+     *
+     * @param {object} handle the editor handle, mounted and not fail-closed
+     */
+    function settleIfBackAtConfirmed(handle) {
+        if (
+            !view.unsaved ||
+            view.conflict ||
+            view.saving > 0 ||
+            handle.pending ||
+            view.confirmed === null ||
+            JSON.stringify(handle.editor.getJSON()) !== view.confirmed
+        ) {
+            return;
+        }
+
+        view.unsaved = false;
+        view.overwriteOwed = false;
+        env.report('good', 'Saved');
+    }
+
+    /**
      * What the sync engine may do with a newer document right now.
      *
      * @returns {'clean'|'busy'|'dirty'|'closed'}
@@ -416,25 +485,8 @@ export function createSyncHost(view, env) {
             return 'busy';
         }
 
-        // An edit undone again inside the bundle's debounce never reaches
-        // persist(): the bundle finds nothing to send, so nothing would
-        // clear `unsaved`, and this tab would stop following and raise a
-        // conflict over text it does not hold. When the editor is back to
-        // exactly what the server last confirmed, nothing is unsaved and
-        // no overwrite is owed.
-        if (
-            view.unsaved &&
-            !view.conflict &&
-            !handle.pending &&
-            JSON.stringify(handle.editor.getJSON()) === view.confirmed
-        ) {
-            view.unsaved = false;
-            view.overwriteOwed = false;
-            // The edit said Editing and no save will ever answer to say
-            // otherwise. Said here, inside the condition: this runs on
-            // every poll, and only the change from unsaved is reported.
-            env.report('good', 'Saved');
-        }
+        // After the save-in-the-air check, never before it.
+        settleIfBackAtConfirmed(handle);
 
         // `unsaved`, not only handle.pending: after a save that never
         // answered or was rejected, the bundle reports nothing pending
@@ -841,7 +893,13 @@ export function createSyncHost(view, env) {
             return;
         }
 
-        // The editor now holds exactly the version the server stored.
+        // The editor now holds exactly the version the server stored. Text
+        // this tab had marked unsaved is no longer in it, and no save will
+        // answer for it: the word that still says Editing goes back to
+        // Saved. Only on that change.
+        if (view.unsaved) {
+            env.report('good', 'Saved');
+        }
         view.unsaved = false;
         view.confirmed = JSON.stringify(handle.editor.getJSON());
         view.overwriteOwed = false;
@@ -854,7 +912,9 @@ export function createSyncHost(view, env) {
     /**
      * Back online: send what was typed while offline, and ONLY that.
      * resendIfOwed() saves when this tab holds unsaved text and does
-     * nothing otherwise. Saving unconditionally, as the page used to, sent
+     * nothing otherwise; text typed and deleted again is not unsaved text,
+     * and resendIfOwed() checks for that before it sends anything (see
+     * settleIfBackAtConfirmed()). Saving unconditionally, as the page used to, sent
      * an idle reader's stale copy: refused as a conflict that reader never
      * caused, or stored as a new version that threw everybody who was
      * typing into one. The draft is NOT cleared here: persist() clears it

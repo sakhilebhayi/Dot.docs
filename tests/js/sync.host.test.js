@@ -1542,7 +1542,7 @@ test('an edit undone inside the debounce puts the save word back to Saved, once'
     assert.equal(B.view.unsaved, false);
     assert.deepEqual(B.reports.slice(said), [{ tone: 'good', word: 'Saved' }]);
 
-    // syncState() is asked on every poll. Only the change is reported.
+    // The check runs again on every tick. Only the change is reported.
     assert.equal(B.host().syncState(), 'clean');
     await B.cycle();
     await B.cycle();
@@ -1719,6 +1719,221 @@ test('a save settles in a browser that cannot keep drafts', async () => {
     assert.equal(A.host().syncState(), 'clean');
 });
 
+// ───────────────────────────────────────────────────────── back at what the server confirmed, on every tick
+
+test('an edit undone inside the debounce: the next quiet poll clears it and says Saved, once', async () => {
+    const { server, B } = await pair();
+    B.type('startx');
+    B.type('start');
+    await B.debounce();
+    assert.equal(B.sent.length, 0, 'the bundle found nothing to send');
+    assert.equal(B.word(), 'Editing');
+    assert.equal(B.view.unsaved, true);
+
+    // Nobody has saved: the poll brings no document. The check must not
+    // wait for one.
+    const said = B.reports.length;
+    await B.cycle();
+    assert.equal(B.view.unsaved, false);
+    assert.equal(B.word(), 'Saved');
+    assert.deepEqual(B.reports.slice(said), [{ tone: 'good', word: 'Saved' }]);
+    assert.equal(B.host().syncState(), 'clean');
+
+    await B.cycle();
+    await B.cycle();
+    assert.deepEqual(B.reports.slice(said), [{ tone: 'good', word: 'Saved' }], 'only the change is reported');
+    assert.equal(B.sent.length, 0);
+    assert.equal(server.version, 1);
+});
+
+test('an edit undone inside the debounce is cleared by a poll that was not answered, too', async () => {
+    const { B } = await pair();
+    B.type('startx');
+    B.type('start');
+    await B.debounce();
+
+    await B.fireTimer();
+    await B.pollAnswers(403, null);
+    assert.equal(B.view.unsaved, false);
+    assert.equal(B.word(), 'Saved');
+});
+
+test('an edit undone inside the debounce, then back online: a document the writer did not change is not sent', async () => {
+    const { server, A, B } = await pair();
+    B.type('startx');
+    B.type('start');
+    await B.debounce();
+    assert.equal(B.view.unsaved, true);
+
+    B.host().backOnline();
+    assert.equal(B.sent.length, 0, 'the editor holds what the server confirmed: there is nothing to send');
+    assert.equal(B.view.unsaved, false);
+    assert.equal(B.word(), 'Saved');
+
+    await B.poll();
+    assert.equal(server.version, 1, 'no version was made of an unchanged document');
+
+    // Somebody who is typing is therefore not thrown into a conflict.
+    A.type('A1');
+    await A.cycle();
+    assert.equal(A.view.conflict, null);
+});
+
+test('an edit undone inside the debounce, then back online with the server ahead: nothing is sent and the tab follows', async () => {
+    const { server, A, B } = await pair();
+    B.type('startx');
+    B.type('start');
+    await B.debounce();
+    // Somebody saves while this tab is offline; it has not polled.
+    A.type('A1 newer work');
+    await A.debounce();
+    await A.land();
+
+    B.host().backOnline();
+    assert.equal(B.sent.length, 0);
+
+    await B.poll();
+    assert.equal(B.view.conflict, null, 'no conflict on a tab that holds no text of its own');
+    assert.equal(B.text(), 'A1 newer work');
+    assert.equal(B.view.baseVersion, 2);
+    assert.equal(B.sent.length, 0);
+    assert.equal(server.json.text, 'A1 newer work');
+    assert.deepEqual(server.history, []);
+});
+
+test('back online inside the debounce, then the edit is undone: nothing is sent', async () => {
+    const { server, B } = await pair();
+    B.type('startx');
+    B.host().backOnline();
+    assert.equal(B.view.resave, true, 'owed while the debounce is armed');
+
+    B.type('start');
+    await B.debounce();
+    assert.equal(B.sent.length, 0, 'the bundle found nothing to send');
+
+    await B.cycle();
+    assert.equal(B.sent.length, 0, 'and the owed save is not a copy the writer did not change');
+    assert.equal(B.view.unsaved, false);
+    assert.equal(B.view.resave, false);
+    assert.equal(B.word(), 'Saved');
+    assert.equal(server.version, 1);
+});
+
+test('an undo handed over while the save of the undone text is in the air is not written off by a quiet poll', async () => {
+    const { server, B } = await pair();
+    B.type('startx');
+    await B.debounce();
+    // The x is deleted again. The debounce hands the document over: owed.
+    B.type('start');
+    await B.debounce();
+    assert.equal(B.sent.length, 1);
+    assert.equal(B.view.resave, true);
+
+    // A quiet poll is answered before the save is. The editor does hold
+    // what the server last CONFIRMED, but a save of something else is in
+    // the air: nothing is settled, and the owed save is not dropped.
+    await B.cycle();
+    assert.equal(B.view.unsaved, true);
+    assert.equal(B.view.resave, true);
+    assert.notEqual(B.word(), 'Saved');
+    assert.equal(B.host().syncState(), 'busy');
+
+    B.saveArrives();
+    await B.saveReturns();
+    assert.equal(server.json.text, 'startx');
+    assert.deepEqual([B.sent[1].json.text, B.sent[1].base], ['start', 2]);
+
+    await B.land();
+    assert.equal(server.json.text, 'start', 'the server ends at what the editor shows');
+    assert.equal(B.text(), 'start');
+    assert.equal(B.view.unsaved, false);
+    assert.equal(B.word(), 'Saved');
+});
+
+for (const [who, notices] of [
+    ['a poll', (B) => B.cycle()],
+    ['syncState()', async (B) => B.host().syncState()],
+]) {
+    test(`an undo after a save whose answer was lost is not written off as Saved (${who} notices first)`, async () => {
+        const { server, clock, B } = await pair();
+        B.type('startx');
+        await B.debounce();
+        // The server stores it, and the answer never comes.
+        B.saveArrives();
+        B.saveNeverAnswers();
+        assert.equal(server.json.text, 'startx');
+
+        B.type('start');
+        await B.debounce();
+        assert.equal(B.view.resave, true);
+
+        // The save is given up on. What the server holds is no longer known,
+        // so the editor being back at the last CONFIRMED document proves
+        // nothing: the undo has to be sent.
+        clock.now += SAVE_EXPIRY_MS;
+        await notices(B);
+        assert.equal(B.view.confirmed, null, 'nothing is confirmed once a save has gone unanswered');
+        assert.equal(B.view.unsaved, true);
+        assert.notEqual(B.word(), 'Saved');
+
+        await B.cycle();
+        assert.deepEqual([B.sent[1].json.text, B.sent[1].base], ['start', 1]);
+        await B.land();
+        await B.cycle();
+        // Refused against the tab's own stored save: the notice (a stated
+        // limit), never a silent return of the deleted character.
+        assert.equal(B.text(), 'start');
+        assert.deepEqual(B.view.conflict, { version: 2, ready: true });
+        assert.equal(B.word(), 'Not saved');
+
+        B.host().keepMine();
+        await B.land();
+        assert.equal(server.json.text, 'start');
+        assert.equal(B.view.confirmed, JSON.stringify(doc('start')), 'an accepted save is confirmed again');
+        assert.equal(B.word(), 'Saved');
+    });
+}
+
+test('an undo handed over while a save was in the air is sent when that save request fails outright', async () => {
+    const { server, B } = await pair();
+    B.type('startx');
+    await B.debounce();
+    B.type('start');
+    await B.debounce();
+
+    // The request fails. Whether the server stored it is not known.
+    B.saves.shift().reject(new Error('network'));
+    await settle();
+    assert.equal(B.view.confirmed, null);
+    assert.equal(B.word(), 'Not saved');
+
+    await B.cycle();
+    assert.deepEqual([B.sent[1].json.text, B.sent[1].base], ['start', 1], 'not written off: it is sent');
+    await B.land();
+    assert.equal(server.json.text, 'start');
+    assert.equal(B.view.unsaved, false);
+    assert.equal(B.word(), 'Saved');
+});
+
+test('an undo whose save the server refused outright is settled: the server still holds what it confirmed', async () => {
+    const { server, B } = await pair();
+    B.type('startx');
+    await B.debounce();
+    B.type('start');
+    await B.debounce();
+
+    // The schema rejects the save of startx: nothing was written.
+    server.rejectNext = true;
+    B.saveArrives();
+    await B.saveReturns();
+
+    assert.equal(B.sent.length, 1, 'the editor holds what the server holds: nothing more is sent');
+    assert.equal(B.view.unsaved, false);
+    assert.equal(B.view.resave, false);
+    assert.equal(B.word(), 'Saved');
+    assert.equal(server.version, 1);
+});
+
 // ───────────────────────────────────────────────────────── adoptVersion
 
 test('adoptVersion: exactly one past the base moves the base, and the next save is accepted', async () => {
@@ -1830,6 +2045,16 @@ test('an accepted suggestion is put into the editor over unsaved typing and its 
     assert.equal(A.view.tick, 1);
     assert.equal(A.outlineRefreshes, 1);
     assert.equal(A.host().syncState(), 'clean');
+    assert.equal(A.word(), 'Saved', 'the typing that said Editing is gone, and no save will answer for it');
+});
+
+test('an accepted suggestion on a tab with nothing unsaved says nothing', async () => {
+    const { server, A } = await pair();
+    const said = A.reports.length;
+
+    A.host().applySuggestion(doc('the accepted suggestion'), server.replace(doc('the accepted suggestion')));
+    assert.equal(A.text(), 'the accepted suggestion');
+    assert.equal(A.reports.length, said);
 });
 
 test('a suggestion this editor cannot open leaves the document alone and says so', async () => {

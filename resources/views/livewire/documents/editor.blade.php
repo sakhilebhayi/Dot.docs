@@ -24,7 +24,9 @@
         resave: false,
         // The document, as a JSON string, as the server last confirmed it:
         // what the page opened with, what the last accepted save stored, or
-        // the last server document applied. See syncState().
+        // the last server document applied. Null again from the moment one
+        // of this tab's saves goes unanswered, until the server has said
+        // what it holds. See settleIfBackAtConfirmed() in sync/host.js.
         confirmed: null,
         // The next save puts this tab's own text back over a version it
         // loaded (Put it back): it goes as an overwrite.
