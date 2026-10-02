@@ -8,6 +8,7 @@ import {
     SAVE_EXPIRY_MS,
     createSyncHost,
     createTabId,
+    unloadSaveBody,
 } from '../../resources/js/editor/sync/host.js';
 
 /**
@@ -243,8 +244,16 @@ function makeTab({ server, clock }, name, options = {}) {
 
         if (beacon) {
             // navigator.sendBeacon(): the browser delivers the body after
-            // the page has gone. Built as the bundle's beaconSave() builds it.
-            const body = clone({ _token: 'csrf', content: json, base_version: t.view.baseVersion });
+            // the page has gone. Built by the function the bundle's
+            // beaconSave() builds it with, from the mount options the Blade
+            // component passes: both are read now, at the moment of leaving.
+            const body = clone(
+                unloadSaveBody(json, {
+                    csrfToken: 'csrf',
+                    getBaseVersion: () => t.view.baseVersion,
+                    getOverwrite: () => t.view.overwriteOwed,
+                })
+            );
             t.beacons.push({ body, answer: server.autosave(body) });
 
             return true;
@@ -981,6 +990,17 @@ test('text that cannot be put back stays set aside, and the page says so', async
     assert.equal(B.text(), 'A1');
 });
 
+test('text that cannot be put back leaves an overwrite that was already owed as it was', async () => {
+    const { B } = await conflicted();
+    await B.host().loadTheirs();
+    B.view.overwriteOwed = true;
+    B.setContentThrows = true;
+
+    B.host().putBack();
+    assert.equal(B.view.syncNotice, 'Your text could not be put back.');
+    assert.equal(B.view.overwriteOwed, true);
+});
+
 test('Load theirs before the newer document has been downloaded fetches it and changes nothing', async () => {
     const { A, B } = await pair();
     A.type('A1');
@@ -1181,6 +1201,342 @@ test('the question says what will be replaced and where the replaced version goe
         'Put this text back? It will replace the text on the page now, including everything saved since this text was written. The version it replaces is kept in the history.'
     );
     assert.equal(PUT_BACK_UNSAVED_WARNING, ' Text on the page that has not been saved yet will be lost.');
+});
+
+// ───────────────────────────────────────────────────────── an overwrite on purpose is owed until a save says so
+
+test('the unload beacon states the base and whether an overwrite is owed, both read at the moment of leaving', () => {
+    let base = 4;
+    let owed = false;
+    const options = { csrfToken: 'token-1', getBaseVersion: () => base, getOverwrite: () => owed };
+
+    assert.deepEqual(unloadSaveBody(doc('one'), options), {
+        _token: 'token-1',
+        content: doc('one'),
+        base_version: 4,
+        overwrite: false,
+    });
+
+    base = 7;
+    owed = true;
+    assert.deepEqual(unloadSaveBody(doc('two'), options), {
+        _token: 'token-1',
+        content: doc('two'),
+        base_version: 7,
+        overwrite: true,
+    });
+});
+
+test('the unload beacon sends a real boolean, whatever the page hands it, and no base when the page states none', () => {
+    // The server validates `overwrite` as a boolean and stores nothing when it is not one.
+    for (const [given, sent] of [
+        [undefined, false],
+        [null, false],
+        [0, false],
+        ['', false],
+        [1, true],
+        ['yes', true],
+        [{}, true],
+    ]) {
+        const body = unloadSaveBody(doc('x'), { getBaseVersion: () => 2, getOverwrite: () => given });
+        assert.equal(body.overwrite, sent);
+    }
+
+    assert.deepEqual(unloadSaveBody(doc('x'), {}), { _token: '', content: doc('x'), base_version: null, overwrite: false });
+    assert.deepEqual(unloadSaveBody(doc('x')), { _token: '', content: doc('x'), base_version: null, overwrite: false });
+});
+
+test('an ordinary tab closed inside the debounce sends a beacon that does not overwrite', async () => {
+    const { server, A } = await pair();
+    A.type('A last words');
+    A.leave();
+
+    assert.deepEqual(
+        A.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]),
+        [[1, false, 200]]
+    );
+    assert.deepEqual(server.history, []);
+});
+
+test('Put it back, then the tab is closed inside the debounce: the beacon says it overwrites, and the replaced version is kept', async () => {
+    const { server, B } = await conflicted();
+    await B.host().loadTheirs();
+    B.host().putBack();
+
+    // Closed, or a link followed, before the debounce fires.
+    B.leave();
+    assert.deepEqual(
+        B.beacons.map((beacon) => [beacon.body.content.text, beacon.body.base_version, beacon.body.overwrite]),
+        [['B1', 2, true]]
+    );
+    assert.equal(B.beacons[0].answer.status, 200);
+    assert.equal(server.json.text, 'B1');
+    assert.deepEqual(server.history, [{ version: 2, text: 'A1' }], 'the other person version is kept first');
+});
+
+test('Keep mine marks the overwrite as owed when it moves the base up, until a save is accepted', async () => {
+    const { server, B } = await conflicted();
+    assert.equal(B.view.overwriteOwed, false);
+
+    B.host().keepMine();
+    assert.equal(B.view.baseVersion, 2);
+    assert.equal(B.view.overwriteOwed, true, 'owed from the moment the base states the other person version');
+
+    await B.land();
+    assert.equal(server.json.text, 'B1');
+    assert.equal(B.view.overwriteOwed, false, 'an accepted save that said so settles it');
+
+    B.type('B1 and on');
+    await B.debounce();
+    assert.equal(B.sent.at(-1).overwrite, false, 'the save after that is an ordinary one');
+});
+
+test('a Keep mine save the server rejects leaves the overwrite owed: the beacon of what is typed next carries it', async () => {
+    const { server, B } = await conflicted();
+    server.rejectNext = true;
+    B.host().keepMine();
+    await B.land();
+    assert.equal(server.json.text, 'A1', 'nothing was stored');
+    assert.equal(B.view.baseVersion, 2, 'the base stays moved up');
+    assert.equal(B.view.overwriteOwed, true);
+    assert.equal(B.word(), 'Not saved');
+
+    // The writer types on and leaves. The page itself would not save while
+    // the notice stands; the beacon has no such check, and states base 2.
+    B.type('B1 and more');
+    B.leave();
+    assert.deepEqual(
+        B.beacons.map((beacon) => [beacon.body.content.text, beacon.body.base_version, beacon.body.overwrite]),
+        [['B1 and more', 2, true]]
+    );
+    assert.equal(server.json.text, 'B1 and more');
+    assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
+});
+
+test('a Keep mine save cut off by leaving: the beacon of what was typed since carries the overwrite', async () => {
+    const { server, B } = await conflicted();
+    B.host().keepMine();
+    // The request is aborted by the unload: it never reaches the server.
+    B.type('B1 and more');
+    B.leave();
+
+    assert.deepEqual(
+        B.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]),
+        [[2, true, 200]]
+    );
+    assert.equal(server.json.text, 'B1 and more');
+    assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
+});
+
+test('a Keep mine save that did land before the beacon: the beacon is refused and the version is kept once', async () => {
+    const { server, B } = await conflicted();
+    B.host().keepMine();
+    B.type('B1 and more');
+    B.saveArrives();
+    B.leave();
+
+    assert.equal(B.beacons[0].answer.status, 409, 'the base it states is no longer current: nothing is overwritten blind');
+    assert.equal(server.json.text, 'B1');
+    assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
+});
+
+test('after Keep mine the editor being back at the old confirmed document settles nothing: the base no longer names it', async () => {
+    const { server, A, B } = await pair();
+    A.type('A1');
+    await A.debounce();
+    await A.land();
+    // B types, the notice comes up, and B takes the typing out again: the
+    // editor is back at version 1, which is what this tab last had confirmed.
+    B.type('B1');
+    await B.cycle();
+    B.type('start');
+    await B.debounce();
+    assert.notEqual(B.view.conflict, null);
+
+    // Keep mine, knowingly: version 1's text over version 2. The server
+    // rejects the save, so the notice stays and the base stays moved up.
+    server.rejectNext = true;
+    B.host().keepMine();
+    await B.land();
+    assert.equal(B.view.baseVersion, 2);
+    assert.equal(B.view.confirmed, null, 'the base names version 2 now; what was confirmed is version 1');
+
+    // A style change by this same page clears the notice (version 3).
+    B.host().adoptVersion(server.replace(server.json));
+    assert.equal(B.view.conflict, null);
+    assert.equal(B.view.baseVersion, 3);
+
+    // Written off as Saved here, the tab would show version 1 on base 3,
+    // owe nothing, and its next keystroke would replace the other person
+    // text with no version kept. The owed save goes instead, and says so.
+    assert.equal(B.view.unsaved, true);
+    assert.deepEqual(
+        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        [
+            ['start', 2, true],
+            ['start', 3, true],
+        ]
+    );
+    await B.land();
+    assert.equal(server.json.text, 'start');
+    assert.deepEqual(server.history, [{ version: 3, text: 'A1' }]);
+    assert.equal(B.view.overwriteOwed, false);
+    assert.equal(B.view.confirmed, JSON.stringify(doc('start')));
+});
+
+test('a Keep mine save refused against this tab own newer version is sent again, still as an overwrite', async () => {
+    const { server, B } = await conflicted();
+    B.host().keepMine();
+    // A style change by this same page is stored first (version 3: the
+    // other person text, restyled), and its event moves the base up.
+    B.host().adoptVersion(server.replace(server.json));
+    assert.equal(B.view.baseVersion, 3);
+    assert.equal(B.view.conflict, null);
+
+    B.saveArrives();
+    await B.saveReturns();
+    assert.deepEqual(
+        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        [
+            ['B1', 2, true],
+            ['B1', 3, true],
+        ],
+        'the retry replaces the other person text too, and says so'
+    );
+
+    await B.land();
+    assert.equal(server.json.text, 'B1');
+    assert.deepEqual(server.history, [{ version: 3, text: 'A1' }]);
+    assert.equal(B.view.overwriteOwed, false);
+});
+
+test('a Keep mine save that is lost: the ordinary autosave that goes out later still says it overwrites', async () => {
+    const { server, clock, B } = await conflicted();
+    B.host().keepMine();
+    // The request never reaches the server.
+    B.saveNeverAnswers();
+    // A style change by this same page clears the notice (version 3: the
+    // other person text, restyled) while that save is still waited for.
+    B.host().adoptVersion(server.replace(server.json));
+    assert.equal(B.view.conflict, null);
+    B.type('B1 and more');
+    await B.debounce();
+    assert.equal(B.sent.length, 1, 'owed: the Keep mine save is still waited for');
+
+    clock.now += SAVE_EXPIRY_MS;
+    await B.cycle();
+    assert.deepEqual(
+        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        [
+            ['B1', 2, true],
+            ['B1 and more', 3, true],
+        ],
+        'not the Keep mine save itself, and it replaces the other person text all the same'
+    );
+    await B.land();
+    assert.equal(server.json.text, 'B1 and more');
+    assert.deepEqual(server.history, [{ version: 3, text: 'A1' }]);
+    assert.equal(B.view.overwriteOwed, false);
+});
+
+test('Put it back while an ordinary save is in the air: that save answering does not write the overwrite off', async () => {
+    const { server, B } = await conflicted();
+    await B.host().loadTheirs();
+    B.type('A1 plus an edit');
+    await B.debounce();
+    assert.deepEqual([B.sent[0].json.text, B.sent[0].base, B.sent[0].overwrite], ['A1 plus an edit', 2, false]);
+
+    // Put it back before that save has answered (the page asks first: the
+    // text on it is not saved yet).
+    B.host().putBack();
+    assert.equal(B.questions.length, 1);
+    assert.equal(B.view.overwriteOwed, true);
+
+    // The ordinary save is accepted. It did not carry the overwrite, so its
+    // answer does not settle it.
+    await B.land();
+    assert.equal(server.json.text, 'A1 plus an edit');
+    assert.equal(B.view.overwriteOwed, true);
+
+    await B.debounce();
+    assert.deepEqual(
+        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        [
+            ['A1 plus an edit', 2, false],
+            ['B1', 3, true],
+        ]
+    );
+    await B.land();
+    assert.equal(B.view.overwriteOwed, false);
+    assert.equal(server.json.text, 'B1');
+    assert.deepEqual(server.history, [{ version: 3, text: 'A1 plus an edit' }]);
+});
+
+test('Put it back, then the page dies before anything is sent: reopened, the text is set aside and its save overwrites', async () => {
+    const { server, clock, B } = await conflicted();
+    await B.host().loadTheirs();
+    B.host().putBack();
+    assert.equal(B.draft(), 'B1');
+    assert.equal(
+        B.drafts.get(UUID).baseVersion,
+        1,
+        'stamped below the version it is to replace, so no later page takes it for a draft of that version'
+    );
+
+    // A crash: no debounce, no beacon. The same browser opens the page again.
+    const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
+    await again.open();
+    await again.poll();
+    assert.deepEqual(again.questions, [], 'not offered as a plain restore: that save would not say it overwrites');
+    assert.equal(again.text(), 'A1');
+    assert.equal(again.view.setAside, JSON.stringify(doc('B1')));
+    assert.equal(again.view.setAsideFrom, 'draft');
+
+    again.host().putBack();
+    assert.deepEqual(again.questions, [PUT_BACK_QUESTION]);
+    await again.debounce();
+    assert.deepEqual(
+        again.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        [['B1', 2, true]]
+    );
+    await again.land();
+    assert.equal(server.json.text, 'B1');
+    assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
+});
+
+test('Keep mine fails, the writer types on, the page dies: reopened, the text is set aside and its save overwrites', async () => {
+    const { server, clock, B } = await conflicted();
+    server.rejectNext = true;
+    B.host().keepMine();
+    await B.land();
+    B.type('B1 and more');
+    assert.equal(B.drafts.get(UUID).baseVersion, 1);
+
+    const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
+    await again.open();
+    await again.poll();
+    assert.deepEqual(again.questions, []);
+    assert.equal(again.text(), 'A1');
+    assert.equal(again.view.setAside, JSON.stringify(doc('B1 and more')));
+
+    again.host().putBack();
+    await again.debounce();
+    assert.deepEqual(
+        again.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        [['B1 and more', 2, true]]
+    );
+    await again.land();
+    assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
+});
+
+test('once the overwrite has been accepted, the draft of what is typed next states the true base again', async () => {
+    const { B } = await conflicted();
+    B.host().keepMine();
+    await B.land();
+    assert.equal(B.view.baseVersion, 3);
+
+    B.type('B1 and on');
+    assert.equal(B.drafts.get(UUID).baseVersion, 3);
 });
 
 // ───────────────────────────────────────────────────────── fix A

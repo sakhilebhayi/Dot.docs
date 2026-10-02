@@ -24,12 +24,16 @@
         resave: false,
         // The document, as a JSON string, as the server last confirmed it:
         // what the page opened with, what the last accepted save stored, or
-        // the last server document applied. Null again from the moment one
-        // of this tab's saves goes unanswered, until the server has said
-        // what it holds. See settleIfBackAtConfirmed() in sync/host.js.
+        // the last server document applied. It is the document of the
+        // version baseVersion names; null again whenever that is not known
+        // (one of this tab's saves went unanswered, or Keep mine moved the
+        // base up), until a save is accepted or a server document applied.
+        // See settleIfBackAtConfirmed() in sync/host.js.
         confirmed: null,
-        // The next save puts this tab's own text back over a version it
-        // loaded (Put it back): it goes as an overwrite.
+        // This tab's text is to replace, on purpose, the version its base
+        // now names: Keep mine moved the base up to it, or Put it back
+        // replaces the version that was loaded. Every save says so (the
+        // unload beacon too) until one that said so is accepted.
         overwriteOwed: false,
         // Set while a newer version exists on the server AND this tab holds
         // unsaved typing. Saving is suspended until the writer chooses.
@@ -158,6 +162,11 @@
                 // The version this page's copy is based on, read at the
                 // moment of the unload beacon.
                 getBaseVersion: () => this.baseVersion,
+                // Whether an overwrite is owed (Keep mine or Put it back,
+                // with no save that said so accepted yet), read at the same
+                // moment: the beacon then says so too, and the server keeps
+                // the version it replaces.
+                getOverwrite: () => this.overwriteOwed,
                 onChange: (json) => this.persist(json),
                 onSelection: (s) => { this.selection = s; this.tick++; },
                 onCommand: (name, params) => this.hostCommand(name, params),

@@ -37,7 +37,7 @@ import { closeList } from './ui/list';
 import { isContentValid, isEmptyDocument } from './validation';
 import { clearHistoryTransaction, remoteTransaction } from './sync/apply';
 import { createSyncEngine } from './sync/engine';
-import { createSyncHost, createTabId } from './sync/host';
+import { createSyncHost, createTabId, unloadSaveBody } from './sync/host';
 import { createSyncRequest } from './sync/request';
 import { clearDraft, loadDraft, parkStaleDraft, purgeStaleDrafts, saveDraft } from '../offline';
 
@@ -132,7 +132,7 @@ function selectionInfo(editor) {
  *
  * @param {HTMLElement} element
  * @param {{content?: object, vars?: object, styleCss?: string, uploadUrl?: string, autosaveUrl?: string, csrfToken?: string,
- *          getBaseVersion?: () => number,
+ *          getBaseVersion?: () => number, getOverwrite?: () => boolean,
  *          onChange?: (json: object) => void, onSelection?: (s: {blockId: string|null, type: string|null}) => void,
  *          onCommand?: (name: string, params: object) => void}} opts
  * @returns {{editor: Editor, run: (name: string, params?: object) => boolean, destroy: () => void}}
@@ -201,6 +201,14 @@ function mount(element, opts = {}) {
      * JSON body — Laravel's CSRF middleware reads `_token` out of the request
      * input, which for an application/json body is the JSON itself.
      *
+     * The body is built by unloadSaveBody() (sync/host.js, where the tests
+     * can run it). Besides the document it states the version this page's
+     * copy is based on (`getBaseVersion`: the server refuses the save if
+     * somebody has saved since, rather than overwrite them blind) and
+     * whether the page owes an overwrite (`getOverwrite`: the writer chose
+     * Keep mine or Put it back, so the server keeps the version this save
+     * replaces). Both mount options are read now, as the page goes.
+     *
      * @returns {boolean} whether the browser accepted the beacon for delivery
      */
     function beaconSave(json) {
@@ -209,19 +217,7 @@ function mount(element, opts = {}) {
         }
 
         try {
-            const body = new Blob(
-                [
-                    JSON.stringify({
-                        _token: opts.csrfToken || '',
-                        content: json,
-                        // The version this page's copy was based on. The
-                        // server refuses the save if somebody has saved
-                        // since, rather than overwrite them blind.
-                        base_version: typeof opts.getBaseVersion === 'function' ? opts.getBaseVersion() : null,
-                    }),
-                ],
-                { type: 'application/json' }
-            );
+            const body = new Blob([JSON.stringify(unloadSaveBody(json, opts))], { type: 'application/json' });
 
             return navigator.sendBeacon(opts.autosaveUrl, body);
         } catch (_) {

@@ -73,6 +73,45 @@ export function createTabId({ crypto, random, now }) {
 }
 
 /**
+ * The body of the unload beacon: the save the bundle sends through
+ * `navigator.sendBeacon()` when the page goes away with text still inside
+ * the autosave debounce (`POST /documents/{uuid}/autosave`).
+ *
+ * It states the same two things every save through Livewire states, and
+ * both are read HERE, at the moment of leaving, never when the editor was
+ * mounted:
+ *   - `base_version`: the version this page's copy is based on. The server
+ *     refuses the save when somebody has saved since.
+ *   - `overwrite`: whether this tab owes an overwrite (`overwriteOwed`: the
+ *     writer chose Keep mine or Put it back, and no save that said so has
+ *     been accepted yet). The base then names the very version this text
+ *     replaces on purpose, so the save is accepted; with the flag the
+ *     server first keeps that version in the history. Without it, a page
+ *     closed inside the debounce after Put it back, or after a Keep mine
+ *     save that failed, replaced the other person's text and kept it
+ *     nowhere.
+ *
+ * `overwrite` is always a real boolean: the server validates it as one and
+ * stores nothing when it is anything else. sendBeacon() cannot set headers,
+ * so the CSRF token rides in the body.
+ *
+ * Here, not inside the bundle's mount(), so that `node --test` can run it.
+ *
+ * @param {object} json the document
+ * @param {{csrfToken?: string, getBaseVersion?: () => number, getOverwrite?: () => boolean}} options
+ *        the editor's mount options
+ * @returns {{_token: string, content: object, base_version: number|null, overwrite: boolean}}
+ */
+export function unloadSaveBody(json, options = {}) {
+    return {
+        _token: options.csrfToken || '',
+        content: json,
+        base_version: typeof options.getBaseVersion === 'function' ? options.getBaseVersion() : null,
+        overwrite: typeof options.getOverwrite === 'function' ? !!options.getOverwrite() : false,
+    };
+}
+
+/**
  * @typedef {object} SyncView The Blade component's state fields.
  * @property {number} saving how many of this tab's own saves are in the air
  * @property {number} savingSince when the latest of them left
@@ -80,11 +119,18 @@ export function createTabId({ crypto, random, now }) {
  *           exactly what the editor holds has been confirmed by the server
  * @property {boolean} resave a save is owed; resendIfOwed() sends it
  * @property {string|null} confirmed the document, as a JSON string, as the
- *           server last confirmed it; null before the editor is mounted, and
- *           again from the moment one of this tab's saves goes unanswered
- *           until the server has said what it holds
- * @property {boolean} overwriteOwed the next save puts this tab's own text
- *           back over a version it loaded, so it goes as an overwrite
+ *           server last confirmed it, which is the document of the version
+ *           `baseVersion` names. Null before the editor is mounted, and
+ *           again whenever that is no longer known: from the moment one of
+ *           this tab's saves goes unanswered, and from the moment Keep mine
+ *           moves the base up to a version the editor has never held. It is
+ *           set again when a save is accepted or a server document applied
+ * @property {boolean} overwriteOwed this tab's text is to replace, on
+ *           purpose, the version its base now names (Keep mine moved the
+ *           base up to it; Put it back replaces the version that was
+ *           loaded). Every save says so (the Keep mine save, a retry, an
+ *           ordinary autosave, the unload beacon) until one that said so is
+ *           accepted, and the server keeps the replaced version first
  * @property {{version: number, ready: boolean}|null} conflict
  * @property {string|null} setAside the writer's own text, as a JSON string,
  *           kept so the page can offer to put it back
@@ -110,8 +156,9 @@ export function createTabId({ crypto, random, now }) {
  *           `applyRemote`), or nothing when no editor is mounted
  * @property {() => object|null|undefined} engine the sync engine parked on
  *           the element, or nothing before it has started
- * @property {(json: object, baseVersion: number, overwrite: boolean) => Promise<{ok: boolean, conflict: boolean, version: number}>} save
- *           Editor::saveContent()
+ * @property {(json: object, baseVersion: number, overwrite: boolean) => Promise<{ok: boolean, conflict: boolean, version: number|null}>} save
+ *           Editor::saveContent(). `version` is null in one answer only: the
+ *           refusal of a save that stated no base
  * @property {() => Promise<void>} refreshOutline pull the server's outline
  * @property {() => void} refreshPresence re-render the presence strip
  * @property {(tone: string, word: string) => void} report the status word
@@ -138,11 +185,12 @@ export function createSyncHost(view, env) {
      * dropped connection leaves the $wire promise pending for ever). The
      * tab stops waiting for it, and the save is owed again: resendIfOwed()
      * sends it. This is the ONLY place a save expires, and everything that
-     * needs to know whether a save is in the air asks here: persist(),
-     * syncState() and resendIfOwed(). Whichever of them notices first
-     * leaves the same state behind. persist() is the one that matters when
-     * nothing else runs: resendIfOwed() is reached from a poll, and a tab
-     * whose polls are blocked must still be able to save.
+     * needs to know whether a save is in the air asks here (persist(),
+     * syncState(), resendIfOwed(), edited() and putBack()). Whichever of
+     * them notices first leaves the same state behind. persist() is the
+     * one that matters when nothing else runs: resendIfOwed() is reached
+     * from a poll, and a tab whose polls are blocked must still be able to
+     * save.
      *
      * A save that is given up on may still have been STORED: only its
      * answer is known to be lost. From then on what the server holds is not
@@ -211,7 +259,17 @@ export function createSyncHost(view, env) {
             return;
         }
 
-        drafts.saveDraft(view.docUuid, json, view.baseVersion);
+        // While an overwrite is owed, this text is not a draft OF the
+        // version the base names: it is there to replace that version on
+        // purpose (Keep mine moved the base up to it; Put it back replaces
+        // the version that was loaded). Were the draft stamped with that
+        // base, a page opened after a crash or a reload would find a draft
+        // of the current version, offer a plain restore, and save it with
+        // no overwrite flag: the replaced version would be kept nowhere.
+        // Stamped one below, it is older than the document for every later
+        // page: restoreDraft() sets it aside, and Put it back saves it as
+        // an overwrite.
+        drafts.saveDraft(view.docUuid, json, view.overwriteOwed ? view.baseVersion - 1 : view.baseVersion);
     }
 
     /**
@@ -238,9 +296,14 @@ export function createSyncHost(view, env) {
      * `force` is the Keep mine choice: the base version has just been
      * moved up to the newer document's, so this save knowingly replaces
      * it. It goes to the server as the overwrite flag, which keeps the
-     * replaced version in the history first. The save that follows Put
-     * it back carries the same flag (`overwriteOwed`): it too replaces
-     * a version on purpose, the one this tab loaded.
+     * replaced version in the history first. Every save sent while
+     * `overwriteOwed` is set carries the same flag: keepMine() and
+     * putBack() set it, and it stays set until a save that CARRIED it is
+     * accepted. So a retry of a Keep mine save that failed, and the
+     * autosave after Put it back, say so too. Whether a save carried it is
+     * decided when it is sent and handed to saveAnswered(): the answer to
+     * an ordinary save that left before the overwrite was owed must not
+     * write the overwrite off.
      *
      * @param {object} json
      * @param {{force?: boolean}} options
@@ -286,16 +349,19 @@ export function createSyncHost(view, env) {
         view.saving++;
         view.savingSince = env.now();
 
+        // Whether THIS save says it overwrites, captured now.
+        const overwrite = force || view.overwriteOwed;
+
         // Two handlers on ONE then(), not then().catch(): a catch() at the
         // end would also catch whatever goes wrong AFTER the answer, report
         // a save the server stored as Not saved, and count that save as
         // answered a second time.
-        return env.save(json, view.baseVersion, force || view.overwriteOwed).then(
+        return env.save(json, view.baseVersion, overwrite).then(
             (result) => {
                 view.saving = Math.max(0, view.saving - 1);
 
                 try {
-                    saveAnswered(result, snapshot);
+                    saveAnswered(result, snapshot, overwrite);
                 } catch (error) {
                     // Not the save's failure: the save has been answered.
                     env.log('[Dot.Doc] Something failed after a save was answered.', error);
@@ -336,15 +402,21 @@ export function createSyncHost(view, env) {
     /**
      * The server answered a save of `snapshot`.
      *
-     * @param {{ok?: boolean, conflict?: boolean, version?: number}|null|undefined} result
+     * @param {{ok?: boolean, conflict?: boolean, version?: number|null}|null|undefined} result
      * @param {string} snapshot the document that was sent, as a JSON string
+     * @param {boolean} overwrite whether that save said it overwrites
      */
-    function saveAnswered(result, snapshot) {
+    function saveAnswered(result, snapshot, overwrite) {
         if (result && result.ok) {
             view.baseVersion = result.version;
             view.conflict = null;
             view.confirmed = snapshot;
-            view.overwriteOwed = false;
+            // The overwrite is settled only by a save that said so. An
+            // ordinary save that left before Put it back was pressed did
+            // not, and the put-back save still has to.
+            if (overwrite) {
+                view.overwriteOwed = false;
+            }
             env.engine()?.saved(result.version);
             if (clearDraftIfSettled(snapshot)) {
                 view.unsaved = false;
@@ -486,8 +558,9 @@ export function createSyncHost(view, env) {
      * about to store the x. Settling there would drop the owed save of the
      * deletion and say Saved over a document the server does not hold. The
      * `saving` test below is the same guard for a caller that forgets.
-     * And once a save has gone unanswered, `confirmed` is null and nothing
-     * is settled until the server has said what it holds.
+     * And once a save has gone unanswered, or Keep mine has moved the base
+     * up, `confirmed` is null and nothing is settled until the server has
+     * said what it holds.
      *
      * @param {object} handle the editor handle, mounted and not fail-closed
      */
@@ -671,6 +744,12 @@ export function createSyncHost(view, env) {
      * waiting document is left with the engine: when the save lands,
      * persist() tells the engine, which drops it; if the save is lost,
      * both buttons still work.
+     *
+     * From the moment the base has moved up, EVERY save from this tab would
+     * be accepted over the other person's version, not only the one sent
+     * here: a retry after this one failed, the unload beacon, a later
+     * autosave. So the overwrite is marked as owed at that same moment, and
+     * stays owed until a save that says so is accepted.
      */
     function keepMine() {
         const handle = env.handle();
@@ -690,6 +769,17 @@ export function createSyncHost(view, env) {
         }
 
         view.baseVersion = Math.max(view.baseVersion, target);
+        view.overwriteOwed = true;
+        // `confirmed` is the document of the version this tab was based on
+        // BEFORE the base moved. The base now names a version the editor
+        // has never held, so the editor being back at `confirmed` would
+        // prove nothing: written off as Saved there (should the notice be
+        // cleared without a save, by a style change of this page's own),
+        // the tab would show the old version on the new base and owe no
+        // overwrite, and its next keystroke would replace the other
+        // person's text with no version kept. Nothing counts as confirmed
+        // until a save is accepted or a server document is applied.
+        view.confirmed = null;
         persist(handle.editor.getJSON(), { force: true });
     }
 
@@ -790,14 +880,21 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        // This replaces the version that was loaded, exactly as Keep mine
+        // would have: every save that carries it says so, and the server
+        // keeps the replaced version in the history first. Owed BEFORE the
+        // text goes in: setContent() emits `update`, and the draft that
+        // edited() writes off it has to be stamped as an overwrite (see
+        // there), as does a beacon sent before the debounce fires.
+        const owedBefore = view.overwriteOwed;
+        view.overwriteOwed = true;
+
         try {
             handle.editor.commands.setContent(JSON.parse(view.setAside), { errorOnInvalidContent: true });
             forgetSetAside();
-            // This replaces the version that was loaded, exactly as Keep
-            // mine would have: the save that carries it says so, and the
-            // server keeps the replaced version in the history first.
-            view.overwriteOwed = true;
         } catch (_) {
+            // Nothing was put back, so nothing more is owed than before.
+            view.overwriteOwed = owedBefore;
             view.syncNotice = 'Your text could not be put back.';
         }
     }
