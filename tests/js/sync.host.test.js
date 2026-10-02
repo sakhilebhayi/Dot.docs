@@ -1278,6 +1278,84 @@ test('a reader who typed a character and deleted it again sends nothing, and sti
     assert.equal(B.view.conflict, null);
 });
 
+test('an edit undone inside the debounce puts the save word back to Saved, once', async () => {
+    const { B } = await pair();
+    B.type('startx');
+    B.type('start');
+    await B.debounce();
+    assert.equal(B.word(), 'Editing');
+    assert.equal(B.view.unsaved, true);
+
+    const said = B.reports.length;
+    assert.equal(B.host().syncState(), 'clean');
+    assert.equal(B.view.unsaved, false);
+    assert.deepEqual(B.reports.slice(said), [{ tone: 'good', word: 'Saved' }]);
+
+    // syncState() is asked on every poll. Only the change is reported.
+    assert.equal(B.host().syncState(), 'clean');
+    await B.cycle();
+    await B.cycle();
+    assert.deepEqual(B.reports.slice(said), [{ tone: 'good', word: 'Saved' }]);
+});
+
+test('syncState() says nothing when nothing changed: an idle reader, and a tab whose text is still unsaved', async () => {
+    const { server, A, B } = await pair();
+
+    // An idle reader is polled and polled.
+    const idle = B.reports.length;
+    assert.equal(B.host().syncState(), 'clean');
+    await B.cycle();
+    await B.cycle();
+    assert.equal(B.reports.length, idle);
+
+    // A tab whose save was rejected still holds text that exists nowhere else.
+    A.type('A text the server rejects');
+    await A.debounce();
+    server.rejectNext = true;
+    await A.land();
+    const unsent = A.reports.length;
+    assert.equal(A.host().syncState(), 'dirty');
+    await A.cycle();
+    assert.equal(A.reports.length, unsent);
+    assert.equal(A.word(), 'Not saved');
+});
+
+test('a tab that said Editing and then takes a newer document says Saved again', async () => {
+    const { A } = await pair();
+    // Typed and deleted again: nothing to send, and the word still says Editing.
+    A.type('startx');
+    A.type('start');
+    await A.debounce();
+    assert.equal(A.word(), 'Editing');
+    assert.equal(A.view.unsaved, true);
+
+    const said = A.reports.length;
+    assert.equal(A.host().applyFromSync({ version: 2, json: doc('theirs'), outline: null, css: null }), true);
+    assert.equal(A.view.unsaved, false);
+    assert.deepEqual(A.reports.slice(said), [{ tone: 'good', word: 'Saved' }]);
+
+    // A reader with nothing unsaved follows without a word.
+    assert.equal(A.host().applyFromSync({ version: 3, json: doc('theirs again'), outline: null, css: null }), true);
+    assert.deepEqual(A.reports.slice(said), [{ tone: 'good', word: 'Saved' }]);
+});
+
+test('a tab that said Editing and then follows somebody else save says Saved, once', async () => {
+    const { A, B } = await pair();
+    B.type('startx');
+    B.type('start');
+    await B.debounce();
+    assert.equal(B.word(), 'Editing');
+    const said = B.reports.length;
+
+    A.type('A1');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+
+    assert.equal(B.text(), 'A1');
+    assert.deepEqual(B.reports.slice(said), [{ tone: 'good', word: 'Saved' }]);
+});
+
 test('typing the bundle still holds, and a standing conflict, each make the tab dirty on their own', async () => {
     const { server, A } = await pair();
     A.type('A1');

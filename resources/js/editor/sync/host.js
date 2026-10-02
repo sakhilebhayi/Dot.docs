@@ -405,6 +405,10 @@ export function createSyncHost(view, env) {
         ) {
             view.unsaved = false;
             view.overwriteOwed = false;
+            // The edit said Editing and no save will ever answer to say
+            // otherwise. Said here, inside the condition: this runs on
+            // every poll, and only the change from unsaved is reported.
+            env.report('good', 'Saved');
         }
 
         // `unsaved`, not only handle.pending: after a save that never
@@ -474,6 +478,14 @@ export function createSyncHost(view, env) {
 
         if (!handle.applyRemote(remote.json, { force })) {
             return false;
+        }
+
+        // Text this tab had marked unsaved is no longer in the editor, and
+        // no save will ever answer for it: the word that still says Editing
+        // goes back to Saved. Only on that change, so a reader who follows
+        // a document says nothing.
+        if (view.unsaved) {
+            env.report('good', 'Saved');
         }
 
         view.baseVersion = remote.version;
