@@ -1,4 +1,5 @@
 import { Editor, generateJSON } from '@tiptap/core';
+import { ReplaceStep } from '@tiptap/pm/transform';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -8,7 +9,7 @@ import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table
 import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 
-import { BlockId, base62 } from './extensions/blockId';
+import { BlockId, BlockIdRepair, base62 } from './extensions/blockId';
 import { Callout } from './extensions/callout';
 import { Column, Columns } from './extensions/columns';
 import { CrossRef } from './extensions/crossRef';
@@ -34,6 +35,10 @@ import { installPalette, openPalette } from './ui/palette';
 import { SlashMenu } from './ui/slash';
 import { closeList } from './ui/list';
 import { isContentValid, isEmptyDocument } from './validation';
+import { clearHistoryTransaction, remoteTransaction } from './sync/apply';
+import { createSyncEngine } from './sync/engine';
+import { createSyncHost, createTabId, unloadSaveBody } from './sync/host';
+import { createSyncRequest } from './sync/request';
 import { clearDraft, loadDraft, parkStaleDraft, purgeStaleDrafts, saveDraft } from '../offline';
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
@@ -89,6 +94,14 @@ function buildExtensions(opts) {
         DocAttrs,
         SlashMenu,
         PaginationExtension,
+        // Keeps block ids unique whatever a transaction did: UniqueID (in
+        // BlockId, below) only compares ids inside the range that changed,
+        // and an undo across somebody else's change left two blocks with
+        // one id. (applyRemote() now ends the undo history at such a
+        // change; the repair stays for whatever else can do the same.) Its
+        // place in this list does not decide when it runs: UniqueID's
+        // priority puts UniqueID's plugin first.
+        BlockIdRepair,
         // Last, so its global `id` attribute is registered over every node
         // type the extensions above contributed.
         BlockId,
@@ -119,6 +132,7 @@ function selectionInfo(editor) {
  *
  * @param {HTMLElement} element
  * @param {{content?: object, vars?: object, styleCss?: string, uploadUrl?: string, autosaveUrl?: string, csrfToken?: string,
+ *          getBaseVersion?: () => number, getOverwrite?: () => boolean,
  *          onChange?: (json: object) => void, onSelection?: (s: {blockId: string|null, type: string|null}) => void,
  *          onCommand?: (name: string, params: object) => void}} opts
  * @returns {{editor: Editor, run: (name: string, params?: object) => boolean, destroy: () => void}}
@@ -187,6 +201,14 @@ function mount(element, opts = {}) {
      * JSON body — Laravel's CSRF middleware reads `_token` out of the request
      * input, which for an application/json body is the JSON itself.
      *
+     * The body is built by unloadSaveBody() (sync/host.js, where the tests
+     * can run it). Besides the document it states the version this page's
+     * copy is based on (`getBaseVersion`: the server refuses the save if
+     * somebody has saved since, rather than overwrite them blind) and
+     * whether the page owes an overwrite (`getOverwrite`: the writer chose
+     * Keep mine or Put it back, so the server keeps the version this save
+     * replaces). Both mount options are read now, as the page goes.
+     *
      * @returns {boolean} whether the browser accepted the beacon for delivery
      */
     function beaconSave(json) {
@@ -195,9 +217,7 @@ function mount(element, opts = {}) {
         }
 
         try {
-            const body = new Blob([JSON.stringify({ _token: opts.csrfToken || '', content: json })], {
-                type: 'application/json',
-            });
+            const body = new Blob([JSON.stringify(unloadSaveBody(json, opts))], { type: 'application/json' });
 
             return navigator.sendBeacon(opts.autosaveUrl, body);
         } catch (_) {
@@ -541,67 +561,113 @@ function mount(element, opts = {}) {
         },
 
         /**
-         * Apply a document that arrived over Echo from another editor.
+         * Make the editor show a document that somebody else saved.
          *
-         * Not `setContent()`: that lands in the undo stack (a collaborator's
-         * paragraph becomes something YOU can undo), fires onUpdate, and
-         * races the pending autosave — the local debounce would then send
-         * the pre-merge document straight back and clobber the change.
+         * Applied as ONE replacement of only the range that differs, in a
+         * transaction built by remoteTransaction() (sync/apply.js, which
+         * also explains what is levelled first and why). The transaction is
+         * kept out of the undo history (a collaborator's paragraph is not
+         * something YOU can undo) and tagged `preventUpdate` so TipTap does
+         * not emit `update` for it - otherwise the autosave debounce would
+         * arm and send the document straight back.
          *
-         * @returns {boolean} whether the update was applied
+         * The caret and the page-break decorations survive for everything
+         * OUTSIDE that one range. When a single apply carries two separate
+         * changes, the text between them is replaced too, and a caret there
+         * moves to the end of the range.
+         *
+         * The undo history does NOT survive. Once the document has changed,
+         * a second transaction (clearHistoryTransaction(), sync/apply.js)
+         * empties the undo and redo stacks: a step stored before the change,
+         * mapped through that one coarse replacement, can delete the text
+         * that has just arrived, and the next autosave would store that. So
+         * undo reaches back to the last change that came from somebody else
+         * and no further, until remote changes arrive as exact steps
+         * (Phase 3). Edits made afterwards are undoable as usual. A document
+         * the editor already shows changes nothing and leaves the history
+         * alone.
+         *
+         * It never runs over unsaved local typing unless `force` is given:
+         * while the debounce is armed or a save is owed, what the editor
+         * holds exists nowhere else. The caller decides what happens to that
+         * text first (the conflict notice in the Blade bridge).
+         *
+         * @param {object} json a Dot.Doc document
+         * @param {{force?: boolean}} options
+         * @returns {boolean} true when the document was APPLIED. That is not
+         *          a promise that the editor is now identical to it: a local
+         *          repair plugin (a ragged table padded, a figure with no
+         *          image removed) may have adjusted what arrived, and a
+         *          document that does not end in a paragraph has this
+         *          editor's own empty trailing paragraph after it. False
+         *          when nothing was changed.
          */
-        applyRemote: (json) => {
-            if (!json || editor.isDestroyed) {
+        applyRemote: (json, { force = false } = {}) => {
+            if (!json || editor.isDestroyed || !autosave) {
                 return false;
             }
 
-            // Validate and apply FIRST. Cancelling the pending autosave before
-            // knowing whether the payload is usable would throw away the
-            // writer's own unflushed keystrokes every time a remote update is
-            // refused — the local timer stays armed until the remote document
-            // has actually landed.
+            if (!force && (dirty || saveTimer !== null)) {
+                return false;
+            }
+
             if (!isContentValid(json, schemaNames())) {
                 return false;
             }
 
-            const anchor = editor.state.selection.anchor;
+            const tr = remoteTransaction(editor.state, json, ReplaceStep);
 
-            let applied = false;
-            try {
-                applied = editor
-                    .chain()
-                    .command(({ tr }) => {
-                        tr.setMeta('addToHistory', false);
-
-                        return true;
-                    })
-                    .setContent(json, { emitUpdate: false, errorOnInvalidContent: true })
-                    .run();
-            } catch (_) {
-                // A document this editor cannot parse: leave what is on
-                // screen alone rather than blanking it.
+            if (tr === null) {
+                // A document this editor cannot parse or cannot apply: leave
+                // what is on screen alone rather than blanking it.
                 return false;
             }
 
-            if (!applied) {
-                return false;
+            if (tr.docChanged) {
+                tr.setMeta('addToHistory', false);
+                // `preventUpdate` also covers what plugins append inside
+                // this dispatch. TipTap's TrailingNode appends an empty
+                // paragraph there when the document does not end in one;
+                // it must NOT be told to skip it (`skipTrailingNode`), or it
+                // appends the paragraph on the next transaction of any kind
+                // instead, with `update` fired and the autosave armed.
+                tr.setMeta('preventUpdate', true);
+                editor.view.dispatch(tr);
+
+                // The local undo history ends here (see the docblock). In a
+                // dispatch of its own, never as a meta on `tr`: plugins
+                // append to the dispatch above, and prosemirror-history
+                // would put what they appended on the redo stack. It has no
+                // steps and carries `preventUpdate`, so TipTap emits no
+                // `update` and the bookkeeping below holds. The document IS
+                // applied by now, so a throw here must not turn the answer
+                // into false; but an editor that kept its history is the
+                // unsafe state, so it is not passed over in silence.
+                try {
+                    const clearing = clearHistoryTransaction(editor.state);
+
+                    if (clearing !== null) {
+                        editor.view.dispatch(clearing);
+                    }
+                } catch (error) {
+                    console.error(
+                        'Dot.Doc: the undo history could not be emptied after a remote change. An undo may now delete text that arrived from somebody else.',
+                        error
+                    );
+                }
             }
 
-            // Applied: whatever was typed locally is superseded by this
-            // document, so the pending autosave must not fire — it would send
-            // the pre-merge document straight back and clobber the change.
+            // Whatever was pending is superseded (only reachable with
+            // `force`). The editor now holds the applied document. That is
+            // normally exactly the stored one; if a repair plugin adjusted
+            // it or a trailing paragraph was added (see @returns), that
+            // difference is deliberately NOT saved from here - every reading
+            // tab would save its own and conflict with the others. It goes
+            // with the writer's next edit.
             clearTimeout(saveTimer);
             saveTimer = null;
             dirty = false;
-            lastSaved = JSON.stringify(json);
-
-            // Best effort: the anchor is a position in the OLD document, so
-            // it can be out of range or land somewhere odd in the new one.
-            try {
-                editor.commands.setTextSelection(Math.min(anchor, editor.state.doc.content.size));
-            } catch (_) {
-                // Nothing to do — the caret stays where ProseMirror put it.
-            }
+            lastSaved = JSON.stringify(editor.getJSON());
 
             return true;
         },
@@ -655,6 +721,11 @@ export const DotDoc = {
     // anything.
     stripDerived,
     documentsDiffer,
+    // The follow-other-people's-saves loop. The Blade bridge builds one
+    // engine per editor page (sync/engine.js) and hands every decision about
+    // a save, a newer document or a draft to createSyncHost() (sync/host.js),
+    // which it builds from its own state for each call.
+    sync: { createSyncEngine, createSyncRequest, createSyncHost, createTabId },
     /** The single active editor's pagination controller, or a safe no-op stand-in before mount(). */
     get pagination() {
         const el = document.querySelector('[wire\\:ignore].canvas, #doc-paper');

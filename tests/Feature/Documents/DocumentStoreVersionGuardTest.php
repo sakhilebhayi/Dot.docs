@@ -1,0 +1,276 @@
+<?php
+
+namespace Tests\Feature\Documents;
+
+use App\Documents\DocumentStore;
+use App\Documents\Schema\BlockId;
+use App\Documents\StaleDocumentException;
+use App\Models\Document;
+use App\Models\DocumentVersion;
+use App\Models\User;
+use App\Services\WebhookService;
+use Database\Seeders\DocumentStyleSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
+use Mockery\MockInterface;
+use Tests\TestCase;
+
+/**
+ * A save states the version it was based on, and one based on an older
+ * version is refused instead of silently replacing somebody else's work.
+ */
+class DocumentStoreVersionGuardTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private function para(string $text): array
+    {
+        return ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'attrs' => ['id' => BlockId::generate()], 'content' => [['type' => 'text', 'text' => $text]]],
+        ]];
+    }
+
+    private function doc(User $user): Document
+    {
+        $this->seed(DocumentStyleSeeder::class);
+
+        return app(DocumentStore::class)->create($user, 'Guarded');
+    }
+
+    public function test_a_save_based_on_the_current_version_is_stored(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $saved = app(DocumentStore::class)->save($doc, $this->para('Mine'), $user, ['expectedVersion' => $doc->version]);
+
+        $this->assertSame(2, $saved->version);
+        $this->assertSame('Mine', $doc->fresh()->search_text);
+    }
+
+    public function test_a_save_based_on_an_older_version_is_refused_and_changes_nothing(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $store = app(DocumentStore::class);
+
+        $store->save($doc, $this->para('Somebody else got here first'), $user, ['expectedVersion' => 1]);
+
+        try {
+            $store->save(Document::findOrFail($doc->id), $this->para('Based on what I opened'), $user, ['expectedVersion' => 1]);
+            $this->fail('A save based on version 1 must be refused once the document is at version 2.');
+        } catch (StaleDocumentException $e) {
+            $this->assertSame(2, $e->currentVersion);
+        }
+
+        $fresh = $doc->fresh();
+        $this->assertSame(2, $fresh->version);
+        $this->assertSame('Somebody else got here first', $fresh->search_text);
+    }
+
+    /** Restore, import and "accept suggestion" replace the document on purpose and state no base. */
+    public function test_a_save_that_states_no_base_version_still_goes_through(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $store = app(DocumentStore::class);
+
+        $store->save($doc, $this->para('First'), $user);
+        $saved = $store->save(Document::findOrFail($doc->id), $this->para('Second'), $user);
+
+        $this->assertSame(3, $saved->version);
+    }
+
+    /**
+     * Two requests can each hold a model loaded at version 1. The second
+     * must become version 3, never a second "version 2".
+     */
+    public function test_the_new_version_is_counted_from_the_database_not_from_a_stale_model(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $store = app(DocumentStore::class);
+
+        $first = Document::findOrFail($doc->id);
+        $second = Document::findOrFail($doc->id);
+
+        $store->save($first, $this->para('One'), $user);
+        $saved = $store->save($second, $this->para('Two'), $user);
+
+        $this->assertSame(3, $saved->version);
+        $this->assertSame(3, $doc->fresh()->version);
+    }
+
+    /**
+     * A writer that states no base (a restore, say) may hold a model loaded
+     * before somebody else's save. What it writes must be compared with the
+     * row as it is stored NOW: compared with the model's own older copy, a
+     * restore of exactly the text that copy holds looked like "nothing
+     * changed", so the version went up and the other person's text stayed.
+     */
+    public function test_a_save_from_a_model_loaded_earlier_still_writes_every_content_column(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $store = app(DocumentStore::class);
+
+        $store->save($doc, $this->para('One'), $user, ['version' => 'none']);
+        $loadedEarlier = Document::findOrFail($doc->id);
+
+        $store->save(Document::findOrFail($doc->id), $this->para('Two, saved by somebody else'), $user, ['version' => 'none']);
+
+        // Put back exactly what the earlier copy holds.
+        $saved = $store->save($loadedEarlier, $loadedEarlier->content_json, $user, ['version' => 'none']);
+
+        $this->assertSame(4, $saved->version);
+
+        $stored = Document::findOrFail($doc->id);
+        $this->assertSame(4, $stored->version);
+        $this->assertSame('One', $stored->content_json['content'][0]['content'][0]['text']);
+        $this->assertStringContainsString('One', $stored->content);
+        $this->assertSame('One', $stored->search_text);
+        $this->assertSame(1, $stored->word_count);
+    }
+
+    /**
+     * Something the caller changed on the model it passes in (a title, say)
+     * is still written with the content, as Eloquent's save() always did.
+     */
+    public function test_a_save_still_writes_what_the_caller_changed_on_the_model_it_passed(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $doc->title = 'Renamed on the way in';
+        $saved = app(DocumentStore::class)->save($doc, $this->para('Body'), $user);
+
+        $this->assertSame($doc, $saved, 'save() returns the model it was given, brought up to date.');
+        $this->assertSame('Renamed on the way in', $doc->fresh()->title);
+        $this->assertSame('Body', $doc->fresh()->search_text);
+    }
+
+    /**
+     * The editor's "Keep mine": the caller replaces a newer version on
+     * purpose and asks for what it replaces to be kept. That version may
+     * have no entry of its own in the history.
+     */
+    public function test_a_save_can_keep_the_version_it_replaces_as_a_named_version(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $store = app(DocumentStore::class);
+
+        $store->save($doc, $this->para('Theirs'), $user, ['version' => 'none']);
+
+        $saved = $store->save(Document::findOrFail($doc->id), $this->para('Mine'), $user, [
+            'expectedVersion' => 2,
+            'keepReplacedAs' => 'Before Thandi kept their version',
+        ]);
+
+        $this->assertSame(3, $saved->version);
+        $this->assertSame('Mine', $doc->fresh()->search_text);
+
+        $kept = DocumentVersion::where('document_id', $doc->id)->where('kind', 'named')->sole();
+
+        $this->assertSame('Before Thandi kept their version', $kept->label);
+        $this->assertSame(2, $kept->version_number);
+        $this->assertSame('Theirs', $kept->content_json['content'][0]['content'][0]['text']);
+    }
+
+    /** The kept version is part of the save: a save that is not stored keeps nothing. */
+    public function test_a_save_that_is_not_stored_keeps_nothing(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $store = app(DocumentStore::class);
+
+        $store->save($doc, $this->para('Theirs'), $user, ['version' => 'none']);
+
+        try {
+            $store->save(Document::findOrFail($doc->id), $this->para('Mine'), $user, [
+                'expectedVersion' => 1,
+                'keepReplacedAs' => 'Before Thandi kept their version',
+            ]);
+            $this->fail('A stale save must be refused even when it asks to keep what it replaces.');
+        } catch (StaleDocumentException) {
+            // Refused, as it should be.
+        }
+
+        try {
+            $store->save(Document::findOrFail($doc->id), ['type' => 'doc', 'content' => [['type' => 'marquee']]], $user, [
+                'expectedVersion' => 2,
+                'keepReplacedAs' => 'Before Thandi kept their version',
+            ]);
+            $this->fail('Content the schema does not know must be refused.');
+        } catch (InvalidArgumentException) {
+            // Refused, as it should be.
+        }
+
+        $this->assertSame(0, DocumentVersion::where('document_id', $doc->id)->where('kind', 'named')->count());
+        $this->assertSame('Theirs', $doc->fresh()->search_text);
+    }
+
+    /**
+     * `keepReplacedAs` exists so the replaced text is somewhere in the
+     * history. When the head already has a version row of its own it IS
+     * there, and a second copy of it would only be noise. The check is made
+     * inside the save's transaction, on the version read under the lock.
+     */
+    public function test_nothing_more_is_kept_when_the_replaced_head_already_has_a_version(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $store = app(DocumentStore::class);
+
+        $store->save($doc, $this->para('Old'), $user, ['version' => 'named', 'label' => 'Old']);
+        $old = DocumentVersion::where('document_id', $doc->id)->sole();
+        $store->save(Document::findOrFail($doc->id), $this->para('Head, with a version of its own'), $user, ['version' => 'named', 'label' => 'Head']);
+
+        // A restore replaces version 3, which has a row: nothing more is kept.
+        $store->restore(Document::findOrFail($doc->id), $old, $user);
+
+        $this->assertSame(
+            [[2, 'named', 'Old'], [3, 'named', 'Head'], [4, 'restore', 'Restored v2']],
+            DocumentVersion::where('document_id', $doc->id)->orderBy('id')->get()
+                ->map(fn (DocumentVersion $row) => [$row->version_number, $row->kind, $row->label])->all(),
+        );
+
+        // "Keep mine" over version 4, which the restore cut a row for: the same.
+        $store->save(Document::findOrFail($doc->id), $this->para('Mine'), $user, [
+            'version' => 'none',
+            'expectedVersion' => 4,
+            'keepReplacedAs' => 'Before Thandi kept their version',
+        ]);
+
+        $this->assertSame(5, $doc->fresh()->version);
+        $this->assertSame(3, DocumentVersion::where('document_id', $doc->id)->count());
+    }
+
+    public function test_the_webhook_fires_once_after_the_save_has_committed(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $outerLevel = DB::transactionLevel();
+
+        $this->mock(WebhookService::class, function (MockInterface $mock) use ($outerLevel) {
+            $mock->shouldReceive('fire')->once()->andReturnUsing(function () use ($outerLevel) {
+                $this->assertSame($outerLevel, DB::transactionLevel(), 'The webhook must fire after the save transaction has closed.');
+            });
+        });
+
+        app(DocumentStore::class)->save($doc, $this->para('Announce me'), $user, ['expectedVersion' => 1]);
+    }
+
+    public function test_a_refused_save_fires_no_webhook(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $this->mock(WebhookService::class, fn (MockInterface $mock) => $mock->shouldNotReceive('fire'));
+
+        $this->expectException(StaleDocumentException::class);
+
+        app(DocumentStore::class)->save($doc, $this->para('Too late'), $user, ['expectedVersion' => 99]);
+    }
+}

@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Throwable;
 
@@ -100,9 +101,13 @@ class DocumentImportController extends Controller
             abort(422, 'This file could not be read.');
         }
 
+        // An import states no base and replaces whatever is stored, so the
+        // store is told to keep that first (see DocumentStore::save()). The
+        // label column holds 120 characters and the name is the uploader's.
         $store->save($document, $json, Auth::user(), [
             'version' => 'named',
             'label' => 'Imported '.$file->getClientOriginalName(),
+            'keepReplacedAs' => 'Before import of '.Str::limit($file->getClientOriginalName(), 100, ''),
         ]);
 
         return redirect()

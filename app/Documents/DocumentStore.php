@@ -15,6 +15,7 @@ use App\Models\Files\Obj;
 use App\Models\User;
 use App\Services\WebhookService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 class DocumentStore
@@ -71,7 +72,40 @@ class DocumentStore
         return $this->legacy->fromStored($doc->content_json, $doc->content, $this->schema);
     }
 
-    /** @param array{version?:string,label?:string|null} $opts */
+    /**
+     * `expectedVersion` is how a writer says "this is the version my copy
+     * was based on". When it is given and the stored document has moved on,
+     * the save is refused with StaleDocumentException and nothing is
+     * written - two people with the same document open would otherwise each
+     * replace the other's work with a stale whole-document copy. Writers
+     * that replace the document on purpose (restore, import, an accepted
+     * suggestion) state no base and always go through. A style change is
+     * not one of them: it replaces nothing, and goes through restyle().
+     *
+     * `$doc` may have been loaded long before this runs (Livewire loads it
+     * when the request begins). Nothing is taken from that copy: the row is
+     * read again under the write lock, `$doc` is brought up to it, and only
+     * then filled from `$json`. So every content column is written from
+     * `$json`, compared against what is stored NOW, and the same `$doc` is
+     * returned. Anything else the caller changed on `$doc` before calling
+     * (a title, say) is written with it, as Eloquent's save() would.
+     *
+     * `keepReplacedAs` is for a writer that replaces the stored document on
+     * purpose: the editor's "Keep mine" and "Put it back" (which replace a
+     * newer version their base is on), a restore, an import and an accepted
+     * suggestion. Whoever wrote the stored document is not asked, their
+     * open tab follows the replacement, and their save may have cut no
+     * version of its own (see shouldCut()). So the stored document is first
+     * kept as a `named` version with this label, inside the same
+     * transaction as the write that replaces it - unless a version row for
+     * the stored version number already exists, in which case the text is
+     * in the history already and nothing more is cut. A save that is
+     * refused, or whose content the schema rejects, keeps nothing.
+     *
+     * @param  array{version?:string,label?:string|null,expectedVersion?:int,keepReplacedAs?:string}  $opts
+     *
+     * @throws StaleDocumentException
+     */
     public function save(Document $doc, array $json, User $actor, array $opts = []): Document
     {
         // normalise() before validate(): style-bearing attrs (align, column
@@ -83,19 +117,136 @@ class DocumentStore
             throw new InvalidArgumentException(implode('; ', $errors));
         }
 
-        return DB::transaction(function () use ($doc, $json, $actor, $opts) {
+        $doc = DB::transaction(function () use ($doc, $json, $actor, $opts) {
+            $stored = $this->lockStored($doc);
+            $current = (int) $stored->version;
+
+            $expected = $opts['expectedVersion'] ?? null;
+            if ($expected !== null && $expected !== $current) {
+                throw new StaleDocumentException($current);
+            }
+
+            // The caller is replacing the stored document on purpose. Keep
+            // what is stored, as a named version, inside the same
+            // transaction as the write that replaces it - so it exists only
+            // if this save is stored, and holds exactly what it replaced.
+            // Not when the stored version already has a row of its own: the
+            // text is in the history then. That is asked HERE, about the
+            // version read under the lock; asked by the caller beforehand,
+            // an autosave landing in between would leave a newer head that
+            // is in no row and is then replaced unkept.
+            if (isset($opts['keepReplacedAs']) && ! $this->hasVersion($stored)) {
+                $this->cutVersion($stored, $actor, 'named', $opts['keepReplacedAs']);
+            }
+
+            $this->bringUpTo($doc, $stored);
             $this->fill($doc, $json);
-            $doc->version = $doc->version + 1;
+            $doc->version = $current + 1;
             $doc->save();
 
             $kind = $opts['version'] ?? 'auto';
             if ($kind !== 'none' && $this->shouldCut($doc, $actor, $kind)) {
                 $this->cutVersion($doc, $actor, $kind, $opts['label'] ?? null);
             }
-            app(WebhookService::class)->fire($doc, 'on_save');
 
             return $doc;
         });
+
+        // After the commit, not inside it: a webhook is an HTTP call to
+        // somebody else's server, and it must neither hold the database's
+        // write lock while it waits nor announce a save that then rolls back.
+        app(WebhookService::class)->fire($doc, 'on_save');
+
+        return $doc;
+    }
+
+    /**
+     * The `keepReplacedAs` label for a writer who saves over a newer
+     * version on purpose (the editor's "Keep mine" and "Put it back").
+     *
+     * Two writers send that save - the Livewire action and the unload
+     * beacon - and both take the label from here, so the history reads the
+     * same whichever of them carried it. The name is cut so the whole
+     * label fits the 120-character column.
+     */
+    public static function overwriteLabel(User $writer): string
+    {
+        return 'Before '.Str::limit($writer->name, 80, '').' kept their version';
+    }
+
+    /**
+     * Change the document's style.
+     *
+     * A style decides how headings and figures are numbered, and those
+     * numbers are stamped into the stored JSON and HTML, so a style change
+     * has to renumber and re-render the document. It does that to the
+     * document AS IT IS STORED when the change is written: the row is read
+     * again under the write lock and its own content is what gets refilled.
+     * `$doc`'s copy of the content is never used. It was loaded when the
+     * request began, and passing it to save() wrote it back over a save
+     * that landed in between - the other person's text was replaced, or
+     * the row was left with one person's JSON and the other's search text.
+     *
+     * The content itself does not change, so no version is cut and nobody's
+     * base is asked for; the version number still goes up, because the
+     * stored JSON and HTML did change and an open editor has to fetch them.
+     * The stored content is normalised but not validated: it was validated
+     * when it was stored, and a style is no reason to refuse it now.
+     */
+    public function restyle(Document $doc, string $styleKey): Document
+    {
+        $doc = DB::transaction(function () use ($doc, $styleKey) {
+            $stored = $this->lockStored($doc);
+            $this->bringUpTo($doc, $stored);
+
+            $doc->style_key = $styleKey;
+            $this->fill($doc, $this->schema->normalise($this->schema->ensureIds($this->json($doc))));
+            $doc->version = (int) $stored->version + 1;
+            $doc->save();
+
+            return $doc;
+        });
+
+        // After the commit, for the reasons given in save().
+        app(WebhookService::class)->fire($doc, 'on_save');
+
+        return $doc;
+    }
+
+    /**
+     * The document's row as the DATABASE has it now, read inside the
+     * caller's transaction and under the write lock. SQLite takes the write
+     * lock when an IMMEDIATE transaction opens (config/database.php), so
+     * this read and the write that follows cannot interleave with another
+     * save; lockForUpdate() gives the same guarantee on PostgreSQL/MySQL.
+     *
+     * withTrashed(): a document moved to the trash while its editor is open
+     * is still saved into, as it was when only the version was read here.
+     */
+    private function lockStored(Document $doc): Document
+    {
+        return Document::withTrashed()->lockForUpdate()->findOrFail($doc->getKey());
+    }
+
+    /**
+     * Bring the caller's model up to the row just read under the lock.
+     *
+     * Eloquent writes only the columns that differ from what the model was
+     * LOADED with. Left on a copy loaded when the request began, that
+     * comparison is made against a document somebody else may have replaced
+     * since: a column whose new value happens to equal the old copy's is
+     * skipped and keeps the other person's value, and the row ends up mixed
+     * (or the write is skipped altogether while the version still goes up).
+     * After this, "loaded with" is the stored row, so the comparison is
+     * exact. What the caller itself changed on the model beforehand is put
+     * back on top and stays unsaved, to be written with the content.
+     */
+    private function bringUpTo(Document $doc, Document $stored): void
+    {
+        $own = $doc->getDirty();
+
+        $doc->setRawAttributes(array_merge($doc->getAttributes(), $stored->getAttributes()), true);
+        $doc->setRawAttributes(array_merge($doc->getAttributes(), $own));
     }
 
     public function cutVersion(Document $doc, User $actor, string $kind = 'auto', ?string $label = null): DocumentVersion
@@ -113,12 +264,21 @@ class DocumentStore
         ]);
     }
 
+    /**
+     * Replace the document with one of its earlier versions. The document
+     * being replaced is kept first (`keepReplacedAs`, see save()): a restore
+     * states no base, so it goes through over whatever is stored.
+     */
     public function restore(Document $doc, DocumentVersion $version, User $actor): Document
     {
         abort_unless($version->document_id === $doc->id, 404);
         $json = $version->content_json ?? $this->legacy->convert($version->content_snapshot);
 
-        return $this->save($doc, $json, $actor, ['version' => 'restore', 'label' => 'Restored v'.$version->version_number]);
+        return $this->save($doc, $json, $actor, [
+            'version' => 'restore',
+            'label' => 'Restored v'.$version->version_number,
+            'keepReplacedAs' => 'Before restoring v'.$version->version_number,
+        ]);
     }
 
     /**
@@ -130,6 +290,18 @@ class DocumentStore
     {
         $this->fill($doc, $json);
         $doc->saveQuietly();
+    }
+
+    /**
+     * Whether the document, at the version it is at, is already in its
+     * history. A version row carries the version number of the document it
+     * was cut from, so a row with this number holds this content.
+     */
+    private function hasVersion(Document $doc): bool
+    {
+        return DocumentVersion::where('document_id', $doc->getKey())
+            ->where('version_number', $doc->version)
+            ->exists();
     }
 
     private function shouldCut(Document $doc, User $actor, string $kind): bool

@@ -1,4 +1,10 @@
+import { Extension } from '@tiptap/core';
 import UniqueID from '@tiptap/extension-unique-id';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+
+// With the extension written out: tests/js loads this file under `node --test`,
+// which does not resolve an extensionless import.
+import { uniqueIdsTransaction } from '../uniqueIds.js';
 
 /**
  * Block ids. Mirrors App\Documents\Schema\BlockId exactly: 8 characters of
@@ -50,4 +56,52 @@ export const BlockId = UniqueID.configure({
     attributeName: 'id',
     types: BLOCK_TYPES,
     generateID: () => base62(8),
+});
+
+export const blockIdRepairKey = new PluginKey('dotdocBlockIdRepair');
+
+/**
+ * The plugin that keeps block ids unique, whatever a transaction did.
+ *
+ * UniqueID above only compares ids among the blocks inside the range a
+ * transaction changed, so it does not see a block that takes on the id of a
+ * block elsewhere. An undo did exactly that once somebody else's change had
+ * been applied in between, while applyRemote() still kept the undo history
+ * across it: it took back the id UniqueID gave the second half of a split,
+ * while the split itself could no longer be undone. Two blocks then carried
+ * one id, the server refused every save ("Duplicate block id") and the tab
+ * could never save again. applyRemote() now empties the undo history after a
+ * remote change (clearHistoryTransaction() in ../sync/apply.js), which
+ * closes that route. The repair stays: nothing else keeps ids unique
+ * whatever a transaction does.
+ *
+ * After every transaction that changed the document, a block sharing its id
+ * with another block gets a new one in an appended transaction. Which block
+ * keeps the id, and everything else the transaction does, is decided in
+ * ../uniqueIds.js, which `tests/js/uniqueIds.test.js` runs together with
+ * this plugin; nothing is decided here.
+ *
+ * A function, so each editor gets its own plugin and the tests can put the
+ * same plugin into a bare EditorState.
+ */
+export function blockIdRepairPlugin() {
+    return new Plugin({
+        key: blockIdRepairKey,
+        appendTransaction: (transactions, _oldState, newState) =>
+            uniqueIdsTransaction(transactions, newState, { types: BLOCK_TYPES, generateId: () => base62(8) }),
+    });
+}
+
+/**
+ * Registers the repair plugin. UniqueID declares priority 10000, so its
+ * plugin is always asked about a transaction first, and this one, at the
+ * default priority, sees the ids UniqueID has already handed out: Enter and
+ * paste never reach it with a duplicate.
+ */
+export const BlockIdRepair = Extension.create({
+    name: 'blockIdRepair',
+
+    addProseMirrorPlugins() {
+        return [blockIdRepairPlugin()];
+    },
 });
