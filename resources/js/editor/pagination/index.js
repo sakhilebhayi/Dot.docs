@@ -174,11 +174,12 @@ export function mountPagination(editor, canvasEl, opts = {}) {
     //    sync engine: applyRemote() tags its transaction `preventUpdate` so
     //    a collaborator's edit never fires the LOCAL autosave/update chain
     //    (see .ai/rules/editor.md), so `update` never fires for it. What
-    //    covers that case is the Blade bridge's applyFromSync(), which calls
-    //    setPageSetup() below with the outline that arrived alongside the
-    //    document, and setPageSetup() schedules a pass.
+    //    covers that case is applyFromSync() in sync/host.js: it hands the
+    //    outline that arrived alongside the document to the page
+    //    (`showOutline`, built in editor.blade.php's syncHost()), which
+    //    calls setPageSetup() below, and setPageSetup() schedules a pass.
     //  - a document style change / page-setup change — both already flow
-    //    through the same Blade bridge's refreshOutline(), which calls
+    //    through the page's refreshOutline() (editor.blade.php), which calls
     //    setPageSetup() below with the fresh values before the next
     //    scheduled pass; no separate event wiring is needed for either.
     editor.on('update', scheduleRepaginate);

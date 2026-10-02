@@ -144,9 +144,16 @@ const uniqueIdStandIn = (newIds) =>
  *      an appended transaction, which is in Beta's undo history.
  *   3. Alpha types a line at the START of the paragraph and presses Enter,
  *      and saves.
- *   4. Beta follows: the change is applied the way applyRemote() applies it,
- *      as the one range that differs, outside the undo history.
+ *   4. Beta follows: the change is applied the way applyRemote() applied it
+ *      when this was seen, as the one range that differs, tagged
+ *      `addToHistory: false`, with Beta's undo history KEPT across it.
  *   5. Beta presses undo.
+ *
+ * applyRemote() has since been changed to empty the undo history after a
+ * remote change (clearHistoryTransaction(), tests/js/sync.history.test.js), so
+ * in the editor step 5 now finds nothing to undo. The history is kept here on
+ * purpose: this is the sequence that showed two blocks can end up with one
+ * id, and the repair has to hold whatever a transaction does.
  *
  * @param {Plugin[]} repair the plugins under test, placed after UniqueID as the editor places them
  * @returns {{state: EditorState, apply: (tr: object) => void}} `apply` keeps going from where the sequence stopped
