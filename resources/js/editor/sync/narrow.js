@@ -3,16 +3,20 @@
  *
  * A document that arrives from the server used to be applied as one
  * whole-document replacement. That moved the caret to wherever its old
- * numeric offset happened to land, left the undo history pointing at
- * positions that no longer existed, and dropped every page-break decoration
+ * numeric offset happened to land and dropped every page-break decoration
  * (they are anchored to positions inside the replaced range). Replacing only
- * what differs keeps all three for everything OUTSIDE the range: positions
- * before and after it map straight through.
+ * what differs keeps both for everything OUTSIDE the range: positions before
+ * and after it map straight through.
  *
  * It is ONE range, from the first difference to the last. When the two
  * documents differ in two separate places, everything between those places
- * is inside the range and is replaced too: a caret there moves to the end
- * of the range, and local edits there can no longer be undone.
+ * is inside the range and is replaced too, and a caret there moves to the
+ * end of the range.
+ *
+ * The undo history is NOT kept, however narrow the range. A stored step
+ * that touches the range would be mapped onto the content that arrived, and
+ * undoing it would delete that content, so applyRemote() empties the history
+ * after the change (clearHistoryTransaction() in ./apply.js).
  *
  * Both arguments are ProseMirror nodes, compared as nodes - NOT as JSON. The
  * server strips `align` when it is null and the editor emits `align: null`

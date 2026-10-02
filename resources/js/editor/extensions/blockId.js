@@ -65,11 +65,15 @@ export const blockIdRepairKey = new PluginKey('dotdocBlockIdRepair');
  *
  * UniqueID above only compares ids among the blocks inside the range a
  * transaction changed, so it does not see a block that takes on the id of a
- * block elsewhere. An undo does exactly that once somebody else's change has
- * been applied in between (applyRemote() keeps the undo history): it takes
- * back the id UniqueID gave the second half of a split, while the split
- * itself can no longer be undone. Two blocks then carry one id, the server
- * refuses every save ("Duplicate block id") and the tab can never save again.
+ * block elsewhere. An undo did exactly that once somebody else's change had
+ * been applied in between, while applyRemote() still kept the undo history
+ * across it: it took back the id UniqueID gave the second half of a split,
+ * while the split itself could no longer be undone. Two blocks then carried
+ * one id, the server refused every save ("Duplicate block id") and the tab
+ * could never save again. applyRemote() now empties the undo history after a
+ * remote change (clearHistoryTransaction() in ../sync/apply.js), which
+ * closes that route. The repair stays: nothing else keeps ids unique
+ * whatever a transaction does.
  *
  * After every transaction that changed the document, a block sharing its id
  * with another block gets a new one in an appended transaction. Which block

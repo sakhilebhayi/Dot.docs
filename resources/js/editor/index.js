@@ -35,7 +35,7 @@ import { installPalette, openPalette } from './ui/palette';
 import { SlashMenu } from './ui/slash';
 import { closeList } from './ui/list';
 import { isContentValid, isEmptyDocument } from './validation';
-import { remoteTransaction } from './sync/apply';
+import { clearHistoryTransaction, remoteTransaction } from './sync/apply';
 import { createSyncEngine } from './sync/engine';
 import { createSyncHost, createTabId } from './sync/host';
 import { createSyncRequest } from './sync/request';
@@ -96,9 +96,11 @@ function buildExtensions(opts) {
         PaginationExtension,
         // Keeps block ids unique whatever a transaction did: UniqueID (in
         // BlockId, below) only compares ids inside the range that changed,
-        // and an undo across somebody else's change can leave two blocks
-        // with one id. Its place in this list does not decide when it runs:
-        // UniqueID's priority puts UniqueID's plugin first.
+        // and an undo across somebody else's change left two blocks with
+        // one id. (applyRemote() now ends the undo history at such a
+        // change; the repair stays for whatever else can do the same.) Its
+        // place in this list does not decide when it runs: UniqueID's
+        // priority puts UniqueID's plugin first.
         BlockIdRepair,
         // Last, so its global `id` attribute is registered over every node
         // type the extensions above contributed.
@@ -573,11 +575,21 @@ function mount(element, opts = {}) {
          * not emit `update` for it - otherwise the autosave debounce would
          * arm and send the document straight back.
          *
-         * The caret, the undo history and the page-break decorations survive
-         * for everything OUTSIDE that one range. When a single apply carries
-         * two separate changes, the text between them is replaced too: a
-         * caret there moves to the end of the range, and local edits there
-         * can no longer be undone.
+         * The caret and the page-break decorations survive for everything
+         * OUTSIDE that one range. When a single apply carries two separate
+         * changes, the text between them is replaced too, and a caret there
+         * moves to the end of the range.
+         *
+         * The undo history does NOT survive. Once the document has changed,
+         * a second transaction (clearHistoryTransaction(), sync/apply.js)
+         * empties the undo and redo stacks: a step stored before the change,
+         * mapped through that one coarse replacement, can delete the text
+         * that has just arrived, and the next autosave would store that. So
+         * undo reaches back to the last change that came from somebody else
+         * and no further, until remote changes arrive as exact steps
+         * (Phase 3). Edits made afterwards are undoable as usual. A document
+         * the editor already shows changes nothing and leaves the history
+         * alone.
          *
          * It never runs over unsaved local typing unless `force` is given:
          * while the debounce is armed or a save is owed, what the editor
@@ -625,6 +637,28 @@ function mount(element, opts = {}) {
                 // instead, with `update` fired and the autosave armed.
                 tr.setMeta('preventUpdate', true);
                 editor.view.dispatch(tr);
+
+                // The local undo history ends here (see the docblock). In a
+                // dispatch of its own, never as a meta on `tr`: plugins
+                // append to the dispatch above, and prosemirror-history
+                // would put what they appended on the redo stack. It has no
+                // steps and carries `preventUpdate`, so TipTap emits no
+                // `update` and the bookkeeping below holds. The document IS
+                // applied by now, so a throw here must not turn the answer
+                // into false; but an editor that kept its history is the
+                // unsafe state, so it is not passed over in silence.
+                try {
+                    const clearing = clearHistoryTransaction(editor.state);
+
+                    if (clearing !== null) {
+                        editor.view.dispatch(clearing);
+                    }
+                } catch (error) {
+                    console.error(
+                        'Dot.Doc: the undo history could not be emptied after a remote change. An undo may now delete text that arrived from somebody else.',
+                        error
+                    );
+                }
             }
 
             // Whatever was pending is superseded (only reachable with

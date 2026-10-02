@@ -8,7 +8,9 @@ import { diffRange } from './narrow.js';
  * and unsaved-typing guards) and what happens around it (the transaction's
  * metas, the dispatch, the autosave bookkeeping). It lives here, apart from
  * the editor bundle, so `tests/js/sync.apply.test.js` can run every branch
- * of it under `node --test`.
+ * of it under `node --test`. Once this transaction has changed the document,
+ * applyRemote() also dispatches clearHistoryTransaction() (below): the local
+ * undo history does not survive a remote change.
  *
  * In order:
  *
@@ -27,8 +29,8 @@ import { diffRange } from './narrow.js';
  *      this editor's copies go stale as soon as a heading moves. They are
  *      brought level FIRST, as attribute steps (which shift no positions):
  *      otherwise a re-stamped contents list at the top stretches the replaced
- *      range from there to the real change, and the caret and undo history
- *      inside that stretch are lost.
+ *      range from there to the real change, and a caret inside that stretch
+ *      is moved to its end.
  *   4. The one range that still differs (see ./narrow.js) is replaced with a
  *      ReplaceStep, NOT tr.replace(): tr.replace() runs ProseMirror's fitter,
  *      which re-shapes an open slice around isolating nodes (table cells,
@@ -169,4 +171,72 @@ export function remoteTransaction(state, json, ReplaceStep) {
     });
 
     return tr;
+}
+
+/**
+ * The key prosemirror-history gives its plugin (`new PluginKey('history')`).
+ * The package does not export the key, and this file imports nothing, so the
+ * plugin is found among the state's plugins by this string.
+ */
+const HISTORY_KEY = 'history$';
+
+/**
+ * The transaction that empties an editor's undo and redo history.
+ *
+ * applyRemote() (../index.js) dispatches it directly after a remote
+ * transaction that changed the document, because the local undo history
+ * must not survive a remote change:
+ *
+ *   prosemirror-history keeps its stacks valid across a transaction that is
+ *   not an undo step by mapping every stored step through that transaction.
+ *   That is exact when the other person's change arrives as the small steps
+ *   they actually made. It is not safe for the ONE coarse replacement
+ *   remoteTransaction() builds: a stored step whose range touches the
+ *   replaced range is mapped onto the content that was inserted. Press Enter
+ *   at the start of a paragraph, let somebody else type in both halves, and
+ *   undo: the inverse of the split now covers exactly what they typed, and
+ *   deletes it. The next autosave would store that.
+ *   (`tests/js/sync.history.test.js` replays it.)
+ *
+ * So undo reaches back only as far as the last change that came from
+ * somebody else. Keeping the stacks "when no stored step touches the range"
+ * was considered and rejected: a mistake in such a check is silent data loss
+ * again. Collaborative undo needs remote changes to arrive as exact steps
+ * (the step log of Phase 3).
+ *
+ * prosemirror-history has no call that clears it. Its plugin replaces its
+ * state with whatever a transaction carries under the plugin's key
+ * (`historyState`; that is how its own undo and redo commands work), and an
+ * empty state is what the plugin's `spec.state.init()` returns.
+ *
+ * It is a transaction of its OWN, never a meta on the remote transaction:
+ * prosemirror-history records a transaction appended to one that carries
+ * this meta on the redo stack, whatever its `addToHistory` says, and the
+ * remote dispatch can have appended transactions (TipTap's TrailingNode and
+ * UniqueID, the id repair). This one has no steps, so the plugins that
+ * react to a changed document append nothing to it. It is tagged
+ * `addToHistory: false` and `preventUpdate`: nothing changed that the writer
+ * could undo or the autosave should send.
+ *
+ * Dependency-free, like remoteTransaction(): everything is a method on the
+ * state it is given.
+ *
+ * @param {import('prosemirror-state').EditorState} state the editor's state,
+ *        AFTER the remote transaction has been applied
+ * @returns {import('prosemirror-state').Transaction|null} null when the
+ *          state has no history plugin; otherwise a transaction with no
+ *          steps, which changes neither the document nor the selection. It
+ *          has not been dispatched.
+ */
+export function clearHistoryTransaction(state) {
+    const plugin = state.plugins.find((candidate) => candidate.key === HISTORY_KEY);
+
+    if (!plugin || !plugin.spec.state || typeof plugin.spec.state.init !== 'function') {
+        return null;
+    }
+
+    return state.tr
+        .setMeta(HISTORY_KEY, { historyState: plugin.spec.state.init() })
+        .setMeta('addToHistory', false)
+        .setMeta('preventUpdate', true);
 }
