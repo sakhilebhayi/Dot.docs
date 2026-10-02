@@ -44,6 +44,16 @@ class EditorSyncWiringTest extends TestCase
         $this->fail("the {$state} notice is not in the bar");
     }
 
+    /**
+     * An element's text as a reader gets it: one line, single spaces.
+     */
+    private function words(?Element $element): string
+    {
+        $this->assertNotNull($element);
+
+        return trim((string) preg_replace('/\s+/', ' ', $element->textContent));
+    }
+
     public function test_the_editor_page_starts_the_sync_engine_against_its_own_document(): void
     {
         $this->seed(DocumentStyleSeeder::class);
@@ -94,6 +104,8 @@ class EditorSyncWiringTest extends TestCase
         $this->assertStringContainsString('@click="keepMine()"', $html);
         $this->assertStringContainsString('@click="loadTheirs()"', $html);
         $this->assertStringContainsString('@click="putBack()"', $html);
+        // And a way to decline the way back.
+        $this->assertStringContainsString('@click="discardSetAside()"', $html);
     }
 
     /**
@@ -146,28 +158,32 @@ class EditorSyncWiringTest extends TestCase
             $this->assertTrue($this->notice($bar, $state)->hasAttribute('hidden'), "the {$state} notice is hidden until Alpine runs");
             $this->assertNull($strip->querySelector('[x-show="'.$state.'"] button'));
         }
-        $this->assertStringContainsString(
-            'this document was changed elsewhere while you were typing',
-            $this->notice($bar, 'conflict')->textContent,
+        // A reload during a conflict no longer loses the text (the page
+        // sets it aside as a draft and offers it back), so the sentence
+        // does not forbid one.
+        $this->assertSame(
+            'Not saved — this document was changed elsewhere while you were typing. Choose one.',
+            $this->words($this->notice($bar, 'conflict')->querySelector('.doc-notice-text')),
         );
         $this->assertStringContainsString('Your text was set aside.', $this->notice($bar, 'setAside')->textContent);
         $this->assertNotNull($this->notice($bar, 'syncNotice')->querySelector('[x-text="syncNotice"]'));
 
-        // The three buttons, real buttons, in reading order, each in its notice.
+        // The four buttons, real buttons, in reading order, each in its notice.
         $handlers = [];
         foreach ($bar->querySelectorAll('button') as $button) {
             $this->assertSame('button', $button->getAttribute('type'));
             $handlers[] = $button->getAttribute('@click');
         }
-        $this->assertSame(['keepMine()', 'loadTheirs()', 'putBack()'], $handlers);
+        $this->assertSame(['keepMine()', 'loadTheirs()', 'putBack()', 'discardSetAside()'], $handlers);
         $this->assertNotNull($this->notice($bar, 'conflict')->querySelector('button[\@click="keepMine()"][title]'));
         $loadTheirs = $this->notice($bar, 'conflict')->querySelector('button[\@click="loadTheirs()"][title]');
         $this->assertNotNull($loadTheirs);
         $this->assertSame('!conflict || !conflict.ready', $loadTheirs->getAttribute(':disabled'));
-        $this->assertNotNull($this->notice($bar, 'setAside')->querySelector('button[\@click="putBack()"]'));
+        $this->assertNotNull($this->notice($bar, 'setAside')->querySelector('button[\@click="putBack()"][title]'));
+        $this->assertNotNull($this->notice($bar, 'setAside')->querySelector('button[\@click="discardSetAside()"][title]'));
 
         // And nowhere else on the page: the strip carries no button at all.
-        foreach (['keepMine()', 'loadTheirs()', 'putBack()'] as $handler) {
+        foreach (['keepMine()', 'loadTheirs()', 'putBack()', 'discardSetAside()'] as $handler) {
             $this->assertSame(1, substr_count($html, '@click="'.$handler.'"'));
         }
         $this->assertCount(0, $strip->querySelectorAll('button'));
@@ -272,6 +288,66 @@ class EditorSyncWiringTest extends TestCase
         // And the flag it reads is a field of the page's own state.
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
         $this->assertMatchesRegularExpression('/^\s*unsaved: false,$/m', $alpine[1]);
+    }
+
+    /**
+     * Put it back replaces the whole document on the page, and through the
+     * save that follows the stored one, with an older whole copy. The row
+     * used to be one unexplained button under "Your text was set aside.",
+     * shown also for a draft whose text was already in the document, and it
+     * could not be declined. Now the row says what it is, per source, and
+     * what the button does, and it has a second button that declines.
+     *
+     * The source is `setAsideFrom` (resources/js/editor/sync/host.js):
+     * 'conflict' is text this tab set aside a moment ago through Load
+     * theirs; anything else is a draft from an earlier visit that the
+     * document has moved past, which the page did not take away and which
+     * may already be part of the document. putBack() asks first in exactly
+     * the cases the first sentence does not cover.
+     */
+    public function test_the_set_aside_notice_says_what_it_is_and_what_its_buttons_do_and_can_be_declined(): void
+    {
+        $html = $this->editorHtml();
+        $dom = HTMLDocument::createFromString($html, LIBXML_NOERROR);
+        $bar = $dom->querySelector('.doc-notices');
+        $this->assertNotNull($bar);
+        $row = $this->notice($bar, 'setAside');
+
+        // One sentence per source, and never both: each is hidden in the
+        // markup and switched by the source.
+        $sentences = [];
+        foreach ($row->querySelectorAll('.doc-notice-text > span[x-bind\:hidden]') as $sentence) {
+            $this->assertTrue($sentence->hasAttribute('hidden'));
+            $sentences[$sentence->getAttribute('x-bind:hidden')] = $this->words($sentence);
+        }
+        $this->assertSame([
+            "setAsideFrom !== 'conflict'" => 'Your text was set aside. Put it back replaces what is on the page now; the version it replaces is kept in the history.',
+            "setAsideFrom === 'conflict'" => 'A draft from your last visit here differs from the document as it is now. It may already be part of it.',
+        ], $sentences);
+
+        // Two buttons, in this order.
+        $buttons = [];
+        foreach ($row->querySelectorAll('button') as $button) {
+            $this->assertSame('button', $button->getAttribute('type'));
+            $buttons[$this->words($button)] = [$button->getAttribute('@click'), $button->getAttribute('title')];
+        }
+        $this->assertSame([
+            'Put it back' => [
+                'putBack()',
+                'Replace what is on the page now with this text. The version it replaces is kept in the history.',
+            ],
+            'Discard' => [
+                'discardSetAside()',
+                'Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.',
+            ],
+        ], $buttons);
+
+        // The page's state carries the source and the version the text was
+        // set aside against, and Discard hands over to the module.
+        $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
+        $this->assertMatchesRegularExpression('/^\s*setAsideFrom: null,$/m', $alpine[1]);
+        $this->assertMatchesRegularExpression('/^\s*setAsideBase: null,$/m', $alpine[1]);
+        $this->assertStringContainsString('discardSetAside() { this.syncHost().discardSetAside(); }', $alpine[1]);
     }
 
     /**

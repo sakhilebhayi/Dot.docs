@@ -804,14 +804,18 @@
             {{-- A newer version was saved elsewhere while this tab held
                  unsaved typing. Saving is suspended until the writer picks
                  one: nothing is overwritten and nothing is thrown away
-                 without being asked. Reloading instead of choosing opens
-                 the newer version and sets this tab's text aside: the page
-                 then offers Put it back, but only in a browser that could
-                 keep the offline draft. Hence the last sentence. --}}
+                 without being asked.
+
+                 The sentence used to end in Do not reload. A reload instead
+                 of a choice opens the newer version, and this tab's text is
+                 then in the offline draft, which the page finds older than
+                 the document, sets aside and offers back in the next row
+                 (as a draft, so Put it back asks first). Only a browser
+                 that cannot keep a draft loses the text to a reload. --}}
             <div class="doc-notice" hidden x-bind:hidden="!conflict">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
-                    <span>Not saved — this document was changed elsewhere while you were typing. Do not reload: choose one.</span>
+                    <span>Not saved — this document was changed elsewhere while you were typing. Choose one.</span>
                 </p>
                 <span class="doc-notice-actions">
                     <button type="button" class="tool tool-mono" @click="keepMine()"
@@ -822,22 +826,47 @@
                 </span>
             </div>
 
-            {{-- The writer chose Load theirs, or opened the page with a draft
-                 the document had moved past. Their own text is held by the
-                 page so they can have it back. --}}
+            {{-- Text the page holds for the writer, and where it came from
+                 (setAsideFrom, set by sync/host.js):
+
+                 - conflict: the writer chose Load theirs a moment ago, and
+                   this is what the tab held. The page took it away, so it
+                   says so, and says what Put it back does.
+                 - anything else (draft): a draft from an earlier visit that
+                   the document has since moved past. The page took nothing
+                   away, and it cannot tell text that was never stored from
+                   text the unload beacon stored and others then built on,
+                   so it does not say Your text was set aside: it says what
+                   it found.
+
+                 Put it back replaces the whole page, and through the save
+                 that follows the stored document; the server keeps the
+                 version it replaces. putBack() asks first (a browser
+                 confirm) unless the text came from Load theirs, the
+                 document has not moved since and nothing on the page is
+                 unsaved. Discard only removes the offer: nothing is sent
+                 and the page is not touched. The copy parked under
+                 stale-<uuid> when the text was set aside stays for its 7
+                 days in a browser that keeps drafts, but nothing in the
+                 page offers it again. --}}
             <div class="doc-notice" hidden x-bind:hidden="!setAside">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
-                    <span>Your text was set aside.</span>
+                    <span hidden x-bind:hidden="setAsideFrom !== 'conflict'">Your text was set aside. Put it back replaces what is on the page now; the version it replaces is kept in the history.</span>
+                    <span hidden x-bind:hidden="setAsideFrom === 'conflict'">A draft from your last visit here differs from the document as it is now. It may already be part of it.</span>
                 </p>
                 <span class="doc-notice-actions">
-                    <button type="button" class="tool tool-mono" @click="putBack()">Put it back</button>
+                    <button type="button" class="tool tool-mono" @click="putBack()"
+                            title="Replace what is on the page now with this text. The version it replaces is kept in the history.">Put it back</button>
+                    <button type="button" class="tool tool-mono" @click="discardSetAside()"
+                            title="Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.">Discard</button>
                 </span>
             </div>
 
             {{-- The page can no longer stay in step: signed out, access
                  removed, the document gone, or a version this editor cannot
-                 open. --}}
+                 open. Also said here: a newer version or the writer's own
+                 text that could not be put into the editor. --}}
             <div class="doc-notice" hidden x-bind:hidden="!syncNotice">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
