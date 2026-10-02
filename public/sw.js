@@ -1,13 +1,11 @@
 /**
  * Dot.Docs Service Worker
  * - Caches static assets for offline shell
- * - Intercepts document save requests and queues them in IndexedDB when offline
- * - Background sync replays queued saves when connectivity is restored
+ * - Passes Livewire requests straight to the network. It does NOT keep a
+ *   failed save for later: see handleLivewirePost().
  */
 
 const CACHE_NAME = 'dotdocs-v1';
-const OFFLINE_DB  = 'dotdocs-offline';
-const SYNC_TAG    = 'dotdocs-sync-saves';
 
 // Assets to pre-cache (shell). Vite build output filenames change; we cache
 // dynamically on first fetch instead (network-first with offline fallback).
@@ -38,11 +36,19 @@ self.addEventListener('fetch', (event) => {
     // Only handle same-origin requests
     if (url.origin !== self.location.origin) return;
 
-    // Livewire AJAX / document save POSTs — queue offline
+    // Livewire requests — to the network; offline they fail (see below)
     if (request.method === 'POST' && url.pathname.includes('/livewire/')) {
         event.respondWith(handleLivewirePost(request));
         return;
     }
+
+    // Every other request that is not a GET goes to the network untouched.
+    // The branches below are for pages and static files; the editor's sync
+    // poll and its unload beacon are POSTs, the Cache API cannot store a
+    // POST, and running them through "cache first" only produced a rejected
+    // cache.put() on every call. A form post is not answered from the cache
+    // either.
+    if (request.method !== 'GET') return;
 
     // Navigation requests — network first, fall back to cache
     if (request.mode === 'navigate') {
@@ -69,90 +75,29 @@ self.addEventListener('fetch', (event) => {
     );
 });
 
-// ── Handle Livewire POSTs offline ─────────────────────────────────────────────
+// ── Livewire requests ─────────────────────────────────────────────────────────
+// Straight to the network. When the network is down the page gets what a
+// browser with no service worker would give it: a failed request.
+//
+// This used to store the request in IndexedDB, answer the page with a
+// made-up `{effects: [], components: []}` body, and send the stored request
+// again when the connection came back. Neither half worked. Livewire cannot
+// read that body: it throws, never releases the request, and every later
+// action on the page - saving included - stays pending until reload. And a
+// replayed save is a whole-document copy from before the connection dropped,
+// sent behind the page's back. Text typed offline is protected by the
+// offline draft (resources/js/offline.js); the editor page sends it itself
+// once it is back online.
 async function handleLivewirePost(request) {
     try {
-        const response = await fetch(request.clone());
-        return response;
+        return await fetch(request.clone());
     } catch (_) {
-        // Offline: queue the request body for later replay
-        try {
-            const body = await request.clone().text();
-            await enqueueOfflineSave({ url: request.url, body, timestamp: Date.now() });
-
-            // Request background sync if supported
-            if ('sync' in self.registration) {
-                await self.registration.sync.register(SYNC_TAG);
-            }
-        } catch (_) { /* ignore storage errors */ }
-
-        // Return a synthetic "offline queued" response so Livewire doesn't crash
-        return new Response(
-            JSON.stringify({ effects: [], components: [] }),
-            { status: 200, headers: { 'Content-Type': 'application/json' } }
-        );
+        return Response.error();
     }
 }
 
-// ── Background sync: replay queued saves ──────────────────────────────────────
-self.addEventListener('sync', (event) => {
-    if (event.tag === SYNC_TAG) {
-        event.waitUntil(replayQueuedSaves());
-    }
-});
-
-async function replayQueuedSaves() {
-    const queue = await dequeueAllOfflineSaves();
-    for (const item of queue) {
-        try {
-            await fetch(item.url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: item.body,
-            });
-        } catch (_) {
-            // Still offline — re-enqueue and stop
-            await enqueueOfflineSave(item);
-            break;
-        }
-    }
-}
-
-// ── IndexedDB helpers ─────────────────────────────────────────────────────────
-function openDb() {
-    return new Promise((resolve, reject) => {
-        const req = indexedDB.open(OFFLINE_DB, 1);
-        req.onupgradeneeded = (e) => {
-            e.target.result.createObjectStore('saves', { keyPath: 'id', autoIncrement: true });
-            e.target.result.createObjectStore('drafts', { keyPath: 'docUuid' });
-        };
-        req.onsuccess = (e) => resolve(e.target.result);
-        req.onerror = () => reject(req.error);
-    });
-}
-
-async function enqueueOfflineSave(item) {
-    const db = await openDb();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('saves', 'readwrite');
-        tx.objectStore('saves').add(item);
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error);
-    });
-}
-
-async function dequeueAllOfflineSaves() {
-    const db = await openDb();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('saves', 'readwrite');
-        const store = tx.objectStore('saves');
-        const items = [];
-        const cursor = store.openCursor();
-        cursor.onsuccess = (e) => {
-            const c = e.target.result;
-            if (c) { items.push(c.value); store.delete(c.primaryKey); c.continue(); }
-            else resolve(items);
-        };
-        cursor.onerror = () => reject(cursor.error);
-    });
-}
+// ── IndexedDB ─────────────────────────────────────────────────────────────────
+// This worker no longer uses IndexedDB. The `dotdocs-offline` database and its
+// layout belong to resources/js/offline.js. Its `saves` store held the save
+// queue that has been removed from this file; offline.js still creates it,
+// only so that no browser needs a schema upgrade.
