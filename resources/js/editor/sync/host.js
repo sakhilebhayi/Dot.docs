@@ -297,17 +297,23 @@ export function createSyncHost(view, env) {
             env.engine()?.saved(result.version);
             if (clearDraftIfSettled(snapshot)) {
                 view.unsaved = false;
+                // Said only here: Saved means the stored document is what
+                // the editor holds.
+                env.report('good', 'Saved');
             } else {
                 // What was stored is not what the editor holds now, so a
-                // save is owed. Normally the bundle's debounce is still
-                // armed and sends it (resendIfOwed() then does nothing).
-                // But this answer may have come late, after the text typed
-                // since was handed to persist() and turned away by a
-                // conflict this very answer has just ended: nothing else
-                // would send that text until the next keystroke.
+                // save is owed and the word does not go to Saved: it stays
+                // on Editing, or goes to Saving when resendIfOwed() sends.
+                // Normally the bundle's debounce is still armed and sends
+                // it. But the debounce may find nothing to send (the editor
+                // is back at what the bundle last handed over, which
+                // persist() only marked as owed), and this answer may have
+                // come late, after the text typed since was handed to
+                // persist() and turned away by a conflict this very answer
+                // has just ended. In both cases nothing else would send
+                // that text until the next keystroke.
                 view.resave = true;
             }
-            env.report('good', 'Saved');
         } else if (result && result.conflict && result.version <= view.baseVersion) {
             // Refused against a version this tab is already based on: one
             // of its own saves got there first. That is not a conflict -
@@ -344,10 +350,20 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        // handle.pending means the bundle's own debounce is still armed.
+        // It normally calls persist() itself, but not always: when the
+        // editor is back at the document the bundle last handed over (a
+        // typo and a backspace), the debounce finds nothing to send, and
+        // that document may be one persist() only marked as owed. So the
+        // save STAYS owed while the debounce is armed, and a later call
+        // sends it if the debounce did not. Returning after `resave` was
+        // cleared dropped it for good.
+        if (handle.pending) {
+            return;
+        }
+
         view.resave = false;
-        // handle.pending means the bundle's own debounce is still armed
-        // and will call persist() itself.
-        if (view.unsaved && !view.conflict && !handle.pending) {
+        if (view.unsaved && !view.conflict) {
             persist(handle.editor.getJSON());
         }
     }

@@ -1169,6 +1169,140 @@ test('a save whose answer is lost is sent again and raises the notice against it
     assert.equal(A.text(), 'A1');
 });
 
+// ───────────────────────────────────────────────────────── an owed save and the debounce
+
+test('an owed save that comes due while the debounce is armed over unchanged text stays owed, and Saved is not said', async () => {
+    const { server, A } = await pair();
+    A.type('A');
+    await A.debounce();
+    // Handed over while the first save is in the air: owed. The bundle now
+    // counts this as the last document it handed over.
+    A.type('A and B');
+    await A.debounce();
+    assert.equal(A.sent.length, 1);
+    assert.equal(A.view.resave, true);
+
+    // A typo and a backspace: the debounce is armed again, over the document
+    // the bundle already handed over.
+    A.type('A and Bx');
+    A.type('A and B');
+
+    // The first save answers.
+    A.saveArrives();
+    await A.saveReturns();
+    assert.equal(server.json.text, 'A');
+    assert.equal(A.sent.length, 1, 'the debounce is armed, so nothing is sent yet');
+    assert.equal(A.view.resave, true, 'and the save stays owed');
+    assert.equal(A.view.unsaved, true);
+    assert.notEqual(A.word(), 'Saved', 'the stored document is not what the editor holds');
+
+    // The debounce fires and finds nothing it has not handed over already.
+    await A.debounce();
+    assert.equal(A.sent.length, 1);
+    assert.equal(A.view.resave, true);
+    assert.notEqual(A.word(), 'Saved');
+    assert.equal(A.draft(), 'A and B');
+
+    // The next tick sends it.
+    await A.cycle();
+    assert.deepEqual(
+        A.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        [
+            ['A', 1, false],
+            ['A and B', 2, false],
+        ]
+    );
+    assert.equal(A.word(), 'Saving');
+
+    await A.land();
+    assert.equal(server.version, 3);
+    assert.equal(server.json.text, 'A and B');
+    assert.equal(A.view.unsaved, false);
+    assert.equal(A.view.resave, false);
+    assert.equal(A.word(), 'Saved');
+    assert.equal(A.draft(), null);
+
+    // And it is sent once.
+    await A.cycle();
+    await A.cycle();
+    assert.equal(A.sent.length, 2);
+});
+
+test('Saved is said only when the stored document is what the editor holds', async () => {
+    const { server, A } = await pair();
+    A.type('one');
+    await A.debounce();
+    A.type('one two');
+
+    // The answer arrives while the writer is typing on.
+    await A.land();
+    assert.equal(server.json.text, 'one');
+    assert.equal(A.word(), 'Editing', 'not Saved: the editor holds more than was stored');
+    assert.equal(A.view.unsaved, true);
+
+    await A.debounce();
+    assert.equal(A.word(), 'Saving');
+    await A.land();
+    assert.equal(server.json.text, 'one two');
+    assert.equal(A.word(), 'Saved');
+});
+
+test('a debounce that does send what was owed is not followed by a second send', async () => {
+    const { server, A } = await pair();
+    A.type('A');
+    await A.debounce();
+    A.type('A and B');
+    await A.debounce();
+    assert.equal(A.view.resave, true);
+    A.type('A and B and C');
+
+    A.saveArrives();
+    await A.saveReturns();
+    assert.equal(A.sent.length, 1);
+    assert.equal(A.view.resave, true, 'owed while the debounce is armed');
+
+    await A.debounce();
+    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['A and B and C', 2]);
+    await A.cycle();
+    assert.equal(A.sent.length, 2, 'the owed save waits for the one the debounce sent');
+
+    await A.land();
+    await A.cycle();
+    assert.equal(A.sent.length, 2);
+    assert.equal(A.view.resave, false);
+    assert.equal(server.json.text, 'A and B and C');
+    assert.equal(A.word(), 'Saved');
+});
+
+test('adoptVersion inside the debounce, over text the debounce will not send again: the owed save sends it', async () => {
+    const { server, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    // A style change by this same page is stored first (version 2). The
+    // autosave that travelled with it is refused against that version.
+    const styled = server.replace(server.json);
+    A.saveArrives();
+    await A.saveReturns();
+    assert.deepEqual(A.view.conflict, { version: 2, ready: false });
+
+    // A typo and a backspace, then the style change's own event arrives.
+    A.type('A1x');
+    A.type('A1');
+    A.host().adoptVersion(styled);
+    assert.equal(A.view.conflict, null);
+    assert.equal(A.sent.length, 1, 'the debounce is armed: nothing yet');
+
+    await A.debounce();
+    assert.equal(A.sent.length, 1, 'the bundle finds nothing new to send');
+    assert.equal(A.view.resave, true);
+
+    await A.poll();
+    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['A1', 2]);
+    await A.land();
+    assert.equal(server.json.text, 'A1');
+    assert.equal(A.word(), 'Saved');
+});
+
 // ───────────────────────────────────────────────────────── fix B
 
 test('a save that has not answered is waited for, for fifteen seconds', async () => {
@@ -1957,15 +2091,78 @@ test('back online: text whose rejected save left it unsent is sent', async () =>
 });
 
 test('back online inside the debounce sends nothing: the debounce does', async () => {
-    const { A } = await pair();
+    const { server, A } = await pair();
     A.type('A1');
 
     A.host().backOnline();
     assert.equal(A.sent.length, 0);
-    assert.equal(A.view.resave, false);
+    // The save stays owed while the debounce is armed: the debounce may find
+    // nothing to send (see the next test), and then nothing else would.
+    assert.equal(A.view.resave, true);
 
     await A.debounce();
     assert.equal(A.sent.length, 1);
+
+    // The debounce did send, so the owed save is not sent a second time.
+    await A.land();
+    await A.cycle();
+    assert.equal(A.sent.length, 1);
+    assert.equal(A.view.resave, false);
+    assert.equal(server.json.text, 'A1');
+    assert.equal(A.word(), 'Saved');
+});
+
+test('back online inside the debounce, over text the debounce will not send again: the owed save sends it', async () => {
+    const { server, clock, A } = await pair();
+    // Typed offline: handed over, and the save never answers.
+    A.type('one');
+    await A.debounce();
+    A.saveNeverAnswers();
+    A.type('one two');
+    await A.debounce();
+    assert.equal(A.sent.length, 1);
+    clock.now += SAVE_EXPIRY_MS;
+
+    // A typo and a backspace: the debounce is armed, and the editor is back
+    // at what the bundle last handed over. The connection returns.
+    A.type('one twox');
+    A.type('one two');
+    A.host().backOnline();
+    assert.equal(A.sent.length, 1, 'the debounce is armed: nothing yet');
+
+    await A.debounce();
+    assert.equal(A.sent.length, 1, 'the bundle finds nothing new to send');
+    assert.equal(A.view.resave, true, 'so the save is still owed');
+    assert.notEqual(A.word(), 'Saved');
+
+    await A.poll();
+    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['one two', 1]);
+    await A.land();
+    assert.equal(server.json.text, 'one two');
+    assert.equal(A.view.unsaved, false);
+    assert.equal(A.word(), 'Saved');
+    assert.equal(A.draft(), null);
+});
+
+test('back online inside the debounce, after a save that failed outright: the owed save sends the text', async () => {
+    const { server, A } = await pair();
+    A.type('one');
+    await A.debounce();
+    A.saves.shift().reject(new Error('offline'));
+    await settle();
+    assert.equal(A.word(), 'Not saved');
+
+    A.type('onex');
+    A.type('one');
+    A.host().backOnline();
+    await A.debounce();
+    assert.equal(A.sent.length, 1, 'the bundle finds nothing new to send');
+
+    await A.poll();
+    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['one', 1]);
+    await A.land();
+    assert.equal(server.json.text, 'one');
+    assert.equal(A.word(), 'Saved');
 });
 
 // ───────────────────────────────────────────────────────── the draft at page load
