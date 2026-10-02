@@ -36,6 +36,8 @@ import { SlashMenu } from './ui/slash';
 import { closeList } from './ui/list';
 import { isContentValid, isEmptyDocument } from './validation';
 import { remoteTransaction } from './sync/apply';
+import { createSyncEngine } from './sync/engine';
+import { createSyncRequest } from './sync/request';
 import { clearDraft, loadDraft, parkStaleDraft, purgeStaleDrafts, saveDraft } from '../offline';
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
@@ -682,6 +684,9 @@ export const DotDoc = {
     // anything.
     stripDerived,
     documentsDiffer,
+    // The follow-other-people's-saves loop. The Blade bridge builds one per
+    // editor page; see sync/engine.js.
+    sync: { createSyncEngine, createSyncRequest },
     /** The single active editor's pagination controller, or a safe no-op stand-in before mount(). */
     get pagination() {
         const el = document.querySelector('[wire\\:ignore].canvas, #doc-paper');
