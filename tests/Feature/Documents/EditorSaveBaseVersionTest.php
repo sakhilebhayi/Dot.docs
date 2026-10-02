@@ -66,7 +66,11 @@ class EditorSaveBaseVersionTest extends TestCase
         $this->assertSame('Theirs', $doc->fresh()->search_text);
     }
 
-    /** A tab still running the previous JavaScript sends no base version at all. */
+    /**
+     * A tab still running the previous JavaScript sends no base version at
+     * all. The refusal carries NO version: that JavaScript adopts any number
+     * it is handed as the base of its offline draft (see the next test).
+     */
     public function test_a_save_with_no_base_version_is_refused_with_a_reload_message(): void
     {
         $user = User::factory()->withPersonalTeam()->create();
@@ -74,11 +78,41 @@ class EditorSaveBaseVersionTest extends TestCase
 
         Livewire::actingAs($user)->test(Editor::class, ['uuid' => $doc->uuid])
             ->call('saveContent', $this->para('From an old tab'))
-            ->assertReturned(['ok' => false, 'conflict' => false, 'version' => 1])
+            ->assertReturned(['ok' => false, 'conflict' => false, 'version' => null])
             ->assertHasErrors('content')
             ->assertSee('Reload');
 
         $this->assertSame(1, $doc->fresh()->version);
+    }
+
+    /**
+     * The tab was opened at version 1 and somebody else has saved since. Its
+     * old JavaScript does `if (Number.isFinite(result.version)) baseVersion
+     * = result.version` before it looks at `ok`, and stamps every later
+     * keystroke's offline draft with that base. Handed the CURRENT version,
+     * the draft would claim to be based on text its writer never saw; the
+     * reload the message asks for would then offer it back as up to date and
+     * its autosave would pass the stale check, replacing the other person's
+     * saves. So the answer must not say which version the server is at.
+     */
+    public function test_the_refusal_to_an_old_tab_does_not_hand_it_the_current_version(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $other = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $oldTab = Livewire::actingAs($user)->test(Editor::class, ['uuid' => $doc->uuid]);
+
+        app(DocumentStore::class)->save(Document::findOrFail($doc->id), $this->para('Theirs'), $other);
+
+        // Compared strictly: assertReturned() on an array is a loose
+        // comparison, and the point here is that no number comes back.
+        $oldTab->call('saveContent', $this->para('From an old tab, based on version 1'))
+            ->assertReturned(fn (mixed $answer): bool => $answer === ['ok' => false, 'conflict' => false, 'version' => null]);
+
+        $fresh = $doc->fresh();
+        $this->assertSame(2, $fresh->version);
+        $this->assertSame('Theirs', $fresh->search_text);
     }
 
     /**

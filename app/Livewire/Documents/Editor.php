@@ -99,9 +99,10 @@ class Editor extends Component
      * reads all three keys: it keeps the offline draft when `ok` is false (a
      * refused save must not quietly lose the writer's work), shows the
      * "changed elsewhere" choice when `conflict` is true, and stamps
-     * `version` onto the next draft as its base.
+     * `version` onto the next draft as its base. `version` is null in one
+     * answer only, the refusal of a save that stated no base (see there).
      *
-     * @return array{ok:bool,conflict:bool,version:int}
+     * @return array{ok:bool,conflict:bool,version:int|null}
      */
     public function saveContent(array $content, ?int $baseVersion = null, bool $overwrite = false): array
     {
@@ -113,7 +114,16 @@ class Editor extends Component
             $this->addError('content', 'This page is out of date. Reload it to keep editing.');
             $this->saved = false;
 
-            return ['ok' => false, 'conflict' => false, 'version' => $this->document->version];
+            // Never the current version here. The JavaScript in a tab opened
+            // before saves stated a base adopts ANY numeric `version` it is
+            // answered with as the base of its offline draft, before it
+            // looks at `ok`. Handed the current version, a draft built on
+            // an older one would claim to be up to date, and after the
+            // reload this message asks for it would be offered back and
+            // saved over everything written since, passing the stale check.
+            // With null that tab keeps its true base, so the reloaded page
+            // sets the draft aside when anybody has saved in between.
+            return ['ok' => false, 'conflict' => false, 'version' => null];
         }
 
         $opts = ['expectedVersion' => $baseVersion];
