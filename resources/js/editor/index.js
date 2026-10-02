@@ -9,7 +9,7 @@ import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table
 import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 
-import { BlockId, base62 } from './extensions/blockId';
+import { BlockId, BlockIdRepair, base62 } from './extensions/blockId';
 import { Callout } from './extensions/callout';
 import { Column, Columns } from './extensions/columns';
 import { CrossRef } from './extensions/crossRef';
@@ -94,6 +94,12 @@ function buildExtensions(opts) {
         DocAttrs,
         SlashMenu,
         PaginationExtension,
+        // Keeps block ids unique whatever a transaction did: UniqueID (in
+        // BlockId, below) only compares ids inside the range that changed,
+        // and an undo across somebody else's change can leave two blocks
+        // with one id. Its place in this list does not decide when it runs:
+        // UniqueID's priority puts UniqueID's plugin first.
+        BlockIdRepair,
         // Last, so its global `id` attribute is registered over every node
         // type the extensions above contributed.
         BlockId,
