@@ -714,7 +714,7 @@ export function createSyncHost(view, env) {
                 // the next app boot collects it after 7 days.
                 await drafts.parkStaleDraft(view.docUuid, draft.json, draft.baseVersion);
                 drafts.clearDraft(view.docUuid);
-                // Offer it in the page as well: the status strip shows
+                // Offer it in the page as well: the notice bar shows
                 // Your text was set aside, with Put it back. Not when the
                 // document already says exactly this (the unload beacon
                 // stored it): there is nothing to put back.

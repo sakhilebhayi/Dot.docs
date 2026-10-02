@@ -288,6 +288,10 @@ const GROUND = [
     { surface: '.note-danger', note: 'a danger note' },
     { surface: '.dotdoc-panel', note: 'the command palette' },
     { surface: '.dotdoc-bubble', note: 'the floating contextual toolbar' },
+    // The editor's notice bar (conflict, set aside, stopped updating) and the
+    // buttons on it, which carry their own fill there.
+    { surface: '.doc-notice', note: 'the editor notice bar' },
+    { surface: '.doc-notice .tool', note: 'a notice bar button' },
 ];
 
 const INKS = [
@@ -315,6 +319,9 @@ const INKS = [
     '.dotdoc-panel-hint',
     '.dotdoc-panel-title',
     '.dotdoc-bubble-btn',
+    '.doc-notice-text',
+    '.tool',
+    '.doc-notice .tool:disabled',
 ];
 
 /** The inverted surfaces — the pairs the token table was blind to. */

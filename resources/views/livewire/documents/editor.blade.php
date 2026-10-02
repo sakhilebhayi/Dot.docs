@@ -41,7 +41,7 @@
         setAside: null,
         // A reason the page can no longer stay in step (signed out, access
         // removed, document deleted, a version this editor cannot open).
-        // Shown in the status strip.
+        // Shown in the notice bar.
         syncNotice: '',
         // The people last reported by the poll, as a comparable string, so
         // the presence strip is only re-rendered when it actually changes.
@@ -483,117 +483,256 @@
          @open-ai-palette.window="Livewire.dispatchTo('documents.ai-assistant', 'open-palette')"
          @open-save-as-template.window="Livewire.dispatchTo('documents.save-as-template', 'open')"
          class="hidden"></div>
-    {{-- ── The persistent bar ───────────────────────────────────────────
-         ONE slim row under the top bar, and nothing on it inserts a block.
-         Spec §4 retired the bench: the twelve formatting buttons that used to
-         wrap into three ragged rows are now either on the floating toolbar
-         that follows the selection (marks, heading level, table and image
-         tools — resources/js/editor/ui/bubble.js) or in the two menus that
-         already listed them, `/` and ⌘K.
+    {{-- ── The head of the editor page ──────────────────────────────────
+         The persistent bar and, directly under it, the notice bar. One
+         element, so the two stay at the top of the canvas TOGETHER where
+         the page scrolls under them (below 900px): a notice that asks the
+         writer to choose must not scroll away with the paper. --}}
+    <div class="doc-head">
+        {{-- ── The persistent bar ───────────────────────────────────────────
+             ONE slim row under the top bar, and nothing on it inserts a block.
+             Spec §4 retired the bench: the twelve formatting buttons that used to
+             wrap into three ragged rows are now either on the floating toolbar
+             that follows the selection (marks, heading level, table and image
+             tools — resources/js/editor/ui/bubble.js) or in the two menus that
+             already listed them, `/` and ⌘K.
 
-         What is left is what has to be true all the time: what the document is
-         called, which style it is set in, where it is filed, who else is here,
-         whether it is saved, and which version that is. The ⌘K button is the
-         door to everything else, and "More" holds the actions that act on the
-         whole document rather than on the text under the cursor.
+             What is left is what has to be true all the time: what the document is
+             called, which style it is set in, where it is filed, who else is here,
+             whether it is saved, and which version that is. The ⌘K button is the
+             door to everything else, and "More" holds the actions that act on the
+             whole document rather than on the text under the cursor.
 
-         The document's title is here, and ONLY here: the top bar deliberately
-         does not repeat it on this route (layouts/app.blade.php), because a
-         title you can read in two places but edit in one is a title people
-         edit in the wrong one. --}}
-    <div class="doc-bar">
-        {{-- The page's one <h1>. The title is edited through the input
-             beside it, so the heading is for the document outline and for
-             assistive technology; Livewire re-renders both together. --}}
-        <h1 class="sr-only">{{ $title ?: 'Untitled' }}</h1>
+             The document's title is here, and ONLY here: the top bar deliberately
+             does not repeat it on this route (layouts/app.blade.php), because a
+             title you can read in two places but edit in one is a title people
+             edit in the wrong one. --}}
+        <div class="doc-bar">
+            {{-- The page's one <h1>. The title is edited through the input
+                 beside it, so the heading is for the document outline and for
+                 assistive technology; Livewire re-renders both together. --}}
+            <h1 class="sr-only">{{ $title ?: 'Untitled' }}</h1>
 
-        <label class="sr-only" for="doc-title">Document title</label>
-        <input id="doc-title"
-               wire:model.blur="title"
-               wire:change="saveTitle"
-               type="text"
-               class="doc-title-field"
-               placeholder="Untitled" />
+            <label class="sr-only" for="doc-title">Document title</label>
+            <input id="doc-title"
+                   wire:model.blur="title"
+                   wire:change="saveTitle"
+                   type="text"
+                   class="doc-title-field"
+                   placeholder="Untitled" />
 
-        <label class="sr-only" for="doc-style-picker">Document style</label>
-        <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select">
-            @foreach (\App\Styles\StyleEngine::systemKeys() as $styleKey)
-                <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
-            @endforeach
-        </select>
-        @error('style')
-            <span class="field-error">{{ $message }}</span>
-        @enderror
-
-        <label class="sr-only" for="doc-view-mode">Page view</label>
-        <select id="doc-view-mode" class="tool-select"
-                x-model="viewMode" @change="window.DotDoc.pagination.setMode(viewMode)">
-            <option value="continuous">Continuous</option>
-            <option value="single">Single page</option>
-            <option value="multi-page">Multi-page</option>
-            <option value="focus">Focus</option>
-            <option value="print-preview">Print preview</option>
-        </select>
-
-        <button type="button" class="tool tool-mono" aria-pressed="false"
-                x-bind:aria-pressed="thumbnailsOpen ? 'true' : 'false'"
-                @click="thumbnailsOpen = !thumbnailsOpen; if (thumbnailsOpen) $nextTick(() => window.DotDoc.pagination.refreshThumbnails())">Pages</button>
-
-        {{-- Everything structural — headings, lists, tables, images, callouts,
-             columns, breaks, cross-references, exports, the assistant — is in
-             the registry, which this button and the `/` menu both list. --}}
-        <button type="button" class="tool tool-mono doc-bar-palette"
-                title="Commands — or type / in the document" aria-keyshortcuts="Meta+K Control+K"
-                @click="window.DotDoc.openPalette(ed())">&#8984;K</button>
-
-        {{-- Where this document is filed in the shared Dot.Files tree.
-             A quiet line of text, not a link: the button beside it is the one
-             affordance, and it opens the same .sheet folder picker the
-             documents index uses for rename. --}}
-        <span class="micro doc-bar-filed" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
-        <button type="button" class="tool tool-mono" x-ref="moveTrigger"
-                wire:click="$set('showMoveSheet', true)">Move</button>
-        @error('location')
-            <span class="field-error">{{ $message }}</span>
-        @enderror
-
-        @if (count($activeUsers) > 0)
-            <div class="presence" aria-label="People here now">
-                @foreach (array_slice($activeUsers, 0, 4) as $member)
-                    <span class="presence-face" title="{{ $member['name'] }}">
-                        @if (! empty($member['avatar']))
-                            <img src="{{ $member['avatar'] }}" alt="{{ $member['name'] }}" />
-                        @else
-                            {{ strtoupper(substr($member['name'], 0, 1)) }}
-                        @endif
-                    </span>
+            <label class="sr-only" for="doc-style-picker">Document style</label>
+            <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select">
+                @foreach (\App\Styles\StyleEngine::systemKeys() as $styleKey)
+                    <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
                 @endforeach
-                @if (count($activeUsers) > 4)
-                    <span class="presence-face">+{{ count($activeUsers) - 4 }}</span>
-                @endif
-            </div>
-        @endif
+            </select>
+            @error('style')
+                <span class="field-error">{{ $message }}</span>
+            @enderror
 
-        {{-- State is a WORD and a dot, never colour alone. A rejected save
-             has to be visible: the writer keeps typing over content the
-             server never accepted, and the offline draft is deliberately
-             kept as the only remaining copy. The same words go to the
-             top bar through the `shell:save-state` event. --}}
-        <span class="doc-status" aria-live="polite">
-            <x-shell.status-word tone="idle" word="Offline" x-show="isOffline"
-                                 title="Edits are saved in this browser and sync when you are back online." />
+            <label class="sr-only" for="doc-view-mode">Page view</label>
+            <select id="doc-view-mode" class="tool-select"
+                    x-model="viewMode" @change="window.DotDoc.pagination.setMode(viewMode)">
+                <option value="continuous">Continuous</option>
+                <option value="single">Single page</option>
+                <option value="multi-page">Multi-page</option>
+                <option value="focus">Focus</option>
+                <option value="print-preview">Print preview</option>
+            </select>
 
-            <x-shell.status-word tone="idle" word="Editing" x-show="isTyping && !isOffline" />
+            <button type="button" class="tool tool-mono" aria-pressed="false"
+                    x-bind:aria-pressed="thumbnailsOpen ? 'true' : 'false'"
+                    @click="thumbnailsOpen = !thumbnailsOpen; if (thumbnailsOpen) $nextTick(() => window.DotDoc.pagination.refreshThumbnails())">Pages</button>
 
-            <x-shell.status-word tone="idle" word="Saving"
-                                 wire:loading wire:target="saveContent,saveTitle" />
+            {{-- Everything structural — headings, lists, tables, images, callouts,
+                 columns, breaks, cross-references, exports, the assistant — is in
+                 the registry, which this button and the `/` menu both list. --}}
+            <button type="button" class="tool tool-mono doc-bar-palette"
+                    title="Commands — or type / in the document" aria-keyshortcuts="Meta+K Control+K"
+                    @click="window.DotDoc.openPalette(ed())">&#8984;K</button>
 
-            <span class="status-word status-word-danger" x-show="aiError" x-cloak
-                  @click="aiError = ''" style="cursor:pointer" title="Click to dismiss">
-                <span class="status-word-dot" aria-hidden="true"></span>
-                <span x-text="aiError"></span>
+            {{-- Where this document is filed in the shared Dot.Files tree.
+                 A quiet line of text, not a link: the button beside it is the one
+                 affordance, and it opens the same .sheet folder picker the
+                 documents index uses for rename. --}}
+            <span class="micro doc-bar-filed" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
+            <button type="button" class="tool tool-mono" x-ref="moveTrigger"
+                    wire:click="$set('showMoveSheet', true)">Move</button>
+            @error('location')
+                <span class="field-error">{{ $message }}</span>
+            @enderror
+
+            @if (count($activeUsers) > 0)
+                <div class="presence" aria-label="People here now">
+                    @foreach (array_slice($activeUsers, 0, 4) as $member)
+                        <span class="presence-face" title="{{ $member['name'] }}">
+                            @if (! empty($member['avatar']))
+                                <img src="{{ $member['avatar'] }}" alt="{{ $member['name'] }}" />
+                            @else
+                                {{ strtoupper(substr($member['name'], 0, 1)) }}
+                            @endif
+                        </span>
+                    @endforeach
+                    @if (count($activeUsers) > 4)
+                        <span class="presence-face">+{{ count($activeUsers) - 4 }}</span>
+                    @endif
+                </div>
+            @endif
+
+            {{-- State is a WORD and a dot, never colour alone. A rejected save
+                 has to be visible: the writer keeps typing over content the
+                 server never accepted, and the offline draft is deliberately
+                 kept as the only remaining copy. The same words go to the
+                 top bar through the `shell:save-state` event. --}}
+            <span class="doc-status" aria-live="polite">
+                <x-shell.status-word tone="idle" word="Offline" x-show="isOffline"
+                                     title="Edits are saved in this browser and sync when you are back online." />
+
+                <x-shell.status-word tone="idle" word="Editing" x-show="isTyping && !isOffline" />
+
+                <x-shell.status-word tone="idle" word="Saving"
+                                     wire:loading wire:target="saveContent,saveTitle" />
+
+                <span class="status-word status-word-danger" x-show="aiError" x-cloak
+                      @click="aiError = ''" style="cursor:pointer" title="Click to dismiss">
+                    <span class="status-word-dot" aria-hidden="true"></span>
+                    <span x-text="aiError"></span>
+                </span>
+
+                {{-- A newer version was saved elsewhere while this tab held
+                     unsaved typing, and saving is suspended until the writer
+                     chooses. The strip says so in two words. The sentence and
+                     the two buttons are in the notice bar under this row: the
+                     strip is one line that does not wrap, and a notice with
+                     buttons in it ended up outside the window or under the
+                     dock. Rendered on every render and shown with x-show, like
+                     everything Alpine binds here (.ai/rules/livewire.md). --}}
+                <x-shell.status-word tone="danger" word="Not saved" x-show="conflict" x-cloak />
+
+                @error('content')
+                    <x-shell.status-word tone="danger" :title="$message"
+                                         :word="'Not saved — '.\Illuminate\Support\Str::limit($message, 60)" />
+                @enderror
+
+                {{-- The x-show sits on a wrapper that is rendered the same on
+                     EVERY render, and the Saved / Ready word inside it comes and
+                     goes with the error above. With the x-show on the word
+                     itself, a word that came back after a rejected save was a
+                     new element, bound to the newest Alpine data object, whose
+                     conflict, syncNotice and isTyping never change
+                     (.ai/rules/livewire.md): Saved then showed beside the
+                     conflict notice and while typing. --}}
+                <span x-show="!isTyping && !isOffline && !conflict && !syncNotice">
+                    @unless ($errors->has('content'))
+                        <x-shell.status-word tone="good" :word="$saved ? 'Saved' : 'Ready'"
+                                             wire:loading.remove wire:target="saveContent,saveTitle" />
+                    @endunless
+                </span>
+
+                <span class="micro" title="Last edited {{ $document->updated_at->diffForHumans() }}">
+                    <x-shell.figure :value="$document->version" prefix="v" label="Version" />
+                </span>
             </span>
 
+            {{-- Everything that acts on the whole document, in one menu, so the
+                 row never has to reflow. --}}
+            <div class="menu doc-bar-end" x-data="{ open: false }"
+                 x-on:keydown.escape.window="if (open) { open = false; $refs.moreBtn.focus() }">
+                <button type="button" class="tool tool-mono" x-ref="moreBtn" @click="open = !open"
+                        :aria-expanded="open ? 'true' : 'false'">More</button>
+
+                <div class="menu-list menu-list-wide" x-show="open" @click.outside="open = false" x-cloak>
+                    <button type="button" data-shell-expand="dock"
+                            @click="$dispatch('open-ai-palette'); open = false">
+                        Ask the assistant
+                        <span class="micro">Ctrl+Shift+K</span>
+                    </button>
+
+                    <button type="button" wire:click="toggleSuggestionMode"
+                            aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
+                        {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
+                    </button>
+
+                    {{-- No `data-shell-expand` here, deliberately: comments render
+                         in `.editor-side`, beside the paper, NOT in the dock.
+                         Revealing a panel is one-way by design, so pointing this at
+                         the dock took ~340px of canvas width in either direction
+                         with no way back. --}}
+                    <button type="button" wire:click="toggleCommentSidebar"
+                            aria-pressed="{{ $commentSidebarOpen ? 'true' : 'false' }}">
+                        {{ $commentSidebarOpen ? 'Hide comments' : 'Show comments' }}
+                    </button>
+
+                    <button type="button" @click="ed().chain().focus().undo().run(); open = false">
+                        Undo
+                        <span class="micro">&#8984;Z</span>
+                    </button>
+                    <button type="button" @click="ed().chain().focus().redo().run(); open = false">
+                        Redo
+                        <span class="micro">&#8679;&#8984;Z</span>
+                    </button>
+
+                    <button type="button"
+                            :class="ed()?.isActive('code') ? 'is-on' : ''"
+                            @click="ed().chain().focus().toggleCode().run(); open = false">Inline code</button>
+
+                    <div x-data="voiceTyping" x-init="init()">
+                        <button type="button" x-show="supported" @click="toggle()"
+                                :aria-pressed="listening ? 'true' : 'false'"
+                                x-text="listening ? 'Stop voice typing' : 'Start voice typing'">Start voice typing</button>
+                    </div>
+
+                    <span class="menu-label">Export</span>
+                    <a href="{{ route('documents.export', [$document->uuid, 'pdf']) }}">PDF</a>
+                    <a href="{{ route('documents.export', [$document->uuid, 'word']) }}">Word (.docx)</a>
+                    <a href="{{ route('documents.export', [$document->uuid, 'html']) }}">HTML</a>
+                    <a href="{{ route('documents.export', [$document->uuid, 'markdown']) }}">Markdown</a>
+
+                    {{-- The same render, filed beside the document in the
+                         shared tree instead of downloaded. --}}
+                    <span class="menu-label">Save to Dot.Files</span>
+                    {{-- A bare <form>/<button>, NOT .menu-form/.btn: those are
+                         for the import picker, and their centred full-width
+                         button breaks the menu's row rhythm beside the export
+                         links above. `.menu-list button` already styles this. --}}
+                    @foreach (['pdf' => 'PDF', 'word' => 'Word (.docx)', 'html' => 'HTML', 'markdown' => 'Markdown'] as $format => $label)
+                        <form action="{{ route('documents.export.save-to-files', [$document->uuid, $format]) }}" method="POST">
+                            @csrf
+                            <button type="submit">{{ $label }}</button>
+                        </form>
+                    @endforeach
+
+                    <span class="menu-label">Import</span>
+                    <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
+                          enctype="multipart/form-data" class="menu-form">
+                        @csrf
+                        <label class="field-label" for="doc-import">A .docx or .md file</label>
+                        <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
+                        <button type="submit" class="btn btn-primary">Import it</button>
+                    </form>
+
+                    <button type="button" @click="$dispatch('open-save-as-template'); open = false"
+                            title="Save this document as a reusable template">Save as a template</button>
+                </div>
+            </div>
+        </div>
+
+        {{-- ── The notice bar ───────────────────────────────────────────────
+             What the writer has to read in full, and what they have to
+             answer, is said here and not in the one-line status strip above:
+             this bar is as wide as the editor column, its text wraps, and
+             its buttons drop onto a line of their own when there is no room
+             beside the text. It takes no space while nothing is showing.
+
+             It is a live region, so a notice is announced when it appears.
+
+             Every element is rendered on EVERY Livewire render and shown or
+             hidden with x-show. Nothing here may come and go with a Blade
+             condition: Alpine would bind an element Livewire adds later to
+             the newest data object, whose state never changes
+             (.ai/rules/livewire.md). --}}
+        <div class="doc-notices" role="status" aria-live="polite">
             {{-- A newer version was saved elsewhere while this tab held
                  unsaved typing. Saving is suspended until the writer picks
                  one: nothing is overwritten and nothing is thrown away
@@ -601,134 +740,41 @@
                  the newer version and sets this tab's text aside: the page
                  then offers Put it back, but only in a browser that could
                  keep the offline draft. Hence the last sentence. --}}
-            <span class="status-word status-word-danger" x-show="conflict" x-cloak>
-                <span class="status-word-dot" aria-hidden="true"></span>
-                <span>Not saved — this document was changed elsewhere while you were typing. Do not reload: choose one.</span>
-                <button type="button" class="tool tool-mono" @click="keepMine()"
-                        title="Save your version over the newer one. The other version is kept in the history.">Keep mine</button>
-                <button type="button" class="tool tool-mono" @click="loadTheirs()"
-                        :disabled="!conflict || !conflict.ready"
-                        title="Show the newer version. You can put your text back afterwards.">Load theirs</button>
-            </span>
+            <div class="doc-notice" x-show="conflict" x-cloak>
+                <p class="doc-notice-text">
+                    <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
+                    <span>Not saved — this document was changed elsewhere while you were typing. Do not reload: choose one.</span>
+                </p>
+                <span class="doc-notice-actions">
+                    <button type="button" class="tool tool-mono" @click="keepMine()"
+                            title="Save your version over the newer one. The other version is kept in the history.">Keep mine</button>
+                    <button type="button" class="tool tool-mono" @click="loadTheirs()"
+                            :disabled="!conflict || !conflict.ready"
+                            title="Show the newer version. You can put your text back afterwards.">Load theirs</button>
+                </span>
+            </div>
 
             {{-- The writer chose Load theirs, or opened the page with a draft
                  the document had moved past. Their own text is held by the
                  page so they can have it back. --}}
-            <span class="status-word status-word-idle" x-show="setAside" x-cloak>
-                <span class="status-word-dot" aria-hidden="true"></span>
-                <span>Your text was set aside.</span>
-                <button type="button" class="tool tool-mono" @click="putBack()">Put it back</button>
-            </span>
+            <div class="doc-notice" x-show="setAside" x-cloak>
+                <p class="doc-notice-text">
+                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                    <span>Your text was set aside.</span>
+                </p>
+                <span class="doc-notice-actions">
+                    <button type="button" class="tool tool-mono" @click="putBack()">Put it back</button>
+                </span>
+            </div>
 
-            <span class="status-word status-word-danger" x-show="syncNotice" x-cloak>
-                <span class="status-word-dot" aria-hidden="true"></span>
-                <span x-text="syncNotice"></span>
-            </span>
-
-            @error('content')
-                <x-shell.status-word tone="danger" :title="$message"
-                                     :word="'Not saved — '.\Illuminate\Support\Str::limit($message, 60)" />
-            @enderror
-
-            {{-- The x-show sits on a wrapper that is rendered the same on
-                 EVERY render, and the Saved / Ready word inside it comes and
-                 goes with the error above. With the x-show on the word
-                 itself, a word that came back after a rejected save was a
-                 new element, bound to the newest Alpine data object, whose
-                 conflict, syncNotice and isTyping never change
-                 (.ai/rules/livewire.md): Saved then showed beside the
-                 conflict notice and while typing. --}}
-            <span x-show="!isTyping && !isOffline && !conflict && !syncNotice">
-                @unless ($errors->has('content'))
-                    <x-shell.status-word tone="good" :word="$saved ? 'Saved' : 'Ready'"
-                                         wire:loading.remove wire:target="saveContent,saveTitle" />
-                @endunless
-            </span>
-
-            <span class="micro" title="Last edited {{ $document->updated_at->diffForHumans() }}">
-                <x-shell.figure :value="$document->version" prefix="v" label="Version" />
-            </span>
-        </span>
-
-        {{-- Everything that acts on the whole document, in one menu, so the
-             row never has to reflow. --}}
-        <div class="menu doc-bar-end" x-data="{ open: false }"
-             x-on:keydown.escape.window="if (open) { open = false; $refs.moreBtn.focus() }">
-            <button type="button" class="tool tool-mono" x-ref="moreBtn" @click="open = !open"
-                    :aria-expanded="open ? 'true' : 'false'">More</button>
-
-            <div class="menu-list menu-list-wide" x-show="open" @click.outside="open = false" x-cloak>
-                <button type="button" data-shell-expand="dock"
-                        @click="$dispatch('open-ai-palette'); open = false">
-                    Ask the assistant
-                    <span class="micro">Ctrl+Shift+K</span>
-                </button>
-
-                <button type="button" wire:click="toggleSuggestionMode"
-                        aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
-                    {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
-                </button>
-
-                {{-- No `data-shell-expand` here, deliberately: comments render
-                     in `.editor-side`, beside the paper, NOT in the dock.
-                     Revealing a panel is one-way by design, so pointing this at
-                     the dock took ~340px of canvas width in either direction
-                     with no way back. --}}
-                <button type="button" wire:click="toggleCommentSidebar"
-                        aria-pressed="{{ $commentSidebarOpen ? 'true' : 'false' }}">
-                    {{ $commentSidebarOpen ? 'Hide comments' : 'Show comments' }}
-                </button>
-
-                <button type="button" @click="ed().chain().focus().undo().run(); open = false">
-                    Undo
-                    <span class="micro">&#8984;Z</span>
-                </button>
-                <button type="button" @click="ed().chain().focus().redo().run(); open = false">
-                    Redo
-                    <span class="micro">&#8679;&#8984;Z</span>
-                </button>
-
-                <button type="button"
-                        :class="ed()?.isActive('code') ? 'is-on' : ''"
-                        @click="ed().chain().focus().toggleCode().run(); open = false">Inline code</button>
-
-                <div x-data="voiceTyping" x-init="init()">
-                    <button type="button" x-show="supported" @click="toggle()"
-                            :aria-pressed="listening ? 'true' : 'false'"
-                            x-text="listening ? 'Stop voice typing' : 'Start voice typing'">Start voice typing</button>
-                </div>
-
-                <span class="menu-label">Export</span>
-                <a href="{{ route('documents.export', [$document->uuid, 'pdf']) }}">PDF</a>
-                <a href="{{ route('documents.export', [$document->uuid, 'word']) }}">Word (.docx)</a>
-                <a href="{{ route('documents.export', [$document->uuid, 'html']) }}">HTML</a>
-                <a href="{{ route('documents.export', [$document->uuid, 'markdown']) }}">Markdown</a>
-
-                {{-- The same render, filed beside the document in the
-                     shared tree instead of downloaded. --}}
-                <span class="menu-label">Save to Dot.Files</span>
-                {{-- A bare <form>/<button>, NOT .menu-form/.btn: those are
-                     for the import picker, and their centred full-width
-                     button breaks the menu's row rhythm beside the export
-                     links above. `.menu-list button` already styles this. --}}
-                @foreach (['pdf' => 'PDF', 'word' => 'Word (.docx)', 'html' => 'HTML', 'markdown' => 'Markdown'] as $format => $label)
-                    <form action="{{ route('documents.export.save-to-files', [$document->uuid, $format]) }}" method="POST">
-                        @csrf
-                        <button type="submit">{{ $label }}</button>
-                    </form>
-                @endforeach
-
-                <span class="menu-label">Import</span>
-                <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
-                      enctype="multipart/form-data" class="menu-form">
-                    @csrf
-                    <label class="field-label" for="doc-import">A .docx or .md file</label>
-                    <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
-                    <button type="submit" class="btn btn-primary">Import it</button>
-                </form>
-
-                <button type="button" @click="$dispatch('open-save-as-template'); open = false"
-                        title="Save this document as a reusable template">Save as a template</button>
+            {{-- The page can no longer stay in step: signed out, access
+                 removed, the document gone, or a version this editor cannot
+                 open. --}}
+            <div class="doc-notice" x-show="syncNotice" x-cloak>
+                <p class="doc-notice-text">
+                    <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
+                    <span x-text="syncNotice"></span>
+                </p>
             </div>
         </div>
     </div>
