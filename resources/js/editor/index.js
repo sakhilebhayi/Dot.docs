@@ -37,6 +37,7 @@ import { closeList } from './ui/list';
 import { isContentValid, isEmptyDocument } from './validation';
 import { remoteTransaction } from './sync/apply';
 import { createSyncEngine } from './sync/engine';
+import { createSyncHost, createTabId } from './sync/host';
 import { createSyncRequest } from './sync/request';
 import { clearDraft, loadDraft, parkStaleDraft, purgeStaleDrafts, saveDraft } from '../offline';
 
@@ -684,9 +685,11 @@ export const DotDoc = {
     // anything.
     stripDerived,
     documentsDiffer,
-    // The follow-other-people's-saves loop. The Blade bridge builds one per
-    // editor page; see sync/engine.js.
-    sync: { createSyncEngine, createSyncRequest },
+    // The follow-other-people's-saves loop. The Blade bridge builds one
+    // engine per editor page (sync/engine.js) and hands every decision about
+    // a save, a newer document or a draft to createSyncHost() (sync/host.js),
+    // which it builds from its own state for each call.
+    sync: { createSyncEngine, createSyncRequest, createSyncHost, createTabId },
     /** The single active editor's pagination controller, or a safe no-op stand-in before mount(). */
     get pagination() {
         const el = document.querySelector('[wire\\:ignore].canvas, #doc-paper');

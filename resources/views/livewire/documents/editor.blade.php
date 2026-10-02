@@ -3,10 +3,11 @@
         owns: false,
         echo: null,
         // This tab's identity for presence and the sync poll. Per page load,
-        // not per browser: two tabs of one account are two tabs.
-        tabId: (window.crypto && window.crypto.randomUUID)
-            ? window.crypto.randomUUID()
-            : 'tab-' + Math.random().toString(36).slice(2) + Date.now().toString(36),
+        // not per browser: two tabs of one account are two tabs. Made in
+        // init(), not here: the editor bundle makes it (createTabId() in
+        // sync/host.js), and Alpine can read this object before that
+        // bundle has loaded.
+        tabId: '',
         // How many of this tab's own saves are in the air, and when the
         // latest one left. The sync engine decides nothing about a newer
         // document until they have settled - but a request that never
@@ -97,6 +98,13 @@
             if (!host) return;
             this.owns = !window.DotDoc.get(host);
 
+            // Once per data object: Alpine calls init() more than once.
+            if (!this.tabId) {
+                this.tabId = window.DotDoc.sync.createTabId({
+                    crypto: window.crypto, random: Math.random, now: Date.now,
+                });
+            }
+
             // Numbers first, editor second: the heading-number decorations are
             // built when the view is created, so seeding the server's outline
             // before mount() is what stops a numbered document rendering
@@ -146,26 +154,21 @@
 
             if (!this.owns) return;
 
-            this.confirmed = JSON.stringify(editor.getJSON());
+            // What the editor holds now is what the server last confirmed,
+            // and the status word says Saved (or Read only, fail-closed).
+            this.syncHost().opened();
 
             // Typing indicator and the offline draft run off every keystroke;
             // the save itself is debounced inside the bundle.
             editor.on('update', () => {
                 this.isTyping = true;
-                this.unsaved = true;
                 this.tick++;
-                this.report('idle', 'Editing');
                 clearTimeout(this.typingTimeout);
                 this.typingTimeout = setTimeout(() => { this.isTyping = false; }, 1000);
-                // Never write a draft in fail-closed mode: what the editor is
-                // holding then is not the document.
-                if (window.offlineDraft && handle.autosaves !== false) {
-                    window.offlineDraft.saveDraft(this.docUuid, JSON.stringify(editor.getJSON()), this.baseVersion);
-                }
+                // Marks the text unsaved, says Editing and writes the
+                // offline draft (never in fail-closed mode).
+                this.syncHost().edited();
             });
-
-            this.report(handle.autosaves === false ? 'danger' : 'good',
-                        handle.autosaves === false ? 'Read only' : 'Saved');
 
             this.refreshOutline();
             this.setupEcho();
@@ -183,17 +186,9 @@
             window.addEventListener('app-online',  () => {
                 this.isOffline = false;
                 // Back online: send what was typed while offline, and ONLY
-                // that. resendIfOwed() saves when this tab holds unsaved
-                // text and does nothing otherwise. Saving unconditionally,
-                // as this listener used to, sent an idle reader's stale
-                // copy: refused as a conflict that reader never caused, or
-                // stored as a new version that threw everybody who was
-                // typing into one. The draft is NOT cleared here: persist()
-                // clears it itself, and only once the save has stored what
-                // the editor is holding.
-                this.resave = true;
-                this.resendIfOwed();
-                this.syncEngine()?.poke();
+                // that (an idle reader sends nothing), then check for what
+                // was missed. See backOnline() in sync/host.js.
+                this.syncHost().backOnline();
             });
 
             // A hidden tab stops polling; coming back polls at once.
@@ -216,131 +211,69 @@
             });
         },
 
-        // $wire actions resolve with the PHP method's return value, so a
-        // refused save is visible here. saveContent() answers
-        // {ok, conflict, version}:
-        //   ok       - stored; `version` becomes the base of the next save.
-        //   conflict - somebody saved first. Nothing was written. Saving is
-        //              suspended and the writer is asked what to do.
-        //   neither  - the content was rejected (DocumentSchema), or the page
-        //              is out of date; the error renders in the status area.
-        // On anything but `ok` the offline draft is KEPT - it is the only
-        // remaining copy of what the writer typed.
+        // Everything this page decides about a save (send it, hold it, send
+        // it again, refuse it, overwrite on purpose), about a newer document
+        // (follow it, raise the conflict, set text aside, put it back) and
+        // about the offline draft is decided in
+        // resources/js/editor/sync/host.js, where node --test runs it
+        // together with the real engine. The methods below hand over to it
+        // and do nothing else.
         //
-        // One save in the air at a time. Livewire sends a second call after
-        // the first, with the arguments it was CALLED with, so a second
-        // autosave fired before the first had answered would state the old
-        // base and be refused: the tab would conflict with itself. A save
-        // asked for in the meantime is remembered in `resave` and sent by
-        // resendIfOwed() once the first has answered.
-        //
-        // `force` is the Keep mine choice: the base version has just been
-        // moved up to the newer document's, so this save knowingly replaces
-        // it. It goes to the server as the overwrite flag, which keeps the
-        // replaced version in the history first. The save that follows Put
-        // it back carries the same flag (`overwriteOwed`): it too replaces
-        // a version on purpose, the one this tab loaded.
-        persist(json, { force = false } = {}) {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            // Fail-closed (the content check refused the document): the editor
-            // is read-only and must not write anything back.
-            if (handle && handle.autosaves === false) return Promise.resolve();
-
-            // An unresolved conflict: every save would be refused. The draft
-            // keeps the text; the notice asks the question.
-            if (this.conflict && !force) {
-                this.report('danger', 'Not saved');
-                return Promise.resolve();
-            }
-
-            if (this.saving > 0 && !force) {
-                this.resave = true;
-                return Promise.resolve();
-            }
-
-            this.report('idle', 'Saving');
-
-            // What is being SENT, captured now: the draft is cleared only if
-            // the editor still holds exactly this when the answer arrives.
-            const snapshot = JSON.stringify(json);
-
-            this.saving++;
-            this.savingSince = Date.now();
-
-            return @this.saveContent(json, this.baseVersion, force || this.overwriteOwed).then((result) => {
-                this.saving = Math.max(0, this.saving - 1);
-
-                if (result && result.ok) {
-                    this.baseVersion = result.version;
-                    this.conflict = null;
-                    this.confirmed = snapshot;
-                    this.overwriteOwed = false;
-                    this.syncEngine()?.saved(result.version);
-                    if (this.clearDraftIfSettled(snapshot)) this.unsaved = false;
-                    this.report('good', 'Saved');
-                } else if (result && result.conflict && result.version <= this.baseVersion) {
-                    // Refused against a version this tab is already based
-                    // on: one of its own saves got there first. That is not
-                    // a conflict - send again on the new base.
-                    this.resave = true;
-                } else if (result && result.conflict) {
-                    this.enterConflict(result.version);
-                } else {
-                    this.report('danger', 'Not saved');
-                }
-
-                // A newer document may have been waiting for this save to
-                // settle before the engine decided what to do with it.
-                this.syncEngine()?.retry();
-                this.resendIfOwed();
-
-                return this.refreshOutline();
-            }).catch(() => {
-                this.saving = Math.max(0, this.saving - 1);
-                this.report('danger', 'Not saved');
-                this.syncEngine()?.retry();
+        // The host keeps no state of its own. It is built afresh from `this`
+        // for every call, because Alpine re-creates this data object whenever
+        // a render changes the x-data string, while the handlers bound at
+        // first load stay on the first object: a call has to read and write
+        // the object it was made on. Besides that object it is given the
+        // page: the editor handle and the engine (both parked on the
+        // element), Livewire, the draft store, the style element, the clock
+        // and the console.
+        syncHost() {
+            return window.DotDoc.sync.createSyncHost(this, {
+                handle: () => window.DotDoc?.get(this.$refs.editorEl),
+                engine: () => this.syncEngine(),
+                // $wire actions resolve with the PHP method's return value:
+                // saveContent() answers {ok, conflict, version}.
+                save: (json, baseVersion, overwrite) => @this.saveContent(json, baseVersion, overwrite),
+                refreshOutline: () => this.refreshOutline(),
+                // The presence strip is rendered by Livewire.
+                refreshPresence: () => @this.refreshPresence(),
+                report: (tone, word) => this.report(tone, word),
+                drafts: () => window.offlineDraft,
+                documentsDiffer: (a, b) => window.DotDoc.documentsDiffer(a, b),
+                // The outline that arrives with somebody else's document.
+                showOutline: (outline) => {
+                    window.DotDoc.setOutline(outline);
+                    window.DotDoc.pagination.setPageSetup(
+                        outline.pageSetup, outline.headerSegments, outline.footerSegments
+                    );
+                },
+                // Somebody else may have changed the document style: the
+                // outline carries its numbering and page setup, this carries
+                // its fonts and colours.
+                showCss: (css) => {
+                    const style = document.getElementById('doc-style');
+                    if (style) style.textContent = css;
+                },
+                confirm: (question) => window.confirm(question),
+                now: () => Date.now(),
+                info: (...args) => console.info(...args),
+                log: (...args) => console.error(...args),
             });
         },
 
-        // Send the save that is owed, if one is and nothing stands in its
-        // way. Called when a save answers, on every answered poll and when
-        // the browser comes back online. It only ever sends text that is
-        // still unsaved HERE (`unsaved`); it never sends a copy the writer
-        // has not touched.
-        resendIfOwed() {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            // Fail-closed: nothing is written back.
-            if (!handle || handle.autosaves === false) return;
-            // A save that has not answered in 15 seconds is not coming back
-            // (see syncState()): stop waiting for it and send again.
-            if (this.saving > 0 && Date.now() - this.savingSince >= 15000) {
-                this.saving = 0;
-                this.resave = true;
-            }
-            if (this.saving > 0 || !this.resave) return;
-            this.resave = false;
-            // handle.pending means the bundle's own debounce is still armed
-            // and will call persist() itself.
-            if (this.unsaved && !this.conflict && !handle.pending) {
-                this.persist(handle.editor.getJSON());
-            }
-        },
-
-        // Drop the offline draft only when the document the server just
-        // stored is still exactly what the editor holds AND nothing further
-        // is queued. Anything else means the draft is still the only copy of
-        // something.
-        // Returns whether the save settled, that is, whether the editor
-        // still holds exactly what was stored. persist() clears `unsaved`
-        // on that answer, so it is given even when there is no draft store.
-        clearDraftIfSettled(snapshot) {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            if (!handle || handle.autosaves === false) return false;
-            if (handle.pending) return false;
-            if (JSON.stringify(handle.editor.getJSON()) !== snapshot) return false;
-            if (window.offlineDraft) window.offlineDraft.clearDraft(this.docUuid);
-            return true;
-        },
+        persist(json, options) { return this.syncHost().persist(json, options); },
+        resendIfOwed() { this.syncHost().resendIfOwed(); },
+        clearDraftIfSettled(snapshot) { return this.syncHost().clearDraftIfSettled(snapshot); },
+        syncState() { return this.syncHost().syncState(); },
+        adoptVersion(version, options) { this.syncHost().adoptVersion(version, options); },
+        applyFromSync(remote, options) { return this.syncHost().applyFromSync(remote, options); },
+        enterConflict(version) { this.syncHost().enterConflict(version); },
+        keepMine() { this.syncHost().keepMine(); },
+        loadTheirs() { return this.syncHost().loadTheirs(); },
+        putBack() { this.syncHost().putBack(); },
+        membersChanged(members) { this.syncHost().membersChanged(members); },
+        restoreDraftIfRestorable() { return this.syncHost().restoreDraft(); },
+        applySuggestion(content, version) { this.syncHost().applySuggestion(content, version); },
 
         // Numbering rules live in the document style, so the server owns them.
         // Pull the fresh numbers after every save and hand them to the bundle.
@@ -358,64 +291,6 @@
             return this.$refs.editorEl?.__dotdocSync ?? null;
         },
 
-        // What the sync engine may do with a newer document right now.
-        syncState() {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            if (!handle || handle.autosaves === false) return 'closed';
-            if (this.saving > 0) {
-                // A save that has not answered in 15 seconds is not coming
-                // back (a dropped connection leaves the $wire promise
-                // pending for ever); stop waiting for it.
-                if (Date.now() - this.savingSince < 15000) return 'busy';
-                this.saving = 0;
-            }
-            // An edit undone again inside the bundle's debounce never
-            // reaches persist(): the bundle finds nothing to send, so
-            // nothing would clear `unsaved`, and this tab would stop
-            // following and raise a conflict over text it does not hold.
-            // When the editor is back to exactly what the server last
-            // confirmed, nothing is unsaved and no overwrite is owed.
-            if (this.unsaved && !this.conflict && !handle.pending
-                && JSON.stringify(handle.editor.getJSON()) === this.confirmed) {
-                this.unsaved = false;
-                this.overwriteOwed = false;
-            }
-            // `unsaved`, not only handle.pending: after a save that never
-            // answered or was rejected, the bundle reports nothing pending
-            // while this tab still holds text that exists nowhere else.
-            if (this.conflict || this.unsaved || handle.pending) return 'dirty';
-            return 'clean';
-        },
-
-        // This page just saved the document through some other action
-        // (a style change, an accepted suggestion). Move the base up to the
-        // version that produced, so the next autosave is not refused.
-        //
-        // A style change re-saves what the SERVER holds, not what this
-        // editor holds. If the version it produced is not exactly one past
-        // this tab's base, somebody else saved first and the editor does
-        // not have their text: leave the base alone and let the engine
-        // bring the newer document (or raise the conflict). Adopting the
-        // version blindly would make this tab's next save erase their work.
-        // `contentLoaded` is for the caller that has just put exactly that
-        // version's content into the editor.
-        adoptVersion(version, { contentLoaded = false } = {}) {
-            if (!Number.isFinite(version)) return;
-            if (!contentLoaded && version !== this.baseVersion + 1) {
-                this.syncEngine()?.poke();
-                return;
-            }
-            this.baseVersion = version;
-            this.syncEngine()?.saved(version);
-            // An autosave that travelled with that action may have been
-            // refused against the version the action itself produced.
-            if (this.conflict && this.conflict.version <= version) {
-                this.conflict = null;
-                this.resave = true;
-                this.resendIfOwed();
-            }
-        },
-
         startSync() {
             const host = this.$refs.editorEl;
             if (!host || host.__dotdocSync || !window.DotDoc?.sync) return;
@@ -428,169 +303,15 @@
                     document.querySelector('meta[name=csrf-token]').content
                 ),
                 visible: () => document.visibilityState !== 'hidden',
-                host: {
-                    state: () => this.syncState(),
-                    applyRemote: (remote) => this.applyFromSync(remote),
-                    onConflict: (remote) => this.enterConflict(remote.version),
-                    onRefused: () => {
-                        this.syncNotice = 'A newer version could not be opened here. Reload the page.';
-                    },
-                    // Every answered poll is also the moment to send a save
-                    // that never answered.
-                    onMembers: (members) => { this.membersChanged(members); this.resendIfOwed(); },
-                    onStopped: (reason) => {
-                        this.syncNotice = {
-                            'signed-out': 'You have been signed out. Reload the page to keep editing.',
-                            'forbidden': 'You no longer have access to this document.',
-                            'gone': 'This document no longer exists.',
-                        }[reason] || 'This page has stopped updating. Reload it.';
-                        this.report('danger', 'Not saved');
-                    },
-                },
+                // What the engine may do with a newer document, and what the
+                // page does with what a poll brings, is decided in
+                // sync/host.js. The engine keeps these callbacks for as long
+                // as it lives, so they stay with the data object that
+                // started it.
+                host: this.syncHost().engineHost(),
             });
 
             host.__dotdocSync.start();
-        },
-
-        // Put a newer server document into the editor. `force` is the Load
-        // theirs choice, the only case allowed to replace unsaved typing.
-        applyFromSync(remote, { force = false } = {}) {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            // Fail-closed: what the editor shows is not the document, so
-            // nothing may be written into it.
-            if (!handle || handle.autosaves === false) return false;
-            if (!handle.applyRemote(remote.json, { force })) return false;
-
-            this.baseVersion = remote.version;
-            this.unsaved = false;
-            this.confirmed = JSON.stringify(handle.editor.getJSON());
-            // Whatever this tab had put back is no longer in the editor.
-            this.overwriteOwed = false;
-            // The server now holds newer content than any draft.
-            if (window.offlineDraft) window.offlineDraft.clearDraft(this.docUuid);
-
-            if (remote.outline) {
-                window.DotDoc.setOutline(remote.outline);
-                window.DotDoc.pagination.setPageSetup(
-                    remote.outline.pageSetup, remote.outline.headerSegments, remote.outline.footerSegments
-                );
-            }
-
-            // Somebody else may have changed the document style: the outline
-            // carries its numbering and page setup, this carries its fonts
-            // and colours.
-            if (remote.css) {
-                const style = document.getElementById('doc-style');
-                if (style) style.textContent = remote.css;
-            }
-
-            this.tick++;
-            return true;
-        },
-
-        // A newer version exists and this tab has unsaved typing. Stop
-        // saving and ask; the draft keeps the text in the meantime.
-        // `version` is the version that is in the way: Keep mine needs only
-        // that number, not the document itself.
-        enterConflict(version) {
-            const engine = this.syncEngine();
-            const waiting = engine ? engine.pending : null;
-            this.conflict = {
-                version: Math.max(
-                    Number.isFinite(version) ? version : 0,
-                    this.conflict ? this.conflict.version : 0,
-                    waiting ? waiting.version : 0
-                ),
-                ready: !!waiting,
-            };
-            this.report('danger', 'Not saved');
-            // Download the newer document if the engine does not hold it.
-            // refetch, not poke: the engine may already have SEEN that
-            // version, and an ordinary poll would be told nothing changed.
-            if (!this.conflict.ready) engine?.refetch(this.baseVersion);
-        },
-
-        // Keep mine: save this tab's text over the newer version, on
-        // purpose. The base moves up to that version so the save is
-        // accepted. The waiting document is left with the engine: when the
-        // save lands, persist() tells the engine, which drops it; if the
-        // save is lost, both buttons still work.
-        keepMine() {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            if (!handle || handle.autosaves === false || !this.conflict) return;
-            // One choice at a time: a Keep mine save is already in the air.
-            if (this.syncState() === 'busy') return;
-            const waiting = this.syncEngine()?.pending;
-            const target = Math.max(this.conflict.version || 0, waiting ? waiting.version : 0);
-            if (!target) return;
-            this.baseVersion = Math.max(this.baseVersion, target);
-            this.persist(handle.editor.getJSON(), { force: true });
-        },
-
-        // Load theirs: show the newer document. This tab's text is parked
-        // as a stale- draft and also held in `setAside`, so the page can
-        // offer to put it back.
-        async loadTheirs() {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            const engine = this.syncEngine();
-            if (!handle || handle.autosaves === false || !engine) return;
-            // One choice at a time: a Keep mine save is already in the air.
-            if (this.syncState() === 'busy') return;
-
-            const waiting = engine.takeRemote();
-            if (!waiting) { engine.refetch(this.baseVersion); return; }
-
-            const mine = JSON.stringify(handle.editor.getJSON());
-
-            if (window.offlineDraft) {
-                await window.offlineDraft.parkStaleDraft(this.docUuid, mine, this.baseVersion);
-                console.info(
-                    '[Dot.Doc] Your unsaved text was kept as stale-' + this.docUuid +
-                    ' and will be removed after 7 days.'
-                );
-            }
-
-            if (!this.applyFromSync(waiting, { force: true })) {
-                this.syncNotice = 'The newer version could not be opened here. Reload the page.';
-                return;
-            }
-
-            this.setAside = mine;
-            this.conflict = null;
-            this.report('good', 'Saved');
-        },
-
-        // Put it back: the writer chose Load theirs and wants their own
-        // text after all (or opened the page with a draft the document had
-        // moved past). setContent() emits `update`, so the ordinary
-        // autosave sends the text on the current base.
-        putBack() {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            // Fail-closed: nothing may be written into the editor.
-            if (!handle || handle.autosaves === false || !this.setAside) return;
-            try {
-                handle.editor.commands.setContent(JSON.parse(this.setAside), { errorOnInvalidContent: true });
-                this.setAside = null;
-                // This replaces the version that was loaded, exactly as Keep
-                // mine would have: the save that carries it says so, and the
-                // server keeps the replaced version in the history first.
-                this.overwriteOwed = true;
-            } catch (_) {
-                this.syncNotice = 'Your text could not be put back.';
-            }
-        },
-
-        // The presence strip is rendered by Livewire; only ask it to
-        // re-render when the set of people actually changed.
-        membersChanged(members) {
-            const key = members.map((member) => member.id).join(',');
-            if (key === this.memberKey) return;
-            const first = this.memberKey === '';
-            this.memberKey = key;
-            // The first report matches what the page was rendered with unless
-            // somebody else is already here.
-            if (first && members.length <= 1) return;
-            @this.refreshPresence();
         },
 
         // Every name here is a registry command in the `system` group: the
@@ -656,92 +377,6 @@
             } else if (name === 'comment') {
                 if (!@this.commentSidebarOpen) @this.toggleCommentSidebar();
             }
-        },
-
-        // loadDraft returns {json, savedAt, baseVersion}. A draft is offered
-        // only when it was written against THIS version of the document —
-        // if the version has moved on, somebody else has saved since and
-        // restoring the draft would overwrite them.
-        async restoreDraftIfRestorable() {
-            if (!window.offlineDraft) return;
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            // Fail-closed: the editor is read-only and holds something that is
-            // not the document, so neither restore a draft nor delete one.
-            if (!handle || handle.autosaves === false) return;
-            const editor = handle.editor;
-
-            try {
-                const draft = await window.offlineDraft.loadDraft(this.docUuid);
-                if (!draft) return;
-
-                const parsed = JSON.parse(draft.json);
-                if (!parsed || parsed.type !== 'doc' || draft.baseVersion === null) {
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    return;
-                }
-
-                if (draft.baseVersion < this.documentVersion) {
-                    // Not restorable, but not this page's to destroy either.
-                    // Park it under a stale- key so it can be recovered by
-                    // hand; parkStaleDraft() stamps parkedAt, and the sweep on
-                    // the next app boot collects it after 7 days.
-                    await window.offlineDraft.parkStaleDraft(this.docUuid, draft.json, draft.baseVersion);
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    // Offer it in the page as well: the status strip shows
-                    // Your text was set aside, with Put it back. Not when
-                    // the document already says exactly this (the unload
-                    // beacon stored it): there is nothing to put back.
-                    if (window.DotDoc.documentsDiffer(parsed, editor.getJSON())) {
-                        this.setAside = draft.json;
-                    }
-                    console.info(
-                        '[Dot.Doc] An offline draft based on v' + draft.baseVersion +
-                        ' was kept as stale-' + this.docUuid + ': the document is now at v' +
-                        this.documentVersion + ', so restoring it would overwrite a newer save.'
-                    );
-                    return;
-                }
-
-                if (draft.baseVersion > this.documentVersion) {
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    return;
-                }
-
-                // Same version. Outline::apply() stamps toc.entries and
-                // crossRef.label into the stored document, so those come off
-                // both sides or every load would look like a difference.
-                if (!window.DotDoc.documentsDiffer(parsed, editor.getJSON())) {
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    return;
-                }
-
-                if (!confirm('An unsaved offline draft of this document was found. Restore it?')) {
-                    // Declining is not the same as discarding, and this is a
-                    // single confirm() with no undo behind it. Park the draft
-                    // rather than delete it, so a mis-click stays recoverable
-                    // for the 7 days the sweep leaves it alone.
-                    await window.offlineDraft.parkStaleDraft(this.docUuid, draft.json, draft.baseVersion);
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    console.info(
-                        '[Dot.Doc] The offline draft was not restored. It was kept as stale-' +
-                        this.docUuid + ' and will be removed after 7 days.'
-                    );
-                    return;
-                }
-
-                try {
-                    editor.commands.setContent(parsed, { errorOnInvalidContent: true });
-                } catch (_) {
-                    // Unopenable: keep the draft rather than lose it.
-                    console.info('[Dot.Doc] The offline draft could not be applied and has been kept.');
-                    return;
-                }
-                // The draft is NOT cleared here. The restore emits `update`,
-                // which rewrites the draft and sets `unsaved`; the save that
-                // follows can now be refused as a conflict, and until it has
-                // settled the draft is the only stored copy of this text.
-                // persist() clears it once the save has gone through.
-            } catch (_) {}
         },
 
         setupEcho() {
@@ -814,36 +449,6 @@
             this.aiError = '';
             this.tick++;
             handle.flush();
-        },
-
-        // An accepted suggestion is a document the server has already stored,
-        // so it arrives as JSON and goes in the same way a collaborator's
-        // update does: validated, outside the undo stack, and refused rather
-        // than blanking the page.
-        applySuggestion(content, version) {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            if (!handle) return;
-            // The same fail-closed gate applyFromSync() has. In that mode
-            // the content check refused the document: the editor is read-only
-            // and what it is showing is not the document, so merging an
-            // accepted suggestion into the view would show the writer a
-            // document that exists nowhere.
-            if (handle.autosaves === false) {
-                this.aiError = 'This document is open read-only, so the accepted suggestion was not applied here. Reload the page once the content problem is fixed.';
-                return;
-            }
-            if (!handle.applyRemote(content, { force: true })) {
-                this.aiError = 'That suggestion could not be applied — the document is unchanged.';
-                return;
-            }
-            // The editor now holds exactly the version the server stored.
-            this.unsaved = false;
-            this.confirmed = JSON.stringify(handle.editor.getJSON());
-            this.overwriteOwed = false;
-            this.adoptVersion(version, { contentLoaded: true });
-            this.aiError = '';
-            this.tick++;
-            this.refreshOutline();
         },
 
         // Insert voice-transcribed text at current cursor position

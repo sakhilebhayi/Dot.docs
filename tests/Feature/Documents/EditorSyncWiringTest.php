@@ -76,5 +76,7 @@ class EditorSyncWiringTest extends TestCase
         $this->assertStringNotContainsString('.heartbeat()', $html);
         $this->assertStringNotContainsString('.leaving()', $html);
         $this->assertStringNotContainsString('.user.joined', $html);
+        $this->assertStringNotContainsString('.user.left', $html);
+        $this->assertStringNotContainsString('beforeunload', $html);
     }
 }
