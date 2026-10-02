@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createSyncEngine } from '../../resources/js/editor/sync/engine.js';
-import { SAVE_EXPIRY_MS, createSyncHost, createTabId } from '../../resources/js/editor/sync/host.js';
+import {
+    PUT_BACK_QUESTION,
+    PUT_BACK_UNSAVED_WARNING,
+    SAVE_EXPIRY_MS,
+    createSyncHost,
+    createTabId,
+} from '../../resources/js/editor/sync/host.js';
 
 /**
  * The page's half of the sync state machine (sync/host.js), driven together
@@ -17,7 +23,10 @@ import { SAVE_EXPIRY_MS, createSyncHost, createTabId } from '../../resources/js/
  *     refuses over unsaved typing unless forced);
  *   - a fake draft store, an injected clock and a captured timer;
  *   - saves and polls that are answered BY HAND, so "a save in the air" is a
- *     state a test can hold for as long as it needs.
+ *     state a test can hold for as long as it needs;
+ *   - `leave()`, the page going away: the bundle's pagehide flush, which
+ *     goes by beacon to the fake server's autosave endpoint, after which
+ *     nothing answers that tab any more.
  *
  * What stands in for the Blade component is `view`, a plain object with the
  * component's state fields, and `open()` / `startSync()`, which make the same
@@ -69,6 +78,33 @@ class FakeServer {
         return { ok: true, conflict: false, version: this.version };
     }
 
+    /**
+     * POST /documents/{uuid}/autosave, the unload beacon's endpoint
+     * (DocumentAutosaveController): the same save, stated in a JSON body.
+     */
+    autosave(body) {
+        const valid =
+            body &&
+            body.content &&
+            body.content.type === 'doc' &&
+            Number.isInteger(body.base_version) &&
+            body.base_version >= 1 &&
+            // Laravel's `boolean` rule, when the field is there at all.
+            (!('overwrite' in body) || [true, false, 1, 0, '1', '0'].includes(body.overwrite));
+        if (!valid) {
+            return { status: 422, body: { message: 'The given data was invalid.' } };
+        }
+
+        const result = this.save(body.content, body.base_version, [true, 1, '1'].includes(body.overwrite));
+        if (result.ok) {
+            return { status: 200, body: { version: result.version } };
+        }
+
+        return result.conflict
+            ? { status: 409, body: { conflict: true, version: result.version } }
+            : { status: 422, body: { message: 'The given data was invalid.' } };
+    }
+
     /** A save that states no base: a style change, an accepted suggestion. */
     replace(json) {
         this.version += 1;
@@ -109,6 +145,8 @@ const makeView = (version) => ({
     overwriteOwed: false,
     conflict: null,
     setAside: null,
+    setAsideFrom: null,
+    setAsideBase: null,
     syncNotice: '',
     memberKey: '',
     docUuid: UUID,
@@ -140,6 +178,8 @@ function makeTab({ server, clock }, name, options = {}) {
         saves: [],
         /** Every save this tab has sent. */
         sent: [],
+        /** Every unload beacon this tab has sent, with the server's answer (which no page ever reads). */
+        beacons: [],
         /** Polls in the air, oldest first. */
         polls: [],
         /** The payload of every poll this tab has sent. */
@@ -184,7 +224,7 @@ function makeTab({ server, clock }, name, options = {}) {
         onUpdate();
     };
 
-    const flushSave = () => {
+    const flushSave = ({ beacon = false } = {}) => {
         saveTimer = null;
         if (!dirty || !autosave) {
             return false;
@@ -200,6 +240,16 @@ function makeTab({ server, clock }, name, options = {}) {
 
         dirty = false;
         lastSaved = serialised;
+
+        if (beacon) {
+            // navigator.sendBeacon(): the browser delivers the body after
+            // the page has gone. Built as the bundle's beaconSave() builds it.
+            const body = clone({ _token: 'csrf', content: json, base_version: t.view.baseVersion });
+            t.beacons.push({ body, answer: server.autosave(body) });
+
+            return true;
+        }
+
         // The bundle's onChange, which the page wires to persist().
         t.host().persist(json);
 
@@ -356,6 +406,15 @@ function makeTab({ server, clock }, name, options = {}) {
     t.debounce = async () => {
         flushSave();
         await settle();
+    };
+    /**
+     * The tab is closed, or the writer follows a link: pagehide flushes what
+     * the debounce still holds by beacon. The page is gone afterwards. A
+     * save already in the air may still reach the server (saveArrives()),
+     * but its answer reaches nobody, and the draft store stays as it is.
+     */
+    t.leave = () => {
+        flushSave({ beacon: true });
     };
 
     // ---- what the network does
@@ -806,6 +865,8 @@ test('Load theirs: this tab text is parked and set aside, and the newer document
     await B.host().loadTheirs();
     assert.equal(B.text(), 'A1');
     assert.equal(B.view.setAside, JSON.stringify(doc('B1')));
+    assert.equal(B.view.setAsideFrom, 'conflict');
+    assert.equal(B.view.setAsideBase, 2, 'the version the page showed when the text was set aside');
     assert.equal(B.stale(), 'B1');
     assert.equal(B.drafts.get(STALE).baseVersion, 1);
     assert.equal(B.draft(), null);
@@ -844,8 +905,11 @@ test('Put it back: the text returns, its save says it overwrites, and the replac
     await B.host().loadTheirs();
 
     B.host().putBack();
+    assert.deepEqual(B.questions, [], 'straight after Load theirs the writer knows what is on the page: no question');
     assert.equal(B.text(), 'B1');
     assert.equal(B.view.setAside, null);
+    assert.equal(B.view.setAsideFrom, null);
+    assert.equal(B.view.setAsideBase, null);
     assert.equal(B.view.overwriteOwed, true);
     assert.equal(B.view.unsaved, true);
 
@@ -911,6 +975,8 @@ test('text that cannot be put back stays set aside, and the page says so', async
     B.host().putBack();
     assert.equal(B.view.syncNotice, 'Your text could not be put back.');
     assert.equal(B.view.setAside, JSON.stringify(doc('B1')));
+    assert.equal(B.view.setAsideFrom, 'conflict');
+    assert.equal(B.view.setAsideBase, 2);
     assert.equal(B.view.overwriteOwed, false);
     assert.equal(B.text(), 'A1');
 });
@@ -976,6 +1042,145 @@ test('Keep mine and Load theirs both do nothing while a save is in the air', asy
     await B.land();
     assert.equal(server.json.text, 'B1');
     assert.equal(B.view.conflict, null);
+});
+
+// ───────────────────────────────────────────────────────── text that was set aside
+
+test('Discard: the offer goes, nothing is sent, the page is untouched and the parked copy stays', async () => {
+    const { server, B } = await conflicted();
+    await B.host().loadTheirs();
+    B.view.overwriteOwed = true;
+
+    B.host().discardSetAside();
+    assert.equal(B.view.setAside, null);
+    assert.equal(B.view.setAsideFrom, null);
+    assert.equal(B.view.setAsideBase, null);
+    assert.equal(B.text(), 'A1');
+    assert.equal(B.stale(), 'B1', 'the parked copy stays for its seven days');
+    assert.equal(B.sent.length, 0);
+    assert.equal(server.version, 2);
+    assert.equal(B.view.overwriteOwed, true, 'nothing else is touched');
+    assert.equal(B.view.baseVersion, 2);
+    assert.equal(B.view.unsaved, false);
+    assert.equal(B.view.syncNotice, '');
+    assert.deepEqual(B.questions, []);
+
+    // Nothing is left to put back.
+    B.view.overwriteOwed = false;
+    B.host().putBack();
+    assert.equal(B.text(), 'A1');
+    assert.equal(B.view.overwriteOwed, false);
+});
+
+test('Discard does nothing when nothing was set aside, and works before the editor exists', async () => {
+    const { A } = await pair();
+    A.host().discardSetAside();
+    assert.equal(A.view.setAside, null);
+    assert.equal(A.text(), 'start');
+
+    const w = world();
+    const early = w.tab('early');
+    early.mounted = false;
+    early.view.setAside = JSON.stringify(doc('set aside'));
+    early.view.setAsideFrom = 'draft';
+    early.view.setAsideBase = 1;
+    early.host().discardSetAside();
+    assert.deepEqual(
+        [early.view.setAside, early.view.setAsideFrom, early.view.setAsideBase],
+        [null, null, null]
+    );
+});
+
+test('Put it back after the document has moved on asks first, and a no changes nothing', async () => {
+    const { server, A, B } = await conflicted({ B: { confirmAnswer: false } });
+    await B.host().loadTheirs();
+    // Somebody saves again and this tab follows: the offer is still there,
+    // against a document that is no longer the one the writer loaded.
+    A.type('A2 newer work');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.equal(B.text(), 'A2 newer work');
+    assert.equal(B.view.baseVersion, 3);
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'following does not take the offer away');
+    assert.equal(B.view.setAsideBase, 2);
+
+    B.host().putBack();
+    assert.deepEqual(B.questions, [PUT_BACK_QUESTION]);
+    assert.equal(B.text(), 'A2 newer work', 'declined: the page is untouched');
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'and the offer stands');
+    assert.equal(B.view.setAsideFrom, 'conflict');
+    assert.equal(B.view.setAsideBase, 2);
+    assert.equal(B.view.overwriteOwed, false);
+    assert.equal(B.view.unsaved, false);
+    await B.debounce();
+    assert.equal(B.sent.length, 0);
+
+    // Asked again, and this time answered yes.
+    B.confirmAnswer = true;
+    B.host().putBack();
+    assert.equal(B.questions.length, 2);
+    assert.equal(B.text(), 'B1');
+    assert.equal(B.view.setAside, null);
+    await B.debounce();
+    assert.deepEqual(
+        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        [['B1', 3, true]]
+    );
+    await B.land();
+    assert.equal(server.json.text, 'B1');
+    assert.deepEqual(server.history, [{ version: 3, text: 'A2 newer work' }]);
+});
+
+test('Put it back after this tab own later save asks first too', async () => {
+    const { server, B } = await conflicted({ B: { confirmAnswer: false } });
+    await B.host().loadTheirs();
+    B.type('A1 and new work by B');
+    await B.debounce();
+    await B.land();
+    assert.equal(B.view.baseVersion, 3);
+    assert.equal(B.view.setAsideBase, 2);
+
+    B.host().putBack();
+    assert.deepEqual(B.questions, [PUT_BACK_QUESTION]);
+    assert.equal(B.text(), 'A1 and new work by B');
+    assert.equal(server.json.text, 'A1 and new work by B');
+    assert.equal(B.sent.length, 1);
+});
+
+test('Put it back over text that is not saved yet asks first, and says that text will be lost', async () => {
+    const { B } = await conflicted({ B: { confirmAnswer: false } });
+    await B.host().loadTheirs();
+    // Typed after Load theirs and not sent yet: it is in no saved version.
+    B.type('A1 and words nobody has stored');
+
+    B.host().putBack();
+    assert.deepEqual(B.questions, [PUT_BACK_QUESTION + PUT_BACK_UNSAVED_WARNING]);
+    assert.equal(B.text(), 'A1 and words nobody has stored');
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')));
+    assert.equal(B.draft(), 'A1 and words nobody has stored');
+});
+
+test('Put it back does not warn about unsaved text when the only edit was undone again', async () => {
+    const { B } = await conflicted();
+    await B.host().loadTheirs();
+    B.type('A1x');
+    B.type('A1');
+    await B.debounce();
+    assert.equal(B.view.unsaved, true, 'no tick has settled it yet');
+
+    B.host().putBack();
+    assert.deepEqual(B.questions, [], 'the page holds exactly what the writer loaded: no question');
+    assert.equal(B.text(), 'B1');
+    assert.equal(B.view.overwriteOwed, true);
+});
+
+test('the question says what will be replaced and where the replaced version goes', () => {
+    assert.equal(
+        PUT_BACK_QUESTION,
+        'Put this text back? It will replace the text on the page now, including everything saved since this text was written. The version it replaces is kept in the history.'
+    );
+    assert.equal(PUT_BACK_UNSAVED_WARNING, ' Text on the page that has not been saved yet will be lost.');
 });
 
 // ───────────────────────────────────────────────────────── fix A
@@ -1920,6 +2125,7 @@ test('an undo whose save the server refused outright is settled: the server stil
     B.type('startx');
     await B.debounce();
     B.type('start');
+    assert.equal(B.draft(), 'start', 'kept while the save of startx is in the air: the server may be about to hold startx');
     await B.debounce();
 
     // The schema rejects the save of startx: nothing was written.
@@ -1928,6 +2134,7 @@ test('an undo whose save the server refused outright is settled: the server stil
     await B.saveReturns();
 
     assert.equal(B.sent.length, 1, 'the editor holds what the server holds: nothing more is sent');
+    assert.equal(B.draft(), null, 'and a draft that says what the server confirmed is not kept');
     assert.equal(B.view.unsaved, false);
     assert.equal(B.view.resave, false);
     assert.equal(B.word(), 'Saved');
@@ -2184,6 +2391,7 @@ test('fail-closed: nothing is saved, nothing is applied, no draft is touched, an
     assert.equal(R.view.baseVersion, 1);
     assert.equal(R.view.resave, true, 'the owed save is not written off either');
     assert.equal(R.view.setAside, JSON.stringify(doc('set aside')));
+    assert.deepEqual(R.questions, [], 'Put it back does not even ask');
     assert.equal(R.engine.pending.version, 2, 'the waiting document was not taken');
     assert.equal(
         R.view.aiError,
@@ -2441,6 +2649,8 @@ test('a draft the document has moved past is parked and set aside, and can be pu
     assert.deepEqual(A.questions, [], 'it is not offered for restore: that would overwrite a newer save');
     assert.equal(A.text(), 'version 2 by somebody');
     assert.equal(A.view.setAside, JSON.stringify(doc('offline work')));
+    assert.equal(A.view.setAsideFrom, 'draft');
+    assert.equal(A.view.setAsideBase, 2);
     assert.equal(A.stale(), 'offline work');
     assert.equal(A.drafts.get(STALE).baseVersion, 1);
     assert.equal(A.draft(), null);
@@ -2448,6 +2658,7 @@ test('a draft the document has moved past is parked and set aside, and can be pu
 
     await A.poll();
     A.host().putBack();
+    assert.deepEqual(A.questions, [PUT_BACK_QUESTION], 'a draft from an earlier visit is never put back unasked');
     await A.debounce();
     assert.deepEqual([A.sent[0].json.text, A.sent[0].base, A.sent[0].overwrite], ['offline work', 2, true]);
     await A.land();
@@ -2461,6 +2672,8 @@ test('a draft the document has moved past is not set aside when the document alr
     const A = await reopened(w, { json: JSON.stringify(doc('last words')), baseVersion: 1 });
 
     assert.equal(A.view.setAside, null, 'there is nothing to put back');
+    assert.equal(A.view.setAsideFrom, null);
+    assert.equal(A.view.setAsideBase, null);
     assert.equal(A.stale(), 'last words');
     assert.equal(A.draft(), null);
 });
@@ -2556,13 +2769,207 @@ test('reloading instead of choosing: the text comes back set aside, and Put it b
     await again.open();
     assert.equal(again.text(), 'A1');
     assert.equal(again.view.setAside, JSON.stringify(doc('B1')));
+    assert.equal(again.view.setAsideFrom, 'draft');
 
     await again.poll();
     again.host().putBack();
+    assert.deepEqual(again.questions, [PUT_BACK_QUESTION]);
     await again.debounce();
     await again.land();
     assert.equal(server.json.text, 'B1');
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
+});
+
+// ───────────────────────────────────────────────────────── a draft whose text is already in the document
+
+test('the beacon stored the last words and nobody saved since: the draft is parked and nothing is offered', async () => {
+    const { server, clock, A } = await pair();
+    A.type('A last words');
+    A.leave();
+    assert.deepEqual(
+        A.beacons.map((beacon) => [beacon.body.content.text, beacon.body.base_version, beacon.answer.status]),
+        [['A last words', 1, 200]]
+    );
+    assert.equal(server.json.text, 'A last words');
+    assert.equal(A.draft(), 'A last words', 'the page was gone before it could clear its draft');
+
+    const again = makeTab({ server, clock }, 'A2', { drafts: A.drafts });
+    await again.open();
+    assert.equal(again.text(), 'A last words');
+    assert.equal(again.view.setAside, null);
+    assert.equal(again.view.setAsideFrom, null);
+    assert.deepEqual(again.questions, []);
+    assert.equal(again.draft(), null);
+});
+
+test('the beacon stored the last words and others saved since: the draft is offered, and putting it back asks first', async () => {
+    const { server, clock, A, B } = await pair();
+    A.type('A last words');
+    A.leave();
+    assert.equal(server.version, 2);
+
+    // The other writer follows and works on: two more versions.
+    await B.cycle();
+    B.type('A last words, then B one');
+    await B.debounce();
+    await B.land();
+    B.type('A last words, then B one and B two');
+    await B.debounce();
+    await B.land();
+    assert.equal(server.version, 4);
+
+    // The first browser opens the document again. Its draft (based on
+    // version 1) holds text the document has had since version 2, but the
+    // page cannot know that: all it sees is a draft that differs.
+    const again = makeTab({ server, clock }, 'A2', { drafts: A.drafts, confirmAnswer: false });
+    await again.open();
+    await again.poll();
+    assert.equal(again.text(), 'A last words, then B one and B two');
+    assert.equal(again.view.setAside, JSON.stringify(doc('A last words')));
+    assert.equal(again.view.setAsideFrom, 'draft', 'the page knows this is a draft from an earlier visit, not text it took away');
+    assert.equal(again.view.setAsideBase, 4);
+
+    // One click must not replace two versions of somebody else's work.
+    again.host().putBack();
+    assert.deepEqual(again.questions, [PUT_BACK_QUESTION]);
+    assert.equal(again.text(), 'A last words, then B one and B two');
+    assert.equal(again.view.setAside, JSON.stringify(doc('A last words')));
+    await again.debounce();
+    assert.equal(again.sent.length, 0);
+    assert.equal(server.version, 4);
+    assert.deepEqual(server.history, []);
+
+    // The writer can decline for good. The parked copy stays.
+    again.host().discardSetAside();
+    assert.equal(again.view.setAside, null);
+    assert.equal(again.stale(), 'A last words');
+    await B.cycle();
+    assert.equal(B.text(), 'A last words, then B one and B two');
+});
+
+test('a save in the air when the tab closed landed, and others saved since: putting the draft back asks first', async () => {
+    const { server, clock, A, B } = await pair();
+    A.type('A last words');
+    await A.debounce();
+    // The tab is closed with the save in the air. The server stores it;
+    // the answer reaches nobody, so the draft is never cleared.
+    A.leave();
+    assert.equal(A.beacons.length, 0, 'nothing was left for a beacon to send');
+    A.saveArrives();
+    assert.equal(server.json.text, 'A last words');
+    assert.equal(A.draft(), 'A last words');
+
+    await B.cycle();
+    B.type('A last words, then B');
+    await B.debounce();
+    await B.land();
+
+    const again = makeTab({ server, clock }, 'A2', { drafts: A.drafts, confirmAnswer: false });
+    await again.open();
+    await again.poll();
+    assert.equal(again.view.setAsideFrom, 'draft');
+
+    again.host().putBack();
+    assert.deepEqual(again.questions, [PUT_BACK_QUESTION]);
+    assert.equal(again.text(), 'A last words, then B');
+    await again.debounce();
+    assert.equal(again.sent.length, 0);
+    assert.equal(server.json.text, 'A last words, then B');
+});
+
+test('a save in the air when the tab closed landed and nobody saved since: nothing is offered', async () => {
+    const { server, clock, A } = await pair();
+    A.type('A last words');
+    await A.debounce();
+    A.leave();
+    A.saveArrives();
+
+    const again = makeTab({ server, clock }, 'A2', { drafts: A.drafts });
+    await again.open();
+    assert.equal(again.view.setAside, null);
+    assert.deepEqual(again.questions, []);
+    assert.equal(again.text(), 'A last words');
+});
+
+test('an edit undone inside the debounce leaves no draft: after somebody saves, reopening offers nothing', async () => {
+    const { server, clock, A, B } = await pair();
+    B.type('startx');
+    assert.equal(B.draft(), 'startx');
+    B.type('start');
+    assert.equal(B.draft(), null, 'a draft that says what the server confirmed is not kept');
+    await B.debounce();
+    assert.equal(B.sent.length, 0);
+    B.leave();
+    assert.equal(B.beacons.length, 0);
+
+    A.type('A1');
+    await A.debounce();
+    await A.land();
+
+    const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
+    await again.open();
+    assert.equal(again.text(), 'A1');
+    assert.equal(again.view.setAside, null, 'no offer to put back a copy that holds none of this reader text');
+    assert.equal(again.view.setAsideFrom, null);
+    assert.equal(again.stale(), null);
+    assert.deepEqual(again.questions, []);
+    assert.deepEqual(again.draftCalls, ['loadDraft']);
+});
+
+test('an edit undone after a save leaves no draft either: the draft store is cleared, not rewritten', async () => {
+    const { A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    await A.land();
+    assert.equal(A.draft(), null);
+
+    A.type('A1 and a typo');
+    assert.equal(A.draft(), 'A1 and a typo');
+    A.type('A1');
+    assert.equal(A.draft(), null);
+    assert.equal(A.draftCalls.at(-1), 'clearDraft');
+});
+
+test('an edit undone inside the debounce in a browser that cannot keep drafts is still settled', async () => {
+    const w = world();
+    const A = w.tab('A', { draftStore: false });
+    await A.open();
+    await A.poll();
+    A.type('startx');
+    A.type('start');
+    await A.debounce();
+
+    await A.cycle();
+    assert.equal(A.view.unsaved, false);
+    assert.equal(A.word(), 'Saved');
+});
+
+test('an edit undone inside the debounce that a tick settles leaves no draft behind', async () => {
+    const { clock, B } = await pair();
+    // The save of the first edit is given up on: from then on nothing is
+    // confirmed, so the undo is a draft worth keeping...
+    B.type('startx');
+    await B.debounce();
+    B.saveNeverAnswers();
+    clock.now += SAVE_EXPIRY_MS;
+    B.type('start');
+    assert.equal(B.draft(), 'start');
+
+    // ...until a save is accepted and the server says what it holds.
+    await B.debounce();
+    await B.land();
+    assert.equal(B.view.confirmed, JSON.stringify(doc('start')));
+    assert.equal(B.draft(), null);
+
+    // From here an undone edit is settled by the next tick, draft and all.
+    B.type('start again');
+    await B.debounce();
+    B.type('start');
+    assert.equal(B.draft(), 'start', 'kept while the save of the other text is in the air');
+    await B.debounce();
+    await B.land();
+    assert.equal(B.view.unsaved, false);
+    assert.equal(B.draft(), null);
 });
 
 // ───────────────────────────────────────────────────────── the module holds no state

@@ -29,6 +29,18 @@
 export const SAVE_EXPIRY_MS = 15000;
 
 /**
+ * What Put it back asks before it replaces the page with text that was set
+ * aside, whenever the writer cannot be taken to know what that replaces:
+ * the text is a draft from an earlier visit, or the document has moved on
+ * since the text was set aside, or the page holds text that is not saved.
+ */
+export const PUT_BACK_QUESTION =
+    'Put this text back? It will replace the text on the page now, including everything saved since this text was written. The version it replaces is kept in the history.';
+
+/** Added to the question when the page holds text no saved version has. */
+export const PUT_BACK_UNSAVED_WARNING = ' Text on the page that has not been saved yet will be lost.';
+
+/**
  * This tab's identity for presence and the sync poll. Per page load, not
  * per browser: two tabs of one account are two tabs.
  *
@@ -76,6 +88,12 @@ export function createTabId({ crypto, random, now }) {
  * @property {{version: number, ready: boolean}|null} conflict
  * @property {string|null} setAside the writer's own text, as a JSON string,
  *           kept so the page can offer to put it back
+ * @property {'conflict'|'draft'|null} setAsideFrom where `setAside` came
+ *           from: `conflict` is this tab's text, set aside a moment ago by
+ *           Load theirs; `draft` is a draft found at page load that the
+ *           document has moved past. Null while nothing is set aside
+ * @property {number|null} setAsideBase the document version the page showed
+ *           when the text was set aside. Null while nothing is set aside
  * @property {string} syncNotice
  * @property {string} memberKey
  * @property {string} docUuid
@@ -170,11 +188,30 @@ export function createSyncHost(view, env) {
 
         const handle = env.handle();
         const drafts = env.drafts();
-        // Never write a draft in fail-closed mode: what the editor is
+        // Never touch a draft in fail-closed mode: what the editor is
         // holding then is not the document.
-        if (drafts && handle && handle.autosaves !== false) {
-            drafts.saveDraft(view.docUuid, JSON.stringify(handle.editor.getJSON()), view.baseVersion);
+        if (!drafts || !handle || handle.autosaves === false) {
+            return;
         }
+
+        const json = JSON.stringify(handle.editor.getJSON());
+        // A draft that says exactly what the server last confirmed is never
+        // kept. It protects nothing, and it would outlive the page: once
+        // anybody has saved, the next visit would find a draft that
+        // differs from the document and offer to put back a copy that
+        // holds none of this writer's text. So an edit undone again clears
+        // the draft instead of rewriting it. Not while a save is in the
+        // air, though: the server may be about to hold something else (the
+        // very text that was just undone), and then this draft is the only
+        // record that the writer took it out again. settleIfBackAtConfirmed()
+        // clears it once that save has answered.
+        if (!saveInTheAir() && json === view.confirmed) {
+            drafts.clearDraft(view.docUuid);
+
+            return;
+        }
+
+        drafts.saveDraft(view.docUuid, json, view.baseVersion);
     }
 
     /**
@@ -439,7 +476,8 @@ export function createSyncHost(view, env) {
      * back online. So this runs on every tick: from resendIfOwed(), which
      * the engine reaches after every completed poll and backOnline() calls,
      * and from syncState(). It says Saved only when it takes the tab from
-     * unsaved to nothing unsaved, so an idle reader says nothing.
+     * unsaved to nothing unsaved, so an idle reader says nothing. The
+     * offline draft goes with it: it says what the server holds.
      *
      * Both callers run it AFTER saveInTheAir() has answered no, never
      * before. While a save is in the air the server may be about to hold
@@ -467,6 +505,12 @@ export function createSyncHost(view, env) {
 
         view.unsaved = false;
         view.overwriteOwed = false;
+        // The draft now says what the server holds: it is not kept (see
+        // edited()).
+        const drafts = env.drafts();
+        if (drafts) {
+            drafts.clearDraft(view.docUuid);
+        }
         env.report('good', 'Saved');
     }
 
@@ -652,7 +696,8 @@ export function createSyncHost(view, env) {
     /**
      * Load theirs: show the newer document. This tab's text is parked as a
      * stale- draft and also held in `setAside`, so the page can offer to
-     * put it back.
+     * put it back. `setAsideFrom` and `setAsideBase` record that it came
+     * from this choice and which version the page showed at that moment.
      *
      * @returns {Promise<void>}
      */
@@ -694,6 +739,11 @@ export function createSyncHost(view, env) {
         }
 
         view.setAside = mine;
+        view.setAsideFrom = 'conflict';
+        // The version the page shows now: applyFromSync() has just moved
+        // the base to it. Put it back straight away replaces exactly this
+        // version, which the writer has just chosen to look at.
+        view.setAsideBase = view.baseVersion;
         view.conflict = null;
         env.report('good', 'Saved');
     }
@@ -702,7 +752,25 @@ export function createSyncHost(view, env) {
      * Put it back: the writer chose Load theirs and wants their own text
      * after all (or opened the page with a draft the document had moved
      * past). setContent() emits `update`, so the ordinary autosave sends
-     * the text on the current base.
+     * the text on the current base, as an overwrite.
+     *
+     * It replaces everything on the page, and through the save that
+     * follows the stored document, so the writer has to know what that is.
+     * Straight after Load theirs they do: it is the version they have just
+     * chosen to look at. In three cases they may not, and the page asks
+     * first (PUT_BACK_QUESTION, through `env.confirm`); a no changes
+     * nothing, and the offer stays:
+     *   - the text is a draft found at page load (`setAsideFrom` is not
+     *     `conflict`). The page cannot tell a draft whose text was never
+     *     stored from one whose text went into the document after the page
+     *     died (the unload beacon, or a save that was in the air), so it
+     *     may be offering text the document already has, and putting it
+     *     back would undo everything saved after it;
+     *   - the document has moved on since the text was set aside
+     *     (`baseVersion` is no longer `setAsideBase`): this tab followed
+     *     other people's saves, or saved the writer's own later work;
+     *   - the page holds text that is not saved yet. That text is in no
+     *     version, so the question also says it will be lost.
      */
     function putBack() {
         const handle = env.handle();
@@ -711,9 +779,20 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        // An edit undone again is not unsaved text: do not warn about it.
+        if (!saveInTheAir()) {
+            settleIfBackAtConfirmed(handle);
+        }
+
+        const knowingly =
+            view.setAsideFrom === 'conflict' && view.baseVersion === view.setAsideBase && !view.unsaved;
+        if (!knowingly && !env.confirm(PUT_BACK_QUESTION + (view.unsaved ? PUT_BACK_UNSAVED_WARNING : ''))) {
+            return;
+        }
+
         try {
             handle.editor.commands.setContent(JSON.parse(view.setAside), { errorOnInvalidContent: true });
-            view.setAside = null;
+            forgetSetAside();
             // This replaces the version that was loaded, exactly as Keep
             // mine would have: the save that carries it says so, and the
             // server keeps the replaced version in the history first.
@@ -721,6 +800,27 @@ export function createSyncHost(view, env) {
         } catch (_) {
             view.syncNotice = 'Your text could not be put back.';
         }
+    }
+
+    /**
+     * Discard: the writer does not want the text that was set aside. Only
+     * the offer goes. Nothing is sent, the page is not touched, and the
+     * copy parked under stale-<uuid> stays for its 7 days, so declining
+     * loses nothing.
+     */
+    function discardSetAside() {
+        forgetSetAside();
+    }
+
+    /**
+     * Nothing is set aside any more. The three fields go together: where
+     * the text came from and which version it was set aside against mean
+     * nothing without the text.
+     */
+    function forgetSetAside() {
+        view.setAside = null;
+        view.setAsideFrom = null;
+        view.setAsideBase = null;
     }
 
     /**
@@ -791,12 +891,18 @@ export function createSyncHost(view, env) {
                 // the next app boot collects it after 7 days.
                 await drafts.parkStaleDraft(view.docUuid, draft.json, draft.baseVersion);
                 drafts.clearDraft(view.docUuid);
-                // Offer it in the page as well: the notice bar shows
-                // Your text was set aside, with Put it back. Not when the
-                // document already says exactly this (the unload beacon
-                // stored it): there is nothing to put back.
+                // Offer it in the page as well, through the notice bar and
+                // Put it back. Not when the document already says exactly
+                // this (the unload beacon stored it and nobody has saved
+                // since): there is nothing to put back. When it differs,
+                // the page cannot tell whether this text was never stored
+                // or was stored and then built on by later saves, so the
+                // source is recorded as a draft and putBack() asks before
+                // it replaces anything.
                 if (env.documentsDiffer(parsed, editor.getJSON())) {
                     view.setAside = draft.json;
+                    view.setAsideFrom = 'draft';
+                    view.setAsideBase = view.baseVersion;
                 }
                 env.info(
                     '[Dot.Doc] An offline draft based on v' +
@@ -976,6 +1082,7 @@ export function createSyncHost(view, env) {
         keepMine,
         loadTheirs,
         putBack,
+        discardSetAside,
         membersChanged,
         restoreDraft,
         applySuggestion,

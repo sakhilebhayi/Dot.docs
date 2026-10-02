@@ -41,6 +41,16 @@
         // document has since moved past. Kept so the page can offer to put
         // it back.
         setAside: null,
+        // Where setAside came from, and the document version the page
+        // showed when the text was set aside. The source is 'conflict'
+        // (Load theirs, a moment ago in this tab) or 'draft' (a draft found
+        // at page load that the document has moved past: its text may
+        // already be part of the document). Put it back asks first when the
+        // source is a draft or baseVersion is no longer setAsideBase. Both
+        // are null while nothing is set aside, and everything that clears
+        // setAside clears them with it.
+        setAsideFrom: null,
+        setAsideBase: null,
         // A reason the page can no longer stay in step (signed out, access
         // removed, document deleted, a version this editor cannot open).
         // Shown in the notice bar.
@@ -273,6 +283,7 @@
         keepMine() { this.syncHost().keepMine(); },
         loadTheirs() { return this.syncHost().loadTheirs(); },
         putBack() { this.syncHost().putBack(); },
+        discardSetAside() { this.syncHost().discardSetAside(); },
         membersChanged(members) { this.syncHost().membersChanged(members); },
         restoreDraftIfRestorable() { return this.syncHost().restoreDraft(); },
         applySuggestion(content, version) { this.syncHost().applySuggestion(content, version); },
