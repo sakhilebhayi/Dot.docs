@@ -21,6 +21,8 @@ function harness({ version = 1, state = 'clean', visible = true } = {}) {
         refusals: [],
         members: [],
         stopped: [],
+        /** What the host was called with, in order: 'members', 'state', 'polled'. */
+        calls: [],
         applyResult: true,
         timer: null,
     };
@@ -33,7 +35,11 @@ function harness({ version = 1, state = 'clean', visible = true } = {}) {
                 h.requests.push({ payload, resolve, reject });
             }),
         host: {
-            state: () => h.state,
+            state: () => {
+                h.calls.push('state');
+
+                return h.state;
+            },
             applyRemote: (remote) => {
                 h.applied.push(remote);
                 if (h.applyResult instanceof Error) {
@@ -45,8 +51,15 @@ function harness({ version = 1, state = 'clean', visible = true } = {}) {
             onConflict: (remote) => h.conflicts.push(remote),
             onRefused: (remote) => h.refusals.push(remote),
             onMembers: (members, others) => {
+                h.calls.push('members');
                 h.members.push({ members, others });
                 if (h.membersThrow) {
+                    throw new Error('host failed');
+                }
+            },
+            onPolled: () => {
+                h.calls.push('polled');
+                if (h.polledThrows) {
                     throw new Error('host failed');
                 }
             },
@@ -379,6 +392,111 @@ test('a 403 with no JSON body is a failure to retry, not a reason to stop', asyn
 
     await h.fire();
     assert.equal(h.requests.length, 1, 'it polls again');
+});
+
+// ───────────────────────────────────────────────────────── a tick for the host on every completed poll
+
+const ticks = (h) => h.calls.filter((call) => call === 'polled').length;
+
+test('a poll that is answered gives the host a tick, after the members and after the document was offered', async () => {
+    const h = harness({ version: 1 });
+    h.engine.start();
+    await settle();
+    await h.answer(200, moved(2));
+
+    assert.deepEqual(h.calls, ['members', 'state', 'polled']);
+
+    await h.fire();
+    await h.answer(200, quiet(2, 1));
+    assert.equal(ticks(h), 2, 'one tick for each poll, also when nothing changed');
+});
+
+for (const [what, complete] of [
+    ['is answered 403 with no body', (h) => h.answer(403)],
+    ['is answered 503 with no body', (h) => h.answer(503)],
+    ['is answered 500 with a JSON body', (h) => h.answer(500, { message: 'Server Error' })],
+    ['is answered 429 with a JSON body', (h) => h.answer(429, { message: 'Too Many Attempts.' })],
+    ['is answered 200 with no body', (h) => h.answer(200)],
+    ['never reaches the server', (h) => h.fail()],
+]) {
+    test(`a poll that ${what} still gives the host a tick`, async () => {
+        // The host re-sends a save nobody answered from this tick. If only an
+        // ANSWERED poll gave one, a blocked poll would stop the tab saving.
+        const h = harness();
+        h.engine.start();
+        await settle();
+        await complete(h);
+
+        assert.deepEqual(h.calls, ['polled'], 'no members, no document: only the tick');
+        assert.equal(h.timer.ms, FAST_MS * 2, 'and it is still a failure to back off from');
+
+        await h.fire();
+        await complete(h);
+        assert.equal(ticks(h), 2);
+    });
+}
+
+test('a host whose tick throws does not end the polling', async () => {
+    const h = harness();
+    h.polledThrows = true;
+    h.engine.start();
+    await settle();
+
+    await h.fail();
+    assert.equal(h.timer.ms, FAST_MS * 2);
+
+    await h.fire();
+    await h.answer(200, quiet(1, 1));
+    assert.equal(h.timer.ms, FAST_MS);
+    assert.equal(ticks(h), 2);
+});
+
+test('a poll that stops the engine gives no tick, and neither does one answered after stop()', async () => {
+    const stoppedByTheApplication = harness();
+    stoppedByTheApplication.engine.start();
+    await settle();
+    await stoppedByTheApplication.answer(403, { message: 'This action is unauthorized.' });
+    assert.deepEqual(stoppedByTheApplication.stopped, ['forbidden']);
+    assert.equal(ticks(stoppedByTheApplication), 0);
+
+    const stoppedByThePage = harness();
+    stoppedByThePage.engine.start();
+    await settle();
+    stoppedByThePage.engine.stop();
+    await stoppedByThePage.answer(200, quiet(1, 1));
+    assert.equal(ticks(stoppedByThePage), 0);
+});
+
+test('a host with no tick of its own is polled as before', async () => {
+    const requests = [];
+    let timer = null;
+    const engine = createSyncEngine({
+        version: 1,
+        tab: 'tab-a',
+        request: () => new Promise((resolve) => requests.push(resolve)),
+        host: {
+            state: () => 'clean',
+            applyRemote: () => true,
+            onConflict: () => {},
+            onRefused: () => {},
+            onMembers: () => {},
+            onStopped: () => {},
+        },
+        setTimer: (fn, ms) => {
+            timer = { fn, ms };
+
+            return timer;
+        },
+        clearTimer: () => {
+            timer = null;
+        },
+    });
+    engine.start();
+    await settle();
+    requests.shift()({ status: 503, body: null });
+    await settle();
+
+    assert.equal(timer.ms, FAST_MS * 2, 'the next poll is armed');
 });
 
 test('a hidden tab does not poll; becoming visible polls at once', async () => {

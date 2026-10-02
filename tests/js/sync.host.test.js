@@ -393,6 +393,11 @@ function makeTab({ server, clock }, name, options = {}) {
         t.polls.shift().resolve({ status, body });
         await settle();
     };
+    /** The oldest poll in the air never reaches the server: the request itself fails. */
+    t.pollFails = async () => {
+        t.polls.shift().reject(new Error('network'));
+        await settle();
+    };
     t.fireTimer = async () => {
         const { fn } = t.timer;
         t.timer = null;
@@ -1233,6 +1238,118 @@ test('a save that never answers does not stop the notice: when somebody else sav
     assert.equal(A.view.conflict.version, 2);
     assert.equal(A.text(), 'A long paragraph');
     assert.equal(server.json.text, 'B1');
+});
+
+// ───────────────────────────────────────────────────────── a save given up on while the polls are blocked
+
+// Something in front of the application (a firewall, a rate limiter) or the
+// network itself answers the poll; the application never does.
+const BLOCKED_POLLS = [
+    ['answered 403 with no body', (t) => t.pollAnswers(403, null)],
+    ['answered 503 with no body', (t) => t.pollAnswers(503, null)],
+    ['answered 500 with a JSON body', (t) => t.pollAnswers(500, { message: 'Server Error' })],
+    ['answered 429 with a JSON body', (t) => t.pollAnswers(429, { message: 'Too Many Attempts.' })],
+    ['that never reach the server', (t) => t.pollFails()],
+];
+
+for (const [what, blocked] of BLOCKED_POLLS) {
+    test(`with polls ${what}, a save that never answers is given up on after fifteen seconds: the next autosave goes out by itself`, async () => {
+        const { server, clock, A } = await pair();
+        A.type('A1');
+        await A.debounce();
+        A.saveNeverAnswers();
+
+        // Not one poll is answered from here on.
+        await A.fireTimer();
+        await blocked(A);
+        assert.equal(A.view.saving, 1, 'inside fifteen seconds the save is still waited for');
+
+        clock.now += SAVE_EXPIRY_MS;
+        A.type('A2');
+        await A.debounce();
+        assert.deepEqual(
+            A.sent.map((save) => [save.json.text, save.base]),
+            [
+                ['A1', 1],
+                ['A2', 1],
+            ],
+            'persist() gives up on the old save itself; it does not wait for a poll to do it'
+        );
+        assert.equal(A.word(), 'Saving');
+
+        await A.land();
+        assert.equal(server.json.text, 'A2');
+        assert.equal(A.view.unsaved, false);
+        assert.equal(A.view.saving, 0);
+        assert.equal(A.word(), 'Saved');
+        assert.equal(A.draft(), null);
+
+        // And nothing is sent a second time on the next blocked poll.
+        await A.fireTimer();
+        await blocked(A);
+        assert.equal(A.sent.length, 2);
+    });
+
+    test(`with polls ${what}, a tab that has stopped typing still sends its owed save once the old one is given up on`, async () => {
+        const { server, clock, A } = await pair();
+        A.type('A1');
+        await A.debounce();
+        A.saveNeverAnswers();
+        // Handed over inside the fifteen seconds: owed. Then the writer stops.
+        A.type('A2');
+        await A.debounce();
+        assert.equal(A.sent.length, 1);
+        assert.equal(A.view.resave, true);
+
+        await A.fireTimer();
+        await blocked(A);
+        assert.equal(A.sent.length, 1, 'still waited for');
+
+        clock.now += SAVE_EXPIRY_MS;
+        await A.fireTimer();
+        await blocked(A);
+        assert.deepEqual(
+            A.sent.map((save) => [save.json.text, save.base]),
+            [
+                ['A1', 1],
+                ['A2', 1],
+            ],
+            'every completed poll is a tick, answered or not'
+        );
+
+        await A.land();
+        assert.equal(server.json.text, 'A2');
+        assert.equal(A.view.unsaved, false);
+        assert.equal(A.word(), 'Saved');
+    });
+}
+
+test('five minutes of typing behind blocked polls and one lost save: every autosave after the first fifteen seconds is sent', async () => {
+    const { server, clock, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    A.saveNeverAnswers();
+
+    for (let round = 2; round <= 30; round += 1) {
+        clock.now += 10_000;
+        A.type(`A${round}`);
+        await A.debounce();
+        await A.land();
+        await A.fireTimer();
+        await A.pollAnswers(403, null);
+    }
+
+    assert.equal(server.json.text, 'A30');
+    assert.equal(A.view.unsaved, false);
+    assert.equal(A.view.saving, 0);
+    assert.equal(A.word(), 'Saved');
+    // Round 2 came inside the fifteen seconds and waited as an owed save.
+    // Round 3's autosave gave up on the lost save and went out, carrying the
+    // whole document, so round 2 was never sent on its own.
+    assert.deepEqual(
+        A.sent.map((save) => save.json.text),
+        ['A1', ...Array.from({ length: 28 }, (_, index) => `A${index + 3}`)]
+    );
 });
 
 // ───────────────────────────────────────────────────────── what counts as unsaved

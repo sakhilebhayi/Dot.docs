@@ -117,9 +117,12 @@ export function createSyncHost(view, env) {
      * A save that has not answered in 15 seconds is not coming back (a
      * dropped connection leaves the $wire promise pending for ever). The
      * tab stops waiting for it, and the save is owed again: resendIfOwed()
-     * sends it. This is the ONLY place a save expires. syncState() and
-     * resendIfOwed() both ask here, so whichever of them notices first
-     * leaves the same state behind.
+     * sends it. This is the ONLY place a save expires, and everything that
+     * needs to know whether a save is in the air asks here: persist(),
+     * syncState() and resendIfOwed(). Whichever of them notices first
+     * leaves the same state behind. persist() is the one that matters when
+     * nothing else runs: resendIfOwed() is reached from a poll, and a tab
+     * whose polls are blocked must still be able to save.
      *
      * @returns {boolean}
      */
@@ -207,7 +210,12 @@ export function createSyncHost(view, env) {
         // sends it once that one has answered. Checked BEFORE the conflict,
         // because the save in the air may be the Keep mine save that ends
         // the conflict: text handed over meanwhile must not be dropped.
-        if (view.saving > 0 && !force) {
+        // Asked through saveInTheAir(), never by reading `saving`: a save
+        // that has not answered in 15 seconds is given up on HERE too, and
+        // this autosave then goes out by itself. Otherwise one lost answer
+        // would turn every later autosave into an owed one for as long as
+        // no poll came to notice.
+        if (saveInTheAir() && !force) {
             view.resave = true;
 
             return Promise.resolve();
@@ -319,8 +327,9 @@ export function createSyncHost(view, env) {
 
     /**
      * Send the save that is owed, if one is and nothing stands in its way.
-     * Called when a save answers, on every answered poll and when the
-     * browser comes back online. It only ever sends text that is still
+     * Called when a save answers, after every poll that completed (answered
+     * or not: the engine's `onPolled` tick) and when the browser comes back
+     * online. It only ever sends text that is still
      * unsaved HERE (`unsaved`); it never sends a copy the writer has not
      * touched.
      */
@@ -860,6 +869,12 @@ export function createSyncHost(view, env) {
                 membersChanged(members);
                 resendIfOwed();
             },
+            // And so is every poll that completed without an answer from
+            // the application (a firewall's 403, a 5xx, no network): saving
+            // must not depend on the follow loop being healthy. On an
+            // answered poll this is the second call; by then the save is in
+            // the air or nothing is owed, so it does nothing.
+            onPolled: () => resendIfOwed(),
             onStopped: (reason) => {
                 view.syncNotice =
                     {

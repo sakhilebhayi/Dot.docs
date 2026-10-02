@@ -12,6 +12,10 @@
  *     but only if the host is `clean`. A tab with unsaved typing is told
  *     there is a conflict instead; a tab with a save in flight is left
  *     alone until that save settles; a read-only tab is never written to.
+ *   - After every poll that completed, answered or not, it gives the host a
+ *     tick (`onPolled`), so that what the host does on a timer of its own
+ *     (sending a save that is owed) does not depend on the poll being
+ *     answered.
  *   - It stops for good when the APPLICATION says the session has ended,
  *     access was removed or the document is gone. The application answers
  *     those with a JSON body; the same status with no JSON body came from
@@ -55,6 +59,7 @@ const STOP_REASONS = { 401: 'signed-out', 419: 'signed-out', 403: 'forbidden', 4
  *     onConflict: (remote: {version: number, json: object, outline: object|null, css: string|null}) => void,
  *     onRefused: (remote: {version: number, json: object, outline: object|null, css: string|null}) => void,
  *     onMembers: (members: object[], others: number) => void,
+ *     onPolled?: () => void,
  *     onStopped: (reason: 'signed-out'|'forbidden'|'gone') => void,
  *   },
  *   version: number,
@@ -215,6 +220,17 @@ export function createSyncEngine(options) {
             } catch (_) {
                 // Keep polling.
             }
+        }
+
+        // Every completed poll gives the host a tick, answered or not. The
+        // host sends a save that is owed from it (one that was given up on
+        // after never answering, for one). Were the tick given only on a
+        // 200, a tab whose polls are blocked by something in front of the
+        // application would also stop saving. A throw must not end the loop.
+        try {
+            host.onPolled?.();
+        } catch (_) {
+            // Keep polling.
         }
 
         if (again) {
