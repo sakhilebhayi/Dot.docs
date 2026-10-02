@@ -351,6 +351,43 @@ class EditorSyncWiringTest extends TestCase
     }
 
     /**
+     * What each choice does to somebody's text used to be said only in a
+     * `title`, which a keyboard does not bring up and screen readers treat
+     * unevenly. Each button is now also described by an element in the bar
+     * (aria-describedby) that says the same as its title.
+     *
+     * And a button pressed from the keyboard hands the keyboard back to the
+     * document: the row that held the button goes away once the choice is
+     * carried out, and the focus was left on nothing.
+     */
+    public function test_the_notice_buttons_say_what_they_do_and_give_the_keyboard_back(): void
+    {
+        $html = $this->editorHtml();
+        $dom = HTMLDocument::createFromString($html, LIBXML_NOERROR);
+        $bar = $dom->querySelector('.doc-notices');
+        $this->assertNotNull($bar);
+
+        $described = 0;
+        foreach ($bar->querySelectorAll('button') as $button) {
+            $id = (string) $button->getAttribute('aria-describedby');
+            $this->assertNotSame('', $id, $this->words($button).' is described');
+            $this->assertCount(1, $dom->querySelectorAll('[id="'.$id.'"]'));
+            $description = $bar->querySelector('[id="'.$id.'"]');
+            $this->assertNotNull($description, 'the description is inside the bar');
+            $this->assertTrue($description->hasAttribute('hidden'), 'it is read with the button, not shown');
+            $this->assertSame($button->getAttribute('title'), $this->words($description));
+            $described++;
+        }
+        $this->assertSame(4, $described);
+
+        // One listener on the bar, after the button's own; the method is
+        // page glue in the component.
+        $this->assertSame('noticePressed($event)', $bar->getAttribute('@click'));
+        $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
+        $this->assertStringContainsString('noticePressed(event) {', $alpine[1]);
+    }
+
+    /**
      * An element under `wire:ignore` is never brought up to date by a later
      * render, so nothing in the notice bar may depend on what the server
      * renders: no Blade condition, no echoed value, no Livewire directive

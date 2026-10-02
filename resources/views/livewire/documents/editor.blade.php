@@ -102,6 +102,22 @@
             window.dispatchEvent(new CustomEvent('shell:save-state', { detail: { tone, word } }));
         },
 
+        // A button in the notice bar was pressed from the keyboard: hand the
+        // keyboard back to the document. The row that held the button goes
+        // away once the choice has been carried out (at once, or when the
+        // save answers), and the focus would be left on nothing. The notice
+        // bar calls this for every click inside it, after the button's own
+        // handler. Only a press from the keyboard counts (a click the
+        // browser made from Enter or Space has detail 0): after a tap,
+        // focusing the paper would bring up the on-screen keyboard over a
+        // document the writer has just asked to look at. No scrolling:
+        // nobody asked to go anywhere. This is page glue about focus, not a
+        // decision about a save; sync/host.js has no DOM.
+        noticePressed(event) {
+            if (event.detail !== 0 || !event.target.closest('button')) return;
+            this.ed()?.commands.focus(null, { scrollIntoView: false });
+        },
+
         init() {
             // Alpine now comes only from Livewire's bundle (the duplicate CDN
             // tag is gone from layouts/app.blade.php — two Alpines break
@@ -800,7 +816,8 @@
                Do NOT use x-bind:hidden on anything outside a wire:ignore
                element: without the x-show guard a morph writes the newest
                object's answer straight onto the live element. --}}
-        <div class="doc-notices" role="status" aria-live="polite" wire:ignore>
+        <div class="doc-notices" role="status" aria-live="polite" wire:ignore
+             @click="noticePressed($event)">
             {{-- A newer version was saved elsewhere while this tab held
                  unsaved typing. Saving is suspended until the writer picks
                  one: nothing is overwritten and nothing is thrown away
@@ -811,7 +828,10 @@
                  then in the offline draft, which the page finds older than
                  the document, sets aside and offers back in the next row
                  (as a draft, so Put it back asks first). Only a browser
-                 that cannot keep a draft loses the text to a reload. --}}
+                 that cannot keep a draft loses the text to a reload.
+
+                 What each button does is in its title and, for a keyboard
+                 or a screen reader, in the element it is described by. --}}
             <div class="doc-notice" hidden x-bind:hidden="!conflict">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
@@ -819,10 +839,14 @@
                 </p>
                 <span class="doc-notice-actions">
                     <button type="button" class="tool tool-mono" @click="keepMine()"
+                            aria-describedby="doc-notice-keep-mine-does"
                             title="Save your version over the newer one. The other version is kept in the history.">Keep mine</button>
                     <button type="button" class="tool tool-mono" @click="loadTheirs()"
                             :disabled="!conflict || !conflict.ready"
+                            aria-describedby="doc-notice-load-theirs-does"
                             title="Show the newer version. You can put your text back afterwards.">Load theirs</button>
+                    <span id="doc-notice-keep-mine-does" hidden>Save your version over the newer one. The other version is kept in the history.</span>
+                    <span id="doc-notice-load-theirs-does" hidden>Show the newer version. You can put your text back afterwards.</span>
                 </span>
             </div>
 
@@ -857,9 +881,13 @@
                 </p>
                 <span class="doc-notice-actions">
                     <button type="button" class="tool tool-mono" @click="putBack()"
+                            aria-describedby="doc-notice-put-back-does"
                             title="Replace what is on the page now with this text. The version it replaces is kept in the history.">Put it back</button>
                     <button type="button" class="tool tool-mono" @click="discardSetAside()"
+                            aria-describedby="doc-notice-discard-does"
                             title="Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.">Discard</button>
+                    <span id="doc-notice-put-back-does" hidden>Replace what is on the page now with this text. The version it replaces is kept in the history.</span>
+                    <span id="doc-notice-discard-does" hidden>Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.</span>
                 </span>
             </div>
 
