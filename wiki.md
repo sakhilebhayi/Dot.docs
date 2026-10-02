@@ -85,11 +85,10 @@ Real, broadcast-over-Reverb domain events exist today (not aspirational):
 
 | Event | Channel | Trigger | Broadcast payload |
 |---|---|---|---|
-| `DocumentUpdated` | `document.{id}` (presence) | Live content edit propagated to other active collaborators | document id, content, version, editor identity |
-| `UserJoinedDocument` / `UserLeftDocument` | `document.{id}` (presence) | Collaborator opens/leaves the editor | user identity / user id |
+| `DocumentUpdated` | `document.{id}` (presence) | A save happened; open editors treat it as a prompt to poll | document id, content, version, editor identity |
 | `CommentPosted` | `document.{id}` (presence) | New comment or reply | full comment payload including author |
 
-These are genuine `ShouldBroadcast` events wired to real Livewire components (`Editor`, `CommentThread`) and `PresenceService` — not stubs. There is no outbound Dot.Brain-facing Knowledge Pack publisher yet; these events are internal to the collaborative-editing feature only, not (yet) republished as ecosystem-facing domain events.
+These are genuine `ShouldBroadcast` events wired to real Livewire components (`Editor`, `CommentThread`) — not stubs. There is no outbound Dot.Brain-facing Knowledge Pack publisher yet; these events are internal to the collaborative-editing feature only, not (yet) republished as ecosystem-facing domain events.
 
 ## 6. Security & Technical-Debt Scan (this pass)
 

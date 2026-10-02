@@ -20,4 +20,4 @@ Before planning or editing, find EVERY row whose globs match the file's path and
 | app/Search/** | .ai/rules/search.md |
 | app/Styles/** | .ai/rules/styles.md |
 | app/Services/WebhookService.php, app/Support/SsrfGuard.php | .ai/rules/support.md |
-| resources/views/**, resources/css/**, resources/js/** | .ai/rules/views.md |
+| resources/views/**, resources/css/**, resources/js/**, public/sw.js | .ai/rules/views.md |

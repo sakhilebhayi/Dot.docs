@@ -3,6 +3,7 @@ paths:
   - 'resources/views/**'
   - 'resources/css/**'
   - 'resources/js/**'
+  - 'public/sw.js'
 ---
 
 # Views
@@ -136,3 +137,6 @@ higher than `.dock`/`.rail` can ever reach, at any width, rather than relying
 on a DOM-order tiebreak that depends on which page's markup a given modal
 happens to be mounted inside. A modal must outrank a persistent panel
 outright, not conditionally on where it was declared.
+
+## The service worker never touches a non-GET request and never keeps a save for later
+`public/sw.js` caches pages and static files, and that is all. Every same-origin request that is not a GET goes to the network untouched (the editor's sync poll and its unload beacon are POSTs, and the Cache API cannot store one); a Livewire request is passed straight to the network and, offline, FAILS as a network error, exactly as it would with no service worker. Do not queue a failed Livewire request, answer it with a made-up body, or replay it later: the worker used to do all three, the made-up `{effects: [], components: []}` body made Livewire throw and never release the request (every later action on the page, saving included, hung until reload), and a replayed save is a whole-document copy from before the connection dropped, sent behind the page's back over whatever anybody saved since. Text typed offline is protected by the offline draft (`resources/js/offline.js`), and the editor page sends it itself once it is back online (the `app-online` listener calls `backOnline()` in `resources/js/editor/sync/host.js`, which sends it through `resendIfOwed()`). The worker does not use IndexedDB at all; the `dotdocs-offline` database belongs to `offline.js`. Covered by `tests/js/sw.test.js`.
