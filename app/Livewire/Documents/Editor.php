@@ -5,7 +5,7 @@ namespace App\Livewire\Documents;
 use App\Audit\AuditLogger;
 use App\Documents\DocumentStore;
 use App\Documents\Import\HtmlToJson;
-use App\Documents\Outline\Outline;
+use App\Documents\Outline\EditorOutline;
 use App\Documents\StaleDocumentException;
 use App\Events\DocumentUpdated;
 use App\Events\UserJoinedDocument;
@@ -15,8 +15,6 @@ use App\Models\AiSuggestion;
 use App\Models\Document;
 use App\Models\DocumentStyle;
 use App\Models\Files\Obj;
-use App\Print\HeaderFooterBands;
-use App\Print\PageSetup;
 use App\Services\PresenceService;
 use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -196,32 +194,7 @@ class Editor extends Component
         // own authorisation rather than trusting mount()'s.
         $this->authorize('view', $this->document);
 
-        $style = $this->document->resolvedStyle() ?? DocumentStyle::resolve('report');
-        $result = app(Outline::class)->build($this->document->content_json ?? [], $style?->tokens['numbering'] ?? []);
-
-        // PageSetup::fromDocument() requires a non-null DocumentStyle;
-        // StyleEngine::resolve() is the guaranteed-non-null resolver
-        // render() already uses two lines below in this same class, so
-        // page setup and CSS are resolved from the same style either way.
-        $resolvedStyle = app(StyleEngine::class)->resolve($this->document);
-        $setup = PageSetup::fromDocument($this->document, $resolvedStyle);
-
-        $vars = array_merge($this->document->variables ?? [], [
-            'title' => $this->document->title,
-            'date' => now()->format('Y-m-d'),
-            'team' => $this->document->team?->name ?? '',
-        ]);
-        $bands = app(HeaderFooterBands::class);
-
-        return [
-            'numbers' => $result->numbers,
-            'toc' => $result->toc,
-            'figures' => $result->figures,
-            'tables' => $result->tables,
-            'pageSetup' => $setup->toArray(),
-            'headerSegments' => $bands->segments($setup->header, $vars),
-            'footerSegments' => $bands->segments($setup->footer, $vars),
-        ];
+        return app(EditorOutline::class)->of($this->document);
     }
 
     /**
