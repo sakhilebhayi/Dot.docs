@@ -170,16 +170,13 @@ export function mountPagination(editor, canvasEl, opts = {}) {
     // Triggers, per design spec §2.1:
     //  - a debounced idle pause after any edit. This covers local typing
     //    directly (TipTap's onUpdate fires on any transaction with
-    //    docChanged). It does NOT itself cover a remote update applied via
-    //    applyRemote() - that call uses `emitUpdate: false` specifically so
+    //    docChanged). It does NOT itself cover a document applied by the
+    //    sync engine: applyRemote() tags its transaction `preventUpdate` so
     //    a collaborator's edit never fires the LOCAL autosave/update chain
-    //    (see .ai/rules/editor.md's applyRemote() rule) - so `update` alone
-    //    never fires for it. What actually covers a remote update is the
-    //    Blade bridge's Echo listener, which already calls refreshOutline()
-    //    immediately after every successful applyRemote() (independent of
-    //    this `update` listener), and refreshOutline() calls setPageSetup()
-    //    below, which schedules a pass - so the guarantee holds, just via
-    //    that path rather than this one.
+    //    (see .ai/rules/editor.md), so `update` never fires for it. What
+    //    covers that case is the Blade bridge's applyFromSync(), which calls
+    //    setPageSetup() below with the outline that arrived alongside the
+    //    document, and setPageSetup() schedules a pass.
     //  - a document style change / page-setup change — both already flow
     //    through the same Blade bridge's refreshOutline(), which calls
     //    setPageSetup() below with the fresh values before the next
