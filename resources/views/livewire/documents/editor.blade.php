@@ -617,7 +617,14 @@
                 <x-shell.status-word tone="idle" word="Saving"
                                      wire:loading wire:target="saveContent,saveTitle" />
 
-                <span class="status-word status-word-danger" x-show="aiError" x-cloak
+                {{-- wire:ignore: the sentence is written by Alpine (x-text),
+                     and a Livewire morph evaluates x-text on the incoming
+                     copy of this element against the newest data object,
+                     where aiError is empty, then removes the live text: the
+                     word stayed up with nothing in it. Nothing here is
+                     rendered by the server, so the morph can skip it
+                     (.ai/rules/livewire.md). --}}
+                <span class="status-word status-word-danger" wire:ignore x-show="aiError" x-cloak
                       @click="aiError = ''" style="cursor:pointer" title="Click to dismiss">
                     <span class="status-word-dot" aria-hidden="true"></span>
                     <span x-text="aiError"></span>
@@ -629,8 +636,9 @@
                      the two buttons are in the notice bar under this row: the
                      strip is one line that does not wrap, and a notice with
                      buttons in it ended up outside the window or under the
-                     dock. Rendered on every render and shown with x-show, like
-                     everything Alpine binds here (.ai/rules/livewire.md). --}}
+                     dock. Rendered on every render and shown with x-show:
+                     x-show is the one Alpine binding a Livewire morph leaves
+                     as it is on the live element (.ai/rules/livewire.md). --}}
                 <x-shell.status-word tone="danger" word="Not saved" x-show="conflict" x-cloak />
 
                 @error('content')
@@ -750,12 +758,36 @@
 
              It is a live region, so a notice is announced when it appears.
 
-             Every element is rendered on EVERY Livewire render and shown or
-             hidden with x-show. Nothing here may come and go with a Blade
-             condition: Alpine would bind an element Livewire adds later to
-             the newest data object, whose state never changes
-             (.ai/rules/livewire.md). --}}
-        <div class="doc-notices" role="status" aria-live="polite">
+             The whole bar is wire:ignore, and its rows are switched with the
+             `hidden` attribute (x-bind:hidden), not with x-show. Both for a
+             reason (.ai/rules/livewire.md):
+
+             - Every Livewire morph initialises the INCOMING copy of each
+               element it patches against the root's newest Alpine data
+               object, whose conflict, setAside and syncNotice never change,
+               and copies the outcome onto the live element. Only x-show is
+               guarded against that. A render while the conflict notice
+               showed disabled Load theirs, and one while a sync notice
+               showed took its sentence away for good. Livewire skips a
+               wire:ignore element before it clones anything, so nothing in
+               here is evaluated or patched by a morph. The price: nothing
+               in here may be rendered by the server. No Blade condition, no
+               echoed value. It is static markup that Alpine shows, hides
+               and fills.
+             - After its first evaluation x-show applies a change (a hide or
+               a show) only inside requestAnimationFrame while the page
+               reports itself visible. In a tab that is not being painted
+               the frame never comes: a notice stayed up although its state
+               was gone, and one that should have appeared would not have.
+               x-bind:hidden writes the attribute in Alpine's own flush
+               after the change and waits for no frame. The rows carry
+               `hidden` in the markup, so nothing shows before Alpine runs
+               (`.doc-notice[hidden]` in shell.css: the row is display:flex,
+               which beats the browser's own [hidden] rule).
+               Do NOT use x-bind:hidden on anything outside a wire:ignore
+               element: without the x-show guard a morph writes the newest
+               object's answer straight onto the live element. --}}
+        <div class="doc-notices" role="status" aria-live="polite" wire:ignore>
             {{-- A newer version was saved elsewhere while this tab held
                  unsaved typing. Saving is suspended until the writer picks
                  one: nothing is overwritten and nothing is thrown away
@@ -763,7 +795,7 @@
                  the newer version and sets this tab's text aside: the page
                  then offers Put it back, but only in a browser that could
                  keep the offline draft. Hence the last sentence. --}}
-            <div class="doc-notice" x-show="conflict" x-cloak>
+            <div class="doc-notice" hidden x-bind:hidden="!conflict">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
                     <span>Not saved — this document was changed elsewhere while you were typing. Do not reload: choose one.</span>
@@ -780,7 +812,7 @@
             {{-- The writer chose Load theirs, or opened the page with a draft
                  the document had moved past. Their own text is held by the
                  page so they can have it back. --}}
-            <div class="doc-notice" x-show="setAside" x-cloak>
+            <div class="doc-notice" hidden x-bind:hidden="!setAside">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
                     <span>Your text was set aside.</span>
@@ -793,7 +825,7 @@
             {{-- The page can no longer stay in step: signed out, access
                  removed, the document gone, or a version this editor cannot
                  open. --}}
-            <div class="doc-notice" x-show="syncNotice" x-cloak>
+            <div class="doc-notice" hidden x-bind:hidden="!syncNotice">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
                     <span x-text="syncNotice"></span>

@@ -5,6 +5,7 @@ namespace Tests\Feature\Documents;
 use App\Documents\DocumentStore;
 use App\Models\User;
 use Database\Seeders\DocumentStyleSeeder;
+use Dom\Element;
 use Dom\HTMLDocument;
 use Dom\Node;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,6 +30,20 @@ class EditorSyncWiringTest extends TestCase
         return $this->actingAs($user)->get(route('documents.edit', $doc->uuid))->assertOk()->getContent();
     }
 
+    /**
+     * One row of the notice bar, found by the state that switches it.
+     */
+    private function notice(Element $bar, string $state): Element
+    {
+        foreach ($bar->querySelectorAll('.doc-notice') as $row) {
+            if ($row->getAttribute('x-bind:hidden') === '!'.$state) {
+                return $row;
+            }
+        }
+
+        $this->fail("the {$state} notice is not in the bar");
+    }
+
     public function test_the_editor_page_starts_the_sync_engine_against_its_own_document(): void
     {
         $this->seed(DocumentStyleSeeder::class);
@@ -51,6 +66,20 @@ class EditorSyncWiringTest extends TestCase
         $this->assertStringContainsString('getBaseVersion', $alpine[1]);
         $this->assertStringContainsString('refreshPresence', $alpine[1]);
         $this->assertStringEndsWith('}', trim($alpine[1]));
+
+        // The page's decisions are made by resources/js/editor/sync/host.js,
+        // which tests/js/sync.host.test.js runs. Those tests prove nothing
+        // about this page unless the page really hands over to the module:
+        // a host built from the data object the call was made on, and the
+        // engine given that host's callbacks.
+        $this->assertStringContainsString('createSyncHost(this', $alpine[1]);
+        $this->assertStringContainsString('this.syncHost().engineHost()', $alpine[1]);
+
+        // The unload beacon reads, at the moment of leaving, whether this
+        // tab owes an overwrite (Keep mine or Put it back). Without this
+        // option the beacon never says so and the server keeps nothing of
+        // the version it replaces.
+        $this->assertStringContainsString('getOverwrite: () => this.overwriteOwed', $alpine[1]);
     }
 
     /**
@@ -106,19 +135,23 @@ class EditorSyncWiringTest extends TestCase
         $this->assertSame('status', $bar->getAttribute('role'));
         $this->assertSame('polite', $bar->getAttribute('aria-live'));
 
-        // The three notices, each shown by Alpine and hidden until Alpine runs.
+        // The three notices, in this order. Each is hidden in the markup the
+        // server sends, so it does not show before Alpine runs.
+        $rows = [];
+        foreach ($bar->querySelectorAll('.doc-notice') as $row) {
+            $rows[] = $row->getAttribute('x-bind:hidden');
+        }
+        $this->assertSame(['!conflict', '!setAside', '!syncNotice'], $rows);
         foreach (['conflict', 'setAside', 'syncNotice'] as $state) {
-            $notice = $bar->querySelector('.doc-notice[x-show="'.$state.'"]');
-            $this->assertNotNull($notice, "the {$state} notice is in the bar");
-            $this->assertTrue($notice->hasAttribute('x-cloak'), "the {$state} notice is hidden until Alpine runs");
+            $this->assertTrue($this->notice($bar, $state)->hasAttribute('hidden'), "the {$state} notice is hidden until Alpine runs");
             $this->assertNull($strip->querySelector('[x-show="'.$state.'"] button'));
         }
         $this->assertStringContainsString(
             'this document was changed elsewhere while you were typing',
-            $bar->querySelector('[x-show="conflict"]')->textContent,
+            $this->notice($bar, 'conflict')->textContent,
         );
-        $this->assertStringContainsString('Your text was set aside.', $bar->querySelector('[x-show="setAside"]')->textContent);
-        $this->assertNotNull($bar->querySelector('[x-show="syncNotice"] [x-text="syncNotice"]'));
+        $this->assertStringContainsString('Your text was set aside.', $this->notice($bar, 'setAside')->textContent);
+        $this->assertNotNull($this->notice($bar, 'syncNotice')->querySelector('[x-text="syncNotice"]'));
 
         // The three buttons, real buttons, in reading order, each in its notice.
         $handlers = [];
@@ -127,11 +160,11 @@ class EditorSyncWiringTest extends TestCase
             $handlers[] = $button->getAttribute('@click');
         }
         $this->assertSame(['keepMine()', 'loadTheirs()', 'putBack()'], $handlers);
-        $this->assertNotNull($bar->querySelector('[x-show="conflict"] button[\@click="keepMine()"][title]'));
-        $loadTheirs = $bar->querySelector('[x-show="conflict"] button[\@click="loadTheirs()"][title]');
+        $this->assertNotNull($this->notice($bar, 'conflict')->querySelector('button[\@click="keepMine()"][title]'));
+        $loadTheirs = $this->notice($bar, 'conflict')->querySelector('button[\@click="loadTheirs()"][title]');
         $this->assertNotNull($loadTheirs);
         $this->assertSame('!conflict || !conflict.ready', $loadTheirs->getAttribute(':disabled'));
-        $this->assertNotNull($bar->querySelector('[x-show="setAside"] button[\@click="putBack()"]'));
+        $this->assertNotNull($this->notice($bar, 'setAside')->querySelector('button[\@click="putBack()"]'));
 
         // And nowhere else on the page: the strip carries no button at all.
         foreach (['keepMine()', 'loadTheirs()', 'putBack()'] as $handler) {
@@ -149,20 +182,78 @@ class EditorSyncWiringTest extends TestCase
     }
 
     /**
-     * Alpine binds an element Livewire ADDS on a later render to the newest
-     * data object, whose state never changes (.ai/rules/livewire.md). So
-     * nothing in the notice bar may come and go with a Blade condition: every
-     * element is rendered on every render and shown or hidden with x-show.
+     * Livewire's morph must not reach the notice bar at all, and a notice
+     * must not wait for an animation frame to go away.
+     *
+     * Every morph initialises the INCOMING copy of every element it patches
+     * against the root's newest Alpine data object, whose conflict, setAside
+     * and syncNotice never change, and copies the outcome onto the live
+     * element. Only x-show is guarded against that. A re-render while the
+     * conflict notice showed (somebody leaving is enough) disabled Load
+     * theirs, and one while a sync notice showed removed its sentence for
+     * good, leaving a red dot and no words. So the bar is `wire:ignore`:
+     * Livewire skips it before it clones anything.
+     *
+     * And x-show hides on a later change only inside requestAnimationFrame,
+     * so in a tab that is not being painted a notice stayed up although its
+     * state was gone. The rows are switched with the `hidden` attribute
+     * instead, which Alpine writes in the same flush as the change.
      */
-    public function test_nothing_in_the_notice_bar_is_rendered_conditionally(): void
+    public function test_the_notice_bar_is_out_of_livewires_morph_and_its_rows_are_switched_with_the_hidden_attribute(): void
+    {
+        $html = $this->editorHtml();
+        $dom = HTMLDocument::createFromString($html, LIBXML_NOERROR);
+        $bar = $dom->querySelector('.doc-notices');
+        $strip = $dom->querySelector('.doc-status');
+        $this->assertNotNull($bar);
+        $this->assertNotNull($strip);
+
+        $this->assertTrue($bar->hasAttribute('wire:ignore'), 'the notice bar is skipped by the morph');
+
+        // Not x-show and not x-cloak, anywhere in the bar: the attribute is
+        // in the markup from the start and Alpine switches it.
+        $this->assertCount(0, $bar->querySelectorAll('[x-show], [x-cloak]'));
+        $this->assertCount(3, $bar->querySelectorAll('.doc-notice'));
+        foreach (['conflict', 'setAside', 'syncNotice'] as $state) {
+            $row = $this->notice($bar, $state);
+            $this->assertTrue($row->hasAttribute('hidden'));
+            $this->assertSame('!'.$state, $row->getAttribute('x-bind:hidden'));
+        }
+
+        // `.doc-notice` is display:flex, which beats the browser's own rule
+        // for [hidden]: without this rule all three notices show for good.
+        $css = file_get_contents(resource_path('css/shell.css'));
+        $this->assertMatchesRegularExpression('/\.doc-notice\[hidden\][^{}]*\{\s*display:\s*none;\s*\}/', $css);
+
+        // The one sentence in the strip that Alpine writes (a refused AI
+        // result or suggestion) was emptied by the same morph. It is
+        // skipped by the morph as well.
+        $aiError = $strip->querySelector('[x-show="aiError"]');
+        $this->assertNotNull($aiError);
+        $this->assertTrue($aiError->hasAttribute('wire:ignore'));
+        $this->assertNotNull($aiError->querySelector('[x-text="aiError"]'));
+    }
+
+    /**
+     * An element under `wire:ignore` is never brought up to date by a later
+     * render, so nothing in the notice bar may depend on what the server
+     * renders: no Blade condition, no echoed value, no Livewire directive
+     * other than the one that takes the bar out of the morph. It is static
+     * markup that Alpine alone shows, hides and fills.
+     */
+    public function test_nothing_in_the_notice_bar_depends_on_what_the_server_renders(): void
     {
         $blade = file_get_contents(resource_path('views/livewire/documents/editor.blade.php'));
 
         // From the bar's opening tag to the closing tag at the same indentation.
-        $this->assertSame(1, preg_match('/^( *)<div class="doc-notices".*?^\1<\/div>$/ms', $blade, $bar));
+        $this->assertSame(1, preg_match('/^( *)<div class="doc-notices"[^>]*>.*?^\1<\/div>$/ms', $blade, $bar));
         $this->assertStringContainsString('putBack()', $bar[0]);
         $this->assertDoesNotMatchRegularExpression('/@(if|unless|else|error|isset|empty|foreach|auth|can)\b/', $bar[0]);
-        $this->assertStringNotContainsString('wire:', $bar[0]);
+        // No echo. (`{{--` opens a Blade comment, which renders nothing.)
+        $this->assertDoesNotMatchRegularExpression('/\{\{(?!--)|\{!!/', $bar[0]);
+        // `wire:ignore` on the bar's own tag, and no other Livewire directive.
+        $this->assertMatchesRegularExpression('/^ *<div class="doc-notices"[^>]*\swire:ignore[\s>]/', $bar[0]);
+        $this->assertSame(1, substr_count($bar[0], 'wire:'));
     }
 
     /**

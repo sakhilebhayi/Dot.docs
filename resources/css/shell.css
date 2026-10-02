@@ -1418,6 +1418,20 @@ button.list-row {
     border-bottom: 1px solid var(--line);
 }
 
+/*
+ * A row is switched with the `hidden` attribute (x-bind:hidden in
+ * editor.blade.php), not with x-show: x-show applies a change only inside an
+ * animation frame, and a notice must come and go with its state. `display: flex`
+ * above beats the browser's own `[hidden] { display: none }`, so without this
+ * rule every notice would show all the time. The second selector is for what
+ * a row switches or keeps hidden inside itself (one of two sentences, the
+ * text a button is described by).
+ */
+.doc-notice[hidden],
+.doc-notice [hidden] {
+    display: none;
+}
+
 .doc-notice-text {
     flex: 0 1 auto;
     min-width: 0;
