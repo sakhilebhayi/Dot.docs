@@ -8,8 +8,6 @@ use App\Documents\Import\HtmlToJson;
 use App\Documents\Outline\EditorOutline;
 use App\Documents\StaleDocumentException;
 use App\Events\DocumentUpdated;
-use App\Events\UserJoinedDocument;
-use App\Events\UserLeftDocument;
 use App\Files\FilesService;
 use App\Models\AiSuggestion;
 use App\Models\Document;
@@ -66,15 +64,10 @@ class Editor extends Component
         $this->title = $this->document->title;
         $this->contentJson = app(DocumentStore::class)->json($this->document);
 
-        $presence = app(PresenceService::class);
-        $presence->join($this->document, Auth::user());
-        $this->activeUsers = $presence->getMemberList($this->document->id);
-
-        try {
-            UserJoinedDocument::dispatch($this->document, Auth::user());
-        } catch (\Throwable) {
-            // Broadcasting unavailable — continue without real-time presence
-        }
+        // The browser registers this tab's presence with its first sync poll
+        // (it owns the tab id). Until then, show whoever is already here plus
+        // the person opening the page.
+        $this->activeUsers = $this->presentMembers();
 
         $this->loadPendingSuggestions();
 
@@ -152,7 +145,6 @@ class Editor extends Component
             // a misconfigured broadcast connection for as long as it lasted.
             report($e);
         }
-        app(PresenceService::class)->heartbeat($this->document, Auth::user());
 
         return ['ok' => true, 'conflict' => false, 'version' => $this->document->version];
     }
@@ -376,21 +368,46 @@ class Editor extends Component
         return $files->registerDocument($this->document, $files->root($team));
     }
 
-    public function heartbeat(): void
+    /**
+     * Called by tabs opened before the sync poll shipped: their JavaScript
+     * still calls this every 60 seconds. It does nothing now - presence is
+     * recorded by the sync poll - but it must exist, or each of those calls
+     * would be answered with an error page. Remove one release later.
+     */
+    public function heartbeat(): void {}
+
+    /**
+     * Called by tabs opened before the sync poll shipped, when they close.
+     * It does nothing now, for the same reason as heartbeat(). Remove one
+     * release later.
+     */
+    public function leaving(): void {}
+
+    /**
+     * Re-read who is here for the presence strip. The editor's sync poll
+     * calls this when the set of people it is told about changes - presence
+     * itself is recorded by that poll (DocumentSyncController), not here.
+     */
+    public function refreshPresence(): void
     {
-        app(PresenceService::class)->heartbeat($this->document, Auth::user());
-        $this->activeUsers = app(PresenceService::class)->getMemberList($this->document->id);
+        $this->authorize('view', $this->document);
+
+        $this->activeUsers = $this->presentMembers();
     }
 
-    public function leaving(): void
+    /**
+     * @return list<array{id:int,name:string,avatar:string}>
+     */
+    private function presentMembers(): array
     {
-        $presence = app(PresenceService::class);
-        $presence->leave($this->document, Auth::user());
-        try {
-            UserLeftDocument::dispatch($this->document, Auth::user());
-        } catch (\Throwable) {
-            // Broadcasting unavailable
+        $members = app(PresenceService::class)->members($this->document->id);
+        $me = Auth::user();
+
+        if (! collect($members)->contains('id', $me->id)) {
+            $members[] = ['id' => $me->id, 'name' => $me->name, 'avatar' => $me->profile_photo_url];
         }
+
+        return $members;
     }
 
     private function loadPendingSuggestions(): void
