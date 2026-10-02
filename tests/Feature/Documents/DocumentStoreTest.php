@@ -81,13 +81,14 @@ class DocumentStoreTest extends TestCase
         $user = User::factory()->create();
         $doc = app(DocumentStore::class)->create($user, 'R');
         Livewire::actingAs($user)->test(Editor::class, ['uuid' => $doc->uuid])
-            ->call('saveContent', $this->para('typed'))
+            ->call('saveContent', $this->para('typed'), 1)
             ->assertSet('saved', true);
         $this->assertSame('typed', $doc->fresh()->search_text);
 
         Livewire::actingAs($user)->test(Editor::class, ['uuid' => $doc->uuid])
-            ->call('saveContent', ['type' => 'doc', 'content' => [['type' => 'marquee']]])
-            ->assertHasErrors('content');
+            ->call('saveContent', ['type' => 'doc', 'content' => [['type' => 'marquee']]], 2)
+            ->assertHasErrors('content')
+            ->assertReturned(['ok' => false, 'conflict' => false, 'version' => 2]);
     }
 
     public function test_save_normalises_style_bearing_attrs_so_bad_values_never_persist(): void

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Documents\DocumentStore;
+use App\Documents\StaleDocumentException;
 use App\Models\Document;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,6 +36,10 @@ class DocumentAutosaveController extends Controller
             'content.type' => ['required', 'string', 'in:doc'],
             'content.content' => ['sometimes', 'array'],
             'content.attrs' => ['sometimes', 'array'],
+            // The version the page's copy was based on. A beacon that states
+            // none comes from a tab running JavaScript from before saves
+            // carried one, and is refused: it would overwrite blind.
+            'base_version' => ['required', 'integer', 'min:1'],
         ]);
 
         try {
@@ -45,7 +50,17 @@ class DocumentAutosaveController extends Controller
             // style and variables reset themselves behind the writer's back.
             // Rules here are a shape check; DocumentSchema::validate(), run
             // inside DocumentStore::save(), is what actually vets the content.
-            $document = $store->save($document, $request->input('content'), Auth::user(), ['version' => 'none']);
+            $document = $store->save($document, $request->input('content'), Auth::user(), [
+                'version' => 'none',
+                'expectedVersion' => $request->integer('base_version'),
+            ]);
+        } catch (StaleDocumentException $e) {
+            // Somebody saved after this page last synced. The page is already
+            // gone, so nobody reads this; what matters is that nothing was
+            // overwritten. The offline draft in the browser still holds the
+            // text, and the editor page offers it back the next time the
+            // document is opened there (Put it back).
+            return response()->json(['conflict' => true, 'version' => $e->currentVersion], 409);
         } catch (InvalidArgumentException $e) {
             // DocumentSchema::validate() refused it — an unknown node type, or
             // a block with no valid id. Report it as a validation failure so

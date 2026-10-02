@@ -44,7 +44,7 @@ class DocumentAutosaveTest extends TestCase
         $before = $doc->version;
 
         $response = $this->actingAs($user)
-            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Last words')]);
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Last words'), 'base_version' => $doc->version]);
 
         $response->assertOk()->assertJson(['version' => $before + 1]);
 
@@ -66,7 +66,7 @@ class DocumentAutosaveTest extends TestCase
         $content['attrs'] = ['schema' => 1, 'style' => 'legal', 'vars' => ['client' => 'Acme']];
 
         $this->actingAs($user)
-            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $content])
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $content, 'base_version' => $doc->version])
             ->assertOk();
 
         $doc->refresh();
@@ -84,7 +84,7 @@ class DocumentAutosaveTest extends TestCase
         $doc = $this->doc($user);
 
         $this->actingAs($user)
-            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Flushed')])
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Flushed'), 'base_version' => $doc->version])
             ->assertOk();
 
         $this->assertSame(0, $doc->versions()->count());
@@ -99,7 +99,7 @@ class DocumentAutosaveTest extends TestCase
         $this->actingAs($user)
             ->postJson(route('documents.autosave', $doc->uuid), ['content' => ['type' => 'doc', 'content' => [
                 ['type' => 'mermaidDiagram', 'attrs' => ['id' => BlockId::generate()]],
-            ]]])
+            ]], 'base_version' => $doc->version])
             ->assertStatus(422)
             ->assertJsonValidationErrors('content');
 
@@ -112,7 +112,7 @@ class DocumentAutosaveTest extends TestCase
         $doc = $this->doc($user);
 
         $this->actingAs($user)
-            ->postJson(route('documents.autosave', $doc->uuid), ['content' => ['type' => 'paragraph']])
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => ['type' => 'paragraph'], 'base_version' => $doc->version])
             ->assertStatus(422)
             ->assertJsonValidationErrors('content.type');
 
@@ -136,7 +136,7 @@ class DocumentAutosaveTest extends TestCase
         $response = $this->actingAs($user)
             ->postJson(route('documents.autosave', $doc->uuid), ['content' => ['type' => 'doc', 'content' => [
                 ['type' => 'paragraph', 'attrs' => 'boom', 'content' => []],
-            ]]]);
+            ]], 'base_version' => $doc->version]);
 
         $this->assertContains($response->status(), [200, 422]);
     }
@@ -149,7 +149,7 @@ class DocumentAutosaveTest extends TestCase
         $stored = $doc->content_json;
 
         $this->actingAs($stranger)
-            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Not mine')])
+            ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Not mine'), 'base_version' => $doc->version])
             ->assertForbidden();
 
         $this->assertSame($stored, $doc->fresh()->content_json);
@@ -160,7 +160,7 @@ class DocumentAutosaveTest extends TestCase
         $owner = User::factory()->withPersonalTeam()->create();
         $doc = $this->doc($owner);
 
-        $this->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Anon')])
+        $this->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->docJson('Anon'), 'base_version' => $doc->version])
             ->assertUnauthorized();
     }
 

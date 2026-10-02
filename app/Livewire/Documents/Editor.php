@@ -6,6 +6,7 @@ use App\Audit\AuditLogger;
 use App\Documents\DocumentStore;
 use App\Documents\Import\HtmlToJson;
 use App\Documents\Outline\Outline;
+use App\Documents\StaleDocumentException;
 use App\Events\DocumentUpdated;
 use App\Events\UserJoinedDocument;
 use App\Events\UserLeftDocument;
@@ -86,44 +87,76 @@ class Editor extends Component
     }
 
     /**
-     * @return array{ok:bool,version:int} whether the document was stored, and
-     *                                    the version it is now at. $wire
-     *                                    actions resolve with the return
-     *                                    value, so the editor bridge awaits
-     *                                    both: it keeps the offline draft when
-     *                                    `ok` is false (a rejected save must
-     *                                    not quietly lose the writer's work)
-     *                                    and stamps `version` onto the draft
-     *                                    as its `baseVersion`, which is what
-     *                                    decides on the next load whether the
-     *                                    draft is still restorable or somebody
-     *                                    else has saved since.
+     * `$baseVersion` is the document version the browser's copy was based
+     * on. A save based on an older version is refused - two people with the
+     * document open would otherwise each replace the other's work with a
+     * stale whole-document copy - and a save that states no base at all
+     * comes from a tab still running JavaScript from before this rule, which
+     * must reload rather than write.
+     *
+     * `$overwrite` is the page's "Keep mine" or "Put it back" choice: the
+     * writer knows a newer version exists, has their base on it, and is
+     * replacing it on purpose. The person who wrote that version is not
+     * asked, and their save may have cut no version of its own (the unload
+     * beacon never does; an autosave skips it while the same author's last
+     * one is under two minutes old), so the save is told to keep what it
+     * replaces as a named version (`keepReplacedAs`). DocumentStore::save()
+     * cuts it inside the save's own transaction: a save that is refused as
+     * stale, or whose content the schema rejects, keeps nothing.
+     *
+     * $wire actions resolve with the return value, so the editor bridge
+     * reads all three keys: it keeps the offline draft when `ok` is false (a
+     * refused save must not quietly lose the writer's work), shows the
+     * "changed elsewhere" choice when `conflict` is true, and stamps
+     * `version` onto the next draft as its base.
+     *
+     * @return array{ok:bool,conflict:bool,version:int}
      */
-    public function saveContent(array $content): array
+    public function saveContent(array $content, ?int $baseVersion = null, bool $overwrite = false): array
     {
         $this->authorize('update', $this->document);
 
         $this->resetErrorBag('content');
 
+        if ($baseVersion === null) {
+            $this->addError('content', 'This page is out of date. Reload it to keep editing.');
+            $this->saved = false;
+
+            return ['ok' => false, 'conflict' => false, 'version' => $this->document->version];
+        }
+
+        $opts = ['expectedVersion' => $baseVersion];
+        if ($overwrite) {
+            // The label column holds 120 characters.
+            $opts['keepReplacedAs'] = 'Before '.Str::limit(Auth::user()->name, 80, '').' kept their version';
+        }
+
         try {
-            $this->document = app(DocumentStore::class)->save($this->document, $content, Auth::user());
+            $this->document = app(DocumentStore::class)->save($this->document, $content, Auth::user(), $opts);
+        } catch (StaleDocumentException $e) {
+            $this->saved = false;
+
+            return ['ok' => false, 'conflict' => true, 'version' => $e->currentVersion];
         } catch (InvalidArgumentException $e) {
             $this->addError('content', $e->getMessage());
             $this->saved = false;
 
-            return ['ok' => false, 'version' => $this->document->version];
+            return ['ok' => false, 'conflict' => false, 'version' => $this->document->version];
         }
         $this->contentJson = $this->document->content_json;
         $this->saved = true;
 
         try {
             DocumentUpdated::dispatch($this->document, Auth::user(), $this->document->content, $this->document->content_json, $this->document->version);
-        } catch (\Throwable) {
-            // Broadcasting unavailable — continue without real-time sync
+        } catch (\Throwable $e) {
+            // Broadcasting unavailable: the save itself has succeeded, so
+            // carry on - but log it. This catch used to be empty, which hid
+            // a misconfigured broadcast connection for as long as it lasted.
+            report($e);
         }
         app(PresenceService::class)->heartbeat($this->document, Auth::user());
 
-        return ['ok' => true, 'version' => $this->document->version];
+        return ['ok' => true, 'conflict' => false, 'version' => $this->document->version];
     }
 
     /**
@@ -230,7 +263,9 @@ class Editor extends Component
         $this->loadPendingSuggestions();
         $this->saved = true;
 
-        $this->dispatch('suggestion-accepted', content: $this->contentJson);
+        // `version` so the page can move its base up: this save came from
+        // the page itself, and its next autosave must not be refused as stale.
+        $this->dispatch('suggestion-accepted', content: $this->contentJson, version: $this->document->version);
     }
 
     public function rejectSuggestion(int $suggestionId): void
@@ -277,7 +312,7 @@ class Editor extends Component
         $this->document = app(DocumentStore::class)->save($this->document, $this->document->content_json, Auth::user(), ['version' => 'none']);
         $this->contentJson = $this->document->content_json;
 
-        $this->dispatch('style-changed', css: $engine->css($engine->resolve($this->document), 'canvas'));
+        $this->dispatch('style-changed', css: $engine->css($engine->resolve($this->document), 'canvas'), version: $this->document->version);
     }
 
     /**
