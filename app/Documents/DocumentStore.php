@@ -71,7 +71,25 @@ class DocumentStore
         return $this->legacy->fromStored($doc->content_json, $doc->content, $this->schema);
     }
 
-    /** @param array{version?:string,label?:string|null} $opts */
+    /**
+     * `expectedVersion` is how a writer says "this is the version my copy
+     * was based on". When it is given and the stored document has moved on,
+     * the save is refused with StaleDocumentException and nothing is
+     * written - two people with the same document open would otherwise each
+     * replace the other's work with a stale whole-document copy. Writers
+     * that replace the document on purpose (restore, import, an accepted
+     * suggestion, a style change) state no base and always go through.
+     *
+     * `keepReplacedAs` is for a writer that replaces a newer version on
+     * purpose (the editor's "Keep mine" and "Put it back"). The stored
+     * document is first kept as a `named` version with this label, inside
+     * the same transaction as the write that replaces it. A save that is
+     * refused, or whose content the schema rejects, keeps nothing.
+     *
+     * @param  array{version?:string,label?:string|null,expectedVersion?:int,keepReplacedAs?:string}  $opts
+     *
+     * @throws StaleDocumentException
+     */
     public function save(Document $doc, array $json, User $actor, array $opts = []): Document
     {
         // normalise() before validate(): style-bearing attrs (align, column
@@ -83,19 +101,46 @@ class DocumentStore
             throw new InvalidArgumentException(implode('; ', $errors));
         }
 
-        return DB::transaction(function () use ($doc, $json, $actor, $opts) {
+        $doc = DB::transaction(function () use ($doc, $json, $actor, $opts) {
+            // The version as the DATABASE has it now, read inside the
+            // transaction - never the model's own copy, which was loaded
+            // when the request began. SQLite takes the write lock when an
+            // IMMEDIATE transaction opens (config/database.php), so this
+            // read and the write below cannot interleave with another save;
+            // lockForUpdate() gives the same guarantee on PostgreSQL/MySQL.
+            $current = (int) DB::table('documents')->where('id', $doc->getKey())->lockForUpdate()->value('version');
+
+            $expected = $opts['expectedVersion'] ?? null;
+            if ($expected !== null && $expected !== $current) {
+                throw new StaleDocumentException($current);
+            }
+
+            // "Keep mine": the caller is replacing a newer version on
+            // purpose. Keep what is stored, as a named version, inside the
+            // same transaction as the write that replaces it - so it exists
+            // only if this save is stored, and holds exactly what it replaced.
+            if (isset($opts['keepReplacedAs'])) {
+                $this->cutVersion(Document::query()->findOrFail($doc->getKey()), $actor, 'named', $opts['keepReplacedAs']);
+            }
+
             $this->fill($doc, $json);
-            $doc->version = $doc->version + 1;
+            $doc->version = $current + 1;
             $doc->save();
 
             $kind = $opts['version'] ?? 'auto';
             if ($kind !== 'none' && $this->shouldCut($doc, $actor, $kind)) {
                 $this->cutVersion($doc, $actor, $kind, $opts['label'] ?? null);
             }
-            app(WebhookService::class)->fire($doc, 'on_save');
 
             return $doc;
         });
+
+        // After the commit, not inside it: a webhook is an HTTP call to
+        // somebody else's server, and it must neither hold the database's
+        // write lock while it waits nor announce a save that then rolls back.
+        app(WebhookService::class)->fire($doc, 'on_save');
+
+        return $doc;
     }
 
     public function cutVersion(Document $doc, User $actor, string $kind = 'auto', ?string $label = null): DocumentVersion
