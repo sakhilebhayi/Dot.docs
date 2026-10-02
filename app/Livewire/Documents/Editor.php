@@ -265,9 +265,11 @@ class Editor extends Component
 
     /**
      * Switch the document's style. Valid keys are the fourteen system
-     * styles or a team-owned custom style of the same key. Re-saves the
-     * document through DocumentStore so heading/figure numbering is
-     * rebuilt against the new style's numbering rules.
+     * styles or a team-owned custom style of the same key. Goes through
+     * DocumentStore::restyle(), which rebuilds heading/figure numbering
+     * against the new style's rules from the document as it is stored at
+     * that moment - never from this component's own copy, which was loaded
+     * when the request began and may be older than somebody else's save.
      */
     public function setStyle(string $key): void
     {
@@ -283,8 +285,7 @@ class Editor extends Component
             return;
         }
 
-        $this->document->style_key = $key;
-        $this->document = app(DocumentStore::class)->save($this->document, $this->document->content_json, Auth::user(), ['version' => 'none']);
+        $this->document = app(DocumentStore::class)->restyle($this->document, $key);
         $this->contentJson = $this->document->content_json;
 
         $this->dispatch('style-changed', css: $engine->css($engine->resolve($this->document), 'canvas'), version: $this->document->version);

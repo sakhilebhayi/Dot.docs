@@ -103,6 +103,54 @@ class DocumentStoreVersionGuardTest extends TestCase
     }
 
     /**
+     * A writer that states no base (a restore, say) may hold a model loaded
+     * before somebody else's save. What it writes must be compared with the
+     * row as it is stored NOW: compared with the model's own older copy, a
+     * restore of exactly the text that copy holds looked like "nothing
+     * changed", so the version went up and the other person's text stayed.
+     */
+    public function test_a_save_from_a_model_loaded_earlier_still_writes_every_content_column(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $store = app(DocumentStore::class);
+
+        $store->save($doc, $this->para('One'), $user, ['version' => 'none']);
+        $loadedEarlier = Document::findOrFail($doc->id);
+
+        $store->save(Document::findOrFail($doc->id), $this->para('Two, saved by somebody else'), $user, ['version' => 'none']);
+
+        // Put back exactly what the earlier copy holds.
+        $saved = $store->save($loadedEarlier, $loadedEarlier->content_json, $user, ['version' => 'none']);
+
+        $this->assertSame(4, $saved->version);
+
+        $stored = Document::findOrFail($doc->id);
+        $this->assertSame(4, $stored->version);
+        $this->assertSame('One', $stored->content_json['content'][0]['content'][0]['text']);
+        $this->assertStringContainsString('One', $stored->content);
+        $this->assertSame('One', $stored->search_text);
+        $this->assertSame(1, $stored->word_count);
+    }
+
+    /**
+     * Something the caller changed on the model it passes in (a title, say)
+     * is still written with the content, as Eloquent's save() always did.
+     */
+    public function test_a_save_still_writes_what_the_caller_changed_on_the_model_it_passed(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $doc->title = 'Renamed on the way in';
+        $saved = app(DocumentStore::class)->save($doc, $this->para('Body'), $user);
+
+        $this->assertSame($doc, $saved, 'save() returns the model it was given, brought up to date.');
+        $this->assertSame('Renamed on the way in', $doc->fresh()->title);
+        $this->assertSame('Body', $doc->fresh()->search_text);
+    }
+
+    /**
      * The editor's "Keep mine": the caller replaces a newer version on
      * purpose and asks for what it replaces to be kept. That version may
      * have no entry of its own in the history.

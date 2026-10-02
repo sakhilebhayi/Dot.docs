@@ -78,7 +78,16 @@ class DocumentStore
      * written - two people with the same document open would otherwise each
      * replace the other's work with a stale whole-document copy. Writers
      * that replace the document on purpose (restore, import, an accepted
-     * suggestion, a style change) state no base and always go through.
+     * suggestion) state no base and always go through. A style change is
+     * not one of them: it replaces nothing, and goes through restyle().
+     *
+     * `$doc` may have been loaded long before this runs (Livewire loads it
+     * when the request begins). Nothing is taken from that copy: the row is
+     * read again under the write lock, `$doc` is brought up to it, and only
+     * then filled from `$json`. So every content column is written from
+     * `$json`, compared against what is stored NOW, and the same `$doc` is
+     * returned. Anything else the caller changed on `$doc` before calling
+     * (a title, say) is written with it, as Eloquent's save() would.
      *
      * `keepReplacedAs` is for a writer that replaces a newer version on
      * purpose (the editor's "Keep mine" and "Put it back"). The stored
@@ -102,13 +111,8 @@ class DocumentStore
         }
 
         $doc = DB::transaction(function () use ($doc, $json, $actor, $opts) {
-            // The version as the DATABASE has it now, read inside the
-            // transaction - never the model's own copy, which was loaded
-            // when the request began. SQLite takes the write lock when an
-            // IMMEDIATE transaction opens (config/database.php), so this
-            // read and the write below cannot interleave with another save;
-            // lockForUpdate() gives the same guarantee on PostgreSQL/MySQL.
-            $current = (int) DB::table('documents')->where('id', $doc->getKey())->lockForUpdate()->value('version');
+            $stored = $this->lockStored($doc);
+            $current = (int) $stored->version;
 
             $expected = $opts['expectedVersion'] ?? null;
             if ($expected !== null && $expected !== $current) {
@@ -120,9 +124,10 @@ class DocumentStore
             // same transaction as the write that replaces it - so it exists
             // only if this save is stored, and holds exactly what it replaced.
             if (isset($opts['keepReplacedAs'])) {
-                $this->cutVersion(Document::query()->findOrFail($doc->getKey()), $actor, 'named', $opts['keepReplacedAs']);
+                $this->cutVersion($stored, $actor, 'named', $opts['keepReplacedAs']);
             }
 
+            $this->bringUpTo($doc, $stored);
             $this->fill($doc, $json);
             $doc->version = $current + 1;
             $doc->save();
@@ -141,6 +146,81 @@ class DocumentStore
         app(WebhookService::class)->fire($doc, 'on_save');
 
         return $doc;
+    }
+
+    /**
+     * Change the document's style.
+     *
+     * A style decides how headings and figures are numbered, and those
+     * numbers are stamped into the stored JSON and HTML, so a style change
+     * has to renumber and re-render the document. It does that to the
+     * document AS IT IS STORED when the change is written: the row is read
+     * again under the write lock and its own content is what gets refilled.
+     * `$doc`'s copy of the content is never used. It was loaded when the
+     * request began, and passing it to save() wrote it back over a save
+     * that landed in between - the other person's text was replaced, or
+     * the row was left with one person's JSON and the other's search text.
+     *
+     * The content itself does not change, so no version is cut and nobody's
+     * base is asked for; the version number still goes up, because the
+     * stored JSON and HTML did change and an open editor has to fetch them.
+     * The stored content is normalised but not validated: it was validated
+     * when it was stored, and a style is no reason to refuse it now.
+     */
+    public function restyle(Document $doc, string $styleKey): Document
+    {
+        $doc = DB::transaction(function () use ($doc, $styleKey) {
+            $stored = $this->lockStored($doc);
+            $this->bringUpTo($doc, $stored);
+
+            $doc->style_key = $styleKey;
+            $this->fill($doc, $this->schema->normalise($this->schema->ensureIds($this->json($doc))));
+            $doc->version = (int) $stored->version + 1;
+            $doc->save();
+
+            return $doc;
+        });
+
+        // After the commit, for the reasons given in save().
+        app(WebhookService::class)->fire($doc, 'on_save');
+
+        return $doc;
+    }
+
+    /**
+     * The document's row as the DATABASE has it now, read inside the
+     * caller's transaction and under the write lock. SQLite takes the write
+     * lock when an IMMEDIATE transaction opens (config/database.php), so
+     * this read and the write that follows cannot interleave with another
+     * save; lockForUpdate() gives the same guarantee on PostgreSQL/MySQL.
+     *
+     * withTrashed(): a document moved to the trash while its editor is open
+     * is still saved into, as it was when only the version was read here.
+     */
+    private function lockStored(Document $doc): Document
+    {
+        return Document::withTrashed()->lockForUpdate()->findOrFail($doc->getKey());
+    }
+
+    /**
+     * Bring the caller's model up to the row just read under the lock.
+     *
+     * Eloquent writes only the columns that differ from what the model was
+     * LOADED with. Left on a copy loaded when the request began, that
+     * comparison is made against a document somebody else may have replaced
+     * since: a column whose new value happens to equal the old copy's is
+     * skipped and keeps the other person's value, and the row ends up mixed
+     * (or the write is skipped altogether while the version still goes up).
+     * After this, "loaded with" is the stored row, so the comparison is
+     * exact. What the caller itself changed on the model beforehand is put
+     * back on top and stays unsaved, to be written with the content.
+     */
+    private function bringUpTo(Document $doc, Document $stored): void
+    {
+        $own = $doc->getDirty();
+
+        $doc->setRawAttributes(array_merge($doc->getAttributes(), $stored->getAttributes()), true);
+        $doc->setRawAttributes(array_merge($doc->getAttributes(), $own));
     }
 
     public function cutVersion(Document $doc, User $actor, string $kind = 'auto', ?string $label = null): DocumentVersion
