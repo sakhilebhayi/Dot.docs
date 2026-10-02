@@ -76,7 +76,9 @@ class ImportRoutesWriteTest extends TestCase
         $user = User::factory()->withPersonalTeam()->create();
         $store = app(DocumentStore::class);
         $doc = $store->create($user, 'Report');
-        $name = str_repeat('n', 110).'.md';
+        // 108 characters: "Imported <name>" still fits the column, "Before
+        // import of <name>" would not.
+        $name = str_repeat('n', 105).'.md';
 
         $this->actingAs($user)->post(route('documents.import', $doc->uuid), [
             'file' => UploadedFile::fake()->createWithContent($name, 'Imported body.'),
