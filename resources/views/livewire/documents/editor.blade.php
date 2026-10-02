@@ -653,8 +653,21 @@
                      new element, bound to the newest Alpine data object, whose
                      conflict, syncNotice and isTyping never change
                      (.ai/rules/livewire.md): Saved then showed beside the
-                     conflict notice and while typing. --}}
-                <span x-show="!isTyping && !isOffline && !conflict && !syncNotice">
+                     conflict notice and while typing.
+
+                     `!unsaved`: the word inside is whatever the server last
+                     rendered, so it would say Saved whenever the writer
+                     paused. `unsaved` is the page's own knowledge that the
+                     editor holds text no accepted save has stored (sync/host.js),
+                     and Saved is not said over such text: not after a save
+                     that failed or never answered, and not in the moment
+                     between the end of typing and the autosave. The strip
+                     then shows no word at all until the save is sent
+                     (Saving), stored (Saved) or refused (Not saved); the top
+                     bar keeps its own word throughout. An edit undone again
+                     clears the flag on the next poll that completes
+                     (settleIfBackAtConfirmed() in sync/host.js). --}}
+                <span x-show="!isTyping && !isOffline && !conflict && !syncNotice && !unsaved">
                     @unless ($errors->has('content'))
                         <x-shell.status-word tone="good" :word="$saved ? 'Saved' : 'Ready'"
                                              wire:loading.remove wire:target="saveContent,saveTitle" />

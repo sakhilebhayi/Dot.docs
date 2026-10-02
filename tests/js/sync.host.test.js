@@ -1879,6 +1879,43 @@ test('a save that has not answered is waited for, for fifteen seconds', async ()
     assert.equal(A.view.saving, 1);
 });
 
+// The in-page status strip hides its Saved / Ready word while `unsaved` is
+// true (editor.blade.php; EditorSyncWiringTest pins the condition). That word
+// is whatever the server last rendered, so the flag is the only thing that
+// keeps it from saying Saved over text the server does not hold. These are
+// the states in which it used to.
+test('the page knows the text is unsaved from the first keystroke until a save of it is accepted', async () => {
+    const { server, clock, A } = await pair();
+    A.type('A1');
+    assert.equal(A.view.unsaved, true, 'inside the debounce, before anything is sent');
+
+    await A.debounce();
+    assert.equal(A.view.unsaved, true, 'while the save is in the air');
+
+    A.saveNeverAnswers();
+    assert.equal(A.view.unsaved, true, 'while a save that will never answer is waited for');
+
+    clock.now += SAVE_EXPIRY_MS;
+    assert.equal(A.host().syncState(), 'dirty');
+    assert.equal(A.view.unsaved, true, 'after that save was given up on');
+
+    // The schema refuses the save that is sent again: nothing is stored.
+    server.rejectNext = true;
+    await A.cycle();
+    await A.land();
+    assert.equal(server.json.text, 'start');
+    assert.equal(A.view.unsaved, true, 'after a save the server refused');
+    assert.equal(A.word(), 'Not saved');
+
+    // Only an accepted save of what the editor holds clears it.
+    A.type('A2');
+    await A.debounce();
+    await A.land();
+    assert.equal(server.json.text, 'A2');
+    assert.equal(A.view.unsaved, false);
+    assert.equal(A.word(), 'Saved');
+});
+
 test('a save that never answers is owed again after fifteen seconds: the poll sends it', async () => {
     const { server, clock, A } = await pair();
     A.type('A1');

@@ -235,6 +235,46 @@ class EditorSyncWiringTest extends TestCase
     }
 
     /**
+     * The strip's Saved / Ready word is whatever the server last rendered,
+     * so it said Saved whenever the writer paused, whatever the page knew:
+     * after a save that failed or never answered, and for the moment
+     * between the end of typing and the autosave. `unsaved` is the page's
+     * own knowledge that the editor holds text no accepted save has stored
+     * (resources/js/editor/sync/host.js), and the word is not shown while
+     * it is true.
+     *
+     * The condition sits on the wrapper, which is rendered the same on every
+     * render, and uses x-show, the one binding a morph leaves alone on the
+     * live element: the word inside is server-rendered and comes and goes,
+     * so this wrapper cannot be `wire:ignore` the way the notice bar is.
+     */
+    public function test_the_strip_does_not_say_saved_while_the_page_holds_unsaved_text(): void
+    {
+        $html = $this->editorHtml();
+        $dom = HTMLDocument::createFromString($html, LIBXML_NOERROR);
+        $strip = $dom->querySelector('.doc-status');
+        $this->assertNotNull($strip);
+
+        $word = $strip->querySelector('.status-word-good');
+        $this->assertNotNull($word, 'a freshly opened page renders the Saved / Ready word');
+        $this->assertContains(trim($word->textContent), ['Saved', 'Ready']);
+        $this->assertFalse($word->hasAttribute('x-show'), 'the condition is on the wrapper, not on the word');
+
+        $wrapper = $word->parentElement;
+        $this->assertNotNull($wrapper);
+        $this->assertNotSame($strip, $wrapper);
+        $this->assertSame(
+            '!isTyping && !isOffline && !conflict && !syncNotice && !unsaved',
+            $wrapper->getAttribute('x-show'),
+        );
+        $this->assertFalse($wrapper->hasAttribute('wire:ignore'));
+
+        // And the flag it reads is a field of the page's own state.
+        $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
+        $this->assertMatchesRegularExpression('/^\s*unsaved: false,$/m', $alpine[1]);
+    }
+
+    /**
      * An element under `wire:ignore` is never brought up to date by a later
      * render, so nothing in the notice bar may depend on what the server
      * renders: no Blade condition, no echoed value, no Livewire directive
