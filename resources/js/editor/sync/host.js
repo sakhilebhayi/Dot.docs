@@ -614,8 +614,8 @@ export function createSyncHost(view, env) {
      * unsaved to nothing unsaved, so an idle reader says nothing. The
      * offline draft goes with it: it says what the server holds.
      *
-     * Both callers run it AFTER saveInTheAir() has answered no, never
-     * before. While a save is in the air the server may be about to hold
+     * All three callers (syncState(), resendIfOwed() and putBack()) run it
+     * AFTER saveInTheAir() has answered no, never before. While a save is in the air the server may be about to hold
      * something other than `confirmed`: type x, the save of it leaves,
      * delete x, and the editor is back at `confirmed` while the server is
      * about to store the x. Settling there would drop the owed save of the

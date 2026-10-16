@@ -67,8 +67,10 @@ class PresenceService
             ['user_id', 'last_seen_at'],
         );
 
-        // Sweep this document's dead rows while we are writing anyway, so
-        // the table never needs a scheduled prune to stay small.
+        // Sweep this document's dead rows while we are writing anyway.
+        // There is no scheduled prune: the rows of a document nobody
+        // reopens stay until the document is deleted - a few rows per such
+        // document, which is what this sweep keeps it to.
         DB::table(self::TABLE)
             ->where('document_id', $documentId)
             ->where('last_seen_at', '<', $now->copy()->subSeconds(self::TTL_SECONDS))

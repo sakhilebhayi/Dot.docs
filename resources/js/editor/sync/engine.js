@@ -27,8 +27,9 @@
  * tab has already downloaded", so an unresolved conflict does not make it
  * fetch the same document again on every poll.
  *
- * No DOM, no fetch and no timers of its own: the request function, the
- * timer and the visibility check are all injected, which is what lets
+ * No DOM and no fetch of its own: the request function is injected, and
+ * the timer and the visibility check are injectable with defaults (the
+ * global setTimeout/clearTimeout, and always visible), which is what lets
  * `tests/js/sync.engine.test.js` drive every case by hand.
  */
 

@@ -842,8 +842,11 @@
                  of a choice opens the newer version, and this tab's text is
                  then in the offline draft, which the page finds older than
                  the document, sets aside and offers back in the next row
-                 (as a draft, so Put it back asks first). Only a browser
-                 that cannot keep a draft loses the text to a reload.
+                 (as a draft, so Put it back asks first) - unless a second
+                 tab of the same browser is open on the document: the draft
+                 is keyed per document, not per tab, and that tab clears it
+                 when it follows the save. A browser that cannot keep a
+                 draft loses the text to a reload too.
 
                  What each button does is in its title and, for a keyboard
                  or a screen reader, in the element it is described by. --}}

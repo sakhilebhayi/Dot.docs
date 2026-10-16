@@ -120,7 +120,9 @@ jobs:
           # manifest.json and emitting correct hashes while the BROWSER'S
           # request for those exact asset URLs 404'd against the real,
           # never-updated docroot copy - looked exactly like a stale cache
-          # for days; it was a wrong rsync destination the whole time.
+          # for days; DEPLOY_PATH/public/build was the wrong destination ON
+          # ITS OWN. It is still the right SECOND destination (below): @vite
+          # reads its manifest, so every build goes to both.
           REAL_DOCROOT=$(dirname "$DEPLOY_PATH")
 
           # build/ gets its own --delete-scoped sync so old content-hashed
