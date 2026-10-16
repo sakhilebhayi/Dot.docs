@@ -48,7 +48,12 @@ function harness({ version = 1, state = 'clean', visible = true } = {}) {
 
                 return h.applyResult;
             },
-            onConflict: (remote) => h.conflicts.push(remote),
+            onConflict: (remote) => {
+                h.conflicts.push(remote);
+                if (h.conflictThrows) {
+                    throw new Error('host failed');
+                }
+            },
             onRefused: (remote) => h.refusals.push(remote),
             onMembers: (members, others) => {
                 h.calls.push('members');
@@ -63,9 +68,20 @@ function harness({ version = 1, state = 'clean', visible = true } = {}) {
                     throw new Error('host failed');
                 }
             },
-            onStopped: (reason) => h.stopped.push(reason),
+            onStopped: (reason) => {
+                h.stopped.push(reason);
+                if (h.stoppedThrows) {
+                    throw new Error('host failed');
+                }
+            },
         },
-        visible: () => h.visible,
+        visible: () => {
+            if (h.visibleThrows) {
+                throw new Error('the visibility check failed');
+            }
+
+            return h.visible;
+        },
         setTimer: (fn, ms) => {
             h.timer = { fn, ms };
 
@@ -379,19 +395,70 @@ for (const [status, reason] of [[401, 'signed-out'], [419, 'signed-out'], [403, 
     });
 }
 
-test('a 403 with no JSON body is a failure to retry, not a reason to stop', async () => {
-    // A firewall or rate limiter in front of the application answers 403
-    // with an HTML page. That is not "your access was removed".
+for (const status of [401, 419, 403, 404]) {
+    test(`a ${status} with no JSON body is a failure to retry, not a reason to stop`, async () => {
+        // A firewall or rate limiter in front of the application answers
+        // with an HTML page. That is not "your access was removed", "you
+        // were signed out" or "the document is gone".
+        const h = harness();
+        h.engine.start();
+        await settle();
+        await h.answer(status);
+
+        assert.deepEqual(h.stopped, []);
+        assert.equal(h.timer.ms, FAST_MS * 2);
+
+        await h.fire();
+        assert.equal(h.requests.length, 1, 'it polls again');
+    });
+}
+
+// ───────────────────────────────────────────────────────── a host that throws, and a visibility check that throws
+
+test('a host whose onStopped throws does not throw out of the engine', async () => {
     const h = harness();
+    h.stoppedThrows = true;
+    const run = h.engine.start();
+    await settle();
+    await h.answer(403, { message: 'x' });
+
+    await assert.doesNotReject(run);
+    assert.deepEqual(h.stopped, ['forbidden']);
+    assert.equal(h.timer, null, 'stopped for good all the same');
+});
+
+test('a visibility check that throws counts as visible: the next poll is still armed', async () => {
+    const h = harness();
+    h.visibleThrows = true;
+    const run = h.engine.start();
+    await settle();
+    await h.answer(200, quiet(1, 1));
+
+    await assert.doesNotReject(run);
+    assert.notEqual(h.timer, null, 'the next poll is armed');
+    assert.equal(h.timer.ms, FAST_MS);
+
+    // And a visibility change polls rather than disarming.
+    await h.fire();
+    await h.answer(200, quiet(1, 1));
+    assert.doesNotThrow(() => h.engine.visibilityChanged());
+    await settle();
+    assert.equal(h.requests.length, 1);
+});
+
+test('a host whose onConflict throws through retry() does not reach the caller', async () => {
+    const h = harness({ version: 1, state: 'dirty' });
+    h.conflictThrows = true;
     h.engine.start();
     await settle();
-    await h.answer(403);
+    await h.answer(200, moved(2));
+    assert.equal(h.conflicts.length, 1);
+    assert.notEqual(h.timer, null, 'the throw inside the poll was already survived');
 
-    assert.deepEqual(h.stopped, []);
-    assert.equal(h.timer.ms, FAST_MS * 2);
-
-    await h.fire();
-    assert.equal(h.requests.length, 1, 'it polls again');
+    // retry() is what persist() calls when a save answers: a throw here
+    // would be reported as the failure of a save the server stored.
+    assert.doesNotThrow(() => h.engine.retry());
+    assert.equal(h.conflicts.length, 2);
 });
 
 // ───────────────────────────────────────────────────────── a tick for the host on every completed poll
@@ -418,6 +485,7 @@ for (const [what, complete] of [
     ['is answered 429 with a JSON body', (h) => h.answer(429, { message: 'Too Many Attempts.' })],
     ['is answered 200 with no body', (h) => h.answer(200)],
     ['never reaches the server', (h) => h.fail()],
+    ['times out (the request reports status 0 and no body)', (h) => h.answer(0)],
 ]) {
     test(`a poll that ${what} still gives the host a tick`, async () => {
         // The host re-sends a save nobody answered from this tick. If only an
@@ -514,6 +582,20 @@ test('a hidden tab does not poll; becoming visible polls at once', async () => {
     assert.equal(h.requests.length, 1);
 });
 
+test('a tab that becomes hidden disarms the next poll, and polls no more until it is visible again', async () => {
+    const h = harness();
+    h.engine.start();
+    await settle();
+    await h.answer(200, quiet(1, 1));
+    assert.notEqual(h.timer, null);
+
+    h.visible = false;
+    h.engine.visibilityChanged();
+    await settle();
+    assert.equal(h.timer, null, 'the armed poll is disarmed');
+    assert.equal(h.requests.length, 0, 'and no poll was sent');
+});
+
 test('a poke during a request runs exactly one more poll after it', async () => {
     const h = harness();
     h.engine.start();
@@ -557,7 +639,65 @@ test('createSyncRequest posts JSON with the CSRF token and returns status and bo
     assert.equal(calls[0].init.method, 'POST');
     assert.equal(calls[0].init.headers['X-CSRF-TOKEN'], 'token-123');
     assert.equal(calls[0].init.headers.Accept, 'application/json');
+    assert.equal(calls[0].init.headers['Content-Type'], 'application/json');
+    assert.equal(calls[0].init.credentials, 'same-origin');
     assert.deepEqual(JSON.parse(calls[0].init.body), { version: 2, tab: 'tab-a' });
+});
+
+/** Injected timers: each call is recorded, never run, so a test fires it by hand. */
+function fakeTimers() {
+    const timers = [];
+
+    return {
+        timers,
+        setTimeout: (fn, ms) => {
+            timers.push({ fn, ms, cleared: false });
+
+            return timers.length;
+        },
+        clearTimeout: (id) => {
+            timers[id - 1].cleared = true;
+        },
+    };
+}
+
+test('createSyncRequest gives up on a poll that has not answered in twenty seconds and reports a failure', async () => {
+    const clock = fakeTimers();
+    let init = null;
+    const request = createSyncRequest(
+        '/documents/u/sync',
+        'token-123',
+        (url, options) => {
+            init = options;
+
+            // A request that never answers: a stalled connection, a proxy holding it.
+            return new Promise(() => {});
+        },
+        clock
+    );
+
+    const answer = request({ version: 1, tab: 'tab-a' });
+    assert.equal(clock.timers.length, 1, 'a time limit is set');
+    assert.equal(clock.timers[0].ms, 20000);
+    assert.equal(init.signal.aborted, false, 'the fetch was given a signal to abort on');
+
+    clock.timers[0].fn();
+    // The engine treats this as a completed poll that failed: a tick for
+    // the host, and a retry with back-off.
+    assert.deepEqual(await answer, { status: 0, body: null });
+    assert.equal(init.signal.aborted, true, 'and the fetch was aborted');
+});
+
+test('createSyncRequest clears its time limit once the poll has answered, and keeps the timers default', async () => {
+    const clock = fakeTimers();
+    const request = createSyncRequest('/x', 't', async () => ({ status: 200, json: async () => ({ version: 1 }) }), clock);
+
+    assert.deepEqual(await request({ version: 1, tab: 'tab-a' }), { status: 200, body: { version: 1 } });
+    assert.equal(clock.timers[0].cleared, true);
+
+    // With nothing injected the global timers are used, and an answered request still resolves.
+    const plain = createSyncRequest('/x', 't', async () => ({ status: 200, json: async () => ({ version: 2 }) }));
+    assert.deepEqual(await plain({ version: 1, tab: 'tab-a' }), { status: 200, body: { version: 2 } });
 });
 
 test('createSyncRequest survives a response that is not JSON', async () => {
