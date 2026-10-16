@@ -107,6 +107,13 @@ test('an offline Livewire POST fails as a network error, and nothing is queued f
     assert.equal(worker.listeners.sync, undefined);
 });
 
+test('a POST navigation (a form post such as logout) is not intercepted', () => {
+    const event = fetchEvent('POST', '/logout', 'navigate');
+    loadServiceWorker().listeners.fetch(event);
+
+    assert.equal(event.responded, false);
+});
+
 test('a static asset is still served through the cache', () => {
     const event = fetchEvent('GET', '/build/assets/app-abc.js');
     loadServiceWorker().listeners.fetch(event);

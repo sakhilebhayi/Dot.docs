@@ -39,7 +39,10 @@ class DocumentSyncController extends Controller
     ): JsonResponse {
         $data = $request->validate([
             'version' => ['required', 'integer', 'min:0'],
-            'tab' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9-]+$/'],
+            // \A...\z, not ^...$: in PCRE `$` also matches before a trailing
+            // newline, so "tab-a\n" passed and only the TrimStrings
+            // middleware was saving the rule. The column is 64 wide.
+            'tab' => ['required', 'string', 'max:64', 'regex:/\A[A-Za-z0-9-]+\z/'],
             'leaving' => ['sometimes', 'boolean'],
             // Which version of this request format the caller speaks. Not
             // acted on yet: it is accepted now so that a later phase can

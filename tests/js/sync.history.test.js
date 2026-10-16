@@ -355,6 +355,33 @@ test('in TipTap own editor, plugins append to the remote dispatch and nothing to
     editor.destroy();
 });
 
+/**
+ * The repair stays BEHIND UniqueID (.ai/rules/editor.md): UniqueID declares
+ * priority 10000 and the repair has the default, so TipTap puts UniqueID's
+ * plugin first and the repair sees the ids UniqueID has already handed out.
+ * `BlockId` and `BlockIdRepair` here are the extensions the bundle registers
+ * (extensions/blockId.js); the bundle's full list cannot be loaded under
+ * node, but TipTap orders plugins by extension priority, not by position in
+ * the list, so the order is the same there.
+ */
+test('in the extension stack UniqueID plugin comes before the id repair: uniqueID$ before dotdocBlockIdRepair$', () => {
+    const { editor } = tiptapEditor(MINE);
+    const keys = editor.state.plugins.map((plugin) => plugin.key);
+    // UniqueID makes its PluginKey per editor, and ProseMirror numbers a
+    // key name that is used again (`uniqueID$`, then `uniqueID$1`, ...), so
+    // the key is matched by name: in a page's first editor it is `uniqueID$`.
+    // The repair's key is one module-level constant, always
+    // `dotdocBlockIdRepair$`.
+    const uniqueId = keys.findIndex((key) => /^uniqueID\$\d*$/.test(key));
+    const repair = keys.indexOf('dotdocBlockIdRepair$');
+
+    assert.notEqual(uniqueId, -1, keys.join(', '));
+    assert.notEqual(repair, -1, keys.join(', '));
+    assert.ok(uniqueId < repair, `UniqueID first, got ${keys.join(', ')}`);
+
+    editor.destroy();
+});
+
 test('in TipTap own editor, a remote document the editor already shows leaves the history alone', () => {
     const { editor, updates, dispatches } = tiptapEditor(MINE);
 

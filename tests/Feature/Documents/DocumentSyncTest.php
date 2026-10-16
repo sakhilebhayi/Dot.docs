@@ -9,6 +9,7 @@ use App\Models\DocumentCollaborator;
 use App\Models\User;
 use App\Styles\StyleEngine;
 use Database\Seeders\DocumentStyleSeeder;
+use Illuminate\Foundation\Http\Middleware\TrimStrings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -166,6 +167,44 @@ class DocumentSyncTest extends TestCase
         $this->actingAs($user)
             ->postJson(route('documents.sync', 'no-such-uuid'), ['version' => 1, 'tab' => 'tab-a'])
             ->assertNotFound();
+    }
+
+    /** The tab id column is 64 characters wide: a longer id is refused before anything is written. */
+    public function test_a_tab_id_longer_than_sixty_four_characters_is_refused_and_records_nothing(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $this->actingAs($user)
+            ->postJson(route('documents.sync', $doc->uuid), ['version' => 1, 'tab' => str_repeat('a', 65)])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('tab');
+        $this->assertSame(0, DB::table('document_presences')->count());
+
+        $this->actingAs($user)
+            ->postJson(route('documents.sync', $doc->uuid), ['version' => 1, 'tab' => str_repeat('a', 64)])
+            ->assertOk();
+        $this->assertSame(1, DB::table('document_presences')->count());
+        $this->assertSame(str_repeat('a', 64), DB::table('document_presences')->value('tab_id'));
+    }
+
+    /**
+     * In PCRE `$` matches before a trailing newline, so `^...$` let
+     * "tab-a\n" through and only the TrimStrings middleware was saving the
+     * rule. It is anchored with \A...\z: refused with that middleware out
+     * of the way too.
+     */
+    public function test_a_tab_id_with_a_trailing_newline_is_refused_even_when_nothing_trims_it(): void
+    {
+        $this->withoutMiddleware(TrimStrings::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $this->actingAs($user)
+            ->postJson(route('documents.sync', $doc->uuid), ['version' => 1, 'tab' => "tab-a\n"])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('tab');
+        $this->assertSame(0, DB::table('document_presences')->count());
     }
 
     public function test_a_malformed_body_is_rejected(): void
