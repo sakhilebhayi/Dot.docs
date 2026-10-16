@@ -5,17 +5,14 @@ namespace App\Livewire\Documents;
 use App\Audit\AuditLogger;
 use App\Documents\DocumentStore;
 use App\Documents\Import\HtmlToJson;
-use App\Documents\Outline\Outline;
+use App\Documents\Outline\EditorOutline;
+use App\Documents\StaleDocumentException;
 use App\Events\DocumentUpdated;
-use App\Events\UserJoinedDocument;
-use App\Events\UserLeftDocument;
 use App\Files\FilesService;
 use App\Models\AiSuggestion;
 use App\Models\Document;
 use App\Models\DocumentStyle;
 use App\Models\Files\Obj;
-use App\Print\HeaderFooterBands;
-use App\Print\PageSetup;
 use App\Services\PresenceService;
 use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -67,15 +64,10 @@ class Editor extends Component
         $this->title = $this->document->title;
         $this->contentJson = app(DocumentStore::class)->json($this->document);
 
-        $presence = app(PresenceService::class);
-        $presence->join($this->document, Auth::user());
-        $this->activeUsers = $presence->getMemberList($this->document->id);
-
-        try {
-            UserJoinedDocument::dispatch($this->document, Auth::user());
-        } catch (\Throwable) {
-            // Broadcasting unavailable — continue without real-time presence
-        }
+        // The browser registers this tab's presence with its first sync poll
+        // (it owns the tab id). Until then, show whoever is already here plus
+        // the person opening the page.
+        $this->activeUsers = $this->presentMembers();
 
         $this->loadPendingSuggestions();
 
@@ -86,44 +78,85 @@ class Editor extends Component
     }
 
     /**
-     * @return array{ok:bool,version:int} whether the document was stored, and
-     *                                    the version it is now at. $wire
-     *                                    actions resolve with the return
-     *                                    value, so the editor bridge awaits
-     *                                    both: it keeps the offline draft when
-     *                                    `ok` is false (a rejected save must
-     *                                    not quietly lose the writer's work)
-     *                                    and stamps `version` onto the draft
-     *                                    as its `baseVersion`, which is what
-     *                                    decides on the next load whether the
-     *                                    draft is still restorable or somebody
-     *                                    else has saved since.
+     * `$baseVersion` is the document version the browser's copy was based
+     * on. A save based on an older version is refused - two people with the
+     * document open would otherwise each replace the other's work with a
+     * stale whole-document copy - and a save that states no base at all
+     * comes from a tab still running JavaScript from before this rule, which
+     * must reload rather than write.
+     *
+     * `$overwrite` is the page's "Keep mine" or "Put it back" choice: the
+     * writer knows a newer version exists, has their base on it, and is
+     * replacing it on purpose. The person who wrote that version is not
+     * asked, and their save may have cut no version of its own (the unload
+     * beacon never does; an autosave skips it while the same author's last
+     * one is under two minutes old), so the save is told to keep what it
+     * replaces as a named version (`keepReplacedAs`). DocumentStore::save()
+     * cuts it inside the save's own transaction: a save that is refused as
+     * stale, or whose content the schema rejects, keeps nothing.
+     *
+     * $wire actions resolve with the return value, so the editor bridge
+     * reads all three keys: it keeps the offline draft when `ok` is false (a
+     * refused save must not quietly lose the writer's work), shows the
+     * "changed elsewhere" choice when `conflict` is true, and stamps
+     * `version` onto the next draft as its base. `version` is null in one
+     * answer only, the refusal of a save that stated no base (see there).
+     *
+     * @return array{ok:bool,conflict:bool,version:int|null}
      */
-    public function saveContent(array $content): array
+    public function saveContent(array $content, ?int $baseVersion = null, bool $overwrite = false): array
     {
         $this->authorize('update', $this->document);
 
         $this->resetErrorBag('content');
 
+        if ($baseVersion === null) {
+            $this->addError('content', 'This page is out of date. Reload it to keep editing.');
+            $this->saved = false;
+
+            // Never the current version here. The JavaScript in a tab opened
+            // before saves stated a base adopts ANY numeric `version` it is
+            // answered with as the base of its offline draft, before it
+            // looks at `ok`. Handed the current version, a draft built on
+            // an older one would claim to be up to date, and after the
+            // reload this message asks for it would be offered back and
+            // saved over everything written since, passing the stale check.
+            // With null that tab keeps its true base, so the reloaded page
+            // sets the draft aside when anybody has saved in between.
+            return ['ok' => false, 'conflict' => false, 'version' => null];
+        }
+
+        $opts = ['expectedVersion' => $baseVersion];
+        if ($overwrite) {
+            // The same label the unload beacon uses for the same choice.
+            $opts['keepReplacedAs'] = DocumentStore::overwriteLabel(Auth::user());
+        }
+
         try {
-            $this->document = app(DocumentStore::class)->save($this->document, $content, Auth::user());
+            $this->document = app(DocumentStore::class)->save($this->document, $content, Auth::user(), $opts);
+        } catch (StaleDocumentException $e) {
+            $this->saved = false;
+
+            return ['ok' => false, 'conflict' => true, 'version' => $e->currentVersion];
         } catch (InvalidArgumentException $e) {
             $this->addError('content', $e->getMessage());
             $this->saved = false;
 
-            return ['ok' => false, 'version' => $this->document->version];
+            return ['ok' => false, 'conflict' => false, 'version' => $this->document->version];
         }
         $this->contentJson = $this->document->content_json;
         $this->saved = true;
 
         try {
             DocumentUpdated::dispatch($this->document, Auth::user(), $this->document->content, $this->document->content_json, $this->document->version);
-        } catch (\Throwable) {
-            // Broadcasting unavailable — continue without real-time sync
+        } catch (\Throwable $e) {
+            // Broadcasting unavailable: the save itself has succeeded, so
+            // carry on - but log it. This catch used to be empty, which hid
+            // a misconfigured broadcast connection for as long as it lasted.
+            report($e);
         }
-        app(PresenceService::class)->heartbeat($this->document, Auth::user());
 
-        return ['ok' => true, 'version' => $this->document->version];
+        return ['ok' => true, 'conflict' => false, 'version' => $this->document->version];
     }
 
     /**
@@ -163,32 +196,7 @@ class Editor extends Component
         // own authorisation rather than trusting mount()'s.
         $this->authorize('view', $this->document);
 
-        $style = $this->document->resolvedStyle() ?? DocumentStyle::resolve('report');
-        $result = app(Outline::class)->build($this->document->content_json ?? [], $style?->tokens['numbering'] ?? []);
-
-        // PageSetup::fromDocument() requires a non-null DocumentStyle;
-        // StyleEngine::resolve() is the guaranteed-non-null resolver
-        // render() already uses two lines below in this same class, so
-        // page setup and CSS are resolved from the same style either way.
-        $resolvedStyle = app(StyleEngine::class)->resolve($this->document);
-        $setup = PageSetup::fromDocument($this->document, $resolvedStyle);
-
-        $vars = array_merge($this->document->variables ?? [], [
-            'title' => $this->document->title,
-            'date' => now()->format('Y-m-d'),
-            'team' => $this->document->team?->name ?? '',
-        ]);
-        $bands = app(HeaderFooterBands::class);
-
-        return [
-            'numbers' => $result->numbers,
-            'toc' => $result->toc,
-            'figures' => $result->figures,
-            'tables' => $result->tables,
-            'pageSetup' => $setup->toArray(),
-            'headerSegments' => $bands->segments($setup->header, $vars),
-            'footerSegments' => $bands->segments($setup->footer, $vars),
-        ];
+        return app(EditorOutline::class)->of($this->document);
     }
 
     /**
@@ -219,10 +227,14 @@ class Editor extends Component
             ->whereNull('accepted_at')
             ->findOrFail($suggestionId);
 
+        // No base is stated: accepting replaces whatever is stored, which
+        // may be somebody else's save from a moment ago. The store keeps
+        // that first (see DocumentStore::save()).
         $json = app(HtmlToJson::class)->convert($suggestion->suggestion_text);
         $this->document = app(DocumentStore::class)->save($this->document, $json, Auth::user(), [
             'version' => 'named',
             'label' => 'Accepted suggestion',
+            'keepReplacedAs' => 'Before accepted suggestion',
         ]);
         $this->contentJson = $this->document->content_json;
 
@@ -230,7 +242,9 @@ class Editor extends Component
         $this->loadPendingSuggestions();
         $this->saved = true;
 
-        $this->dispatch('suggestion-accepted', content: $this->contentJson);
+        // `version` so the page can move its base up: this save came from
+        // the page itself, and its next autosave must not be refused as stale.
+        $this->dispatch('suggestion-accepted', content: $this->contentJson, version: $this->document->version);
     }
 
     public function rejectSuggestion(int $suggestionId): void
@@ -255,9 +269,11 @@ class Editor extends Component
 
     /**
      * Switch the document's style. Valid keys are the fourteen system
-     * styles or a team-owned custom style of the same key. Re-saves the
-     * document through DocumentStore so heading/figure numbering is
-     * rebuilt against the new style's numbering rules.
+     * styles or a team-owned custom style of the same key. Goes through
+     * DocumentStore::restyle(), which rebuilds heading/figure numbering
+     * against the new style's rules from the document as it is stored at
+     * that moment - never from this component's own copy, which was loaded
+     * when the request began and may be older than somebody else's save.
      */
     public function setStyle(string $key): void
     {
@@ -273,11 +289,10 @@ class Editor extends Component
             return;
         }
 
-        $this->document->style_key = $key;
-        $this->document = app(DocumentStore::class)->save($this->document, $this->document->content_json, Auth::user(), ['version' => 'none']);
+        $this->document = app(DocumentStore::class)->restyle($this->document, $key);
         $this->contentJson = $this->document->content_json;
 
-        $this->dispatch('style-changed', css: $engine->css($engine->resolve($this->document), 'canvas'));
+        $this->dispatch('style-changed', css: $engine->css($engine->resolve($this->document), 'canvas'), version: $this->document->version);
     }
 
     /**
@@ -368,21 +383,46 @@ class Editor extends Component
         return $files->registerDocument($this->document, $files->root($team));
     }
 
-    public function heartbeat(): void
+    /**
+     * Called by tabs opened before the sync poll shipped: their JavaScript
+     * still calls this every 60 seconds. It does nothing now - presence is
+     * recorded by the sync poll - but it must exist, or each of those calls
+     * would be answered with an error page. Remove one release later.
+     */
+    public function heartbeat(): void {}
+
+    /**
+     * Called by tabs opened before the sync poll shipped, when they close.
+     * It does nothing now, for the same reason as heartbeat(). Remove one
+     * release later.
+     */
+    public function leaving(): void {}
+
+    /**
+     * Re-read who is here for the presence strip. The editor's sync poll
+     * calls this when the set of people it is told about changes - presence
+     * itself is recorded by that poll (DocumentSyncController), not here.
+     */
+    public function refreshPresence(): void
     {
-        app(PresenceService::class)->heartbeat($this->document, Auth::user());
-        $this->activeUsers = app(PresenceService::class)->getMemberList($this->document->id);
+        $this->authorize('view', $this->document);
+
+        $this->activeUsers = $this->presentMembers();
     }
 
-    public function leaving(): void
+    /**
+     * @return list<array{id:int,name:string,avatar:string}>
+     */
+    private function presentMembers(): array
     {
-        $presence = app(PresenceService::class);
-        $presence->leave($this->document, Auth::user());
-        try {
-            UserLeftDocument::dispatch($this->document, Auth::user());
-        } catch (\Throwable) {
-            // Broadcasting unavailable
+        $members = app(PresenceService::class)->members($this->document->id);
+        $me = Auth::user();
+
+        if (! collect($members)->contains('id', $me->id)) {
+            $members[] = ['id' => $me->id, 'name' => $me->name, 'avatar' => $me->profile_photo_url];
         }
+
+        return $members;
     }
 
     private function loadPendingSuggestions(): void

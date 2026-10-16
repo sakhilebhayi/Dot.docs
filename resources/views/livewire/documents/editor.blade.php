@@ -2,7 +2,67 @@
     x-data="{
         owns: false,
         echo: null,
-        heartbeatTimer: null,
+        // This tab's identity for presence and the sync poll. Per page load,
+        // not per browser: two tabs of one account are two tabs. Made in
+        // init(), not here: the editor bundle makes it (createTabId() in
+        // sync/host.js), and Alpine can read this object before that
+        // bundle has loaded.
+        tabId: '',
+        // How many of this tab's own saves are in the air, and when the
+        // latest one left. The sync engine decides nothing about a newer
+        // document until they have settled - but a request that never
+        // answers must not freeze following for ever, so `busy` expires.
+        saving: 0,
+        savingSince: 0,
+        // True from the first local edit until a save of exactly what the
+        // editor holds has been confirmed by the server. The bundle's own
+        // `pending` flag is not enough: it drops the moment a document is
+        // HANDED to persist(), long before the server has stored it.
+        unsaved: false,
+        // A save is owed: one was asked for while another was in the air,
+        // or one never answered. resendIfOwed() sends it.
+        resave: false,
+        // The document, as a JSON string, as the server last confirmed it:
+        // what the page opened with, what the last accepted save stored, or
+        // the last server document applied. It is the document of the
+        // version baseVersion names; null again whenever that is not known
+        // (one of this tab's saves went unanswered, or Keep mine moved the
+        // base up), until a save is accepted or a server document applied.
+        // See settleIfBackAtConfirmed() in sync/host.js.
+        confirmed: null,
+        // This tab's text is to replace, on purpose, the version its base
+        // now names: Keep mine moved the base up to it, or Put it back
+        // replaces the version that was loaded. Every save says so (the
+        // unload beacon too) until one that said so is accepted.
+        overwriteOwed: false,
+        // Set while a newer version exists on the server AND this tab holds
+        // unsaved typing. Saving is suspended until the writer chooses.
+        // `version` is the newest version known to be in the way; `ready`
+        // is whether that document has been downloaded yet.
+        conflict: null,
+        // The writer's own text, as a JSON string, after they chose to load
+        // the newer version - or a draft from an earlier visit that the
+        // document has since moved past. Kept so the page can offer to put
+        // it back.
+        setAside: null,
+        // Where setAside came from, and the document version the page
+        // showed when the text was set aside. The source is 'conflict'
+        // (Load theirs, a moment ago in this tab) or 'draft' (a draft found
+        // at page load that the document has moved past: its text may
+        // already be part of the document). Put it back asks first when the
+        // source is a draft, when baseVersion is no longer setAsideBase, or
+        // when the page holds text that is not saved yet. Both are null
+        // while nothing is set aside, and everything that clears setAside
+        // clears them with it.
+        setAsideFrom: null,
+        setAsideBase: null,
+        // A reason the page can no longer stay in step (signed out, access
+        // removed, document deleted, a version this editor cannot open).
+        // Shown in the notice bar.
+        syncNotice: '',
+        // The people last reported by the poll, as a comparable string, so
+        // the presence strip is only re-rendered when it actually changes.
+        memberKey: '',
         isTyping: false,
         typingTimeout: null,
         isOffline: !navigator.onLine,
@@ -42,6 +102,22 @@
             window.dispatchEvent(new CustomEvent('shell:save-state', { detail: { tone, word } }));
         },
 
+        // A button in the notice bar was pressed from the keyboard: hand the
+        // keyboard back to the document. The row that held the button goes
+        // away once the choice has been carried out (at once, or when the
+        // save answers), and the focus would be left on nothing. The notice
+        // bar calls this for every click inside it, after the button's own
+        // handler. Only a press from the keyboard counts (a click the
+        // browser made from Enter or Space has detail 0): after a tap,
+        // focusing the paper would bring up the on-screen keyboard over a
+        // document the writer has just asked to look at. No scrolling:
+        // nobody asked to go anywhere. This is page glue about focus, not a
+        // decision about a save; sync/host.js has no DOM.
+        noticePressed(event) {
+            if (event.detail !== 0 || !event.target.closest('button')) return;
+            this.ed()?.commands.focus(null, { scrollIntoView: false });
+        },
+
         init() {
             // Alpine now comes only from Livewire's bundle (the duplicate CDN
             // tag is gone from layouts/app.blade.php — two Alpines break
@@ -55,13 +131,27 @@
             if (!host) return;
             this.owns = !window.DotDoc.get(host);
 
+            // Once per data object: Alpine calls init() more than once.
+            if (!this.tabId) {
+                this.tabId = window.DotDoc.sync.createTabId({
+                    crypto: window.crypto, random: Math.random, now: Date.now,
+                });
+            }
+
             // Numbers first, editor second: the heading-number decorations are
             // built when the view is created, so seeding the server's outline
             // before mount() is what stops a numbered document rendering
             // unnumbered for one round trip.
-            try {
-                window.DotDoc.setOutline(JSON.parse(host.dataset.outline || '{}'));
-            } catch (_) {}
+            // Only the first call seeds it. Livewire re-inits this element
+            // whenever the rendered x-data string changes (every render
+            // after the version has moved), and data-outline sits on a
+            // wire:ignore element, so it still holds the PAGE-LOAD outline:
+            // a later instance would put that back over a newer one.
+            if (this.owns) {
+                try {
+                    window.DotDoc.setOutline(JSON.parse(host.dataset.outline || '{}'));
+                } catch (_) {}
+            }
 
             // window.DotDoc comes from resources/js/editor/index.js. It owns the
             // 1200ms autosave debounce, the palette, the slash menu and the
@@ -86,6 +176,14 @@
                 // Livewire cannot issue a request during unload at all.
                 autosaveUrl: '{{ route('documents.autosave', $document->uuid) }}',
                 csrfToken: document.querySelector('meta[name=csrf-token]').content,
+                // The version this page's copy is based on, read at the
+                // moment of the unload beacon.
+                getBaseVersion: () => this.baseVersion,
+                // Whether an overwrite is owed (Keep mine or Put it back,
+                // with no save that said so accepted yet), read at the same
+                // moment: the beacon then says so too, and the server keeps
+                // the version it replaces.
+                getOverwrite: () => this.overwriteOwed,
                 onChange: (json) => this.persist(json),
                 onSelection: (s) => { this.selection = s; this.tick++; },
                 onCommand: (name, params) => this.hostCommand(name, params),
@@ -94,27 +192,29 @@
 
             if (!this.owns) return;
 
+            // What the editor holds now is what the server last confirmed,
+            // and the status word says Saved (or Read only, fail-closed).
+            this.syncHost().opened();
+
             // Typing indicator and the offline draft run off every keystroke;
             // the save itself is debounced inside the bundle.
             editor.on('update', () => {
                 this.isTyping = true;
                 this.tick++;
-                this.report('idle', 'Editing');
                 clearTimeout(this.typingTimeout);
                 this.typingTimeout = setTimeout(() => { this.isTyping = false; }, 1000);
-                // Never write a draft in fail-closed mode: what the editor is
-                // holding then is not the document.
-                if (window.offlineDraft && handle.autosaves !== false) {
-                    window.offlineDraft.saveDraft(this.docUuid, JSON.stringify(editor.getJSON()), this.baseVersion);
-                }
+                // Marks the text unsaved, says Editing and writes the
+                // offline draft (never in fail-closed mode).
+                this.syncHost().edited();
             });
 
-            this.report(handle.autosaves === false ? 'danger' : 'good',
-                        handle.autosaves === false ? 'Read only' : 'Saved');
-
             this.refreshOutline();
-            this.restoreDraftIfRestorable();
             this.setupEcho();
+            // The engine starts only once the draft check has finished. If
+            // its first poll brought a newer document before the draft from
+            // a previous session had been read, applying that document
+            // would delete the draft unexamined.
+            this.restoreDraftIfRestorable().finally(() => this.startSync());
 
             // Online / offline events (dispatched by offline.js initOfflineSupport)
             window.addEventListener('app-offline', () => {
@@ -123,79 +223,96 @@
             });
             window.addEventListener('app-online',  () => {
                 this.isOffline = false;
-                // Flush the current document now that we are back online. The
-                // draft is NOT cleared here: persist() clears it itself, and
-                // only once the save has actually stored what the editor is
-                // holding. Clearing it alongside an un-awaited save was how a
-                // failed reconnect save lost the offline work outright.
-                this.persist(editor.getJSON());
+                // Back online: send what was typed while offline, and ONLY
+                // that (an idle reader sends nothing), then check for what
+                // was missed. See backOnline() in sync/host.js.
+                this.syncHost().backOnline();
             });
 
-            // Heartbeat every 60 seconds to keep presence alive. It
-            // re-arms itself with setTimeout rather than running on a repeating
-            // timer, so a slow round trip cannot stack beats on top of each
-            // other, and destroy() only ever has one handle to clear.
-            const beat = () => {
-                this.heartbeatTimer = setTimeout(() => {
-                    @this.heartbeat();
-                    beat();
-                }, 60000);
-            };
-            beat();
+            // A hidden tab stops polling; coming back polls at once.
+            document.addEventListener('visibilitychange', () => this.syncEngine()?.visibilityChanged());
 
-            // Notify server when tab/window is closed
-            window.addEventListener('beforeunload', () => {
-                @this.leaving();
-            });
-        },
-
-        // $wire actions resolve with the PHP method's return value, so a
-        // rejected save (DocumentSchema validation) is visible here. On a
-        // reject the offline draft is KEPT — it is the only remaining copy of
-        // what the writer typed — and the error renders in the status area.
-        // saveContent() answers {ok, version}: `version` becomes the base the
-        // next draft is written against.
-        persist(json) {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            // Fail-closed (the content check refused the document): the editor
-            // is read-only and must not write anything back.
-            if (handle && handle.autosaves === false) return Promise.resolve();
-
-            this.report('idle', 'Saving');
-
-            // What is being SENT, captured now. Saves resolve out of order, so
-            // an older one must not be allowed to clear a draft that protects
-            // newer keystrokes.
-            const snapshot = JSON.stringify(json);
-
-            return @this.saveContent(json).then((result) => {
-                if (result && Number.isFinite(result.version)) {
-                    this.baseVersion = result.version;
-                }
-                if (result && result.ok) {
-                    this.clearDraftIfSettled(snapshot);
-                    this.report('good', 'Saved');
-                } else {
-                    this.report('danger', 'Not saved');
-                }
-
-                return this.refreshOutline();
+            // Tell the server this tab is going, so the people left behind
+            // stop seeing a face that is no longer here. By beacon, like the
+            // unload save: nothing else is delivered from a closing page.
+            window.addEventListener('pagehide', () => {
+                if (typeof navigator.sendBeacon !== 'function') return;
+                navigator.sendBeacon(
+                    '{{ route('documents.sync', $document->uuid) }}',
+                    new Blob([JSON.stringify({
+                        _token: document.querySelector('meta[name=csrf-token]').content,
+                        version: this.baseVersion,
+                        tab: this.tabId,
+                        leaving: true,
+                    })], { type: 'application/json' })
+                );
             });
         },
 
-        // Drop the offline draft only when the document the server just
-        // stored is still exactly what the editor holds AND nothing further
-        // is queued. Anything else means the draft is still the only copy of
-        // something.
-        clearDraftIfSettled(snapshot) {
-            if (!window.offlineDraft) return;
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            if (!handle || handle.autosaves === false) return;
-            if (handle.pending) return;
-            if (JSON.stringify(handle.editor.getJSON()) !== snapshot) return;
-
-            window.offlineDraft.clearDraft(this.docUuid);
+        // Everything this page decides about a save (send it, hold it, send
+        // it again, refuse it, overwrite on purpose), about a newer document
+        // (follow it, raise the conflict, set text aside, put it back) and
+        // about the offline draft is decided in
+        // resources/js/editor/sync/host.js, where node --test runs it
+        // together with the real engine. The methods below hand over to it
+        // and do nothing else.
+        //
+        // The host keeps no state of its own. It is built afresh from `this`
+        // for every call, because Alpine re-creates this data object whenever
+        // a render changes the x-data string, while the handlers bound at
+        // first load stay on the first object: a call has to read and write
+        // the object it was made on. Besides that object it is given the
+        // page: the editor handle and the engine (both parked on the
+        // element), Livewire, the draft store, the style element, the clock
+        // and the console.
+        syncHost() {
+            return window.DotDoc.sync.createSyncHost(this, {
+                handle: () => window.DotDoc?.get(this.$refs.editorEl),
+                engine: () => this.syncEngine(),
+                // $wire actions resolve with the PHP method's return value:
+                // saveContent() answers {ok, conflict, version}.
+                save: (json, baseVersion, overwrite) => @this.saveContent(json, baseVersion, overwrite),
+                refreshOutline: () => this.refreshOutline(),
+                // The presence strip is rendered by Livewire.
+                refreshPresence: () => @this.refreshPresence(),
+                report: (tone, word) => this.report(tone, word),
+                drafts: () => window.offlineDraft,
+                documentsDiffer: (a, b) => window.DotDoc.documentsDiffer(a, b),
+                // The outline that arrives with somebody else's document.
+                showOutline: (outline) => {
+                    window.DotDoc.setOutline(outline);
+                    window.DotDoc.pagination.setPageSetup(
+                        outline.pageSetup, outline.headerSegments, outline.footerSegments
+                    );
+                },
+                // Somebody else may have changed the document style: the
+                // outline carries its numbering and page setup, this carries
+                // its fonts and colours.
+                showCss: (css) => {
+                    const style = document.getElementById('doc-style');
+                    if (style) style.textContent = css;
+                },
+                confirm: (question) => window.confirm(question),
+                now: () => Date.now(),
+                info: (...args) => console.info(...args),
+                log: (...args) => console.error(...args),
+            });
         },
+
+        persist(json, options) { return this.syncHost().persist(json, options); },
+        resendIfOwed() { this.syncHost().resendIfOwed(); },
+        clearDraftIfSettled(snapshot) { return this.syncHost().clearDraftIfSettled(snapshot); },
+        syncState() { return this.syncHost().syncState(); },
+        adoptVersion(version, options) { this.syncHost().adoptVersion(version, options); },
+        applyFromSync(remote, options) { return this.syncHost().applyFromSync(remote, options); },
+        enterConflict(version) { this.syncHost().enterConflict(version); },
+        keepMine() { this.syncHost().keepMine(); },
+        loadTheirs() { return this.syncHost().loadTheirs(); },
+        putBack() { this.syncHost().putBack(); },
+        discardSetAside() { this.syncHost().discardSetAside(); },
+        membersChanged(members) { this.syncHost().membersChanged(members); },
+        restoreDraftIfRestorable() { return this.syncHost().restoreDraft(); },
+        applySuggestion(content, version) { this.syncHost().applySuggestion(content, version); },
 
         // Numbering rules live in the document style, so the server owns them.
         // Pull the fresh numbers after every save and hand them to the bundle.
@@ -205,6 +322,35 @@
                 window.DotDoc.setOutline(outline);
                 window.DotDoc.pagination.setPageSetup(outline.pageSetup, outline.headerSegments, outline.footerSegments);
             });
+        },
+
+        // The engine is parked on the editor element, not in Alpine's
+        // reactive data, for the same reason the editor handle is.
+        syncEngine() {
+            return this.$refs.editorEl?.__dotdocSync ?? null;
+        },
+
+        startSync() {
+            const host = this.$refs.editorEl;
+            if (!host || host.__dotdocSync || !window.DotDoc?.sync) return;
+
+            host.__dotdocSync = window.DotDoc.sync.createSyncEngine({
+                version: this.baseVersion,
+                tab: this.tabId,
+                request: window.DotDoc.sync.createSyncRequest(
+                    '{{ route('documents.sync', $document->uuid) }}',
+                    document.querySelector('meta[name=csrf-token]').content
+                ),
+                visible: () => document.visibilityState !== 'hidden',
+                // What the engine may do with a newer document, and what the
+                // page does with what a poll brings, is decided in
+                // sync/host.js. The engine keeps these callbacks for as long
+                // as it lives, so they stay with the data object that
+                // started it.
+                host: this.syncHost().engineHost(),
+            });
+
+            host.__dotdocSync.start();
         },
 
         // Every name here is a registry command in the `system` group: the
@@ -272,81 +418,6 @@
             }
         },
 
-        // loadDraft returns {json, savedAt, baseVersion}. A draft is offered
-        // only when it was written against THIS version of the document —
-        // if the version has moved on, somebody else has saved since and
-        // restoring the draft would overwrite them.
-        async restoreDraftIfRestorable() {
-            if (!window.offlineDraft) return;
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            // Fail-closed: the editor is read-only and holds something that is
-            // not the document, so neither restore a draft nor delete one.
-            if (!handle || handle.autosaves === false) return;
-            const editor = handle.editor;
-
-            try {
-                const draft = await window.offlineDraft.loadDraft(this.docUuid);
-                if (!draft) return;
-
-                const parsed = JSON.parse(draft.json);
-                if (!parsed || parsed.type !== 'doc' || draft.baseVersion === null) {
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    return;
-                }
-
-                if (draft.baseVersion < this.documentVersion) {
-                    // Not restorable, but not this page's to destroy either.
-                    // Park it under a stale- key so it can be recovered by
-                    // hand; parkStaleDraft() stamps parkedAt, and the sweep on
-                    // the next app boot collects it after 7 days.
-                    await window.offlineDraft.parkStaleDraft(this.docUuid, draft.json, draft.baseVersion);
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    console.info(
-                        '[Dot.Doc] An offline draft based on v' + draft.baseVersion +
-                        ' was kept as stale-' + this.docUuid + ': the document is now at v' +
-                        this.documentVersion + ', so restoring it would overwrite a newer save.'
-                    );
-                    return;
-                }
-
-                if (draft.baseVersion > this.documentVersion) {
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    return;
-                }
-
-                // Same version. Outline::apply() stamps toc.entries and
-                // crossRef.label into the stored document, so those come off
-                // both sides or every load would look like a difference.
-                if (!window.DotDoc.documentsDiffer(parsed, editor.getJSON())) {
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    return;
-                }
-
-                if (!confirm('An unsaved offline draft of this document was found. Restore it?')) {
-                    // Declining is not the same as discarding, and this is a
-                    // single confirm() with no undo behind it. Park the draft
-                    // rather than delete it, so a mis-click stays recoverable
-                    // for the 7 days the sweep leaves it alone.
-                    await window.offlineDraft.parkStaleDraft(this.docUuid, draft.json, draft.baseVersion);
-                    window.offlineDraft.clearDraft(this.docUuid);
-                    console.info(
-                        '[Dot.Doc] The offline draft was not restored. It was kept as stale-' +
-                        this.docUuid + ' and will be removed after 7 days.'
-                    );
-                    return;
-                }
-
-                try {
-                    editor.commands.setContent(parsed, { errorOnInvalidContent: true });
-                } catch (_) {
-                    // Unopenable: keep the draft rather than lose it.
-                    console.info('[Dot.Doc] The offline draft could not be applied and has been kept.');
-                    return;
-                }
-                window.offlineDraft.clearDraft(this.docUuid);
-            } catch (_) {}
-        },
-
         setupEcho() {
             if (typeof window.Echo === 'undefined') return;
 
@@ -360,28 +431,11 @@
                 .leaving((user) => {
                     console.log(user.name + ' left');
                 })
-                .listen('.document.updated', (e) => {
-                    // Only apply remote updates if from another user.
-                    if (e.editor?.id === {{ auth()->id() }}) return;
-                    const handle = window.DotDoc?.get(this.$refs.editorEl);
-                    // applyRemote (not setContent) cancels the pending
-                    // autosave that would otherwise send the pre-merge
-                    // document straight back, keeps the change out of the
-                    // local undo stack, and refuses JSON this editor cannot
-                    // parse instead of blanking the page.
-                    if (!handle || handle.autosaves === false || !handle.applyRemote(e.json)) return;
-                    if (Number.isFinite(e.version)) this.baseVersion = e.version;
-                    // The server now holds newer content than any draft, and
-                    // what the draft protected has just been superseded.
-                    if (window.offlineDraft) window.offlineDraft.clearDraft(this.docUuid);
-                    this.tick++;
-                    this.refreshOutline();
-                })
-                .listen('.user.joined', (e) => {
-                    @this.heartbeat();
-                })
-                .listen('.user.left', (e) => {
-                    @this.heartbeat();
+                .listen('.document.updated', () => {
+                    // If a socket happens to be connected (local development
+                    // with Reverb), a broadcast means one thing only: check
+                    // now. The sync engine is what applies a document.
+                    this.syncEngine()?.poke();
                 })
                 .listen('.comment.posted', (e) => {
                     Livewire.dispatch('comment-posted', e);
@@ -389,8 +443,15 @@
         },
 
         destroy() {
-            clearTimeout(this.heartbeatTimer);
+            // Alpine also runs this on the OLD data object each time Livewire
+            // morphs a changed x-data string onto this element, which is
+            // every render after the document version has moved. The editor
+            // and the sync engine live on the element and must survive
+            // that; only a real removal tears them down.
+            if (this.$el && this.$el.isConnected) return;
             clearTimeout(this.typingTimeout);
+            this.syncEngine()?.stop();
+            if (this.$refs.editorEl) this.$refs.editorEl.__dotdocSync = null;
             // Echo.join() hands back the CHANNEL, which has no leave() of its
             // own — leaving is done on the Echo instance, by name. Calling
             // this.echo.leave() threw, and Alpine's error report (which
@@ -429,31 +490,6 @@
             handle.flush();
         },
 
-        // An accepted suggestion is a document the server has already stored,
-        // so it arrives as JSON and goes in the same way a collaborator's
-        // update does: validated, outside the undo stack, and refused rather
-        // than blanking the page.
-        applySuggestion(content) {
-            const handle = window.DotDoc?.get(this.$refs.editorEl);
-            if (!handle) return;
-            // The same fail-closed gate the Echo listener has. In that mode
-            // the content check refused the document: the editor is read-only
-            // and what it is showing is not the document, so merging an
-            // accepted suggestion into the view would show the writer a
-            // document that exists nowhere.
-            if (handle.autosaves === false) {
-                this.aiError = 'This document is open read-only, so the accepted suggestion was not applied here. Reload the page once the content problem is fixed.';
-                return;
-            }
-            if (!handle.applyRemote(content)) {
-                this.aiError = 'That suggestion could not be applied — the document is unchanged.';
-                return;
-            }
-            this.aiError = '';
-            this.tick++;
-            this.refreshOutline();
-        },
-
         // Insert voice-transcribed text at current cursor position
         insertVoiceText(text) {
             const editor = this.ed();
@@ -465,9 +501,9 @@
     x-init="init()"
     x-destroy="destroy()"
     @ai-apply.window="applyAiContent('replace', $event.detail.content)"
-    @suggestion-accepted.window="applySuggestion($event.detail.content)"
+    @suggestion-accepted.window="applySuggestion($event.detail.content, $event.detail.version)"
     @voice-transcript.window="insertVoiceText($event.detail.text)"
-    @style-changed.window="document.getElementById('doc-style').textContent = $event.detail.css; refreshOutline()"
+    @style-changed.window="document.getElementById('doc-style').textContent = $event.detail.css; adoptVersion($event.detail.version); refreshOutline()"
     @keydown.ctrl.shift.k.window.prevent="$dispatch('open-ai-palette')"
     @keydown.meta.shift.k.window.prevent="$dispatch('open-ai-palette')"
     class="editor"
@@ -486,210 +522,384 @@
          @open-ai-palette.window="Livewire.dispatchTo('documents.ai-assistant', 'open-palette')"
          @open-save-as-template.window="Livewire.dispatchTo('documents.save-as-template', 'open')"
          class="hidden"></div>
-    {{-- ── The persistent bar ───────────────────────────────────────────
-         ONE slim row under the top bar, and nothing on it inserts a block.
-         Spec §4 retired the bench: the twelve formatting buttons that used to
-         wrap into three ragged rows are now either on the floating toolbar
-         that follows the selection (marks, heading level, table and image
-         tools — resources/js/editor/ui/bubble.js) or in the two menus that
-         already listed them, `/` and ⌘K.
+    {{-- ── The head of the editor page ──────────────────────────────────
+         The persistent bar and, directly under it, the notice bar. One
+         element, so the two stay at the top of the canvas TOGETHER where
+         the page scrolls under them (below 900px): a notice that asks the
+         writer to choose must not scroll away with the paper. --}}
+    <div class="doc-head">
+        {{-- ── The persistent bar ───────────────────────────────────────────
+             ONE slim row under the top bar, and nothing on it inserts a block.
+             Spec §4 retired the bench: the twelve formatting buttons that used to
+             wrap into three ragged rows are now either on the floating toolbar
+             that follows the selection (marks, heading level, table and image
+             tools — resources/js/editor/ui/bubble.js) or in the two menus that
+             already listed them, `/` and ⌘K.
 
-         What is left is what has to be true all the time: what the document is
-         called, which style it is set in, where it is filed, who else is here,
-         whether it is saved, and which version that is. The ⌘K button is the
-         door to everything else, and "More" holds the actions that act on the
-         whole document rather than on the text under the cursor.
+             What is left is what has to be true all the time: what the document is
+             called, which style it is set in, where it is filed, who else is here,
+             whether it is saved, and which version that is. The ⌘K button is the
+             door to everything else, and "More" holds the actions that act on the
+             whole document rather than on the text under the cursor.
 
-         The document's title is here, and ONLY here: the top bar deliberately
-         does not repeat it on this route (layouts/app.blade.php), because a
-         title you can read in two places but edit in one is a title people
-         edit in the wrong one. --}}
-    <div class="doc-bar">
-        {{-- The page's one <h1>. The title is edited through the input
-             beside it, so the heading is for the document outline and for
-             assistive technology; Livewire re-renders both together. --}}
-        <h1 class="sr-only">{{ $title ?: 'Untitled' }}</h1>
+             The document's title is here, and ONLY here: the top bar deliberately
+             does not repeat it on this route (layouts/app.blade.php), because a
+             title you can read in two places but edit in one is a title people
+             edit in the wrong one. --}}
+        <div class="doc-bar">
+            {{-- The page's one <h1>. The title is edited through the input
+                 beside it, so the heading is for the document outline and for
+                 assistive technology; Livewire re-renders both together. --}}
+            <h1 class="sr-only">{{ $title ?: 'Untitled' }}</h1>
 
-        <label class="sr-only" for="doc-title">Document title</label>
-        <input id="doc-title"
-               wire:model.blur="title"
-               wire:change="saveTitle"
-               type="text"
-               class="doc-title-field"
-               placeholder="Untitled" />
+            <label class="sr-only" for="doc-title">Document title</label>
+            <input id="doc-title"
+                   wire:model.blur="title"
+                   wire:change="saveTitle"
+                   type="text"
+                   class="doc-title-field"
+                   placeholder="Untitled" />
 
-        <label class="sr-only" for="doc-style-picker">Document style</label>
-        <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select">
-            @foreach (\App\Styles\StyleEngine::systemKeys() as $styleKey)
-                <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
-            @endforeach
-        </select>
-        @error('style')
-            <span class="field-error">{{ $message }}</span>
-        @enderror
-
-        <label class="sr-only" for="doc-view-mode">Page view</label>
-        <select id="doc-view-mode" class="tool-select"
-                x-model="viewMode" @change="window.DotDoc.pagination.setMode(viewMode)">
-            <option value="continuous">Continuous</option>
-            <option value="single">Single page</option>
-            <option value="multi-page">Multi-page</option>
-            <option value="focus">Focus</option>
-            <option value="print-preview">Print preview</option>
-        </select>
-
-        <button type="button" class="tool tool-mono" aria-pressed="false"
-                x-bind:aria-pressed="thumbnailsOpen ? 'true' : 'false'"
-                @click="thumbnailsOpen = !thumbnailsOpen; if (thumbnailsOpen) $nextTick(() => window.DotDoc.pagination.refreshThumbnails())">Pages</button>
-
-        {{-- Everything structural — headings, lists, tables, images, callouts,
-             columns, breaks, cross-references, exports, the assistant — is in
-             the registry, which this button and the `/` menu both list. --}}
-        <button type="button" class="tool tool-mono doc-bar-palette"
-                title="Commands — or type / in the document" aria-keyshortcuts="Meta+K Control+K"
-                @click="window.DotDoc.openPalette(ed())">&#8984;K</button>
-
-        {{-- Where this document is filed in the shared Dot.Files tree.
-             A quiet line of text, not a link: the button beside it is the one
-             affordance, and it opens the same .sheet folder picker the
-             documents index uses for rename. --}}
-        <span class="micro doc-bar-filed" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
-        <button type="button" class="tool tool-mono" x-ref="moveTrigger"
-                wire:click="$set('showMoveSheet', true)">Move</button>
-        @error('location')
-            <span class="field-error">{{ $message }}</span>
-        @enderror
-
-        @if (count($activeUsers) > 0)
-            <div class="presence" aria-label="People here now">
-                @foreach (array_slice($activeUsers, 0, 4) as $member)
-                    <span class="presence-face" title="{{ $member['name'] }}">
-                        @if (! empty($member['avatar']))
-                            <img src="{{ $member['avatar'] }}" alt="{{ $member['name'] }}" />
-                        @else
-                            {{ strtoupper(substr($member['name'], 0, 1)) }}
-                        @endif
-                    </span>
+            <label class="sr-only" for="doc-style-picker">Document style</label>
+            <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select">
+                @foreach (\App\Styles\StyleEngine::systemKeys() as $styleKey)
+                    <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
                 @endforeach
-                @if (count($activeUsers) > 4)
-                    <span class="presence-face">+{{ count($activeUsers) - 4 }}</span>
-                @endif
-            </div>
-        @endif
-
-        {{-- State is a WORD and a dot, never colour alone. A rejected save
-             has to be visible: the writer keeps typing over content the
-             server never accepted, and the offline draft is deliberately
-             kept as the only remaining copy. The same words go to the
-             top bar through the `shell:save-state` event. --}}
-        <span class="doc-status" aria-live="polite">
-            <x-shell.status-word tone="idle" word="Offline" x-show="isOffline"
-                                 title="Edits are saved in this browser and sync when you are back online." />
-
-            <x-shell.status-word tone="idle" word="Editing" x-show="isTyping && !isOffline" />
-
-            <x-shell.status-word tone="idle" word="Saving"
-                                 wire:loading wire:target="saveContent,saveTitle" />
-
-            <span class="status-word status-word-danger" x-show="aiError" x-cloak
-                  @click="aiError = ''" style="cursor:pointer" title="Click to dismiss">
-                <span class="status-word-dot" aria-hidden="true"></span>
-                <span x-text="aiError"></span>
-            </span>
-
-            @error('content')
-                <x-shell.status-word tone="danger" :title="$message"
-                                     :word="'Not saved — '.\Illuminate\Support\Str::limit($message, 60)" />
-            @else
-                <x-shell.status-word tone="good" :word="$saved ? 'Saved' : 'Ready'"
-                                     wire:loading.remove wire:target="saveContent,saveTitle"
-                                     x-show="!isTyping && !isOffline" />
+            </select>
+            @error('style')
+                <span class="field-error">{{ $message }}</span>
             @enderror
 
-            <span class="micro" title="Last edited {{ $document->updated_at->diffForHumans() }}">
-                <x-shell.figure :value="$document->version" prefix="v" label="Version" />
-            </span>
-        </span>
+            <label class="sr-only" for="doc-view-mode">Page view</label>
+            <select id="doc-view-mode" class="tool-select"
+                    x-model="viewMode" @change="window.DotDoc.pagination.setMode(viewMode)">
+                <option value="continuous">Continuous</option>
+                <option value="single">Single page</option>
+                <option value="multi-page">Multi-page</option>
+                <option value="focus">Focus</option>
+                <option value="print-preview">Print preview</option>
+            </select>
 
-        {{-- Everything that acts on the whole document, in one menu, so the
-             row never has to reflow. --}}
-        <div class="menu doc-bar-end" x-data="{ open: false }"
-             x-on:keydown.escape.window="if (open) { open = false; $refs.moreBtn.focus() }">
-            <button type="button" class="tool tool-mono" x-ref="moreBtn" @click="open = !open"
-                    :aria-expanded="open ? 'true' : 'false'">More</button>
+            <button type="button" class="tool tool-mono" aria-pressed="false"
+                    x-bind:aria-pressed="thumbnailsOpen ? 'true' : 'false'"
+                    @click="thumbnailsOpen = !thumbnailsOpen; if (thumbnailsOpen) $nextTick(() => window.DotDoc.pagination.refreshThumbnails())">Pages</button>
 
-            <div class="menu-list menu-list-wide" x-show="open" @click.outside="open = false" x-cloak>
-                <button type="button" data-shell-expand="dock"
-                        @click="$dispatch('open-ai-palette'); open = false">
-                    Ask the assistant
-                    <span class="micro">Ctrl+Shift+K</span>
-                </button>
+            {{-- Everything structural — headings, lists, tables, images, callouts,
+                 columns, breaks, cross-references, exports, the assistant — is in
+                 the registry, which this button and the `/` menu both list. --}}
+            <button type="button" class="tool tool-mono doc-bar-palette"
+                    title="Commands — or type / in the document" aria-keyshortcuts="Meta+K Control+K"
+                    @click="window.DotDoc.openPalette(ed())">&#8984;K</button>
 
-                <button type="button" wire:click="toggleSuggestionMode"
-                        aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
-                    {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
-                </button>
+            {{-- Where this document is filed in the shared Dot.Files tree.
+                 A quiet line of text, not a link: the button beside it is the one
+                 affordance, and it opens the same .sheet folder picker the
+                 documents index uses for rename. --}}
+            <span class="micro doc-bar-filed" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
+            <button type="button" class="tool tool-mono" x-ref="moveTrigger"
+                    wire:click="$set('showMoveSheet', true)">Move</button>
+            @error('location')
+                <span class="field-error">{{ $message }}</span>
+            @enderror
 
-                {{-- No `data-shell-expand` here, deliberately: comments render
-                     in `.editor-side`, beside the paper, NOT in the dock.
-                     Revealing a panel is one-way by design, so pointing this at
-                     the dock took ~340px of canvas width in either direction
-                     with no way back. --}}
-                <button type="button" wire:click="toggleCommentSidebar"
-                        aria-pressed="{{ $commentSidebarOpen ? 'true' : 'false' }}">
-                    {{ $commentSidebarOpen ? 'Hide comments' : 'Show comments' }}
-                </button>
-
-                <button type="button" @click="ed().chain().focus().undo().run(); open = false">
-                    Undo
-                    <span class="micro">&#8984;Z</span>
-                </button>
-                <button type="button" @click="ed().chain().focus().redo().run(); open = false">
-                    Redo
-                    <span class="micro">&#8679;&#8984;Z</span>
-                </button>
-
-                <button type="button"
-                        :class="ed()?.isActive('code') ? 'is-on' : ''"
-                        @click="ed().chain().focus().toggleCode().run(); open = false">Inline code</button>
-
-                <div x-data="voiceTyping" x-init="init()">
-                    <button type="button" x-show="supported" @click="toggle()"
-                            :aria-pressed="listening ? 'true' : 'false'"
-                            x-text="listening ? 'Stop voice typing' : 'Start voice typing'">Start voice typing</button>
+            @if (count($activeUsers) > 0)
+                <div class="presence" aria-label="People here now">
+                    @foreach (array_slice($activeUsers, 0, 4) as $member)
+                        <span class="presence-face" title="{{ $member['name'] }}">
+                            @if (! empty($member['avatar']))
+                                <img src="{{ $member['avatar'] }}" alt="{{ $member['name'] }}" />
+                            @else
+                                {{ strtoupper(substr($member['name'], 0, 1)) }}
+                            @endif
+                        </span>
+                    @endforeach
+                    @if (count($activeUsers) > 4)
+                        <span class="presence-face">+{{ count($activeUsers) - 4 }}</span>
+                    @endif
                 </div>
+            @endif
 
-                <span class="menu-label">Export</span>
-                <a href="{{ route('documents.export', [$document->uuid, 'pdf']) }}">PDF</a>
-                <a href="{{ route('documents.export', [$document->uuid, 'word']) }}">Word (.docx)</a>
-                <a href="{{ route('documents.export', [$document->uuid, 'html']) }}">HTML</a>
-                <a href="{{ route('documents.export', [$document->uuid, 'markdown']) }}">Markdown</a>
+            {{-- State is a WORD and a dot, never colour alone. A rejected save
+                 has to be visible: the writer keeps typing over content the
+                 server never accepted, and the offline draft is deliberately
+                 kept as the only remaining copy. The same words go to the
+                 top bar through the `shell:save-state` event. --}}
+            <span class="doc-status" aria-live="polite">
+                <x-shell.status-word tone="idle" word="Offline" x-show="isOffline"
+                                     title="Edits are saved in this browser and sync when you are back online." />
 
-                {{-- The same render, filed beside the document in the
-                     shared tree instead of downloaded. --}}
-                <span class="menu-label">Save to Dot.Files</span>
-                {{-- A bare <form>/<button>, NOT .menu-form/.btn: those are
-                     for the import picker, and their centred full-width
-                     button breaks the menu's row rhythm beside the export
-                     links above. `.menu-list button` already styles this. --}}
-                @foreach (['pdf' => 'PDF', 'word' => 'Word (.docx)', 'html' => 'HTML', 'markdown' => 'Markdown'] as $format => $label)
-                    <form action="{{ route('documents.export.save-to-files', [$document->uuid, $format]) }}" method="POST">
+                <x-shell.status-word tone="idle" word="Editing" x-show="isTyping && !isOffline" />
+
+                <x-shell.status-word tone="idle" word="Saving"
+                                     wire:loading wire:target="saveContent,saveTitle" />
+
+                {{-- wire:ignore: the sentence is written by Alpine (x-text),
+                     and a Livewire morph evaluates x-text on the incoming
+                     copy of this element against the newest data object,
+                     where aiError is empty, then removes the live text: the
+                     word stayed up with nothing in it. Nothing here is
+                     rendered by the server, so the morph can skip it
+                     (.ai/rules/livewire.md). --}}
+                <span class="status-word status-word-danger" wire:ignore x-show="aiError" x-cloak
+                      @click="aiError = ''" style="cursor:pointer" title="Click to dismiss">
+                    <span class="status-word-dot" aria-hidden="true"></span>
+                    <span x-text="aiError"></span>
+                </span>
+
+                {{-- A newer version was saved elsewhere while this tab held
+                     unsaved typing, and saving is suspended until the writer
+                     chooses. The strip says so in two words. The sentence and
+                     the two buttons are in the notice bar under this row: the
+                     strip is one line that does not wrap, and a notice with
+                     buttons in it ended up outside the window or under the
+                     dock. Rendered on every render and shown with x-show:
+                     x-show is the one Alpine binding a Livewire morph leaves
+                     as it is on the live element (.ai/rules/livewire.md). --}}
+                <x-shell.status-word tone="danger" word="Not saved" x-show="conflict" x-cloak />
+
+                @error('content')
+                    <x-shell.status-word tone="danger" :title="$message"
+                                         :word="'Not saved — '.\Illuminate\Support\Str::limit($message, 60)" />
+                @enderror
+
+                {{-- The x-show sits on a wrapper that is rendered the same on
+                     EVERY render, and the Saved / Ready word inside it comes and
+                     goes with the error above. With the x-show on the word
+                     itself, a word that came back after a rejected save was a
+                     new element, bound to the newest Alpine data object, whose
+                     conflict, syncNotice and isTyping never change
+                     (.ai/rules/livewire.md): Saved then showed beside the
+                     conflict notice and while typing.
+
+                     `!unsaved`: the word inside is whatever the server last
+                     rendered, so it would say Saved whenever the writer
+                     paused. `unsaved` is the page's own knowledge that the
+                     editor holds text no accepted save has stored (sync/host.js),
+                     and Saved is not said over such text: not after a save
+                     that failed or never answered, and not in the moment
+                     between the end of typing and the autosave. The strip
+                     then shows no word at all until the save is sent
+                     (Saving), stored (Saved) or refused (Not saved); the top
+                     bar keeps its own word throughout. An edit undone again
+                     clears the flag on the next poll that completes
+                     (settleIfBackAtConfirmed() in sync/host.js). --}}
+                <span x-show="!isTyping && !isOffline && !conflict && !syncNotice && !unsaved">
+                    @unless ($errors->has('content'))
+                        <x-shell.status-word tone="good" :word="$saved ? 'Saved' : 'Ready'"
+                                             wire:loading.remove wire:target="saveContent,saveTitle" />
+                    @endunless
+                </span>
+
+                <span class="micro" title="Last edited {{ $document->updated_at->diffForHumans() }}">
+                    <x-shell.figure :value="$document->version" prefix="v" label="Version" />
+                </span>
+            </span>
+
+            {{-- Everything that acts on the whole document, in one menu, so the
+                 row never has to reflow. --}}
+            <div class="menu doc-bar-end" x-data="{ open: false }"
+                 x-on:keydown.escape.window="if (open) { open = false; $refs.moreBtn.focus() }">
+                <button type="button" class="tool tool-mono" x-ref="moreBtn" @click="open = !open"
+                        :aria-expanded="open ? 'true' : 'false'">More</button>
+
+                <div class="menu-list menu-list-wide" x-show="open" @click.outside="open = false" x-cloak>
+                    <button type="button" data-shell-expand="dock"
+                            @click="$dispatch('open-ai-palette'); open = false">
+                        Ask the assistant
+                        <span class="micro">Ctrl+Shift+K</span>
+                    </button>
+
+                    <button type="button" wire:click="toggleSuggestionMode"
+                            aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
+                        {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
+                    </button>
+
+                    {{-- No `data-shell-expand` here, deliberately: comments render
+                         in `.editor-side`, beside the paper, NOT in the dock.
+                         Revealing a panel is one-way by design, so pointing this at
+                         the dock took ~340px of canvas width in either direction
+                         with no way back. --}}
+                    <button type="button" wire:click="toggleCommentSidebar"
+                            aria-pressed="{{ $commentSidebarOpen ? 'true' : 'false' }}">
+                        {{ $commentSidebarOpen ? 'Hide comments' : 'Show comments' }}
+                    </button>
+
+                    <button type="button" @click="ed().chain().focus().undo().run(); open = false">
+                        Undo
+                        <span class="micro">&#8984;Z</span>
+                    </button>
+                    <button type="button" @click="ed().chain().focus().redo().run(); open = false">
+                        Redo
+                        <span class="micro">&#8679;&#8984;Z</span>
+                    </button>
+
+                    <button type="button"
+                            :class="ed()?.isActive('code') ? 'is-on' : ''"
+                            @click="ed().chain().focus().toggleCode().run(); open = false">Inline code</button>
+
+                    <div x-data="voiceTyping" x-init="init()">
+                        <button type="button" x-show="supported" @click="toggle()"
+                                :aria-pressed="listening ? 'true' : 'false'"
+                                x-text="listening ? 'Stop voice typing' : 'Start voice typing'">Start voice typing</button>
+                    </div>
+
+                    <span class="menu-label">Export</span>
+                    <a href="{{ route('documents.export', [$document->uuid, 'pdf']) }}">PDF</a>
+                    <a href="{{ route('documents.export', [$document->uuid, 'word']) }}">Word (.docx)</a>
+                    <a href="{{ route('documents.export', [$document->uuid, 'html']) }}">HTML</a>
+                    <a href="{{ route('documents.export', [$document->uuid, 'markdown']) }}">Markdown</a>
+
+                    {{-- The same render, filed beside the document in the
+                         shared tree instead of downloaded. --}}
+                    <span class="menu-label">Save to Dot.Files</span>
+                    {{-- A bare <form>/<button>, NOT .menu-form/.btn: those are
+                         for the import picker, and their centred full-width
+                         button breaks the menu's row rhythm beside the export
+                         links above. `.menu-list button` already styles this. --}}
+                    @foreach (['pdf' => 'PDF', 'word' => 'Word (.docx)', 'html' => 'HTML', 'markdown' => 'Markdown'] as $format => $label)
+                        <form action="{{ route('documents.export.save-to-files', [$document->uuid, $format]) }}" method="POST">
+                            @csrf
+                            <button type="submit">{{ $label }}</button>
+                        </form>
+                    @endforeach
+
+                    <span class="menu-label">Import</span>
+                    <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
+                          enctype="multipart/form-data" class="menu-form">
                         @csrf
-                        <button type="submit">{{ $label }}</button>
+                        <label class="field-label" for="doc-import">A .docx or .md file</label>
+                        <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
+                        <button type="submit" class="btn btn-primary">Import it</button>
                     </form>
-                @endforeach
 
-                <span class="menu-label">Import</span>
-                <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
-                      enctype="multipart/form-data" class="menu-form">
-                    @csrf
-                    <label class="field-label" for="doc-import">A .docx or .md file</label>
-                    <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
-                    <button type="submit" class="btn btn-primary">Import it</button>
-                </form>
+                    <button type="button" @click="$dispatch('open-save-as-template'); open = false"
+                            title="Save this document as a reusable template">Save as a template</button>
+                </div>
+            </div>
+        </div>
 
-                <button type="button" @click="$dispatch('open-save-as-template'); open = false"
-                        title="Save this document as a reusable template">Save as a template</button>
+        {{-- ── The notice bar ───────────────────────────────────────────────
+             What the writer has to read in full, and what they have to
+             answer, is said here and not in the one-line status strip above:
+             this bar is as wide as the editor column, its text wraps, and
+             its buttons drop onto a line of their own when there is no room
+             beside the text. It takes no space while nothing is showing.
+
+             It is a live region, so a notice is announced when it appears.
+
+             The whole bar is wire:ignore, and its rows are switched with the
+             `hidden` attribute (x-bind:hidden), not with x-show. Both for a
+             reason (.ai/rules/livewire.md):
+
+             - Every Livewire morph initialises the INCOMING copy of each
+               element it patches against the root's newest Alpine data
+               object, whose conflict, setAside and syncNotice never change,
+               and copies the outcome onto the live element. Only x-show is
+               guarded against that. A render while the conflict notice
+               showed disabled Load theirs, and one while a sync notice
+               showed took its sentence away for good. Livewire skips a
+               wire:ignore element before it clones anything, so nothing in
+               here is evaluated or patched by a morph. The price: nothing
+               in here may be rendered by the server. No Blade condition, no
+               echoed value. It is static markup that Alpine shows, hides
+               and fills.
+             - After its first evaluation x-show applies a change (a hide or
+               a show) only inside requestAnimationFrame while the page
+               reports itself visible. In a tab that is not being painted
+               the frame never comes: a notice stayed up although its state
+               was gone, and one that should have appeared would not have.
+               x-bind:hidden writes the attribute in Alpine's own flush
+               after the change and waits for no frame. The rows carry
+               `hidden` in the markup, so nothing shows before Alpine runs
+               (`.doc-notice[hidden]` in shell.css: the row is display:flex,
+               which beats the browser's own [hidden] rule).
+               Do NOT use x-bind:hidden on anything outside a wire:ignore
+               element: without the x-show guard a morph writes the newest
+               object's answer straight onto the live element. --}}
+        <div class="doc-notices" role="status" aria-live="polite" wire:ignore
+             @click="noticePressed($event)">
+            {{-- A newer version was saved elsewhere while this tab held
+                 unsaved typing. Saving is suspended until the writer picks
+                 one: nothing is overwritten and nothing is thrown away
+                 without being asked.
+
+                 The sentence used to end in Do not reload. A reload instead
+                 of a choice opens the newer version, and this tab's text is
+                 then in the offline draft, which the page finds older than
+                 the document, sets aside and offers back in the next row
+                 (as a draft, so Put it back asks first). Only a browser
+                 that cannot keep a draft loses the text to a reload.
+
+                 What each button does is in its title and, for a keyboard
+                 or a screen reader, in the element it is described by. --}}
+            <div class="doc-notice" hidden x-bind:hidden="!conflict">
+                <p class="doc-notice-text">
+                    <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
+                    <span>Not saved — this document was changed elsewhere while you were typing. Choose one.</span>
+                </p>
+                <span class="doc-notice-actions">
+                    <button type="button" class="tool tool-mono" @click="keepMine()"
+                            aria-describedby="doc-notice-keep-mine-does"
+                            title="Save your version over the newer one. The other version is kept in the history.">Keep mine</button>
+                    <button type="button" class="tool tool-mono" @click="loadTheirs()"
+                            :disabled="!conflict || !conflict.ready"
+                            aria-describedby="doc-notice-load-theirs-does"
+                            title="Show the newer version. You can put your text back afterwards.">Load theirs</button>
+                    <span id="doc-notice-keep-mine-does" hidden>Save your version over the newer one. The other version is kept in the history.</span>
+                    <span id="doc-notice-load-theirs-does" hidden>Show the newer version. You can put your text back afterwards.</span>
+                </span>
+            </div>
+
+            {{-- Text the page holds for the writer, and where it came from
+                 (setAsideFrom, set by sync/host.js):
+
+                 - conflict: the writer chose Load theirs a moment ago, and
+                   this is what the tab held. The page took it away, so it
+                   says so, and says what Put it back does.
+                 - anything else (draft): a draft from an earlier visit that
+                   the document has since moved past. The page took nothing
+                   away, and it cannot tell text that was never stored from
+                   text the unload beacon stored and others then built on,
+                   so it does not say Your text was set aside: it says what
+                   it found.
+
+                 Put it back replaces the whole page, and through the save
+                 that follows the stored document; the server keeps the
+                 version it replaces. putBack() asks first (a browser
+                 confirm) unless the text came from Load theirs, the
+                 document has not moved since and nothing on the page is
+                 unsaved. Discard only removes the offer: nothing is sent
+                 and the page is not touched. The copy parked under
+                 stale-<uuid> when the text was set aside stays for its 7
+                 days in a browser that keeps drafts, but nothing in the
+                 page offers it again. --}}
+            <div class="doc-notice" hidden x-bind:hidden="!setAside">
+                <p class="doc-notice-text">
+                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                    <span hidden x-bind:hidden="setAsideFrom !== 'conflict'">Your text was set aside. Put it back replaces what is on the page now; the version it replaces is kept in the history.</span>
+                    <span hidden x-bind:hidden="setAsideFrom === 'conflict'">A draft from your last visit here differs from the document as it is now. It may already be part of it.</span>
+                </p>
+                <span class="doc-notice-actions">
+                    <button type="button" class="tool tool-mono" @click="putBack()"
+                            aria-describedby="doc-notice-put-back-does"
+                            title="Replace what is on the page now with this text. The version it replaces is kept in the history.">Put it back</button>
+                    <button type="button" class="tool tool-mono" @click="discardSetAside()"
+                            aria-describedby="doc-notice-discard-does"
+                            title="Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.">Discard</button>
+                    <span id="doc-notice-put-back-does" hidden>Replace what is on the page now with this text. The version it replaces is kept in the history.</span>
+                    <span id="doc-notice-discard-does" hidden>Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.</span>
+                </span>
+            </div>
+
+            {{-- The page can no longer stay in step: signed out, access
+                 removed, the document gone, or a version this editor cannot
+                 open. Also said here: a newer version or the writer's own
+                 text that could not be put into the editor. --}}
+            <div class="doc-notice" hidden x-bind:hidden="!syncNotice">
+                <p class="doc-notice-text">
+                    <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
+                    <span x-text="syncNotice"></span>
+                </p>
             </div>
         </div>
     </div>

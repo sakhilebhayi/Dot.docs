@@ -1223,6 +1223,20 @@ button.list-row {
 }
 
 /*
+ * The bar and the notice bar under it are ONE sticky element. Below 900px the
+ * page scrolls under them (.editor stops being a fixed-height column there),
+ * and a notice that asks the writer to choose must stay on screen with the
+ * bar, not scroll away with the paper. Two sticky elements cannot be stacked
+ * without knowing the first one's height, so the pair sticks together.
+ */
+.doc-head {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    flex: none;
+}
+
+/*
  * THE PERSISTENT BAR.
  *
  * ONE row under the top bar, and nothing on it inserts a block (spec §4). The
@@ -1237,9 +1251,6 @@ button.list-row {
  * shrink, so it holds one line down to a phone.
  */
 .doc-bar {
-    position: sticky;
-    top: 0;
-    z-index: 20;
     display: flex;
     align-items: center;
     gap: var(--s3);
@@ -1376,6 +1387,118 @@ button.list-row {
     margin-left: auto;
     flex-wrap: nowrap;
     white-space: nowrap;
+}
+
+/*
+ * THE NOTICE BAR.
+ *
+ * The status strip above is one line that never wraps, so it carries a word
+ * (Saved, Editing, Not saved). Anything the writer has to read in full or
+ * answer (the conflict notice with Keep mine and Load theirs, Put it back,
+ * the reason the page stopped updating) is a row here, directly under the
+ * bar: in the strip its buttons ended up outside a laptop-sized window, or
+ * underneath the dock.
+ *
+ * It is part of the frame, not a card laid over it: as wide as the editor
+ * column, flat, a 1px rule under each row, and nothing at all when no notice
+ * is showing (the wrapper has no box of its own). The tone is the 6px dot the
+ * status word uses; the sentence is in --ink.
+ *
+ * Nothing here has a fixed width. The sentence wraps, and takes a line to
+ * itself as soon as the buttons no longer fit beside it; the buttons then
+ * start the next line, and wrap among themselves if they must.
+ */
+.doc-notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2) var(--s4);
+    padding: var(--s2) var(--s4);
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+}
+
+/*
+ * A row is switched with the `hidden` attribute (x-bind:hidden in
+ * editor.blade.php), not with x-show: x-show applies a change only inside an
+ * animation frame, and a notice must come and go with its state. `display: flex`
+ * above beats the browser's own `[hidden] { display: none }`, so without this
+ * rule every notice would show all the time. The second selector is for what
+ * a row switches or keeps hidden inside itself (one of two sentences, the
+ * text a button is described by).
+ */
+.doc-notice[hidden],
+.doc-notice [hidden] {
+    display: none;
+}
+
+.doc-notice-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    margin: 0;
+    color: var(--ink);
+    font-size: var(--t-body);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+/* Level with the FIRST line of the sentence, however many lines it runs to. */
+.doc-notice-text .status-word-dot {
+    margin-top: calc((1.4em - 6px) / 2);
+}
+
+.doc-notice-actions {
+    flex: 0 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+}
+
+/*
+ * A tool on the bar above draws no edge until you go near it. Here the button
+ * is the answer the sentence asks for, so it shows itself as one: the edge and
+ * the fill of .btn, at the tool's own size.
+ */
+.doc-notice .tool {
+    border-color: var(--line);
+    background: var(--surface-raised);
+}
+
+.doc-notice .tool:hover {
+    border-color: var(--ink-soft);
+}
+
+/* Load theirs, until the newer version has been downloaded. */
+.doc-notice .tool:disabled {
+    border-color: var(--line);
+    color: var(--ink-soft);
+    cursor: not-allowed;
+}
+
+/* The same inset as the bar above it, so the two keep one left edge. */
+@container (max-width: 780px) {
+    .doc-notice {
+        padding-left: var(--s3);
+        padding-right: var(--s3);
+    }
+}
+
+/*
+ * Between 900px and 1180px the dock is a sheet laid over the right of the
+ * canvas, not a column beside it, so whatever sits at the right of this bar
+ * would be underneath it. While that sheet is open the rows keep clear of it.
+ * (Below 900px a panel covers the whole page and carries its own way out;
+ * above 1180px the dock is a column and the canvas ends where it begins.)
+ * The dock comes AFTER the canvas in .shell, which is why this needs :has().
+ */
+@media (min-width: 901px) and (max-width: 1180px) {
+    .shell:has(.dock[data-panel-user='open']) .doc-notice {
+        padding-right: calc(min(var(--dock-w), 92vw) + var(--s4));
+    }
 }
 
 .editor-row {
