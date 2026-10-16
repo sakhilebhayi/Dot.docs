@@ -658,10 +658,19 @@
                      the two buttons are in the notice bar under this row: the
                      strip is one line that does not wrap, and a notice with
                      buttons in it ended up outside the window or under the
-                     dock. Rendered on every render and shown with x-show:
-                     x-show is the one Alpine binding a Livewire morph leaves
-                     as it is on the live element (.ai/rules/livewire.md). --}}
-                <x-shell.status-word tone="danger" word="Not saved" x-show="conflict" x-cloak />
+                     dock. Shown with x-show: x-show is the one Alpine binding
+                     a Livewire morph leaves as it is on the live element
+                     (.ai/rules/livewire.md). Like the Saved / Ready word
+                     below, the x-show sits on a wrapper that is rendered the
+                     same on EVERY render, and the word inside it is rendered
+                     only while no content error says Not saved already: with
+                     a conflict standing AND a rejected save, the strip said
+                     Not saved twice, side by side. --}}
+                <span x-show="conflict" x-cloak>
+                    @unless ($errors->has('content'))
+                        <x-shell.status-word tone="danger" word="Not saved" />
+                    @endunless
+                </span>
 
                 @error('content')
                     <x-shell.status-word tone="danger" :title="$message"

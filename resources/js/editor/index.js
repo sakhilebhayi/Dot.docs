@@ -642,12 +642,20 @@ function mount(element, opts = {}) {
                 // `update` and the bookkeeping below holds. The document IS
                 // applied by now, so a throw here must not turn the answer
                 // into false; but an editor that kept its history is the
-                // unsafe state, so it is not passed over in silence.
+                // unsafe state, so it is not passed over in silence - and
+                // neither is a null, which in this bundle can only mean the
+                // history plugin was not found under its key (`history$`,
+                // sync/apply.js), after an upgrade of prosemirror-history
+                // or TipTap.
                 try {
                     const clearing = clearHistoryTransaction(editor.state);
 
                     if (clearing !== null) {
                         editor.view.dispatch(clearing);
+                    } else {
+                        console.error(
+                            'Dot.Doc: the undo history was not emptied after a remote change: no history plugin was found under its key. An undo may now delete text that arrived from somebody else.'
+                        );
                     }
                 } catch (error) {
                     console.error(
