@@ -25,6 +25,11 @@ concurrency:
   group: dot-doc-production-deploy
   cancel-in-progress: false
 
+env:
+  # The public production URL. Only the last step's smoke check uses it,
+  # over plain HTTPS from the runner like any visitor - never over SSH.
+  SITE_URL: https://doc.infodot.co.za
+
 jobs:
   deploy:
     name: Deploy main to doc.infodot.co.za
@@ -124,6 +129,16 @@ jobs:
           # already under $REAL_DOCROOT/build/, nothing else at the docroot.
           rsync -az --delete -e "$SSH" public/build/ "$DEST:$REAL_DOCROOT/build/"
 
+          # ...and the SAME build to DEPLOY_PATH/public/build/ too. The
+          # browser fetches assets from the docroot copy above, but @vite
+          # reads public_path('build/manifest.json'), which is INSIDE
+          # DEPLOY_PATH, to choose the hashed filenames it writes into the
+          # HTML. public/build is gitignored, so `git reset --hard` never
+          # refreshes it: skip this line and the HTML names files the
+          # docroot's --delete has already removed. The two copies must
+          # never diverge - both come from this one build, every deploy.
+          rsync -az --delete -e "$SSH" public/build/ "$DEST:$DEPLOY_PATH/public/build/"
+
           # Everything else under public/ EXCEPT index.php and build/
           # (handled above). No --delete: the docroot also holds doc/ (this
           # app's own source - DEPLOY_PATH itself lives there), an old
@@ -213,3 +228,58 @@ jobs:
             echo "::warning::LSCache purge request failed -- the live site may still serve a stale cached page until it is purged some other way."
           fi
           RESTART
+
+      - name: Smoke-check the live site
+        # Last step, on purpose: a deploy is green only once the live
+        # pages have been seen loading their own assets. Runs on the
+        # runner with plain curl (no SSH), exactly as a browser would: /
+        # and /login must answer 200, and every $SITE_URL/build/ asset
+        # either page references must answer 200 too. A page with NO
+        # build references fails as well - every page here loads the app
+        # bundle, so zero matches means the page is broken.
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d)"
+          trap 'rm -rf "$WORK"' EXIT
+          FAILED=0
+          : > "$WORK/assets"
+
+          for PAGE in "$SITE_URL/" "$SITE_URL/login"; do
+            STATUS=$(curl -s --max-time 30 -o "$WORK/page.html" -w '%{http_code}' "$PAGE" || true)
+            if [ "$STATUS" != "200" ]; then
+              echo "::error::$PAGE answered ${STATUS:-no response} (expected 200)"
+              FAILED=1
+              continue
+            fi
+            echo "200 $PAGE"
+
+            # Every href/src value that starts with $SITE_URL/build/.
+            # grep exits 1 on no match; only that is tolerated here.
+            { grep -oE "(href|src)=[\"'][^\"']*" "$WORK/page.html" || [ "$?" -eq 1 ]; } \
+              | sed -E "s/^(href|src)=[\"']//" \
+              | awk -v prefix="$SITE_URL/build/" 'index($0, prefix) == 1' \
+              | sort -u > "$WORK/refs"
+            if [ ! -s "$WORK/refs" ]; then
+              echo "::error::$PAGE references no $SITE_URL/build/ assets; every page here loads the app bundle, so this page is broken"
+              FAILED=1
+              continue
+            fi
+            cat "$WORK/refs" >> "$WORK/assets"
+          done
+
+          sort -u "$WORK/assets" > "$WORK/unique"
+          while IFS= read -r ASSET; do
+            STATUS=$(curl -s --max-time 30 -o /dev/null -w '%{http_code}' "$ASSET" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "200 $ASSET"
+            else
+              echo "::error::$ASSET answered ${STATUS:-no response} (expected 200)"
+              FAILED=1
+            fi
+          done < "$WORK/unique"
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::Smoke check failed: the live site does not load its own pages or build assets (see above). The deploy is NOT healthy."
+            exit 1
+          fi
+          echo "== Smoke check passed: $SITE_URL/ and $SITE_URL/login answered 200, and so did all $(wc -l < "$WORK/unique" | tr -d ' ') build asset(s) they reference (listed above)."
