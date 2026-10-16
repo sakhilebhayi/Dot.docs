@@ -145,6 +145,36 @@ jobs:
           cd "$DEPLOY_PATH"
           PHP=php
 
+          # ---- crontab: repair this app's lines, never touch anyone else's ----
+          # Rule for this account: the crontab is written only by deploy
+          # workflows, each touches only lines carrying its own marker, and a
+          # write is verified before and after. 2026-08-31: a pipeline whose read
+          # failed installed an EMPTY crontab and silently killed Dot.Mines'
+          # scheduler for six weeks. cron runs with a minimal PATH, so lines carry
+          # the absolute PHP path and keep their last output in a log file.
+          MARK="# dot-doc"
+          PHP_BIN="$(command -v "${PHP:-php}")"
+          OLD="$(mktemp)"; NEW="$(mktemp)"; ERR="$(mktemp)"
+          if ! crontab -l > "$OLD" 2> "$ERR"; then
+            if grep -qi "no crontab for" "$ERR"; then : > "$OLD"; else
+              echo "::error::crontab -l failed: $(cat "$ERR"). Refusing to write a crontab I could not read."; exit 1
+            fi
+          fi
+          OTHERS=$(grep -v "$MARK" "$OLD" | grep -c . || true)
+          {
+            grep -v "$MARK" "$OLD" || true
+            echo "* * * * * cd $DEPLOY_PATH && $PHP_BIN artisan schedule:run > storage/logs/cron-scheduler.log 2>&1 $MARK"
+          } > "$NEW"
+          crontab "$NEW"
+          AFTER=$(crontab -l | grep -v "$MARK" | grep -c . || true)
+          MINE=$(crontab -l | grep -c "$MARK" || true)
+          if [ "$AFTER" != "$OTHERS" ] || [ "$MINE" != "1" ]; then
+            crontab "$OLD"
+            echo "::error::crontab verification failed (other lines before=$OTHERS after=$AFTER, mine=$MINE); the previous crontab was restored."; exit 1
+          fi
+          rm -f "$OLD" "$NEW" "$ERR"
+          echo "== crontab: $MINE line(s) for $MARK installed, $OTHERS other line(s) preserved"
+
           # queue:restart signals workers to finish their current job and
           # exit; systemd's Restart=always then spins up a fresh one --
           # zero-downtime, no direct process kill.
