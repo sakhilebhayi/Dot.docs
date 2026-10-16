@@ -14,6 +14,12 @@
         // answers must not freeze following for ever, so `busy` expires.
         saving: 0,
         savingSince: 0,
+        // Every save this tab sends is numbered, and the number of the last
+        // save given up on is kept: an answer that arrives after its save
+        // was given up on is used only while the page has learnt nothing
+        // newer since (see persist() in sync/host.js).
+        saveSeq: 0,
+        expiredSaveSeq: 0,
         // True from the first local edit until a save of exactly what the
         // editor holds has been confirmed by the server. The bundle's own
         // `pending` flag is not enough: it drops the moment a document is
@@ -652,10 +658,19 @@
                      the two buttons are in the notice bar under this row: the
                      strip is one line that does not wrap, and a notice with
                      buttons in it ended up outside the window or under the
-                     dock. Rendered on every render and shown with x-show:
-                     x-show is the one Alpine binding a Livewire morph leaves
-                     as it is on the live element (.ai/rules/livewire.md). --}}
-                <x-shell.status-word tone="danger" word="Not saved" x-show="conflict" x-cloak />
+                     dock. Shown with x-show: x-show is the one Alpine binding
+                     a Livewire morph leaves as it is on the live element
+                     (.ai/rules/livewire.md). Like the Saved / Ready word
+                     below, the x-show sits on a wrapper that is rendered the
+                     same on EVERY render, and the word inside it is rendered
+                     only while no content error says Not saved already: with
+                     a conflict standing AND a rejected save, the strip said
+                     Not saved twice, side by side. --}}
+                <span x-show="conflict" x-cloak>
+                    @unless ($errors->has('content'))
+                        <x-shell.status-word tone="danger" word="Not saved" />
+                    @endunless
+                </span>
 
                 @error('content')
                     <x-shell.status-word tone="danger" :title="$message"
@@ -827,8 +842,11 @@
                  of a choice opens the newer version, and this tab's text is
                  then in the offline draft, which the page finds older than
                  the document, sets aside and offers back in the next row
-                 (as a draft, so Put it back asks first). Only a browser
-                 that cannot keep a draft loses the text to a reload.
+                 (as a draft, so Put it back asks first) - unless a second
+                 tab of the same browser is open on the document: the draft
+                 is keyed per document, not per tab, and that tab clears it
+                 when it follows the save. A browser that cannot keep a
+                 draft loses the text to a reload too.
 
                  What each button does is in its title and, for a keyboard
                  or a screen reader, in the element it is described by. --}}
@@ -872,7 +890,11 @@
                  and the page is not touched. The copy parked under
                  stale-<uuid> when the text was set aside stays for its 7
                  days in a browser that keeps drafts, but nothing in the
-                 page offers it again. --}}
+                 page offers it again. That is why Discard asks first when
+                 the text came from Load theirs (discardSetAside() in
+                 sync/host.js): that text is the writer's own unsaved
+                 typing, in no saved version. A draft from an earlier visit
+                 is withdrawn without a question. --}}
             <div class="doc-notice" hidden x-bind:hidden="!setAside">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
@@ -885,9 +907,9 @@
                             title="Replace what is on the page now with this text. The version it replaces is kept in the history.">Put it back</button>
                     <button type="button" class="tool tool-mono" @click="discardSetAside()"
                             aria-describedby="doc-notice-discard-does"
-                            title="Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.">Discard</button>
+                            title="Remove this notice and leave the page as it is. Text set aside by Load theirs is in no saved version, so you are asked first; it is removed from this page and kept only in this browser, for 7 days, where this browser keeps drafts.">Discard</button>
                     <span id="doc-notice-put-back-does" hidden>Replace what is on the page now with this text. The version it replaces is kept in the history.</span>
-                    <span id="doc-notice-discard-does" hidden>Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.</span>
+                    <span id="doc-notice-discard-does" hidden>Remove this notice and leave the page as it is. Text set aside by Load theirs is in no saved version, so you are asked first; it is removed from this page and kept only in this browser, for 7 days, where this browser keeps drafts.</span>
                 </span>
             </div>
 

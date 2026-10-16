@@ -4,6 +4,7 @@ namespace Tests\Feature\Documents;
 
 use App\Documents\DocumentStore;
 use App\Livewire\Documents\Editor;
+use App\Models\DocumentCollaborator;
 use App\Models\User;
 use App\Services\PresenceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -150,6 +151,60 @@ class PresenceServiceTest extends TestCase
         $editor->call('refreshPresence');
 
         $this->assertSame(['Owner'], array_column($editor->get('activeUsers'), 'name'));
+    }
+
+    /** Access is checked on every presence refresh, not only when the page was opened. */
+    public function test_refreshing_presence_is_forbidden_once_the_viewer_access_is_removed(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $visitor = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($owner, 'Open');
+        $collaborator = DocumentCollaborator::create(['document_id' => $doc->id, 'user_id' => $visitor->id, 'role' => 'editor']);
+
+        $editor = Livewire::actingAs($visitor)->test(Editor::class, ['uuid' => $doc->uuid]);
+        $editor->call('refreshPresence')->assertOk();
+
+        $collaborator->delete();
+
+        $editor->call('refreshPresence')->assertForbidden();
+    }
+
+    /** One tab id is one row: whoever last claimed it owns it. */
+    public function test_a_touch_for_the_same_tab_id_by_another_user_overwrites_the_row(): void
+    {
+        $first = User::factory()->withPersonalTeam()->create();
+        $second = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($first, 'Open');
+        $presence = app(PresenceService::class);
+
+        $presence->touch($doc->id, $first, 'tab-a');
+        $presence->touch($doc->id, $second, 'tab-a');
+
+        $rows = DB::table('document_presences')->where('document_id', $doc->id)->get();
+        $this->assertCount(1, $rows);
+        $this->assertSame($second->id, (int) $rows[0]->user_id);
+        $this->assertSame([$second->id], array_column($presence->members($doc->id), 'id'));
+    }
+
+    /** The sweep that rides on a touch cleans only the document being touched. */
+    public function test_the_sweep_leaves_other_documents_dead_rows_alone(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $other = User::factory()->withPersonalTeam()->create();
+        $one = app(DocumentStore::class)->create($user, 'One');
+        $two = app(DocumentStore::class)->create($user, 'Two');
+        $presence = app(PresenceService::class);
+
+        $presence->touch($one->id, $user, 'tab-one');
+        $presence->touch($two->id, $user, 'tab-two');
+
+        $this->travel(PresenceService::TTL_SECONDS + 1)->seconds();
+
+        // Somebody arrives in document two: its dead row goes, document one's stays.
+        $presence->touch($two->id, $other, 'tab-three');
+
+        $this->assertSame(['tab-one'], DB::table('document_presences')->where('document_id', $one->id)->pluck('tab_id')->all());
+        $this->assertSame(['tab-three'], DB::table('document_presences')->where('document_id', $two->id)->pluck('tab_id')->all());
     }
 
     /**

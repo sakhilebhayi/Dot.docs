@@ -41,6 +41,15 @@ export const PUT_BACK_QUESTION =
 export const PUT_BACK_UNSAVED_WARNING = ' Text on the page that has not been saved yet will be lost.';
 
 /**
+ * What Discard asks before it withdraws the offer of text this tab set aside
+ * itself (Load theirs): that text is the writer's unsaved typing and is in no
+ * version, so once the offer is gone only the parked copy holds it, and
+ * nothing in the page offers that again.
+ */
+export const DISCARD_QUESTION =
+    'Discard this text? It is in no saved version. It will be removed from this page and kept only in this browser, for 7 days.';
+
+/**
  * This tab's identity for presence and the sync poll. Per page load, not
  * per browser: two tabs of one account are two tabs.
  *
@@ -115,6 +124,11 @@ export function unloadSaveBody(json, options = {}) {
  * @typedef {object} SyncView The Blade component's state fields.
  * @property {number} saving how many of this tab's own saves are in the air
  * @property {number} savingSince when the latest of them left
+ * @property {number} saveSeq the number persist() gave the last save it sent;
+ *           every save this tab sends gets the next one
+ * @property {number} expiredSaveSeq the number of the last save this tab gave
+ *           up on (saveInTheAir()): the answer to a save numbered at or below
+ *           it comes too late to be trusted on its own
  * @property {boolean} unsaved true from the first local edit until a save of
  *           exactly what the editor holds has been confirmed by the server
  * @property {boolean} resave a save is owed; resendIfOwed() sends it
@@ -200,6 +214,10 @@ export function createSyncHost(view, env) {
      * editor back at the last confirmed document, be written off as Saved,
      * and the next poll would bring the undone text back.
      *
+     * The number of the save given up on is remembered (`expiredSaveSeq`),
+     * because its answer may still arrive: persist() then knows the answer
+     * is late and decides whether it can still be used (see there).
+     *
      * @returns {boolean}
      */
     function saveInTheAir() {
@@ -207,6 +225,7 @@ export function createSyncHost(view, env) {
             view.saving = 0;
             view.resave = true;
             view.confirmed = null;
+            view.expiredSaveSeq = view.saveSeq;
         }
 
         return view.saving > 0;
@@ -305,6 +324,26 @@ export function createSyncHost(view, env) {
      * an ordinary save that left before the overwrite was owed must not
      * write the overwrite off.
      *
+     * Sending clears `resave`: the save that was owed is the one going out.
+     * Left set, the flag outlived the send, and when the server rejected
+     * that save resendIfOwed() found it and sent the same document again.
+     *
+     * Every save gets a number (`saveSeq`), so that an answer can be told
+     * apart from the save in the air now. A save that saveInTheAir() has
+     * given up on (its number is at or below `expiredSaveSeq`) may still
+     * answer. Such an answer is used only while the tab has learnt nothing
+     * newer since it left: nothing is confirmed (no later save accepted, no
+     * server document applied) and the base is where it was. Otherwise it
+     * is logged and ignored: adopting it would move the base onto a
+     * version the editor does not show (Load theirs after a Keep mine
+     * save that was given up on), and the next save would replace that
+     * version without the overwrite flag. The poll brings the real outcome
+     * to a tab that follows, and resendIfOwed() has the text that is still
+     * unsaved. Whether or not a late answer is used, it does not count
+     * against `saving`: that number was zeroed when the save was given up
+     * on, and now counts the save that replaced it. A late FAILURE says
+     * nothing at all about the save in the air, so it is only logged.
+     *
      * @param {object} json
      * @param {{force?: boolean}} options
      * @returns {Promise<void>}
@@ -346,11 +385,18 @@ export function createSyncHost(view, env) {
         // the editor still holds exactly this when the answer arrives.
         const snapshot = JSON.stringify(json);
 
+        // The owed save is this one.
+        view.resave = false;
         view.saving++;
         view.savingSince = env.now();
+        const seq = ++view.saveSeq;
+        const baseAtSend = view.baseVersion;
 
         // Whether THIS save says it overwrites, captured now.
         const overwrite = force || view.overwriteOwed;
+
+        /** Whether saveInTheAir() gave this save up before it answered. */
+        const givenUpOn = () => seq <= view.expiredSaveSeq;
 
         // Two handlers on ONE then(), not then().catch(): a catch() at the
         // end would also catch whatever goes wrong AFTER the answer, report
@@ -358,7 +404,18 @@ export function createSyncHost(view, env) {
         // answered a second time.
         return env.save(json, view.baseVersion, overwrite).then(
             (result) => {
-                view.saving = Math.max(0, view.saving - 1);
+                if (givenUpOn()) {
+                    if (view.confirmed !== null || view.baseVersion !== baseAtSend) {
+                        env.log(
+                            '[Dot.Doc] A save that was given up on answered after the page had moved on; the answer is ignored.',
+                            result
+                        );
+
+                        return undefined;
+                    }
+                } else {
+                    view.saving = Math.max(0, view.saving - 1);
+                }
 
                 try {
                     saveAnswered(result, snapshot, overwrite);
@@ -369,7 +426,13 @@ export function createSyncHost(view, env) {
 
                 return refreshOutline();
             },
-            () => {
+            (error) => {
+                if (givenUpOn()) {
+                    env.log('[Dot.Doc] A save that was given up on failed after all; nothing is read into it.', error);
+
+                    return;
+                }
+
                 // The save itself failed: the request was never answered.
                 // Whether the server stored it is not known, so nothing
                 // counts as confirmed any more (see saveInTheAir()).
@@ -551,8 +614,8 @@ export function createSyncHost(view, env) {
      * unsaved to nothing unsaved, so an idle reader says nothing. The
      * offline draft goes with it: it says what the server holds.
      *
-     * Both callers run it AFTER saveInTheAir() has answered no, never
-     * before. While a save is in the air the server may be about to hold
+     * All three callers (syncState(), resendIfOwed() and putBack()) run it
+     * AFTER saveInTheAir() has answered no, never before. While a save is in the air the server may be about to hold
      * something other than `confirmed`: type x, the save of it leaves,
      * delete x, and the editor is back at `confirmed` while the server is
      * about to store the x. Settling there would drop the owed save of the
@@ -835,7 +898,8 @@ export function createSyncHost(view, env) {
         // version, which the writer has just chosen to look at.
         view.setAsideBase = view.baseVersion;
         view.conflict = null;
-        env.report('good', 'Saved');
+        // The word went back to Saved inside applyFromSync(), which took
+        // the tab from unsaved to nothing unsaved; it is not said again.
     }
 
     /**
@@ -906,8 +970,20 @@ export function createSyncHost(view, env) {
      * left alone and stays for its 7 days, so in a browser that keeps
      * drafts declining loses nothing. (A browser that cannot keep drafts
      * parked nothing: there the text is gone with the offer.)
+     *
+     * When the text came from Load theirs (`setAsideFrom` is `conflict`)
+     * it is this tab's own unsaved typing, in no saved version: once the
+     * offer is gone, nothing in the page offers it again. So that case asks
+     * first (DISCARD_QUESTION, through `env.confirm`); a no changes
+     * nothing. A draft from an earlier visit is withdrawn without a
+     * question: the page took nothing away, and its text may already be
+     * part of the document.
      */
     function discardSetAside() {
+        if (view.setAsideFrom === 'conflict' && !env.confirm(DISCARD_QUESTION)) {
+            return;
+        }
+
         forgetSetAside();
     }
 

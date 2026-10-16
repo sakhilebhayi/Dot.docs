@@ -178,6 +178,44 @@ class DocumentStoreVersionGuardTest extends TestCase
         $this->assertSame('Theirs', $kept->content_json['content'][0]['content'][0]['text']);
     }
 
+    /**
+     * The version kept is the STORED document, read under the lock, never
+     * the copy of the model the caller passes in. Keep mine arrives on a
+     * model Livewire loaded when the request began; by then somebody else
+     * has saved, and it is THEIR text that is being replaced and must be
+     * kept - the model's own copy is older than that.
+     */
+    public function test_the_kept_version_holds_the_stored_document_not_the_passed_model_copy(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+        $store = app(DocumentStore::class);
+
+        $store->save($doc, $this->para('Original'), $user, ['version' => 'none']);
+        // The page's model, loaded now: it holds 'Original' at version 2.
+        $stale = Document::findOrFail($doc->id);
+        $this->assertSame(2, $stale->version);
+
+        // Somebody else saves, and no version is cut for it.
+        $store->save(Document::findOrFail($doc->id), $this->para('Theirs'), $user, ['version' => 'none']);
+
+        // Keep mine on the stale model, stating the right base: the page
+        // has moved its base up to 3, the model has not.
+        $saved = $store->save($stale, $this->para('Mine'), $user, [
+            'expectedVersion' => 3,
+            'keepReplacedAs' => 'Before Thandi kept their version',
+        ]);
+
+        $this->assertSame(4, $saved->version);
+        $this->assertSame('Mine', $doc->fresh()->search_text);
+
+        $kept = DocumentVersion::where('document_id', $doc->id)->where('kind', 'named')->sole();
+        $this->assertSame(3, $kept->version_number);
+        $this->assertSame('Theirs', $kept->content_json['content'][0]['content'][0]['text'], 'the stored row, not the model copy');
+        $this->assertStringContainsString('Theirs', $kept->content_snapshot);
+        $this->assertStringNotContainsString('Original', $kept->content_snapshot);
+    }
+
     /** The kept version is part of the save: a save that is not stored keeps nothing. */
     public function test_a_save_that_is_not_stored_keeps_nothing(): void
     {

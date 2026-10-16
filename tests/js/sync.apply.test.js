@@ -229,6 +229,38 @@ test('a step that applies but does not reproduce the target falls back too', () 
     assert.ok(tr.doc.eq(schema.nodeFromJSON(arriving)));
 });
 
+test('when the whole-document replace cannot be applied either, the result is null and the editor is left alone', () => {
+    class Throws {
+        constructor() {
+            throw new RangeError('this slice does not fit');
+        }
+    }
+    const held = doc([para('p1', 'First'), para('p2', 'Second')]);
+    const arriving = doc([para('p1', 'First, edited'), para('p2', 'Second')]);
+    const real = stateOf(held);
+
+    // A state whose transaction cannot replace the whole document either:
+    // the last-resort tr.replaceWith() throws. Forced on the transaction,
+    // because a document this schema can parse can always be replaced
+    // wholesale in a real state; the branch is for the case where it
+    // cannot, and applyRemote() must then leave what is on screen alone.
+    const state = {
+        doc: real.doc,
+        schema: real.schema,
+        get tr() {
+            const tr = real.tr;
+            tr.replaceWith = () => {
+                throw new RangeError('cannot replace');
+            };
+
+            return tr;
+        },
+    };
+
+    assert.equal(remoteTransaction(state, arriving, Throws), null);
+    assert.ok(real.doc.eq(schema.nodeFromJSON(held)), 'nothing was applied to the real state');
+});
+
 test('a document this schema cannot parse gives null', () => {
     const state = stateOf(doc([para('p1', 'One')]));
 

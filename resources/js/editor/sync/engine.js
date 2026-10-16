@@ -27,8 +27,9 @@
  * tab has already downloaded", so an unresolved conflict does not make it
  * fetch the same document again on every poll.
  *
- * No DOM, no fetch and no timers of its own: the request function, the
- * timer and the visibility check are all injected, which is what lets
+ * No DOM and no fetch of its own: the request function is injected, and
+ * the timer and the visibility check are injectable with defaults (the
+ * global setTimeout/clearTimeout, and always visible), which is what lets
  * `tests/js/sync.engine.test.js` drive every case by hand.
  */
 
@@ -95,6 +96,19 @@ export function createSyncEngine(options) {
         return others > 0 ? FAST_MS : SLOW_MS;
     }
 
+    /**
+     * Whether the tab is visible. A visibility check that throws counts as
+     * visible: the next poll must still be armed, or the tab would stop
+     * following over something that is not the document's business.
+     */
+    function isVisible() {
+        try {
+            return !!visible();
+        } catch (_) {
+            return true;
+        }
+    }
+
     function disarm() {
         if (timer !== null) {
             clearTimer(timer);
@@ -104,7 +118,7 @@ export function createSyncEngine(options) {
 
     function arm() {
         disarm();
-        if (!stopped && visible()) {
+        if (!stopped && isVisible()) {
             timer = setTimer(poll, nextDelay());
         }
     }
@@ -186,7 +200,13 @@ export function createSyncEngine(options) {
         if (reason) {
             stopped = true;
             again = false;
-            host.onStopped(reason);
+            // The engine has stopped either way; a page handler that throws
+            // while saying so must not throw out of the poll.
+            try {
+                host.onStopped(reason);
+            } catch (_) {
+                // Stopped all the same.
+            }
 
             return;
         }
@@ -278,8 +298,20 @@ export function createSyncEngine(options) {
             poll();
         },
 
-        /** The host's state changed (a save settled): try to deliver again. */
-        retry: deliver,
+        /**
+         * The host's state changed (a save settled): try to deliver again.
+         * Inside try/catch, as poll() calls deliver(): persist() calls this
+         * when a save answers, and a host callback that threw here would
+         * come out of that answer as the failure of a save the server has
+         * stored.
+         */
+        retry() {
+            try {
+                deliver();
+            } catch (_) {
+                // The host's throw is not the caller's.
+            }
+        },
 
         /** Hand over the waiting document, for the "Load theirs" choice. */
         takeRemote() {
@@ -295,7 +327,7 @@ export function createSyncEngine(options) {
         },
 
         visibilityChanged() {
-            if (visible()) {
+            if (isVisible()) {
                 poll();
             } else {
                 disarm();

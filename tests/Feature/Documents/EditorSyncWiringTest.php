@@ -3,12 +3,15 @@
 namespace Tests\Feature\Documents;
 
 use App\Documents\DocumentStore;
+use App\Documents\Schema\BlockId;
+use App\Livewire\Documents\Editor;
 use App\Models\User;
 use Database\Seeders\DocumentStyleSeeder;
 use Dom\Element;
 use Dom\HTMLDocument;
 use Dom\Node;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
@@ -291,6 +294,55 @@ class EditorSyncWiringTest extends TestCase
     }
 
     /**
+     * The strip has two ways of saying Not saved: the Alpine word for a
+     * standing conflict (`x-show="conflict"`) and the server's word for a
+     * rejected save (`@error('content')`). With a conflict standing AND a
+     * rejected save they stood side by side. The conflict word follows the
+     * Saved / Ready pattern: a wrapper that is rendered on every render
+     * carries the x-show, and the word inside it is rendered only while no
+     * content error says Not saved already.
+     */
+    public function test_the_strip_never_says_not_saved_twice(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Wired');
+        $component = Livewire::actingAs($user)->test(Editor::class, ['uuid' => $doc->uuid]);
+
+        // A rejected save: the server's word says Not saved, and it is the
+        // only one in the strip (the conflict word is Alpine-shown, so in
+        // a browser it would stand beside the error whenever a conflict
+        // stood too).
+        $component->call('saveContent', ['type' => 'doc', 'content' => [['type' => 'marquee']]], 1)
+            ->assertHasErrors('content');
+        $strip = HTMLDocument::createFromString($component->html(), LIBXML_NOERROR)->querySelector('.doc-status');
+        $this->assertNotNull($strip);
+        $this->assertSame(1, substr_count($strip->textContent, 'Not saved'), 'Not saved is said once');
+        $wrapper = $strip->querySelector('[x-show="conflict"]');
+        $this->assertNotNull($wrapper, 'the wrapper is rendered on every render');
+        $this->assertNull($wrapper->querySelector('.status-word'), 'and holds no word while the content error says Not saved');
+        $this->assertSame('', $this->words($wrapper));
+
+        // No error: the wrapper holds the word.
+        $component->call('saveContent', $this->para('Typed'), 1)
+            ->assertHasNoErrors('content');
+        $strip = HTMLDocument::createFromString($component->html(), LIBXML_NOERROR)->querySelector('.doc-status');
+        $this->assertNotNull($strip);
+        $wrapper = $strip->querySelector('[x-show="conflict"]');
+        $this->assertNotNull($wrapper);
+        $this->assertStringNotContainsString('status-word', (string) $wrapper->getAttribute('class'), 'the condition is on a wrapper, not on the word');
+        $this->assertNotNull($wrapper->querySelector('.status-word-danger'));
+        $this->assertSame('Not saved', $this->words($wrapper));
+    }
+
+    private function para(string $text): array
+    {
+        return ['type' => 'doc', 'content' => [
+            ['type' => 'paragraph', 'attrs' => ['id' => BlockId::generate()], 'content' => [['type' => 'text', 'text' => $text]]],
+        ]];
+    }
+
+    /**
      * Put it back replaces the whole document on the page, and through the
      * save that follows the stored one, with an older whole copy. The row
      * used to be one unexplained button under "Your text was set aside.",
@@ -338,7 +390,7 @@ class EditorSyncWiringTest extends TestCase
             ],
             'Discard' => [
                 'discardSetAside()',
-                'Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.',
+                'Remove this notice and leave the page as it is. Text set aside by Load theirs is in no saved version, so you are asked first; it is removed from this page and kept only in this browser, for 7 days, where this browser keeps drafts.',
             ],
         ], $buttons);
 

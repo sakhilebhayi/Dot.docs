@@ -67,6 +67,26 @@ class EditorSaveBaseVersionTest extends TestCase
     }
 
     /**
+     * A conflict is a question for the writer (Keep mine or Load theirs),
+     * not an error: the strip renders no content error for it, and nothing
+     * counts as saved.
+     */
+    public function test_a_conflict_answer_leaves_no_content_error_and_nothing_saved(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        $editor = Livewire::actingAs($user)->test(Editor::class, ['uuid' => $doc->uuid]);
+
+        app(DocumentStore::class)->save(Document::findOrFail($doc->id), $this->para('Theirs'), $user);
+
+        $editor->call('saveContent', $this->para('Mine, based on version 1'), 1)
+            ->assertReturned(['ok' => false, 'conflict' => true, 'version' => 2])
+            ->assertHasNoErrors('content')
+            ->assertSet('saved', false);
+    }
+
+    /**
      * A tab still running the previous JavaScript sends no base version at
      * all. The refusal carries NO version: that JavaScript adopts any number
      * it is handed as the base of its offline draft (see the next test).
@@ -239,6 +259,24 @@ class EditorSaveBaseVersionTest extends TestCase
             ->assertExactJson(['conflict' => true, 'version' => 2]);
 
         $this->assertSame('Theirs', $doc->fresh()->search_text);
+    }
+
+    /** `base_version` is an integer of at least 1: nought and a word are refused, and nothing is written. */
+    public function test_the_beacon_base_version_must_be_an_integer_of_at_least_one(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($user);
+
+        foreach ([0, 'abc'] as $base) {
+            $this->actingAs($user)
+                ->postJson(route('documents.autosave', $doc->uuid), ['content' => $this->para('Last words'), 'base_version' => $base])
+                ->assertStatus(422)
+                ->assertJsonValidationErrors('base_version');
+        }
+
+        $fresh = $doc->fresh();
+        $this->assertSame(1, $fresh->version);
+        $this->assertNotSame('Last words', $fresh->search_text);
     }
 
     public function test_the_beacon_is_rejected_when_it_states_no_base_version(): void

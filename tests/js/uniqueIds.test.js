@@ -23,6 +23,13 @@ import { changedRanges, duplicateIds, uniqueIdsTransaction } from '../../resourc
  * The schema is a stand-in for the editor's, with the editor's own node
  * names, so the real BLOCK_TYPES list applies to it: top-level paragraphs, a
  * list (blocks nested in blocks) and a table (isolating cells).
+ *
+ * The observed sequence below replays, ON PURPOSE, the undo history as the
+ * editor kept it BEFORE Task 8d: applyRemote() now empties the history after
+ * a remote change (tests/js/sync.history.test.js), so in the editor the undo
+ * of step 5 finds nothing. It is kept here because it is the sequence that
+ * showed two blocks ending up with one id, and the repair plugin has to hold
+ * whatever a transaction does, not only what the editor does today.
  */
 const schema = new Schema({
     nodes: {

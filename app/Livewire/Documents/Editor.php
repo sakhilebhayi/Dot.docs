@@ -92,8 +92,10 @@ class Editor extends Component
      * beacon never does; an autosave skips it while the same author's last
      * one is under two minutes old), so the save is told to keep what it
      * replaces as a named version (`keepReplacedAs`). DocumentStore::save()
-     * cuts it inside the save's own transaction: a save that is refused as
-     * stale, or whose content the schema rejects, keeps nothing.
+     * cuts it inside the save's own transaction, and only when the replaced
+     * head has no version row of its own yet (when it has, that text is in
+     * the history already and nothing more is cut): a save that is refused
+     * as stale, or whose content the schema rejects, keeps nothing.
      *
      * $wire actions resolve with the return value, so the editor bridge
      * reads all three keys: it keeps the offline draft when `ok` is false (a
