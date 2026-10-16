@@ -140,6 +140,8 @@ class FakeServer {
 const makeView = (version) => ({
     saving: 0,
     savingSince: 0,
+    saveSeq: 0,
+    expiredSaveSeq: 0,
     unsaved: false,
     resave: false,
     confirmed: null,
@@ -1640,6 +1642,127 @@ test('a save that expired answers late while its own conflict is showing: the te
     assert.equal(A.word(), 'Saved');
 });
 
+// ───────────────────────────────────────────────────────── a save given up on that answers after all
+
+test('a Keep mine save given up on, then Load theirs: its late answer is logged and changes nothing', async () => {
+    const { server, clock, B } = await conflicted();
+    B.host().keepMine();
+    // The Keep mine save reaches the server and is stored, but its answer is slow.
+    B.saveArrives();
+    const late = B.saveNeverAnswers();
+    assert.equal(server.version, 3);
+    assert.equal(server.json.text, 'B1');
+
+    // The tab gives up on it, and the writer chooses Load theirs: the page
+    // shows the other person's version 2.
+    clock.now += SAVE_EXPIRY_MS + 1000;
+    await B.host().loadTheirs();
+    assert.equal(B.text(), 'A1');
+    assert.equal(B.view.baseVersion, 2);
+    assert.equal(B.view.conflict, null);
+    assert.equal(B.view.saving, 0);
+    const reports = B.reports.length;
+    const draftCalls = B.draftCalls.length;
+
+    // Now the answer arrives: version 3 holds B1. The editor shows version
+    // 2, so adopting it would put the base on a version the page does not
+    // show, and the next keystroke would replace version 3 unkept.
+    late.resolve(late.result);
+    await settle();
+    assert.equal(B.view.baseVersion, 2, 'the base does not move onto a version the editor does not show');
+    assert.equal(B.text(), 'A1');
+    assert.equal(B.view.confirmed, JSON.stringify(doc('A1')));
+    assert.equal(B.view.conflict, null);
+    assert.equal(B.view.saving, 0);
+    assert.equal(B.reports.length, reports, 'nothing is reported');
+    assert.equal(B.draftCalls.length, draftCalls, 'no draft is touched');
+    assert.equal(B.sent.length, 1, 'nothing is sent off it');
+    assert.equal(B.errors.length, 1, 'it is logged');
+    assert.match(String(B.errors[0][0]), /given up on/);
+
+    // The real outcome reaches the tab the ordinary way: the poll brings
+    // version 3 and the clean tab follows it.
+    await B.cycle();
+    assert.equal(B.text(), 'B1');
+    assert.equal(B.view.baseVersion, 3);
+});
+
+test('a Keep mine save that answers in time, at the last second, is applied as before', async () => {
+    const { server, clock, B } = await conflicted();
+    B.host().keepMine();
+    B.saveArrives();
+    clock.now += SAVE_EXPIRY_MS - 1;
+
+    await B.saveReturns();
+    assert.equal(B.view.baseVersion, 3);
+    assert.equal(B.view.conflict, null);
+    assert.equal(B.view.overwriteOwed, false);
+    assert.equal(B.word(), 'Saved');
+    assert.equal(server.json.text, 'B1');
+    assert.deepEqual(B.errors, []);
+});
+
+test('a save given up on whose request then fails does not touch the save that replaced it', async () => {
+    const { clock, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    const first = A.saveNeverAnswers();
+
+    // Given up on; the next poll sends it again, and that save is in the air.
+    clock.now += SAVE_EXPIRY_MS;
+    await A.cycle();
+    assert.equal(A.sent.length, 2);
+    assert.equal(A.view.saving, 1);
+    assert.equal(A.word(), 'Saving');
+
+    // The first request fails outright after all (the connection it was on
+    // is closed). That says nothing about the save that replaced it.
+    first.reject(new Error('network'));
+    await settle();
+    assert.equal(A.view.saving, 1, 'the save in the air is still waited for');
+    assert.equal(A.host().syncState(), 'busy');
+    assert.equal(A.word(), 'Saving', 'and no failure is reported for a save that was written off');
+    assert.equal(A.errors.length, 1);
+    assert.match(String(A.errors[0][0]), /given up on/);
+
+    await A.land();
+    assert.equal(A.view.saving, 0);
+    assert.equal(A.word(), 'Saved');
+});
+
+test('a late answer the tab can still use is applied, and does not count against the save that replaced it', async () => {
+    const { server, clock, A } = await pair();
+    A.type('T1');
+    await A.debounce();
+    // Stored as version 2; the answer is slow.
+    A.saveArrives();
+    const late = A.saveNeverAnswers();
+
+    // Given up on and sent again, on the old base: that save is in the air.
+    clock.now += SAVE_EXPIRY_MS;
+    await A.cycle();
+    assert.equal(A.sent.length, 2);
+    assert.equal(A.view.saving, 1);
+
+    // The first answer arrives. The tab has learnt nothing else since
+    // (nothing confirmed, the base where it was), so the answer is good:
+    // the base moves to 2 and the text is settled.
+    late.resolve(late.result);
+    await settle();
+    assert.equal(A.view.baseVersion, 2);
+    assert.equal(A.view.unsaved, false);
+    assert.equal(A.word(), 'Saved');
+    assert.equal(A.view.saving, 1, 'the save in the air is still counted');
+    assert.deepEqual(A.errors, []);
+
+    // The resend is refused against this tab's own version 2, which is not a conflict.
+    await A.land();
+    assert.equal(A.view.conflict, null);
+    assert.equal(A.view.saving, 0);
+    assert.equal(server.version, 2);
+    assert.equal(A.sent.length, 2, 'nothing more is sent: the text is stored');
+});
+
 // ───────────────────────────────────────────────────────── one save at a time
 
 test('autosaves in a row: the next waits for the one in the air and is sent on the new base', async () => {
@@ -1833,6 +1956,40 @@ test('a debounce that does send what was owed is not followed by a second send',
     assert.equal(A.view.resave, false);
     assert.equal(server.json.text, 'A and B and C');
     assert.equal(A.word(), 'Saved');
+});
+
+test('an owed save the debounce sends and the server rejects is not sent a second time', async () => {
+    const { server, A } = await pair();
+    A.type('A');
+    await A.debounce();
+    // Handed over while the first save is in the air: owed.
+    A.type('A and B');
+    await A.debounce();
+    assert.equal(A.view.resave, true);
+    // The writer types on, so the debounce is armed when the first save
+    // answers, and the save stays owed for the debounce to send.
+    A.type('A and B and C');
+    A.saveArrives();
+    await A.saveReturns();
+    assert.equal(A.sent.length, 1);
+    assert.equal(A.view.resave, true, 'owed while the debounce is armed');
+
+    // The debounce sends it. The server rejects it (DocumentSchema).
+    server.rejectNext = true;
+    await A.debounce();
+    assert.equal(A.sent.length, 2);
+    A.saveArrives();
+    await A.saveReturns();
+    assert.equal(A.word(), 'Not saved');
+    assert.equal(A.sent.length, 2, 'the rejected document is not sent again off the owed flag');
+    assert.equal(A.view.resave, false);
+
+    await A.cycle();
+    await A.cycle();
+    assert.equal(A.sent.length, 2);
+    assert.equal(A.word(), 'Not saved');
+    assert.equal(A.view.unsaved, true, 'the text still exists nowhere else');
+    assert.equal(A.draft(), 'A and B and C');
 });
 
 test('adoptVersion inside the debounce, over text the debounce will not send again: the owed save sends it', async () => {

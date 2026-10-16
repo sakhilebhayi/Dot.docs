@@ -14,6 +14,12 @@
         // answers must not freeze following for ever, so `busy` expires.
         saving: 0,
         savingSince: 0,
+        // Every save this tab sends is numbered, and the number of the last
+        // save given up on is kept: an answer that arrives after its save
+        // was given up on is used only while the page has learnt nothing
+        // newer since (see persist() in sync/host.js).
+        saveSeq: 0,
+        expiredSaveSeq: 0,
         // True from the first local edit until a save of exactly what the
         // editor holds has been confirmed by the server. The bundle's own
         // `pending` flag is not enough: it drops the moment a document is
