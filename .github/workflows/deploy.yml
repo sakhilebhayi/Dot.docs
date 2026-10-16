@@ -153,6 +153,10 @@ jobs:
           # scheduler for six weeks. cron runs with a minimal PATH, so lines carry
           # the absolute PHP path and keep their last output in a log file.
           MARK="# dot-doc"
+          # One writer at a time on this account: deploys of different apps can
+          # coincide and would otherwise race on the single crontab.
+          command -v flock > /dev/null || { echo "::error::flock is not installed on the host; crontab writes cannot be serialised"; exit 1; }
+          exec 9>"$HOME/.dot-crontab.lock"; flock -w 120 9 || { echo "::error::could not take the crontab lock within 120 s (another deploy is writing the crontab)"; exit 1; }
           PHP_BIN="$(command -v "${PHP:-php}")"
           OLD="$(mktemp)"; NEW="$(mktemp)"; ERR="$(mktemp)"
           if ! crontab -l > "$OLD" 2> "$ERR"; then
@@ -172,7 +176,7 @@ jobs:
             crontab "$OLD"
             echo "::error::crontab verification failed (other lines before=$OTHERS after=$AFTER, mine=$MINE); the previous crontab was restored."; exit 1
           fi
-          rm -f "$OLD" "$NEW" "$ERR"
+          rm -f "$OLD" "$NEW" "$ERR"; flock -u 9
           echo "== crontab: $MINE line(s) for $MARK installed, $OTHERS other line(s) preserved"
 
           # queue:restart signals workers to finish their current job and
