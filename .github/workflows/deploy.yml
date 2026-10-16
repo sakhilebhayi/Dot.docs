@@ -173,11 +173,24 @@ jobs:
           command -v flock > /dev/null || { echo "::error::flock is not installed on the host; crontab writes cannot be serialised"; exit 1; }
           exec 9>"$HOME/.dot-crontab.lock"; flock -w 120 9 || { echo "::error::could not take the crontab lock within 120 s (another deploy is writing the crontab)"; exit 1; }
           PHP_BIN="$(command -v "${PHP:-php}")"
-          OLD="$(mktemp)"; NEW="$(mktemp)"; ERR="$(mktemp)"
-          if ! crontab -l > "$OLD" 2> "$ERR"; then
-            if grep -qi "no crontab for" "$ERR"; then : > "$OLD"; else
-              echo "::error::crontab -l failed: $(cat "$ERR"). Refusing to write a crontab I could not read."; exit 1
-            fi
+          OLD="$(mktemp)"; NEW="$(mktemp)"; CHK="$(mktemp)"; ERR="$(mktemp)"
+          # crontab -l on this host can transiently answer empty (seen 2026-10-16,
+          # right after a write, under the lock). A read is trusted only when it
+          # is non-empty or the host says there is no crontab; otherwise retry.
+          read_crontab() {
+            local i
+            for i in 1 2 3 4 5; do
+              if crontab -l > "$1" 2> "$ERR"; then
+                [ -s "$1" ] && return 0
+              elif grep -qi "no crontab for" "$ERR"; then
+                : > "$1"; return 0
+              fi
+              sleep 2
+            done
+            return 1
+          }
+          if ! read_crontab "$OLD"; then
+            echo "::error::crontab -l answered empty or failed five times ($(cat "$ERR")). Refusing to write a crontab I could not read."; exit 1
           fi
           OTHERS=$(grep -v "$MARK" "$OLD" | grep -c . || true)
           {
@@ -185,13 +198,14 @@ jobs:
             echo "* * * * * cd $DEPLOY_PATH && $PHP_BIN artisan schedule:run > storage/logs/cron-scheduler.log 2>&1 $MARK"
           } > "$NEW"
           crontab "$NEW"
-          AFTER=$(crontab -l | grep -v "$MARK" | grep -c . || true)
-          MINE=$(crontab -l | grep -c "$MARK" || true)
+          read_crontab "$CHK" || : > "$CHK"
+          AFTER=$(grep -v "$MARK" "$CHK" | grep -c . || true)
+          MINE=$(grep -c "$MARK" "$CHK" || true)
           if [ "$AFTER" != "$OTHERS" ] || [ "$MINE" != "1" ]; then
             crontab "$OLD"
             echo "::error::crontab verification failed (other lines before=$OTHERS after=$AFTER, mine=$MINE); the previous crontab was restored."; exit 1
           fi
-          rm -f "$OLD" "$NEW" "$ERR"; flock -u 9
+          rm -f "$OLD" "$NEW" "$CHK" "$ERR"; flock -u 9
           echo "== crontab: $MINE line(s) for $MARK installed, $OTHERS other line(s) preserved"
 
           # queue:restart signals workers to finish their current job and
