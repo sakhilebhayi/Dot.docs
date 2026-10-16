@@ -338,7 +338,7 @@ class EditorSyncWiringTest extends TestCase
             ],
             'Discard' => [
                 'discardSetAside()',
-                'Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.',
+                'Remove this notice and leave the page as it is. Text set aside by Load theirs is in no saved version, so you are asked first; it is removed from this page and kept only in this browser, for 7 days, where this browser keeps drafts.',
             ],
         ], $buttons);
 

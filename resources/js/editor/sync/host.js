@@ -41,6 +41,15 @@ export const PUT_BACK_QUESTION =
 export const PUT_BACK_UNSAVED_WARNING = ' Text on the page that has not been saved yet will be lost.';
 
 /**
+ * What Discard asks before it withdraws the offer of text this tab set aside
+ * itself (Load theirs): that text is the writer's unsaved typing and is in no
+ * version, so once the offer is gone only the parked copy holds it, and
+ * nothing in the page offers that again.
+ */
+export const DISCARD_QUESTION =
+    'Discard this text? It is in no saved version. It will be removed from this page and kept only in this browser, for 7 days.';
+
+/**
  * This tab's identity for presence and the sync poll. Per page load, not
  * per browser: two tabs of one account are two tabs.
  *
@@ -889,7 +898,8 @@ export function createSyncHost(view, env) {
         // version, which the writer has just chosen to look at.
         view.setAsideBase = view.baseVersion;
         view.conflict = null;
-        env.report('good', 'Saved');
+        // The word went back to Saved inside applyFromSync(), which took
+        // the tab from unsaved to nothing unsaved; it is not said again.
     }
 
     /**
@@ -960,8 +970,20 @@ export function createSyncHost(view, env) {
      * left alone and stays for its 7 days, so in a browser that keeps
      * drafts declining loses nothing. (A browser that cannot keep drafts
      * parked nothing: there the text is gone with the offer.)
+     *
+     * When the text came from Load theirs (`setAsideFrom` is `conflict`)
+     * it is this tab's own unsaved typing, in no saved version: once the
+     * offer is gone, nothing in the page offers it again. So that case asks
+     * first (DISCARD_QUESTION, through `env.confirm`); a no changes
+     * nothing. A draft from an earlier visit is withdrawn without a
+     * question: the page took nothing away, and its text may already be
+     * part of the document.
      */
     function discardSetAside() {
+        if (view.setAsideFrom === 'conflict' && !env.confirm(DISCARD_QUESTION)) {
+            return;
+        }
+
         forgetSetAside();
     }
 

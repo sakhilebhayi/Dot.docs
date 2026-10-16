@@ -878,7 +878,11 @@
                  and the page is not touched. The copy parked under
                  stale-<uuid> when the text was set aside stays for its 7
                  days in a browser that keeps drafts, but nothing in the
-                 page offers it again. --}}
+                 page offers it again. That is why Discard asks first when
+                 the text came from Load theirs (discardSetAside() in
+                 sync/host.js): that text is the writer's own unsaved
+                 typing, in no saved version. A draft from an earlier visit
+                 is withdrawn without a question. --}}
             <div class="doc-notice" hidden x-bind:hidden="!setAside">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
@@ -891,9 +895,9 @@
                             title="Replace what is on the page now with this text. The version it replaces is kept in the history.">Put it back</button>
                     <button type="button" class="tool tool-mono" @click="discardSetAside()"
                             aria-describedby="doc-notice-discard-does"
-                            title="Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.">Discard</button>
+                            title="Remove this notice and leave the page as it is. Text set aside by Load theirs is in no saved version, so you are asked first; it is removed from this page and kept only in this browser, for 7 days, where this browser keeps drafts.">Discard</button>
                     <span id="doc-notice-put-back-does" hidden>Replace what is on the page now with this text. The version it replaces is kept in the history.</span>
-                    <span id="doc-notice-discard-does" hidden>Remove this notice and leave the page as it is. Where this browser keeps drafts, the text stays in it for up to 7 days.</span>
+                    <span id="doc-notice-discard-does" hidden>Remove this notice and leave the page as it is. Text set aside by Load theirs is in no saved version, so you are asked first; it is removed from this page and kept only in this browser, for 7 days, where this browser keeps drafts.</span>
                 </span>
             </div>
 

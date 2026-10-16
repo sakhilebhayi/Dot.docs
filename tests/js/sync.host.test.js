@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { createSyncEngine } from '../../resources/js/editor/sync/engine.js';
 import {
+    DISCARD_QUESTION,
     PUT_BACK_QUESTION,
     PUT_BACK_UNSAVED_WARNING,
     SAVE_EXPIRY_MS,
@@ -1047,6 +1048,15 @@ test('Load theirs works in a browser that cannot keep drafts', async () => {
     assert.equal(B.infos.length, 0, 'nothing was parked, so nothing says it was');
 });
 
+test('Load theirs says Saved once', async () => {
+    const { B } = await conflicted();
+    assert.equal(B.word(), 'Not saved');
+    const said = B.reports.length;
+
+    await B.host().loadTheirs();
+    assert.deepEqual(B.reports.slice(said), [{ tone: 'good', word: 'Saved' }]);
+});
+
 test('Keep mine and Load theirs both do nothing while a save is in the air', async () => {
     const { server, B } = await conflicted();
     B.host().keepMine();
@@ -1085,7 +1095,7 @@ test('Discard: the offer goes, nothing is sent, the page is untouched and the pa
     assert.equal(B.view.baseVersion, 2);
     assert.equal(B.view.unsaved, false);
     assert.equal(B.view.syncNotice, '');
-    assert.deepEqual(B.questions, []);
+    assert.deepEqual(B.questions, [DISCARD_QUESTION], 'the text is in no saved version, so Discard asks first');
 
     // Nothing is left to put back.
     B.view.overwriteOwed = false;
@@ -1111,6 +1121,49 @@ test('Discard does nothing when nothing was set aside, and works before the edit
         [early.view.setAside, early.view.setAsideFrom, early.view.setAsideBase],
         [null, null, null]
     );
+});
+
+test('Discard declined after Load theirs changes nothing: the offer stays', async () => {
+    const { server, B } = await conflicted({ B: { confirmAnswer: false } });
+    await B.host().loadTheirs();
+
+    B.host().discardSetAside();
+    assert.deepEqual(B.questions, [DISCARD_QUESTION]);
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')));
+    assert.equal(B.view.setAsideFrom, 'conflict');
+    assert.equal(B.view.setAsideBase, 2);
+    assert.equal(B.text(), 'A1');
+    assert.equal(B.stale(), 'B1');
+    assert.equal(B.sent.length, 0);
+    assert.equal(server.version, 2);
+
+    // A yes withdraws it.
+    B.confirmAnswer = true;
+    B.host().discardSetAside();
+    assert.deepEqual(B.questions, [DISCARD_QUESTION, DISCARD_QUESTION]);
+    assert.equal(B.view.setAside, null);
+    assert.equal(B.stale(), 'B1', 'the parked copy stays for its seven days');
+});
+
+test('Discard of a draft from an earlier visit does not ask: the page took nothing away', async () => {
+    const { server, B } = await conflicted();
+    // The same browser loads the page again: the text comes back as a draft.
+    const again = makeTab({ server, clock: { now: 2_000_000 } }, 'B2', { drafts: B.drafts });
+    await again.open();
+    assert.equal(again.view.setAsideFrom, 'draft');
+
+    again.host().discardSetAside();
+    assert.deepEqual(again.questions, []);
+    assert.equal(again.view.setAside, null);
+    assert.equal(again.view.setAsideFrom, null);
+    assert.equal(again.stale(), 'B1', 'the parked copy stays');
+});
+
+test('the Discard question says the text is in no version, goes from the page and stays in the browser for 7 days', () => {
+    assert.match(DISCARD_QUESTION, /no saved version/);
+    assert.match(DISCARD_QUESTION, /removed from this page/);
+    assert.match(DISCARD_QUESTION, /kept .* in this browser/);
+    assert.match(DISCARD_QUESTION, /7 days/);
 });
 
 test('Put it back after the document has moved on asks first, and a no changes nothing', async () => {
