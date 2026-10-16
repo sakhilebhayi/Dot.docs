@@ -1,0 +1,76 @@
+name: Provision Guardian Token
+
+# Upserts GUARDIAN_TOKEN in the production .env over the same pinned SSH
+# path deploy.yml uses, then rebuilds the config cache so the running app
+# picks it up. Run AFTER a deploy that ships config/guardian.php. Rotate
+# by updating the GUARDIAN_TOKEN repository secret and re-running this.
+# The value is never printed.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "provision" to confirm writing GUARDIAN_TOKEN to production'
+        required: true
+
+concurrency:
+  group: dot-doc-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: Set GUARDIAN_TOKEN on doc.infodot.co.za
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Refuse unconfirmed runs
+        if: ${{ github.event.inputs.confirm != 'provision' }}
+        run: |
+          echo '::error::Confirmation input was not "provision" -- aborting.'
+          exit 1
+
+      - name: Refuse an empty token secret
+        env:
+          GUARDIAN_TOKEN: ${{ secrets.GUARDIAN_TOKEN }}
+        run: |
+          if [ -z "$GUARDIAN_TOKEN" ]; then
+            echo '::error::Repository secret GUARDIAN_TOKEN is not set.'
+            exit 1
+          fi
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Provision token
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}" \
+              GUARDIAN_TOKEN="${{ secrets.GUARDIAN_TOKEN }}" \
+              'bash -s' <<'PROVISION'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          PHP=php
+
+          # Idempotent upsert: drop any existing GUARDIAN_TOKEN line, append
+          # the current one. Never echo the value.
+          touch .env
+          grep -v '^GUARDIAN_TOKEN=' .env > .env.guardian-tmp || true
+          printf 'GUARDIAN_TOKEN=%s\n' "$GUARDIAN_TOKEN" >> .env.guardian-tmp
+          mv .env.guardian-tmp .env
+
+          $PHP artisan config:cache
+          echo "GUARDIAN_TOKEN provisioned and config cache rebuilt."
+          PROVISION
+
+      - name: Verify from outside
+        env:
+          GUARDIAN_TOKEN: ${{ secrets.GUARDIAN_TOKEN }}
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Authorization: Bearer $GUARDIAN_TOKEN" -H "Accept: application/json" https://doc.infodot.co.za/guardian/health)
+          echo "GET /guardian/health -> $code"
+          [ "$code" = "200" ] || { echo "::error::Expected 200 (503 = token not read by the app, 401 = secret and server disagree, 404 = this release is not deployed yet)."; exit 1; }
