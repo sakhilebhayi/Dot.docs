@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Guardian;
 
+use App\Jobs\QueueHeartbeat;
 use App\Services\Guardian\Checks\CacheCheck;
 use App\Services\Guardian\Checks\DatabaseCheck;
 use App\Services\Guardian\Checks\ErrorRateCheck;
@@ -56,7 +57,7 @@ class CoreChecksTest extends TestCase
 
     public function test_queue_check_is_unknown_with_an_empty_queue_and_no_worker_heartbeat(): void
     {
-        Cache::forget(\App\Jobs\QueueHeartbeat::KEY);
+        Cache::forget(QueueHeartbeat::KEY);
         $result = app(QueueCheck::class)->run();
 
         $this->assertSame('unknown', $result->status());
@@ -65,7 +66,7 @@ class CoreChecksTest extends TestCase
 
     public function test_queue_check_is_healthy_with_an_empty_queue_and_a_live_worker(): void
     {
-        Cache::forever(\App\Jobs\QueueHeartbeat::KEY, now()->subMinutes(2)->toIso8601String());
+        Cache::forever(QueueHeartbeat::KEY, now()->subMinutes(2)->toIso8601String());
 
         $this->assertSame('healthy', app(QueueCheck::class)->run()->status());
     }
@@ -73,7 +74,7 @@ class CoreChecksTest extends TestCase
     public function test_queue_check_warns_on_backlog_and_does_not_count_delayed_jobs(): void
     {
         config(['guardian.queue.pending_warning' => 2, 'guardian.queue.pending_critical' => 100]);
-        Cache::forever(\App\Jobs\QueueHeartbeat::KEY, now()->toIso8601String());
+        Cache::forever(QueueHeartbeat::KEY, now()->toIso8601String());
 
         $this->insertJobs(5, availableIn: 600);
         $result = app(QueueCheck::class)->run()->toArray();
@@ -86,7 +87,7 @@ class CoreChecksTest extends TestCase
 
     public function test_queue_check_goes_critical_when_the_worker_is_an_hour_silent(): void
     {
-        Cache::forever(\App\Jobs\QueueHeartbeat::KEY, now()->subHours(2)->toIso8601String());
+        Cache::forever(QueueHeartbeat::KEY, now()->subHours(2)->toIso8601String());
 
         $this->assertSame('critical', app(QueueCheck::class)->run()->status());
     }

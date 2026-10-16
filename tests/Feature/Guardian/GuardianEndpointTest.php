@@ -8,6 +8,7 @@ use App\Services\Guardian\Contracts\GuardianCheck;
 use App\Services\Guardian\GuardianHealthReport;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 class GuardianEndpointTest extends TestCase
@@ -38,7 +39,7 @@ class GuardianEndpointTest extends TestCase
         $this->getJson('/guardian/health', ['Authorization' => 'Bearer anything'])->assertServiceUnavailable();
     }
 
-    private function report(): \Illuminate\Testing\TestResponse
+    private function report(): TestResponse
     {
         return $this->getJson('/guardian/health', ['Authorization' => 'Bearer test-guardian-token']);
     }
