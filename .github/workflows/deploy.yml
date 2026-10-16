@@ -155,7 +155,8 @@ jobs:
           MARK="# dot-doc"
           # One writer at a time on this account: deploys of different apps can
           # coincide and would otherwise race on the single crontab.
-          exec 9>"$HOME/.dot-crontab.lock"; flock -w 120 9 || { echo "::error::could not take the crontab lock within 120 s"; exit 1; }
+          command -v flock > /dev/null || { echo "::error::flock is not installed on the host; crontab writes cannot be serialised"; exit 1; }
+          exec 9>"$HOME/.dot-crontab.lock"; flock -w 120 9 || { echo "::error::could not take the crontab lock within 120 s (another deploy is writing the crontab)"; exit 1; }
           PHP_BIN="$(command -v "${PHP:-php}")"
           OLD="$(mktemp)"; NEW="$(mktemp)"; ERR="$(mktemp)"
           if ! crontab -l > "$OLD" 2> "$ERR"; then
