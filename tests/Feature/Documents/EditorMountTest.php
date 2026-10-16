@@ -157,7 +157,7 @@ class EditorMountTest extends TestCase
         $doc = app(DocumentStore::class)->create($user, 'Rejected');
         $version = $doc->version;
 
-        // saveContent() returns ['ok' => bool, 'version' => int] because $wire
+        // saveContent() returns ['ok' => bool, 'conflict' => bool, 'version' => int] because $wire
         // actions resolve with the PHP return value: the bridge keeps the
         // offline draft when `ok` is false (so a rejected save cannot silently
         // lose the writer's work) and stamps `version` onto the draft it does
@@ -166,8 +166,8 @@ class EditorMountTest extends TestCase
             ->test(Editor::class, ['uuid' => $doc->uuid])
             ->call('saveContent', ['type' => 'doc', 'content' => [
                 ['type' => 'mermaidDiagram', 'attrs' => ['id' => BlockId::generate()]],
-            ]])
-            ->assertReturned(['ok' => false, 'version' => $version])
+            ]], $version)
+            ->assertReturned(['ok' => false, 'conflict' => false, 'version' => $version])
             ->assertHasErrors('content')
             ->assertSee('Not saved');
 
@@ -188,8 +188,8 @@ class EditorMountTest extends TestCase
             ->test(Editor::class, ['uuid' => $doc->uuid])
             ->call('saveContent', ['type' => 'doc', 'content' => [
                 ['type' => 'paragraph', 'attrs' => ['id' => BlockId::generate()], 'content' => [['type' => 'text', 'text' => 'Typed']]],
-            ]])
-            ->assertReturned(['ok' => true, 'version' => $doc->version + 1]);
+            ]], $doc->version)
+            ->assertReturned(['ok' => true, 'conflict' => false, 'version' => $doc->version + 1]);
 
         $this->assertSame($doc->version + 1, $doc->fresh()->version);
     }

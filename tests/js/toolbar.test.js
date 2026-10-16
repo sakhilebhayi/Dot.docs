@@ -325,4 +325,10 @@ test('the ceiling clears every bar above the page, not just the top one', () => 
     // clears the top bar, and a page with neither has no ceiling but the gap.
     assert.equal(bubble.toolbarCeiling([topbar, null]), 60);
     assert.equal(bubble.toolbarCeiling([null, undefined]), 8);
+
+    // The editor's notice bar sits under the persistent bar. With a notice
+    // showing it is the lowest of the three; with none it has no height, and
+    // its lower edge is the persistent bar's.
+    assert.equal(bubble.toolbarCeiling([topbar, docBar, { bottom: 141 }]), 149);
+    assert.equal(bubble.toolbarCeiling([topbar, docBar, { bottom: 98 }]), 106);
 });

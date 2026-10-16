@@ -134,7 +134,10 @@ update within seconds.
 - A small sync loop in `resources/js/editor/sync/`: about every 1.5 s when
   others are present, 10-15 s alone, paused when the tab is hidden.
 - A tab with no unsaved typing applies the remote document as a narrowed
-  replace (only the changed range), so caret, undo and page breaks survive.
+  replace (only the changed range), so the caret and page breaks outside that
+  range survive. The undo history does not: as built, a remote change ends it
+  (Phase 1 plan, amendment 8d), and undo across other people's changes comes
+  with Phase 3.
 - Per-tab presence, with a leave signal on unload.
 - Webhooks move to after the save commits.
 

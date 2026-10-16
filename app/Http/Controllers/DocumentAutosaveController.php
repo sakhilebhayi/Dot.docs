@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Documents\DocumentStore;
+use App\Documents\StaleDocumentException;
 use App\Models\Document;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,8 +21,10 @@ use InvalidArgumentException;
  * the request is never even created. `navigator.sendBeacon()` is the only send
  * the browser promises to deliver during unload, and it can only POST a body to
  * a plain endpoint — this one. It writes through DocumentStore like every other
- * content writer (see .ai/rules/app.md) and cuts no version snapshot: navigating
- * away is not a point in the document's history.
+ * content writer (see .ai/rules/app.md) and cuts no version snapshot of what it
+ * stores: navigating away is not a point in the document's history. The one
+ * version it can cut is of the document it REPLACES, when the body says
+ * `overwrite: true`.
  */
 class DocumentAutosaveController extends Controller
 {
@@ -35,7 +38,32 @@ class DocumentAutosaveController extends Controller
             'content.type' => ['required', 'string', 'in:doc'],
             'content.content' => ['sometimes', 'array'],
             'content.attrs' => ['sometimes', 'array'],
+            // The version the page's copy was based on. A beacon that states
+            // none comes from a tab running JavaScript from before saves
+            // carried one, and is refused: it would overwrite blind.
+            'base_version' => ['required', 'integer', 'min:1'],
+            // True when the page owes an overwrite: the writer chose "Keep
+            // mine" or "Put it back", so this save replaces a newer version
+            // their base is on, on purpose. See $opts below.
+            'overwrite' => ['sometimes', 'boolean'],
         ]);
+
+        // `version: none` either way: leaving the page is not a point in the
+        // document's history. What `overwrite` adds is a version of the
+        // document being REPLACED, exactly as Editor::saveContent() keeps it
+        // for the same choice - the person who wrote it is not asked, and
+        // their save may have cut no version of its own. Without it, a page
+        // closed inside the autosave debounce after "Put it back", or after
+        // a "Keep mine" save that failed, replaced their text and kept it
+        // nowhere. DocumentStore::save() cuts it inside the save's own
+        // transaction, so a beacon refused as stale keeps nothing.
+        $opts = [
+            'version' => 'none',
+            'expectedVersion' => $request->integer('base_version'),
+        ];
+        if ($request->boolean('overwrite')) {
+            $opts['keepReplacedAs'] = DocumentStore::overwriteLabel(Auth::user());
+        }
 
         try {
             // The RAW input, never `validated()`. validate() returns only the
@@ -45,7 +73,14 @@ class DocumentAutosaveController extends Controller
             // style and variables reset themselves behind the writer's back.
             // Rules here are a shape check; DocumentSchema::validate(), run
             // inside DocumentStore::save(), is what actually vets the content.
-            $document = $store->save($document, $request->input('content'), Auth::user(), ['version' => 'none']);
+            $document = $store->save($document, $request->input('content'), Auth::user(), $opts);
+        } catch (StaleDocumentException $e) {
+            // Somebody saved after this page last synced. The page is already
+            // gone, so nobody reads this; what matters is that nothing was
+            // overwritten. The offline draft in the browser still holds the
+            // text, and the editor page offers it back the next time the
+            // document is opened there (Put it back).
+            return response()->json(['conflict' => true, 'version' => $e->currentVersion], 409);
         } catch (InvalidArgumentException $e) {
             // DocumentSchema::validate() refused it — an unknown node type, or
             // a block with no valid id. Report it as a validation failure so

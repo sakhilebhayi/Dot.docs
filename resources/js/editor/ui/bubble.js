@@ -151,9 +151,12 @@ export function rovingMove(key, current, count) {
  *
  * It sits over the selection, but never over the bars above the page: the top
  * bar, and — on the editor — the persistent `.doc-bar` directly under it, which
- * is `position: sticky` and therefore always there. Accounting for the top bar
- * alone put a first-line selection's toolbar straight over the title field and
- * the style picker.
+ * is sticky (with its wrapper, `.doc-head`) and therefore always there.
+ * Accounting for the top bar alone put a first-line selection's toolbar
+ * straight over the title field and the style picker. Under `.doc-bar` again
+ * is the notice bar (`.doc-notices`), whose buttons the writer may have to
+ * press with text selected; with no notice showing it has no height and its
+ * lower edge is `.doc-bar`'s.
  *
  * @param {Array<{bottom: number}|null|undefined>} bars
  * @param {number} [gap]
@@ -645,12 +648,14 @@ export function installBubble(editor) {
         // The toolbar sits above the selection, but never on top of the bars
         // above the page: a selection in the first line would otherwise put it
         // over the save word and the panel toggles in the top bar, or over the
-        // title field and the style picker in the persistent bar under it —
-        // neither of which is its to cover. With no room up there it goes below
-        // the selection instead.
+        // title field and the style picker in the persistent bar under it, or
+        // over Keep mine and Load theirs in the notice bar under that — none
+        // of which is its to cover. With no room up there it goes below the
+        // selection instead.
         const ceiling = toolbarCeiling([
             document.querySelector('.topbar')?.getBoundingClientRect(),
             document.querySelector('.doc-bar')?.getBoundingClientRect(),
+            document.querySelector('.doc-notices')?.getBoundingClientRect(),
         ]);
         const above = start.top - dom.offsetHeight - 8;
         const top = above >= ceiling ? above : end.bottom + 8;
