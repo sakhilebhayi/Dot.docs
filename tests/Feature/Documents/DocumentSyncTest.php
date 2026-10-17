@@ -12,6 +12,7 @@ use Database\Seeders\DocumentStyleSeeder;
 use Illuminate\Foundation\Http\Middleware\TrimStrings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -103,6 +104,98 @@ class DocumentSyncTest extends TestCase
             $this->assertStringNotContainsString('*', $sql, "A quiet poll selected every column: {$sql}");
             $this->assertStringNotContainsString('content', $sql, "A quiet poll read document content: {$sql}");
         }
+    }
+
+    /** @return array<string, array{0: string, 1: bool}> */
+    public static function whoMayChange(): array
+    {
+        return [
+            'owner' => ['owner', true],
+            'collaborator editor' => ['collaborator:editor', true],
+            'collaborator admin' => ['collaborator:admin', true],
+            'collaborator viewer' => ['collaborator:viewer', false],
+            'team editor' => ['team:editor', true],
+            'team viewer' => ['team:viewer', false],
+            'stranger on a public document' => ['public', false],
+        ];
+    }
+
+    private function actorFor(string $kind): array
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($owner);
+        if ($kind === 'owner') {
+            return [$owner, $doc];
+        }
+        if ($kind === 'public') {
+            $doc->forceFill(['is_public' => true])->save();
+
+            return [User::factory()->withPersonalTeam()->create(), $doc->fresh()];
+        }
+        [$source, $role] = explode(':', $kind);
+        $user = User::factory()->withPersonalTeam()->create();
+        if ($source === 'team') {
+            $owner->currentTeam->users()->attach($user, ['role' => $role]);
+        } else {
+            DocumentCollaborator::create(['document_id' => $doc->id, 'user_id' => $user->id, 'role' => $role]);
+        }
+
+        return [$user, $doc];
+    }
+
+    /**
+     * The poll carries the person's role, so a downgrade is noticed on the
+     * next poll and not only on the next save or render. It asks the very
+     * question Editor::canEdit() asks (the update gate).
+     */
+    #[DataProvider('whoMayChange')]
+    public function test_every_poll_says_whether_this_person_may_still_change_the_document(string $kind, bool $mayChange): void
+    {
+        [$user, $doc] = $this->actorFor($kind);
+
+        $response = $this->actingAs($user)
+            ->postJson(route('documents.sync', $doc->uuid), ['version' => 1, 'tab' => 'tab-a'])
+            ->assertOk();
+
+        $this->assertSame($mayChange, $response->json('can_edit'));
+        $this->assertSame($mayChange, $user->can('update', $doc), 'the same answer the editor page and canEdit() give');
+        $this->assertIsBool($response->json('can_edit'));
+    }
+
+    public function test_the_answer_comes_with_the_changed_document_too_and_follows_a_downgrade_on_the_next_poll(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($owner);
+        $editor = User::factory()->withPersonalTeam()->create();
+        DocumentCollaborator::create(['document_id' => $doc->id, 'user_id' => $editor->id, 'role' => 'editor']);
+        app(DocumentStore::class)->save($doc, $this->para('Newer text'), $owner);
+
+        $this->actingAs($editor)
+            ->postJson(route('documents.sync', $doc->uuid), ['version' => 1, 'tab' => 'tab-a'])
+            ->assertOk()
+            ->assertJson(['changed' => true, 'can_edit' => true]);
+
+        DocumentCollaborator::where('document_id', $doc->id)->where('user_id', $editor->id)->update(['role' => 'viewer']);
+
+        $this->actingAs($editor)
+            ->postJson(route('documents.sync', $doc->uuid), ['version' => 2, 'tab' => 'tab-a'])
+            ->assertOk()
+            ->assertJson(['changed' => false, 'can_edit' => false]);
+    }
+
+    public function test_an_outsider_is_refused_and_a_leaving_tab_gets_no_role(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = $this->doc($owner);
+
+        $outsider = $this->actingAs(User::factory()->withPersonalTeam()->create())
+            ->postJson(route('documents.sync', $doc->uuid), ['version' => 1, 'tab' => 'tab-a'])
+            ->assertForbidden();
+        $this->assertArrayNotHasKey('can_edit', $outsider->json() ?? []);
+
+        $this->actingAs($owner)
+            ->postJson(route('documents.sync', $doc->uuid), ['version' => 1, 'tab' => 'tab-a', 'leaving' => true])
+            ->assertExactJson(['left' => true]);
     }
 
     public function test_each_poll_records_the_tab_and_reports_the_others(): void

@@ -35,6 +35,7 @@
  * row (offerLost(), putBackLost(), dismissLost()).
  */
 
+import { focusAfterInsert } from './insert.js';
 import { appendLost, blockWord, lostEntry } from './merge.js';
 
 /** How long a save is waited for before it is taken as never answering. */
@@ -221,6 +222,32 @@ export function unloadSaveBody(json, options = {}) {
         base_version: typeof options.getBaseVersion === 'function' ? options.getBaseVersion() : null,
         overwrite: typeof options.getOverwrite === 'function' ? !!options.getOverwrite() : false,
     };
+}
+
+/**
+ * Whether the unload flush sends a beacon for the document the editor holds
+ * (the decision of the bundle's flushSave({beacon: true}); here, so that
+ * `node --test` can run it).
+ *
+ *   - `dirty` and `changed`: typed since the last hand-over, and different
+ *     from it: the debounce had not fired yet. Sent.
+ *   - `unsent`: the host says the text was handed over to Livewire and its
+ *     request failed or is held by the back-off (`unsentAtUnload()`). The
+ *     bundle counts a document it has handed over as sent, so without this
+ *     the beacon skipped exactly the text the writer would otherwise lose
+ *     in a browser that keeps no draft. Sent.
+ *   - `sentAlready`: this very content went by beacon a moment ago
+ *     (pagehide, then destroy()): never twice for one content.
+ *
+ * @param {{dirty: boolean, changed: boolean, unsent: boolean, sentAlready: boolean}} state
+ * @returns {boolean}
+ */
+export function beaconWanted({ dirty, changed, unsent, sentAlready }) {
+    if (sentAlready) {
+        return false;
+    }
+
+    return (dirty && changed) || unsent === true;
 }
 
 /**
@@ -425,6 +452,60 @@ export function createSyncHost(view, env) {
         }
 
         return view.saving > 0;
+    }
+
+    /**
+     * Whether a press from the keyboard in the notice bar hands the keyboard back
+     * to the paper (the page's noticePressed()): only when the action completed.
+     * An action that reports false (the writer answered No, or it failed, or it
+     * had nothing to do) leaves the row on the page, and with it the focus where
+     * it was. An action that reports nothing at all (Keep mine) is taken as done:
+     * its row goes away and the focus would be left on nothing.
+     *
+     * @param {unknown} completed what the action returned (a boolean, or a promise's value)
+     * @returns {boolean}
+     */
+    function refocusAfterPress(completed) {
+        return completed !== false;
+    }
+
+    /**
+     * Whether the text this page holds is unsent and unanswered, for the
+     * unload beacon: it is unsaved and no answer has settled the request that
+     * carried it. That is the case while a save is still in the air
+     * (`saving`, whatever its age), when it FAILED (`saveFailures`, reset by
+     * any answer), when its next send is HELD by the back-off (`saveRetryAt`
+     * in the future), and when it was given up on, or failed, and nothing
+     * has been confirmed since (`unanswered`).
+     *
+     * Livewire never rejects the promise of a call whose fetch failed, so in
+     * a real browser the page cannot tell a dead request from a slow one: it
+     * only gives the save up after SAVE_EXPIRY_MS, and `saveFailures` stays 0.
+     * A request in the air is aborted by the closing page, so its text is
+     * beaconed too. That is safe whatever became of the request: both state
+     * the same base (and overwrite flag), so the server stores the text once,
+     * refuses the other as stale and cuts no second history version.
+     *
+     * The bundle counts a document it handed to Livewire as sent, so it asks.
+     * Never for a page that cannot write (read only, fail-closed): a beacon
+     * is a write. No side effects: it is called while the page is going away.
+     *
+     * @returns {boolean}
+     */
+    function unsentAtUnload() {
+        if (cannotWrite(env.handle())) {
+            return false;
+        }
+
+        return (
+            view.unsaved === true &&
+            (view.unanswered !== null ||
+                view.saveFailures > 0 ||
+                view.saveRetryAt > env.now() ||
+                // A save still in the air, whatever its age (past SAVE_EXPIRY_MS it is given up on, though nothing
+                // has noticed yet: saveInTheAir() does, on the next poll tick).
+                view.saving > 0)
+        );
     }
 
     /**
@@ -1458,10 +1539,17 @@ export function createSyncHost(view, env) {
      * writer's edit: undoable, autosaved on the current base, no overwrite
      * owed. The entry goes, and the park is rewritten with the rest.
      *
+     * `options.focus` is true only for a press that came from the keyboard
+     * (the page passes `$event.detail === 0`): a tap on a phone must not
+     * focus the paper, which brings up the on-screen keyboard and scrolls
+     * (`.ai/rules/livewire.md`, the notice bar). The block is in and the
+     * caret is placed either way.
+     *
      * @param {number} index
+     * @param {{focus?: boolean}} [options]
      * @returns {boolean} whether the block went in
      */
-    function putBackLost(index) {
+    function putBackLost(index, options = {}) {
         const handle = env.handle();
         // Fail-closed: nothing may be written into the editor.
         if (cannotWrite(handle)) {
@@ -1475,7 +1563,12 @@ export function createSyncHost(view, env) {
 
         let inserted = false;
         try {
-            inserted = handle.insertBlock(entry.json, { anchors: entry.anchors, keepId: entry.reason === 'deleted' }) === true;
+            inserted =
+                handle.insertBlock(entry.json, {
+                    anchors: entry.anchors,
+                    keepId: entry.reason === 'deleted',
+                    focus: options?.focus === true,
+                }) === true;
         } catch (_) {
             inserted = false;
         }
@@ -1492,13 +1585,30 @@ export function createSyncHost(view, env) {
         return true;
     }
 
-    /** Put them all back: oldest first; the first that cannot go in stops it, and stays listed. */
-    function putBackAllLost() {
+    /**
+     * Put them all back: oldest first; the first that cannot go in stops it, and stays listed.
+     * The editor takes focus ONCE, at the end, and only when every item went in and the press
+     * came from the keyboard (`options.focus`): a partial failure must not leave a keyboard user
+     * in the paper, away from the button and the row that is still there.
+     *
+     * @returns {boolean} whether every item went in (false: one stayed, or there was nothing)
+     */
+    function putBackAllLost(options = {}) {
+        if (view.lost.length === 0) {
+            return false;
+        }
+        const each = { ...options, focus: false };
         while (view.lost.length > 0) {
-            if (!putBackLost(0)) {
-                return;
+            if (!putBackLost(0, each)) {
+                return false;
             }
         }
+        const handle = env.handle();
+        if (options?.focus === true && handle?.editor?.commands) {
+            focusAfterInsert(handle.editor.commands, true);
+        }
+
+        return true;
     }
 
     /**
@@ -1507,10 +1617,12 @@ export function createSyncHost(view, env) {
      * copy. An earlier write may have stored the list: it is stamped dismissed,
      * best effort, so it does not come back after a reload (the copy that could
      * not be written is the only thing that is gone). A no changes nothing.
+     *
+     * @returns {boolean} whether the row was emptied (false: declined)
      */
     function dismissWithoutCopy() {
         if (!env.confirm(DISMISS_LOST_UNKEPT_QUESTION)) {
-            return;
+            return false;
         }
         clearLostNotices();
         const listed = view.lost;
@@ -1520,6 +1632,8 @@ export function createSyncHost(view, env) {
         } catch (_) {
             // Nothing more can be done.
         }
+
+        return true;
     }
 
     /**
@@ -1541,22 +1655,23 @@ export function createSyncHost(view, env) {
      * a copy, a no changes nothing. A list that changed while the write was in
      * flight keeps everything too, because the new entry is not in that copy.
      *
-     * @returns {Promise<void>}
+     * @returns {Promise<boolean>} whether the row was emptied: false when the writer
+     *          declined, the copy could not be kept (and the unkept question was
+     *          declined) or the list changed meanwhile. The row stays then, and
+     *          the page leaves the focus where it is (noticePressed()).
      */
     async function dismissLost() {
         if (view.lost.length === 0) {
-            return;
+            return false;
         }
 
         // The last press could not keep a copy: the writer decides, knowing it.
         if (view.syncNotice === DISMISS_LOST_FAILED_NOTICE) {
-            dismissWithoutCopy();
-
-            return;
+            return dismissWithoutCopy();
         }
 
         if (!env.confirm(DISMISS_LOST_QUESTION)) {
-            return;
+            return false;
         }
 
         const drafts = env.drafts();
@@ -1572,10 +1687,10 @@ export function createSyncHost(view, env) {
             // The notice is the memory of the failure. When a stop reason stands it could not be shown, and the next
             // press would start over with the ordinary question: ask the unkept question now instead.
             if (view.syncNotice !== DISMISS_LOST_FAILED_NOTICE) {
-                dismissWithoutCopy();
+                return dismissWithoutCopy();
             }
 
-            return;
+            return false;
         }
         // Every change of the list makes a new array (offerLost, putBackLost).
         // An EMPTY list is not a change: it is a press made meanwhile that has
@@ -1583,7 +1698,7 @@ export function createSyncHost(view, env) {
         if (view.lost !== dismissing && view.lost.length > 0) {
             setLostNotice(DISMISS_LOST_CHANGED_NOTICE);
 
-            return;
+            return false;
         }
 
         // Our own earlier "nothing was dismissed" is no longer true. (A sync notice has no way off the page
@@ -1591,6 +1706,8 @@ export function createSyncHost(view, env) {
         clearLostNotices();
         view.lost = [];
         drafts.markLostDismissed(view.docUuid, view.tabId, dismissing);
+
+        return true;
     }
 
     /**
@@ -1835,18 +1952,19 @@ export function createSyncHost(view, env) {
      * put it back. `setAsideFrom` and `setAsideBase` record that it came
      * from this choice and which version the page showed at that moment.
      *
-     * @returns {Promise<void>}
+     * @returns {Promise<boolean>} whether the newer document was shown (false:
+     *          nothing to show yet, declined, busy or could not be opened)
      */
     async function loadTheirs() {
         const handle = env.handle();
         const engine = env.engine();
         if (cannotWrite(handle) || !engine) {
-            return;
+            return false;
         }
 
         // One choice at a time: a Keep mine save is already in the air.
         if (syncState() === 'busy') {
-            return;
+            return false;
         }
 
         // A text is already set aside and offered. Load theirs sets THIS tab's
@@ -1856,14 +1974,14 @@ export function createSyncHost(view, env) {
         // elsewhere it is gone): ask first, before the engine's document is
         // taken (a no changes nothing).
         if (view.setAside && engine.pending && !env.confirm(LOAD_THEIRS_REPLACES_QUESTION)) {
-            return;
+            return false;
         }
 
         const waiting = engine.takeRemote();
         if (!waiting) {
             engine.refetch(view.baseVersion);
 
-            return;
+            return false;
         }
 
         let mine = JSON.stringify(handle.editor.getJSON());
@@ -1896,7 +2014,7 @@ export function createSyncHost(view, env) {
         if (!applyFromSync(waiting, { force: true })) {
             view.syncNotice = 'The newer version could not be opened here. Reload the page.';
 
-            return;
+            return false;
         }
 
         view.setAside = mine;
@@ -1908,6 +2026,8 @@ export function createSyncHost(view, env) {
         view.conflict = null;
         // The word went back to Saved inside applyFromSync(), which took
         // the tab from unsaved to nothing unsaved; it is not said again.
+
+        return true;
     }
 
     /**
@@ -1938,7 +2058,7 @@ export function createSyncHost(view, env) {
         const handle = env.handle();
         // Fail-closed: nothing may be written into the editor.
         if (cannotWrite(handle) || !view.setAside) {
-            return;
+            return false;
         }
 
         // An edit undone again is not unsaved text: do not warn about it.
@@ -1949,7 +2069,7 @@ export function createSyncHost(view, env) {
         const knowingly =
             view.setAsideFrom === 'conflict' && view.baseVersion === view.setAsideBase && !view.unsaved;
         if (!knowingly && !env.confirm(PUT_BACK_QUESTION + (view.unsaved ? PUT_BACK_UNSAVED_WARNING : ''))) {
-            return;
+            return false;
         }
 
         // This replaces the version that was loaded, exactly as Keep mine
@@ -1974,7 +2094,11 @@ export function createSyncHost(view, env) {
             view.overwriteOwed = owedBefore;
             view.overwriteFloor = floorBefore;
             setLostNotice(PUT_BACK_FAILED_NOTICE);
+
+            return false;
         }
+
+        return true;
     }
 
     /**
@@ -1992,13 +2116,15 @@ export function createSyncHost(view, env) {
      * nothing. A draft from an earlier visit is withdrawn without a
      * question: the page took nothing away, and its text may already be
      * part of the document.
+     *
+     * @returns {boolean} whether the offer was withdrawn (false: declined)
      */
     function discardSetAside() {
         // A text the page took away (Load theirs) is in no saved version, and so is any text that comes back
         // from the queue of kept parks (it has no base version: setAsideBase is null, offerNextPark()), which may
         // be another tab's: both ask.
         if ((view.setAsideFrom === 'conflict' || view.setAsideBase === null) && !env.confirm(DISCARD_QUESTION)) {
-            return;
+            return false;
         }
 
         const discarded = view.setAside;
@@ -2007,6 +2133,8 @@ export function createSyncHost(view, env) {
         if (discarded) {
             dealtWith(discarded);
         }
+
+        return true;
     }
 
     /**
@@ -2660,6 +2788,44 @@ export function createSyncHost(view, env) {
     }
 
     /**
+     * The sync poll said whether this person may still change the document
+     * (`can_edit`, asked of the same gate as Editor::canEdit()). A poll
+     * answer is the server speaking, so it is as good as the answer to
+     * `env.canEdit()`:
+     *
+     *   - false: the same read only page a confirmed canEdit() = false makes
+     *     (lockReadOnly()), words parked (readOnlyNoticed()). When a refused
+     *     save has already parked words and its question is still out, the
+     *     words typed during the hold are parked now, beside the first copy.
+     *   - true: never re-enables a page that is read only (a reload does
+     *     that: the server draws the page again). It answers only the
+     *     question a refused save left out, the one case where this page
+     *     is held and was never told no: the hold is lifted and the text
+     *     goes again, exactly as accessAnswered() does on a yes.
+     *   - anything but a boolean: nothing (an older server sends no field).
+     *
+     * @param {unknown} canEdit
+     */
+    function accessFromPoll(canEdit) {
+        if (typeof canEdit !== 'boolean' || view.editable === false) {
+            return;
+        }
+
+        if (canEdit === false) {
+            // The same read only page and the same parking as a re-render that draws editable false. When a refused
+            // save's question is still out, words typed during the hold are not in the park made when it was refused,
+            // so they are parked now (the earlier copy stays beside it).
+            readOnlyNoticed();
+
+            return;
+        }
+
+        if (view.accessCheckSince > 0) {
+            accessAnswered(view.accessCheckSince, true, false);
+        }
+    }
+
+    /**
      * The server answered a save with `status`. A 403 does not say WHY: this
      * person's access may have been lowered, but it is also what a request
      * answers when ANOTHER action sent with it was refused (a Move beside an
@@ -2754,6 +2920,8 @@ export function createSyncHost(view, env) {
     function engineHost() {
         return {
             state: () => syncState(),
+            // The role that rides on every poll (see accessFromPoll()).
+            onAccess: (canEdit) => accessFromPoll(canEdit),
             applyRemote: (remote) => applyFromSync(remote),
             // A newer document while this tab holds unsaved typing: merged,
             // or the notice when that cannot be done.
@@ -2803,6 +2971,8 @@ export function createSyncHost(view, env) {
 
     return {
         opened,
+        unsentAtUnload,
+        refocusAfterPress,
         edited,
         persist,
         resendIfOwed,
@@ -2832,6 +3002,7 @@ export function createSyncHost(view, env) {
         isSaveRequest,
         saveRefused,
         readOnlyNoticed,
+        accessFromPoll,
         engineHost,
     };
 }

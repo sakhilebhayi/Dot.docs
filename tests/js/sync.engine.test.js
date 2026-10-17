@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { FAST_MS, MAX_BACKOFF_MS, SLOW_MS, createSyncEngine } from '../../resources/js/editor/sync/engine.js';
+import { FAST_MS, MAX_BACKOFF_MS, PROTOCOL, SLOW_MS, createSyncEngine } from '../../resources/js/editor/sync/engine.js';
 import { createSyncRequest } from '../../resources/js/editor/sync/request.js';
 
 /** Let every pending promise callback run. */
@@ -11,7 +11,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
  * An engine wired to fakes: requests are answered by hand, and the timer is
  * captured instead of run, so each test decides what happens and when.
  */
-function harness({ version = 1, state = 'clean', visible = true } = {}) {
+function harness({ version = 1, state = 'clean', visible = true, withAccess = false } = {}) {
     const h = {
         state,
         visible,
@@ -20,6 +20,8 @@ function harness({ version = 1, state = 'clean', visible = true } = {}) {
         conflicts: [],
         refusals: [],
         members: [],
+        /** What the poll said about this person's role (`can_edit`), each time it said. */
+        access: [],
         stopped: [],
         /** What the host was called with, in order: 'members', 'state', 'polled'. */
         calls: [],
@@ -55,6 +57,17 @@ function harness({ version = 1, state = 'clean', visible = true } = {}) {
                 }
             },
             onRefused: (remote) => h.refusals.push(remote),
+            ...(withAccess
+                ? {
+                      onAccess: (canEdit) => {
+                          h.access.push(canEdit);
+                          h.calls.push('access');
+                          if (h.accessThrows) {
+                              throw new Error('host failed');
+                          }
+                      },
+                  }
+                : {}),
             onMembers: (members, others) => {
                 h.calls.push('members');
                 h.members.push({ members, others });
@@ -709,4 +722,61 @@ test('createSyncRequest survives a response that is not JSON', async () => {
     }));
 
     assert.deepEqual(await request({ version: 1, tab: 'tab-a' }), { status: 419, body: null });
+});
+
+// ───────────────────────────────────────────────────────── the poll carries the person's role
+
+test('a poll that says can_edit hands it to the host before the members, and one that does not says nothing', async () => {
+    const h = harness({ withAccess: true });
+    h.engine.start();
+    await settle();
+
+    await h.answer(200, { ...quiet(1), can_edit: false });
+    assert.deepEqual(h.access, [false]);
+    assert.deepEqual(h.calls.slice(0, 2), ['access', 'members'], 'the role is dealt with before the page sends anything else');
+
+    await h.fire();
+    await h.answer(200, { ...quiet(1), can_edit: true });
+    assert.deepEqual(h.access, [false, true]);
+
+    // An old server: no field, no call. Not a boolean: no call.
+    await h.fire();
+    await h.answer(200, quiet(1));
+    await h.fire();
+    await h.answer(200, { ...quiet(1), can_edit: 'false' });
+    await h.fire();
+    await h.answer(200, { ...quiet(1), can_edit: null });
+    assert.deepEqual(h.access, [false, true]);
+});
+
+test('a host that throws from onAccess, or has none at all, does not end the loop; a failed poll says nothing about the role', async () => {
+    const throwing = harness({ withAccess: true });
+    throwing.accessThrows = true;
+    throwing.engine.start();
+    await settle();
+    await throwing.answer(200, { ...quiet(1), can_edit: false });
+    assert.ok(throwing.timer, 'the next poll is armed');
+    assert.deepEqual(throwing.calls.includes('polled'), true);
+
+    const old = harness();
+    old.engine.start();
+    await settle();
+    await old.answer(200, { ...quiet(1), can_edit: false });
+    assert.ok(old.timer, 'a host written before the field existed ignores it');
+
+    const failing = harness({ withAccess: true });
+    failing.engine.start();
+    await settle();
+    await failing.fail();
+    await failing.fire();
+    await failing.answer(500, { can_edit: false });
+    assert.deepEqual(failing.access, []);
+});
+
+test('the protocol the engine speaks is unchanged: the field is additive and old clients ignore it', async () => {
+    assert.equal(PROTOCOL, 1);
+    const h = harness();
+    h.engine.start();
+    await settle();
+    assert.equal(h.requests[0].payload.protocol, 1);
 });

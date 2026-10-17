@@ -39,9 +39,9 @@ import { closeList } from './ui/list';
 import { isContentValid, isEmptyDocument } from './validation';
 import { clearHistoryTransaction, remoteTransaction } from './sync/apply';
 import { createSyncEngine } from './sync/engine';
-import { insertBlockTransaction } from './sync/insert';
+import { focusAfterInsert, insertBlockTransaction } from './sync/insert';
 import { mergeDocuments } from './sync/merge';
-import { createSyncHost, createTabId, unloadSaveBody } from './sync/host';
+import { beaconWanted, createSyncHost, createTabId, unloadSaveBody } from './sync/host';
 import { createSyncRequest } from './sync/request';
 import {
     clearDraft,
@@ -155,7 +155,7 @@ function selectionInfo(editor) {
  *
  * @param {HTMLElement} element
  * @param {{content?: object, vars?: object, styleCss?: string, uploadUrl?: string, autosaveUrl?: string, csrfToken?: string,
- *          getBaseVersion?: () => number, getOverwrite?: () => boolean, editable?: boolean,
+ *          getBaseVersion?: () => number, getOverwrite?: () => boolean, getUnsent?: () => boolean, editable?: boolean,
  *          onChange?: (json: object) => void, onSelection?: (s: {blockId: string|null, type: string|null}) => void,
  *          onCommand?: (name: string, params: object) => void}} opts
  * @returns {{editor: Editor, run: (name: string, params?: object) => boolean, destroy: () => void}}
@@ -172,6 +172,8 @@ function mount(element, opts = {}) {
     let saveTimer = null;
     let lastSaved = JSON.stringify(opts.content ?? null);
     let dirty = false;
+    // The content the unload beacon last carried: one beacon per content (pagehide, then destroy()).
+    let lastBeaconed = null;
     let autosave = true;
     let contentError = null;
     // A person who may read the document and not change it (the server says
@@ -269,25 +271,44 @@ function mount(element, opts = {}) {
         clearTimeout(saveTimer);
         saveTimer = null;
 
-        if (!dirty || !autosave || readOnly || editor.isDestroyed) {
+        if (!autosave || readOnly || editor.isDestroyed) {
+            return false;
+        }
+
+        // On the way out the host may also say that text this bundle already
+        // handed over is unsent and unanswered (its request failed, or the
+        // back-off holds it): `dirty` is false for that text and the beacon
+        // is the only send left. See beaconWanted() in sync/host.js.
+        const unsent = beacon && hostHoldsUnsent();
+        if (!dirty && !unsent) {
             return false;
         }
 
         const json = editor.getJSON();
         const serialised = JSON.stringify(json);
+        const changed = serialised !== lastSaved;
         // Plugin housekeeping (trailing paragraph, id backfill) can fire
         // onUpdate without changing anything a save would store.
-        if (serialised === lastSaved) {
+        if (!changed && !unsent) {
             dirty = false;
 
             return false;
         }
 
-        if (beacon && beaconSave(json)) {
-            dirty = false;
-            lastSaved = serialised;
+        if (beacon) {
+            const wanted = beaconWanted({ dirty, changed, unsent, sentAlready: serialised === lastBeaconed });
+            if (wanted && beaconSave(json)) {
+                dirty = false;
+                lastSaved = serialised;
+                lastBeaconed = serialised;
 
-            return true;
+                return true;
+            }
+            // Unsent text that could not go by beacon, or went already, is not handed to Livewire now: the
+            // page is going away and the offline draft keeps it.
+            if (!(wanted && dirty && changed)) {
+                return false;
+            }
         }
 
         if (typeof opts.onChange !== 'function') {
@@ -299,6 +320,15 @@ function mount(element, opts = {}) {
         opts.onChange(json);
 
         return true;
+    }
+
+    /** Whether the host says the text it was handed is unsent and unanswered (getUnsent, a mount option). */
+    function hostHoldsUnsent() {
+        try {
+            return typeof opts.getUnsent === 'function' && opts.getUnsent() === true;
+        } catch (_) {
+            return false;
+        }
     }
 
     /**
@@ -789,10 +819,10 @@ function mount(element, opts = {}) {
          * it replaces nothing.
          *
          * @param {object} json the block, as the lost entry holds it
-         * @param {{anchors?: string[], keepId?: boolean}} options
+         * @param {{anchors?: string[], keepId?: boolean, focus?: boolean}} options `focus`: true only for a press from the keyboard
          * @returns {boolean} false when the block could not go in (nothing changed)
          */
-        insertBlock: (json, { anchors = [], keepId = false } = {}) => {
+        insertBlock: (json, { anchors = [], keepId = false, focus = false } = {}) => {
             if (!json || editor.isDestroyed || !autosave || readOnly) {
                 return false;
             }
@@ -812,11 +842,8 @@ function mount(element, opts = {}) {
                 return false;
             }
 
-            try {
-                editor.commands.focus();
-            } catch (_) {
-                // The block is in and the caret is set; focus is a nicety.
-            }
+            // Focus only for a press from the keyboard: a tap on a phone must not bring the keyboard up.
+            focusAfterInsert(editor.commands, focus);
 
             return true;
         },

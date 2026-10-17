@@ -88,7 +88,8 @@ const WORDS = {
     pageBreak: 'page break',
     sectionBreak: 'section break',
     callout: 'callout',
-    columns: 'columns',
+    // Singular: every sentence reads This <word> was ... (a bare columns read This columns was changed).
+    columns: 'column layout',
 };
 
 /**

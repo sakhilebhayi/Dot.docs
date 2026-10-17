@@ -16,7 +16,7 @@ import { NodeSelection, Selection, TextSelection } from 'prosemirror-state';
 import { ReplaceStep } from 'prosemirror-transform';
 
 import { clearHistoryTransaction, remoteTransaction } from '../../resources/js/editor/sync/apply.js';
-import { insertBlockTransaction } from '../../resources/js/editor/sync/insert.js';
+import { focusAfterInsert, insertBlockTransaction } from '../../resources/js/editor/sync/insert.js';
 import { mergeDocuments } from '../../resources/js/editor/sync/merge.js';
 
 /**
@@ -649,3 +649,18 @@ test(
         editor.destroy();
     }
 );
+
+test('focusAfterInsert focuses the paper only for a press from the keyboard, never for a tap, and never throws', () => {
+    let calls = 0;
+    const commands = { focus: () => { calls += 1; } };
+
+    assert.equal(focusAfterInsert(commands, true), true);
+    assert.equal(calls, 1);
+
+    for (const tap of [false, undefined, null, 'true', 1]) {
+        assert.equal(focusAfterInsert(commands, tap), false);
+    }
+    assert.equal(calls, 1, 'a tap leaves the on-screen keyboard down');
+
+    assert.equal(focusAfterInsert({ focus: () => { throw new Error('destroyed'); } }, true), true, 'a throwing focus is a nicety lost, not a failed Put it back');
+});
