@@ -1,11 +1,185 @@
 /*
- * The shell's tokens and chrome primitives come first: Tailwind's preflight
- * only ever touches bare element selectors, and every shell rule that matters
- * is a class, so importing here (the position PostCSS requires) is safe. The
- * paper surface stays its own Vite entry so it keeps loading after Tailwind.
+ * Tailwind v4 entry. The order below reproduces the v3 cascade exactly:
+ *
+ *   shell.css (tokens + chrome classes)  ->  preflight  ->  utilities
+ *
+ * shell.css is imported INTO the base layer, ahead of Tailwind's own preflight,
+ * so it keeps sitting first in the base layer (the position it had when v3
+ * emitted `@import` before `@tailwind base`). Utilities stay above it, and the
+ * paper surface stays its own Vite entry (resources/css/paper.css, unlayered)
+ * so it still loads after Tailwind and wins over it.
+ *
+ * No automatic source detection: `source(none)` plus the @source lines below are
+ * the old `content` globs from tailwind.config.js, nothing more. Do not widen
+ * them; v4 would otherwise scan app/, docs/, tests/ and ship every word in them
+ * that happens to be a utility name.
+ *
+ * Everything under "v3 compatibility" exists so that no page changes by a
+ * single pixel; see the Tailwind v4 section of .ai/rules/views.md.
  */
-@import './shell.css';
+@layer theme, base, components, utilities;
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import './shell.css' layer(base);
+@import 'tailwindcss' source(none);
+@import './tailwind-v3-palette.css';
+
+@source '../views/**/*.blade.php';
+@source '../js/**/*.js';
+@source '../../storage/framework/views/*.php';
+@source '../../vendor/laravel/jetstream/**/*.blade.php';
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+
+@plugin '@tailwindcss/forms';
+@plugin '@tailwindcss/typography';
+
+/*
+ * Night is a class on <html>, set server-side from the `theme` cookie in
+ * resources/views/layouts/app.blade.php so a day-mode reload never flashes.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * v3 compatibility: v4 wraps `hover:` in `@media (hover: hover)`, which turns
+ * every hover style off on touch screens. v3 applied it everywhere.
+ */
+@custom-variant hover (&:hover);
+
+/*
+ * Colours are NOT Tailwind palette entries: every chrome colour is a CSS
+ * custom property defined once in resources/css/shell.css (:root = day,
+ * html.dark = night), and Tailwind only ever reads them through var().
+ * That is what keeps one palette instead of two.
+ */
+@theme {
+    --font-sans: 'Atkinson Hyperlegible Next', 'Atkinson Hyperlegible', ui-sans-serif, system-ui, sans-serif,
+        'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-serif: 'Source Serif 4', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
+
+    --color-desk: var(--desk);
+    --color-desk-raised: var(--desk-raised);
+    --color-rule: var(--rule);
+    --color-paper: var(--paper);
+    --color-text: var(--text);
+    --color-text-2: var(--text-2);
+    --color-ink: var(--ink);
+    --color-marker: var(--marker);
+    --color-signal: var(--signal);
+    --color-good: var(--good);
+    --color-danger: var(--danger);
+
+    /* v3 `ring` was 3px blue-500 at 50%; v4 made it 1px currentColor. */
+    --default-ring-width: 3px;
+    --default-ring-color: rgb(59 130 246 / 0.5);
+
+    /*
+     * v4 renamed the small end of three scales (shadow-sm -> shadow-xs, rounded-sm
+     * -> rounded-xs, blur-sm -> blur-xs) and moved the bare names up one step.
+     * Markup we do not own (Laravel's and Livewire's pagination view, Jetstream)
+     * still says shadow-sm / rounded / blur, so the old names keep their old
+     * values here instead of being renamed in every view.
+     */
+    --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --radius: 0.25rem;
+    --radius-sm: 0.125rem;
+    --blur: 8px;
+    --blur-sm: 4px;
+}
+
+/*
+ * `font-mono` is Atkinson Hyperlegible Mono, as in v3. It is declared inline
+ * (not as a `--font-mono` theme variable) because shell.css, the welcome page
+ * and the guest layout each define their own `--font-mono` (IBM Plex Mono) and
+ * a shared name would make the utility and `code`/`pre` pick that one instead.
+ */
+@theme inline {
+    --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        'Liberation Mono', 'Courier New', monospace;
+    --default-mono-font-family: 'Atkinson Hyperlegible Mono', ui-monospace, SFMono-Regular, Menlo, Monaco,
+        Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+/*
+ * v3 compatibility: v4 preflight changed several defaults. Each is restored
+ * here, in the base layer after the shell and after preflight, with the value
+ * v3 produced.
+ */
+@layer base {
+    /* border colour: v4 defaults to currentColor, v3 to gray-200. */
+    *,
+    ::after,
+    ::before,
+    ::backdrop {
+        border-color: #e5e7eb;
+    }
+
+    /* buttons: v4 uses the default cursor, v3 the pointer (and `default` when disabled). */
+    button,
+    [role='button'] {
+        cursor: pointer;
+    }
+
+    :disabled {
+        cursor: default;
+    }
+
+    /* placeholder: v4 is currentColor at 50%, v3 was gray-400. */
+    input::placeholder,
+    textarea::placeholder {
+        color: #9ca3af;
+    }
+
+    /*
+     * v3 preflight reset `body` to `line-height: inherit` (the shell sets its own
+     * leading on .shell and .scrim, see shell.css); v4 dropped that rule, which
+     * would let shell.css's `body { line-height: 1.55 }` through.
+     */
+    body {
+        line-height: inherit;
+    }
+
+    /* v4 resets padding on every element; v3 left <option> with the browser's. */
+    option {
+        padding: 0 2px 1px;
+    }
+
+    /* v4 strips the native file button (padding, border, colours); v3 left it alone. */
+    ::file-selector-button {
+        padding: 1px 6px;
+        border: 2px outset buttonborder;
+        background-color: buttonface;
+        color: buttontext;
+    }
+}
+
+/*
+ * v3 compatibility: transition property lists. v4 adds outline-color (a focus
+ * outline would now fade in over 150ms where v3 snapped) and the gradient
+ * variables to `transition` and `transition-colors`. These are the v3 lists,
+ * plus translate/scale/rotate, which in v4 are what `translate-*`, `scale-*`
+ * and `rotate-*` set instead of `transform`.
+ *
+ * Plain rules at the end of the utilities layer, not `@utility`: an `@utility`
+ * of the same name is merged BEFORE the built-in one, which would win.
+ */
+@layer utilities {
+    .transition {
+        transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity,
+            box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter;
+    }
+
+    .transition-colors {
+        transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+    }
+
+    /*
+     * `outline-none` was a transparent 2px outline in v3 (it still shows in
+     * forced-colors mode); v4 made it `outline-style: none` and moved the old
+     * behaviour to `outline-hidden`.
+     */
+    .outline-none,
+    .focus\:outline-none:focus {
+        outline: 2px solid transparent;
+        outline-offset: 2px;
+    }
+}
