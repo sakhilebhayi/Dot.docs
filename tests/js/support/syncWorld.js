@@ -399,6 +399,13 @@ export function makeTab({ server, clock }, name, options = {}) {
                 return false;
             }
             content = clone(json);
+            // As the editor's UniqueID does: a block that arrives without an id gets one (the merge's stand-in paragraph).
+            content.content.forEach((block) => {
+                if (block.attrs?.id === null || block.attrs?.id === undefined) {
+                    server.fresh += 1;
+                    block.attrs = { ...(block.attrs ?? {}), id: `fresh${server.fresh}` };
+                }
+            });
             saveTimer = null;
             dirty = false;
             lastSaved = JSON.stringify(content);

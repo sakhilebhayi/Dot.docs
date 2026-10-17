@@ -32,6 +32,7 @@ import {
     pair,
     para,
     settle,
+    textOf,
     world,
 } from './support/syncWorld.js';
 
@@ -5067,7 +5068,7 @@ test('a draft merge the writer said yes to whose apply fails falls through to th
     );
 
     assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION], 'asked once; the fall-through asks nothing more');
-    assert.equal(again.mergeCalls, 1);
+    assert.equal(again.mergeCalls, 2, 'once to decide whether to ask, once more from the editor as it is after the question');
     assert.deepEqual(again.blocks(), blocksOf(server.json), 'the page shows the document as it is');
     assert.equal(again.view.setAside, JSON.stringify(docOf(para('p1', 'start'), para('p2', 'World A'))), 'the whole draft is set aside');
     assert.equal(again.view.setAsideFrom, 'draft');
@@ -5122,6 +5123,101 @@ test('losses of a draft merge are appended to the list re-offered from the last 
         ['Old loss', 'World A'],
         'and the park holds the whole list'
     );
+});
+
+test('typing while the draft merge parks the pre-merge draft (after the yes) is merged in, kept unsaved and sent', async () => {
+    const { server, again } = await deadTabWithDraft(
+        (A, B) => {
+            A.typeIn('p2', 'World A');
+            B.typeIn('p1', 'start B');
+        },
+        {
+            beforeOpen: (tab) => {
+                const realPark = tab.draftStore.parkStaleDraft;
+                tab.draftStore.parkStaleDraft = async (...args) => {
+                    // The writer clicked OK and types straight away, while the park is written.
+                    tab.typeIn('p1', 'start B TYPED-DURING-PARK');
+                    await settle();
+
+                    return realPark(...args);
+                };
+            },
+        }
+    );
+
+    await settle(); // the page does not wait for the park: the typing and the merge land after open() returns
+    await settle();
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION]);
+    assert.deepEqual(again.blocks(), [
+        ['p1', 'start B TYPED-DURING-PARK'],
+        ['p2', 'World A'],
+    ]);
+    assert.equal(again.view.unsaved, true);
+    assert.equal(again.view.resave, true);
+    assert.equal(again.word(), 'Editing');
+    assert.match(again.drafts.get(UUID).json, /TYPED-DURING-PARK/, 'the live draft holds the typing');
+
+    await again.poll();
+    await again.land();
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'start B TYPED-DURING-PARK'],
+        ['p2', 'World A'],
+    ]);
+});
+
+test('typing while the draft merge reads the base row, when the draft adds nothing but loses a block: unsaved stays true and the typing is sent', async () => {
+    const { server, again } = await deadTabWithDraft(
+        (A, B) => {
+            A.typeIn('p2', 'World A');
+            B.typeIn('p2', 'World B'); // D1: the draft's p2 is offered back, nothing else of the draft survives
+        },
+        {
+            beforeOpen: (tab) => {
+                const realLoadBase = tab.draftStore.loadBase;
+                tab.draftStore.loadBase = async (...args) => {
+                    tab.typeIn('p1', 'start TYPED-DURING-LOADBASE');
+
+                    return realLoadBase(...args);
+                };
+            },
+        }
+    );
+
+    assert.deepEqual(again.lostTexts(), ['World A']);
+    assert.equal(again.view.unsaved, true, 'the typing is not written off');
+    assert.equal(again.view.resave, true);
+
+    await again.poll();
+    await again.land();
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'start TYPED-DURING-LOADBASE'],
+        ['p2', 'World B'],
+    ]);
+});
+
+test('Load theirs: typing while the unsaved text is being parked is parked too, and it is the newer text that is set aside', async () => {
+    const { B } = await conflicted();
+    const realPark = B.draftStore.parkStaleDraft;
+    let typed = false;
+    B.draftStore.parkStaleDraft = async (...args) => {
+        if (!typed) {
+            typed = true;
+            B.type('B1 TYPED-DURING-PARK');
+            await settle();
+        }
+
+        return realPark(...args);
+    };
+
+    await B.host().loadTheirs();
+
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1 TYPED-DURING-PARK')), 'the newest text is on offer');
+    assert.deepEqual(
+        B.parks().map((row) => textOf(JSON.parse(row.json))),
+        ['B1', 'B1 TYPED-DURING-PARK'],
+        'and both texts are parked: parking keeps the earlier one'
+    );
+    assert.equal(B.text(), 'A1');
 });
 
 test('a declined draft merge parks the draft and sets it aside, as today', async () => {
@@ -5488,6 +5584,65 @@ test('an accepted suggestion that could not be applied sets nothing aside: the t
     assert.equal(A.view.setAsideBase, null);
     assert.equal(A.stale(), null, 'nothing is parked');
     assert.equal(A.draftCalls.filter((call) => call === 'parkStaleDraft').length, 0);
+});
+
+test('a given-up Keep mine save, Load theirs, a second give-up, then the late OK: the answer is ignored and the stored Keep mine version is not replaced unkept', async () => {
+    const { server, clock, B } = await conflicted();
+    assert.ok(B.view.conflict, 'B shows the notice');
+    B.host().keepMine(); // save on base 2, overwrite
+    const keep = B.saves[0];
+    assert.equal(keep.overwrite, true);
+    clock.now += SAVE_EXPIRY_MS + 1;
+    B.host().syncState(); // the tab gives the Keep mine save up
+    assert.equal(B.view.saving, 0);
+    B.saveArrives(); // ...but it reached the server: v3 = B1, A1 kept in the history
+    assert.equal(server.version, 3);
+    assert.equal(server.text(), 'B1');
+    await B.host().loadTheirs(); // the writer chooses theirs (v2, A1): B1 is set aside
+    assert.equal(B.text(), 'A1');
+    assert.equal(B.view.baseVersion, 2);
+    B.saves.shift(); // the Keep mine answer is still on its way (held here)
+    B.type('A1 more');
+    await B.debounce(); // a save on base 2 goes out
+    clock.now += SAVE_EXPIRY_MS + 1;
+    B.host().syncState(); // and is given up too: confirmed is null again, base still 2
+    assert.equal(B.view.confirmed, null);
+
+    keep.resolve(keep.result); // the Keep mine answer arrives late: ok, v3
+    await settle();
+
+    assert.equal(B.view.baseVersion, 2, 'the late answer does not move the base to a version the page never showed');
+    assert.equal(B.view.confirmed, null, 'and confirms nothing');
+    await B.land();
+    const everStored = JSON.stringify([server.json, server.kept]);
+    assert.ok(everStored.includes('B1'), 'version 3 (B1, stored by Keep mine) is in the head or the history');
+});
+
+test('a poll that brings the awaited document after the 15 s expiry is merged, not answered with the notice', async () => {
+    const { server, clock, A, B } = await twoParagraphs();
+    A.typeIn('p1', 'Hello A');
+    B.typeIn('p2', 'World B');
+    await A.debounce();
+    await B.debounce();
+    A.saveArrives();
+    await A.saveReturns();
+    B.saveArrives(); // refused: A's version is in the way
+    B.visible = false;
+    await B.saveReturns(); // beginMerge: a fetch goes out even though the tab is hidden
+    await B.pollFails(); // that fetch fails; hidden, no timer is re-armed
+    assert.ok(B.view.merging, 'a merge is waiting for its document');
+
+    clock.now += MERGE_FETCH_EXPIRY_MS + 5000;
+    B.visible = true;
+    B.engine.visibilityChanged();
+    await settle();
+    await B.poll(); // the awaited document finally arrives, after the expiry
+
+    assert.equal(B.view.conflict, null, 'no notice: the merge was possible and the document is here');
+    assert.deepEqual(B.blocks(), [
+        ['p1', 'Hello A'],
+        ['p2', 'World B'],
+    ]);
 });
 
 test('an accepted suggestion whose MERGE apply throws after the change: the typing, not the merged page, is set aside and parked, and the suggestion goes in whole', async () => {

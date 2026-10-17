@@ -528,6 +528,63 @@ test('levelEmpty and levelDerived copy, never mutate, and level only what they a
     assert.deepEqual(DERIVED, { toc: ['entries'], crossRef: ['label'] });
 });
 
+/** Every id in a document, at any depth. */
+const allIds = (json) => {
+    const ids = [];
+    const walk = (node) => {
+        if (node && typeof node === 'object') {
+            if (node.attrs && node.attrs.id !== undefined && node.attrs.id !== null) {
+                ids.push(node.attrs.id);
+            }
+            (node.content ?? []).forEach(walk);
+        }
+    };
+    walk(json);
+
+    return ids;
+};
+
+test('two deletions that leave nothing: the empty paragraph does not take the id of a block that is offered back', () => {
+    // They deleted p2; I deleted p1 and typed in p2. Nothing is left, and p2 is in the lost row: Put it back must be
+    // able to return it under its own id (comments, cross-references), so the stand-in paragraph cannot hold that id.
+    const result = merge(
+        docOf([para('p1', 'a'), para('p2', 'b')]),
+        docOf([para('p2', 'b X')]),
+        docOf([para('p1', 'a')])
+    );
+
+    assert.deepEqual(result.lost.map((loss) => [loss.id, loss.reason]), [['p2', 'deleted']]);
+    assert.equal(result.merged.content.length, 1);
+    assert.equal(result.merged.content[0].type, 'paragraph');
+    assert.notEqual(result.merged.content[0].attrs.id, 'p2');
+});
+
+test('two deletions that leave nothing: the stand-in paragraph takes the id of the last block of mine that is not offered back', () => {
+    const result = merge(
+        docOf([para('p1', 'a'), para('p2', 'b'), para('p3', 'c')]),
+        docOf([para('p1', 'a'), para('p2', 'b X')]), // I deleted p3 and typed in p2
+        docOf([para('p3', 'c')]) // they deleted p1 and p2
+    );
+
+    assert.deepEqual(result.lost.map((loss) => loss.id), ['p2']);
+    assert.deepEqual(idsOf(result.merged), ['p1']);
+});
+
+test('the trailing paragraph is carried as the editor own only when theirs holds its id nowhere, at any depth', () => {
+    // Mine ends in the empty paragraph p2 (the editor's own, after a section break); theirs has an item with the id p2 NESTED
+    // in a box. Carrying mine's p2 into theirs would store the id twice.
+    const base = docOf([para('p1', 'One'), para('p2'), sectionBreak('s1')]);
+    const mine = docOf([para('p1', 'One'), sectionBreak('s1'), para('p2')]);
+    const theirs = docOf([para('p1', 'One'), box('b1', para('p2', 'Their item')), sectionBreak('s1')]);
+
+    const result = merge(base, mine, theirs);
+
+    const ids = allIds(JSON.parse(result.theirs));
+    assert.equal(new Set(ids).size, ids.length, `theirs carries ${ids.join(',')}`);
+    const mergedIds = allIds(result.merged);
+    assert.equal(new Set(mergedIds).size, mergedIds.length, `merged carries ${mergedIds.join(',')}`);
+});
+
 test('levelDerived blanks every toc with an array of its own: changing one result never reaches another', () => {
     const json = docOf([toc('t1', [{ id: 'h1' }]), toc('t2', [{ id: 'h2' }])]);
 

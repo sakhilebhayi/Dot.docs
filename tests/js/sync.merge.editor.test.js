@@ -236,6 +236,25 @@ test('a merged document that carries one id twice, nested, is repaired by the ed
     editor.destroy();
 });
 
+test('two deletions that leave nothing: the stand-in paragraph gets an id from the editor, and Put it back returns the offered block under its own id', () => {
+    const { editor } = realEditor(docOf(para('paraBBB2', 'b X')));
+    const base = docOf(para('paraBBB1', 'a'), para('paraBBB2', 'b'));
+    const theirs = docOf(para('paraBBB1', 'a')); // they deleted p2; I deleted p1 and typed in p2
+
+    const result = mergeDocuments(editor.schema, { base, mine: editor.getJSON(), theirs });
+    assert.deepEqual(result.lost.map((loss) => [loss.id, loss.reason]), [['paraBBB2', 'deleted']]);
+    dispatchAsApplyRemoteDoes(editor, result.merged);
+    assert.match(editor.state.doc.firstChild.attrs.id, VALID_ID, 'the editor gave the stand-in an id');
+
+    const entry = result.lost[0];
+    dispatchAsInsertBlockDoes(editor, entry.json, { anchors: entry.anchors, keepId: true });
+    const ids = [];
+    editor.state.doc.forEach((child) => ids.push([child.attrs.id, child.textContent]));
+    assert.ok(ids.some(([id, text]) => id === 'paraBBB2' && text === 'b X'), `Put it back keeps its own id, got ${JSON.stringify(ids)}`);
+
+    editor.destroy();
+});
+
 // ───────────────────────────────────────────────────────── Put it back in the real editor
 
 test('insertBlock: a both block gets a fresh id below the winner, a deleted block keeps its id where it was, and both fire update', () => {

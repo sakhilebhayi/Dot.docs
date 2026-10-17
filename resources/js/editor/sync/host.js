@@ -554,6 +554,12 @@ export function createSyncHost(view, env) {
         view.savingSince = env.now();
         const seq = ++view.saveSeq;
         const baseAtSend = view.baseVersion;
+        // The server document the tab held when this left. A late answer of a
+        // save given up on is believed only while the page still stands where
+        // it did: a base number alone is fooled by Keep mine then Load theirs,
+        // which brings the base back to the number it had at send time while
+        // the page shows another document.
+        const knownAtSend = view.known;
 
         // Whether THIS save says it overwrites, captured now.
         const overwrite = force || view.overwriteOwed;
@@ -568,7 +574,11 @@ export function createSyncHost(view, env) {
         return env.save(json, view.baseVersion, overwrite).then(
             (result) => {
                 if (givenUpOn()) {
-                    if (view.confirmed !== null || view.baseVersion !== baseAtSend) {
+                    const knownNow = view.known;
+                    const knownMoved =
+                        (knownNow?.version ?? null) !== (knownAtSend?.version ?? null) ||
+                        (knownNow?.json ?? null) !== (knownAtSend?.json ?? null);
+                    if (view.confirmed !== null || view.baseVersion !== baseAtSend || knownMoved) {
                         env.log(
                             '[Dot.Doc] A save that was given up on answered after the page had moved on; the answer is ignored.',
                             result
@@ -726,10 +736,6 @@ export function createSyncHost(view, env) {
      * what the server last confirmed.
      */
     function resendIfOwed() {
-        // A fetch for a merge that has not answered in fifteen seconds ends
-        // in the notice; the owed save goes out after the writer's choice.
-        expireMerging();
-
         const handle = env.handle();
         // Fail-closed: nothing is written back.
         if (!handle || handle.autosaves === false) {
@@ -1493,6 +1499,23 @@ export function createSyncHost(view, env) {
         await drafts.parkStaleDraft(view.docUuid, draft.json, draft.baseVersion);
         drafts.clearDraft(view.docUuid);
 
+        // The page is editable while the question is open and the park is
+        // written, so the writer may have typed meanwhile. The merge above was
+        // made before that: applying it would wipe the typing. Merge again from
+        // the editor as it is NOW (this runs to the apply without another
+        // await, so nothing can slip in), the typing counting as part of
+        // theirs, the page's document.
+        let current = null;
+        try {
+            current = handle.merge(JSON.parse(base.json), handle.editor.getJSON(), { mine: parsed, deletionsWin: false });
+        } catch (_) {
+            current = null;
+        }
+        if (!current) {
+            return false;
+        }
+        result = current;
+
         let applied = false;
         try {
             applied = handle.applyRemote(result.merged, { force: true }) === true;
@@ -1505,16 +1528,19 @@ export function createSyncHost(view, env) {
 
         // `confirmed` stays: opened() set it to the page document, which is
         // theirs. What survived of the draft is unsaved on the current base
-        // and goes out on the first tick once startSync() has run.
-        view.unsaved = result.changed;
-        if (result.changed) {
+        // and goes out on the first tick once startSync() has run. Typing the
+        // writer did meanwhile is unsaved too, and the apply just emptied the
+        // editor's own autosave: `unsaved` is never lowered here, and it is
+        // owed to the tick.
+        view.unsaved = view.unsaved || result.changed;
+        if (view.unsaved) {
             // The page said Saved when it opened; the merged text is not.
             env.report('idle', 'Editing');
         }
         if (result.lost.length > 0) {
             offerLost(result.lost, 'draft', view.baseVersion);
         }
-        if (result.changed) {
+        if (view.unsaved) {
             drafts.saveDraft(view.docUuid, JSON.stringify(handle.editor.getJSON()), view.baseVersion);
             view.resave = true;
         }
@@ -1653,11 +1679,20 @@ export function createSyncHost(view, env) {
             return;
         }
 
-        const mine = JSON.stringify(handle.editor.getJSON());
+        let mine = JSON.stringify(handle.editor.getJSON());
 
         const drafts = env.drafts();
         if (drafts) {
-            await drafts.parkStaleDraft(view.docUuid, mine, view.baseVersion);
+            // The writer can type while the text is being parked. Whatever the
+            // editor holds when the park is done and nothing more has changed
+            // is what is set aside; parking never overwrites, so the earlier
+            // text stays parked too.
+            let parked = null;
+            while (parked !== mine) {
+                parked = mine;
+                await drafts.parkStaleDraft(view.docUuid, parked, view.baseVersion);
+                mine = JSON.stringify(handle.editor.getJSON());
+            }
             env.info(
                 '[Dot.Doc] Your unsaved text was kept as stale-' +
                     view.docUuid +
@@ -2236,7 +2271,15 @@ export function createSyncHost(view, env) {
             // must not depend on the follow loop being healthy. On an
             // answered poll this is the second call; by then the save is in
             // the air or nothing is owed, so it does nothing.
-            onPolled: () => resendIfOwed(),
+            // A fetch for a merge that has not answered in fifteen seconds ends
+            // in the notice (the owed save goes out after the writer's choice).
+            // Judged HERE and not in resendIfOwed(): the tick comes after the
+            // poll has delivered its document, so a poll that brings the awaited
+            // document late is merged, not answered with the notice.
+            onPolled: () => {
+                expireMerging();
+                resendIfOwed();
+            },
             onStopped: (reason) => {
                 view.syncNotice =
                     {

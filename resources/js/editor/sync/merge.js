@@ -305,6 +305,14 @@ export function mergeDocuments(schema, { base, mine, theirs, echo = null }, { de
         return B.byId.get(id) ?? null;
     };
 
+    // Every id in theirs, at any depth: the carried paragraph must not repeat one (the same rule as apply.js).
+    const theirsIds = new Set();
+    T.doc.descendants((node) => {
+        if (node.attrs && node.attrs.id !== null && node.attrs.id !== undefined) {
+            theirsIds.add(node.attrs.id);
+        }
+    });
+
     // 4.4 This editor's own trailing paragraph.
     const skip = new Set();
     let theirsOut = T.doc;
@@ -315,7 +323,7 @@ export function mergeDocuments(schema, { base, mine, theirs, echo = null }, { de
         mineLast &&
         mineLast.cmp.type.name === 'paragraph' &&
         mineLast.cmp.content.size === 0 &&
-        !T.byId.has(mineLast.id) &&
+        !theirsIds.has(mineLast.id) &&
         theirsLast
     ) {
         if (theirsLast.cmp.type.name !== 'paragraph') {
@@ -467,12 +475,17 @@ export function mergeDocuments(schema, { base, mine, theirs, echo = null }, { de
     }
 
     // Nothing left: each side deleted what the other kept. The document is
-    // `block+`, so the result is one empty paragraph, under the id of mine's
-    // last block (every id of the union is gone from the output, so none is
-    // duplicated). Without it the merge was impossible and two deletions,
-    // in which nothing was lost, ended in the notice.
+    // `block+`, so the result is one empty paragraph, under the id of the last
+    // block of mine that is not offered back (every id of the union is gone
+    // from the output, so none is duplicated). A block in the lost row keeps
+    // its id free for Put it back, which returns it under that id; when every
+    // block of mine is offered back the paragraph has no id and the editor
+    // assigns one. Without the paragraph the merge was impossible and two
+    // deletions, in which nothing was lost, ended in the notice.
     if (output.length === 0 && schema.nodes.paragraph && M.blocks.length > 0) {
-        output.push(schema.nodes.paragraph.create({ id: M.blocks[M.blocks.length - 1].id }));
+        const offered = new Set(lost.map((loss) => loss.id));
+        const standIn = [...M.blocks].reverse().find((block) => !offered.has(block.id));
+        output.push(schema.nodes.paragraph.create({ id: standIn ? standIn.id : null }));
     }
 
     // 4.6 Document attributes, per key: mine where mine changed it, else theirs.

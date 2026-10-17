@@ -32,7 +32,8 @@ import { LOST, STALE, UUID, blocksOf, deletionLedger, para, world } from './supp
  *      support/syncWorld.js);
  *   C. no document is sent twice on one base, unless the first request failed
  *      or was given up on (15 s), or an accepted suggestion retired that very
- *      request (and only a send made after the suggestion repeats it);
+ *      request (and only a send made after the suggestion repeats it), or the
+ *      first was refused and the editor changed (and changed back) after it left;
  *   D. every tab converges on the server's document, and a fresh token typed
  *      on each tab is saved;
  *   E. no token is lost without a trace (a version, the lost row, a set-aside
@@ -204,9 +205,11 @@ async function run(seed, tabCount) {
             record.sendSeq = ++events;
             record.key = `${baseVersion}|${overwrite}|${JSON.stringify(json)}`;
             record.answered = false;
+            record.edits = tab.edits;
             promise.then(
-                () => {
+                (result) => {
                     record.answered = 'ok';
+                    record.refused = result?.ok === false;
                     record.answerSeq = ++events;
                 },
                 () => {
@@ -216,6 +219,21 @@ async function run(seed, tabCount) {
             );
 
             return promise;
+        };
+        // How many times the writer changed the editor, for invariant C: a byte-identical document can be sent
+        // again after a refusal when the editor changed and changed back in between.
+        tab.edits = 0;
+        const realHost = tab.host;
+        tab.host = () => {
+            const host = realHost();
+            const edited = host.edited;
+            host.edited = (...args) => {
+                tab.edits += 1;
+
+                return edited(...args);
+            };
+
+            return host;
         };
         tab.nullMerges = 0;
         const realMerge = tab.handle.merge;
@@ -869,6 +887,11 @@ async function run(seed, tabCount) {
                 // past that base) and the normal conflict path runs. A wasted round trip, nothing lost. It excuses a
                 // send made AFTER the suggestion that retired the earlier one, and only a repeat of that very request:
                 // a third send repeats the second, which no suggestion retired.
+                // Another: the earlier send was REFUSED (an answer, not a lost one) and the writer changed the editor
+                // after it left, then changed it back (an undo, a composition's undone words): the same bytes, a new send.
+                if (!legitimate && earlier.refused === true && record.edits > earlier.edits) {
+                    legitimate = true;
+                }
                 if (!legitimate && tab.retired?.some((entry) => entry.record === earlier && record.sendSeq > entry.suggestionSeq)) {
                     legitimate = true;
                 }
