@@ -8,7 +8,10 @@ use App\Http\Controllers\DocumentImportController;
 use App\Http\Controllers\DocumentSyncController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\FileViewController;
+use App\Http\Controllers\GuardianHealthController;
 use App\Http\Controllers\PublishedDocumentController;
+use App\Http\Controllers\SchedulerProbeController;
+use App\Http\Middleware\AuthenticateGuardian;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
 use App\Livewire\Documents\Index;
@@ -26,6 +29,18 @@ use Illuminate\Support\Str;
 use Laravel\Jetstream\Jetstream;
 
 Route::get('/auth/ecosystem', [EcosystemAuthController::class, 'handle'])->name('auth.ecosystem');
+
+// Public liveness probe (no auth, no secrets): answers 503 once the cron
+// scheduler or the queue worker has not been heard from. Watched from GitHub by
+// .github/workflows/scheduler-watchdog.yml.
+Route::get('/up/scheduler', SchedulerProbeController::class)->name('up.scheduler');
+
+// Guardian observability report for Dot.Brain (dot-guardian/v1): operational
+// internals, so bearer-authenticated with a dedicated token (503 when none is
+// configured) rather than public like /up and /up/scheduler.
+Route::get('/guardian/health', GuardianHealthController::class)
+    ->middleware(AuthenticateGuardian::class)
+    ->name('guardian.health');
 
 Route::get('/', function () {
     return view('welcome');
