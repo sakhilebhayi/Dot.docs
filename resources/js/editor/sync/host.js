@@ -224,6 +224,32 @@ export function unloadSaveBody(json, options = {}) {
 }
 
 /**
+ * Whether the unload flush sends a beacon for the document the editor holds
+ * (the decision of the bundle's flushSave({beacon: true}); here, so that
+ * `node --test` can run it).
+ *
+ *   - `dirty` and `changed`: typed since the last hand-over, and different
+ *     from it: the debounce had not fired yet. Sent.
+ *   - `unsent`: the host says the text was handed over to Livewire and its
+ *     request failed or is held by the back-off (`unsentAtUnload()`). The
+ *     bundle counts a document it has handed over as sent, so without this
+ *     the beacon skipped exactly the text the writer would otherwise lose
+ *     in a browser that keeps no draft. Sent.
+ *   - `sentAlready`: this very content went by beacon a moment ago
+ *     (pagehide, then destroy()): never twice for one content.
+ *
+ * @param {{dirty: boolean, changed: boolean, unsent: boolean, sentAlready: boolean}} state
+ * @returns {boolean}
+ */
+export function beaconWanted({ dirty, changed, unsent, sentAlready }) {
+    if (sentAlready) {
+        return false;
+    }
+
+    return (dirty && changed) || unsent === true;
+}
+
+/**
  * @typedef {object} SyncView The Blade component's state fields.
  * @property {number} saving how many of this tab's own saves are in the air
  * @property {number} savingSince when the latest of them left
@@ -425,6 +451,47 @@ export function createSyncHost(view, env) {
         }
 
         return view.saving > 0;
+    }
+
+    /**
+     * Whether the text this page holds is unsent and unanswered, for the
+     * unload beacon: it is unsaved and the last request that carried it got
+     * no answer. That is the case when it FAILED (`saveFailures`, reset by
+     * any answer), when its next send is HELD by the back-off (`saveRetryAt`
+     * in the future), and when it was given up on, or failed, and nothing
+     * has been confirmed since (`unanswered`, which saveInTheAir() sets when
+     * a save has not answered in SAVE_EXPIRY_MS, and which this also works out for
+     * itself, since no poll tick may have run since).
+     *
+     * The last case is what a failed request looks like in a real browser:
+     * Livewire never rejects the promise of a call whose fetch failed, so the
+     * page only learns it by the expiry, and `saveFailures` stays 0. A save
+     * still inside its first SAVE_EXPIRY_MS is NOT asked about: it is in the
+     * air, may be about to answer, and the page cannot tell it from one
+     * that is dead (`.ai/rules/editor.md`).
+     *
+     * The bundle counts a document it handed to Livewire as sent, so it asks.
+     * Sending is safe whatever became of the earlier request: both state the
+     * same base, so the server stores the text once and refuses the second
+     * as stale. Never for a page that cannot write (read only, fail-closed):
+     * a beacon is a write. No side effects: it is called while the page is
+     * going away.
+     *
+     * @returns {boolean}
+     */
+    function unsentAtUnload() {
+        if (cannotWrite(env.handle())) {
+            return false;
+        }
+
+        return (
+            view.unsaved === true &&
+            (view.unanswered !== null ||
+                view.saveFailures > 0 ||
+                view.saveRetryAt > env.now() ||
+                // Given up on, though nothing has noticed yet (saveInTheAir() does, on the next poll tick).
+                (view.saving > 0 && env.now() - view.savingSince >= SAVE_EXPIRY_MS))
+        );
     }
 
     /**
@@ -2815,6 +2882,7 @@ export function createSyncHost(view, env) {
 
     return {
         opened,
+        unsentAtUnload,
         edited,
         persist,
         resendIfOwed,

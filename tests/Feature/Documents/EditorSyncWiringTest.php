@@ -93,6 +93,14 @@ class EditorSyncWiringTest extends TestCase
         // option the beacon never says so and the server keeps nothing of
         // the version it replaces.
         $this->assertStringContainsString('getOverwrite: () => this.overwriteOwed', $alpine[1]);
+        $this->assertStringContainsString('getUnsent: () => this.syncHost().unsentAtUnload()', $alpine[1]);
+
+        // And the bundle's unload flush asks the module (beaconWanted(), tested in tests/js/sync.host.test.js)
+        // and the page's getUnsent, so a document handed over to Livewire whose request failed still goes by beacon.
+        $bundle = file_get_contents(resource_path('js/editor/index.js'));
+        $this->assertStringContainsString('beaconWanted({ dirty, changed, unsent, sentAlready: serialised === lastBeaconed })', $bundle);
+        $this->assertStringContainsString('const unsent = beacon && hostHoldsUnsent();', $bundle);
+        $this->assertStringContainsString("typeof opts.getUnsent === 'function' && opts.getUnsent() === true", $bundle);
     }
 
     /**

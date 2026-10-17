@@ -240,6 +240,10 @@
                 // moment: the beacon then says so too, and the server keeps
                 // the version it replaces.
                 getOverwrite: () => this.overwriteOwed,
+                // Whether text handed to Livewire is unsent and unanswered (its
+                // request failed, or the back-off holds it): the beacon then
+                // carries it, which the bundle's own bookkeeping would skip.
+                getUnsent: () => this.syncHost().unsentAtUnload(),
                 // Mounted not editable for somebody who may only read.
                 editable: this.editable,
                 onChange: (json) => this.persist(json),

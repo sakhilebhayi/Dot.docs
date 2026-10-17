@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Schema } from 'prosemirror-model';
 
 import { createSyncEngine } from '../../../resources/js/editor/sync/engine.js';
-import { createSyncHost, unloadSaveBody } from '../../../resources/js/editor/sync/host.js';
+import { beaconWanted, createSyncHost, unloadSaveBody } from '../../../resources/js/editor/sync/host.js';
 import { mergeDocuments } from '../../../resources/js/editor/sync/merge.js';
 import { chooseNextPark, dismissInRows, keepKeyFor, unionLostRows } from '../../../resources/js/offline.js';
 
@@ -332,24 +332,36 @@ export function makeTab({ server, clock }, name, options = {}) {
         onUpdate();
     };
 
+    // The document the last unload beacon carried: one beacon per document content, as the bundle's lastBeaconed.
+    let lastBeaconed = null;
+
     const flushSave = ({ beacon = false } = {}) => {
         saveTimer = null;
-        if (!dirty || !autosave) {
+        if (!autosave || readOnly) {
+            return false;
+        }
+        // The bundle's rule: on the way out, the host may say text is owed that the bundle counts as sent.
+        const unsent = beacon && t.host().unsentAtUnload();
+        if (!dirty && !unsent) {
             return false;
         }
 
         const json = clone(content);
         const serialised = JSON.stringify(json);
-        if (serialised === lastSaved) {
+        const changed = serialised !== lastSaved;
+        if (!changed && !unsent) {
             dirty = false;
 
             return false;
         }
 
-        dirty = false;
-        lastSaved = serialised;
-
         if (beacon) {
+            if (!beaconWanted({ dirty, changed, unsent, sentAlready: serialised === lastBeaconed })) {
+                return false;
+            }
+            dirty = false;
+            lastSaved = serialised;
+            lastBeaconed = serialised;
             // navigator.sendBeacon(): the browser delivers the body after
             // the page has gone. Built by the function the bundle's
             // beaconSave() builds it with, from the mount options the Blade
@@ -365,6 +377,9 @@ export function makeTab({ server, clock }, name, options = {}) {
 
             return true;
         }
+
+        dirty = false;
+        lastSaved = serialised;
 
         // The bundle's onChange, which the page wires to persist().
         t.host().persist(json);

@@ -15,6 +15,7 @@ import {
     PUT_BACK_UNSAVED_WARNING,
     SAVE_EXPIRY_MS,
     SAVE_RETRY_DELAYS_MS,
+    beaconWanted,
     createSyncHost,
     createTabId,
     unloadSaveBody,
@@ -835,6 +836,182 @@ test('the unload beacon sends a real boolean, whatever the page hands it, and no
 
     assert.deepEqual(unloadSaveBody(doc('x'), {}), { _token: '', content: doc('x'), base_version: null, overwrite: false });
     assert.deepEqual(unloadSaveBody(doc('x')), { _token: '', content: doc('x'), base_version: null, overwrite: false });
+});
+
+// ───────────────────────────────────────────────────────── the unload beacon carries text a failed or held save left unsent
+
+test('beaconWanted: a changed, dirty document goes; an unsent one goes even when the bundle counts it as sent; the same content never goes twice', () => {
+    const base = { dirty: false, changed: false, unsent: false, sentAlready: false };
+    const table = [
+        [{}, false],
+        [{ dirty: true }, false, 'dirty but nothing changed since the last hand-over'],
+        [{ dirty: true, changed: true }, true],
+        [{ changed: true }, false, 'changed and not dirty: housekeeping, nothing the writer typed'],
+        [{ unsent: true }, true, 'handed over, request failed or held: counted as sent by the bundle'],
+        [{ dirty: true, changed: true, sentAlready: true }, false],
+        [{ unsent: true, sentAlready: true }, false],
+    ];
+    for (const [given, wanted, why] of table) {
+        assert.equal(beaconWanted({ ...base, ...given }), wanted, `${JSON.stringify(given)} ${why ?? ''}`);
+    }
+});
+
+test('a tab closed after its save request FAILED sends the unsent text by beacon, on the same base', async () => {
+    const { server, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+    assert.equal(A.word(), 'Not saved');
+    assert.equal(A.view.unsaved, true);
+
+    A.leave();
+
+    assert.deepEqual(
+        A.beacons.map((beacon) => [beacon.text, beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]),
+        [['A1', 1, false, 200]]
+    );
+    assert.equal(server.text(), 'A1');
+    assert.equal(server.version, 2);
+});
+
+test('a tab closed while the back-off HOLDS its save sends the unsent text by beacon', async () => {
+    const { clock, server, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+    clock.now += 1;
+    await A.cycle();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+    assert.ok(A.view.saveRetryAt > clock.now, 'the second failure in a row holds the next send');
+
+    A.type('A1 more');
+    A.leave();
+
+    assert.deepEqual(A.beacons.map((beacon) => [beacon.text, beacon.body.base_version]), [['A1 more', 1]]);
+    assert.equal(server.text(), 'A1 more');
+});
+
+test('a tab closed after its save was given up on (no answer in fifteen seconds, which is how a failed fetch looks) beacons the text', async () => {
+    const { clock, server, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    A.saveNeverAnswers();
+
+    // Inside the first fifteen seconds the save may still answer: nothing is sent behind it.
+    clock.now += SAVE_EXPIRY_MS - 1;
+    A.leave();
+    assert.deepEqual(A.beacons, []);
+
+    // Given up on: the request got no answer, the text is owed, and nothing has been confirmed since.
+    clock.now += 1;
+    assert.equal(A.view.unanswered, null, 'no poll tick has noticed that the save was given up on');
+    assert.equal(A.view.saveFailures, 0, 'Livewire never rejected: the page cannot count it as a failure');
+    A.leave();
+
+    assert.deepEqual(A.beacons.map((beacon) => [beacon.text, beacon.body.base_version, beacon.body.overwrite]), [['A1', 1, false]]);
+    assert.equal(server.text(), 'A1');
+});
+
+test('the beacon of a failed save carries an owed overwrite, and a stale base writes nothing and keeps nothing', async () => {
+    const { server, A, B } = await pair();
+    B.type('B1');
+    await B.debounce();
+    await B.land();
+    A.type('A1');
+    await A.debounce();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+    A.view.overwriteOwed = true;
+
+    A.leave();
+
+    assert.deepEqual(A.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]), [[1, true, 409]]);
+    assert.equal(server.text(), 'B1', 'the server refused it: nothing was overwritten');
+    assert.deepEqual(server.history, []);
+    assert.equal(A.draft(), 'A1', 'the offline draft is the safety net');
+});
+
+test('the same unsent text is never beaconed twice (pagehide, then destroy)', async () => {
+    const { A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+
+    A.leave();
+    A.leave();
+    assert.equal(A.beacons.length, 1);
+
+    A.type('A1 and more');
+    A.leave();
+    assert.deepEqual(A.beacons.map((beacon) => beacon.text), ['A1', 'A1 and more'], 'new content is a new beacon');
+});
+
+test('nothing is beaconed for text that is saved, in the air without a failure, or typed on a read only page', async () => {
+    const saved = await pair();
+    saved.A.type('A1');
+    await saved.A.debounce();
+    await saved.A.land();
+    saved.A.leave();
+    assert.deepEqual(saved.A.beacons, [], 'saved: nothing is owed');
+
+    const inTheAir = await pair();
+    inTheAir.A.type('A1');
+    await inTheAir.A.debounce();
+    inTheAir.A.leave();
+    assert.deepEqual(inTheAir.A.beacons, [], 'a save in the air has not failed: it is not beaconed a second time');
+
+    const readOnly = await pair();
+    readOnly.A.type('A1');
+    await readOnly.A.debounce();
+    readOnly.A.saves.shift().reject(new Error('network'));
+    await settle();
+    readOnly.A.handle.makeReadOnly();
+    readOnly.A.leave();
+    assert.deepEqual(readOnly.A.beacons, [], 'a read only page never writes');
+
+    const served = world();
+    const reader = served.tab('R', { readOnly: true });
+    await reader.open();
+    reader.view.unsaved = true;
+    reader.view.saveFailures = 2;
+    reader.leave();
+    assert.deepEqual(reader.beacons, []);
+});
+
+test('unsentAtUnload: unsaved text after a failure or a hold, never on a read only or fail-closed page', async () => {
+    const { clock, A } = await pair();
+    const unsent = () => A.host().unsentAtUnload();
+    assert.equal(unsent(), false, 'nothing typed');
+
+    A.view.unsaved = true;
+    assert.equal(unsent(), false, 'unsaved but no request has failed');
+
+    A.view.saveFailures = 1;
+    assert.equal(unsent(), true, 'the last request failed');
+
+    A.view.saveFailures = 0;
+    A.view.saveRetryAt = clock.now + 5000;
+    assert.equal(unsent(), true, 'held by the back-off');
+
+    A.view.saveRetryAt = clock.now - 1;
+    assert.equal(unsent(), false);
+
+    A.view.saveRetryAt = 0;
+    A.view.unanswered = JSON.stringify(doc('x'));
+    assert.equal(unsent(), true, 'a save was given up on or failed and nothing has been confirmed since');
+
+    A.view.unanswered = null;
+    A.view.saveFailures = 2;
+    A.view.unsaved = false;
+    assert.equal(unsent(), false, 'what the editor holds is what the server confirmed');
+
+    A.view.unsaved = true;
+    A.view.editable = false;
+    assert.equal(unsent(), false, 'a read only page');
 });
 
 test('an ordinary tab closed inside the debounce sends a beacon that does not overwrite', async () => {
