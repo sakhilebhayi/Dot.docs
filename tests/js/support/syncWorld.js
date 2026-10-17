@@ -216,6 +216,7 @@ export const makeView = (version) => ({
     resave: false,
     confirmed: null,
     overwriteOwed: false,
+    overwriteFloor: null,
     conflict: null,
     setAside: null,
     setAsideFrom: null,

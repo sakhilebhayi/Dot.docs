@@ -41,6 +41,11 @@
         // replaces the version that was loaded. Every save says so (the
         // unload beacon too) until one that said so is accepted.
         overwriteOwed: false,
+        // The base the owed overwrite first became owed on, null while none
+        // is owed: the offline draft is stamped below it, so a draft typed
+        // after Keep mine is never merged as if nothing were owed (see
+        // draftStamp() in sync/host.js).
+        overwriteFloor: null,
         // Set while a newer version exists on the server AND this tab holds
         // unsaved typing. Saving is suspended until the writer chooses.
         // `version` is the newest version known to be in the way; `ready`

@@ -1122,6 +1122,113 @@ test('Keep mine fails, the writer types on, the page dies: reopened, the draft i
     assert.deepEqual(server.history, []);
 });
 
+test('an overwrite owed from a merge is still owed after Keep mine and a reopen: the draft is set aside, not merged, and the other writer\'s words are kept', async () => {
+    const holdsT31 = (json) => JSON.stringify(json).includes('t31');
+    const w = world();
+    const { server } = w;
+    const A = w.tab('A');
+    const C = w.tab('C');
+    await A.open();
+    await C.open();
+    await A.poll();
+    await C.poll();
+    await A.cycle();
+    await C.cycle();
+    C.insertAfter('p1', 'n1', 't5');
+    await C.debounce();
+    await C.land(); // v2
+    await A.cycle();
+    A.deleteBlock('n1'); // A deletes n1, which holds t5
+    C.typeIn('n1', 't5 t31');
+    await C.debounce();
+    await C.land(); // v3: C's words in n1
+    await A.cycle(); // c2: A's deletion wins, and the merged save owes an overwrite
+    assert.equal(A.view.overwriteOwed, true);
+    C.typeIn('p1', 'start x');
+    await C.debounce();
+    await C.land(); // v4 lands before A's merged save
+    A.mergeFails = true; // (or: the merge fetch goes unanswered for 15 s)
+    A.saveArrives();
+    await A.saveReturns(); // refused
+    if (A.polls.length === 0 && A.timer) {
+        await A.fireTimer();
+    }
+    await A.poll();
+    assert.ok(A.view.conflict);
+    A.host().keepMine(); // base 3 -> 4, and the Keep mine save is in the air
+    A.insertAfter('p1', 'n9', 'a1');
+    await A.debounce(); // owed behind the save in the air; the draft is rewritten
+    assert.equal(A.drafts.get(UUID).baseVersion, 2, 'stamped below the base the owed overwrite began on, not below the moved-up base');
+    A.leave(); // nothing is waiting in the debounce: no beacon
+    A.saves.length = 0;
+    A.polls.length = 0;
+    A.engine.stop();
+    A.mounted = false;
+
+    const again = w.tab('A2', { drafts: A.drafts });
+    await again.open();
+    assert.deepEqual(again.questions, [], 'not offered as an ordinary draft merge');
+    assert.equal(again.view.setAsideFrom, 'draft');
+    await again.poll();
+    await C.cycle();
+    assert.ok(holdsT31(server.json), 'C\'s words are still in the document');
+    assert.ok(holdsT31(C.handle.editor.getJSON()));
+
+    again.host().putBack();
+    await again.debounce();
+    assert.equal(again.sent.at(-1).overwrite, true, 'putting the text back replaces the version on purpose');
+    await again.land();
+    assert.ok(server.kept.some((row) => holdsT31(row.json)), 'C\'s words are kept in the history');
+});
+
+test('an overwrite owed from Put it back is still owed after Keep mine and a reopen: the draft is set aside, not merged over the version it was to replace', async () => {
+    const { server, clock, A, B } = await conflicted();
+    await B.host().loadTheirs(); // B shows v2 (A1); B1 is set aside
+    B.host().putBack(); // B1 is to replace v2 on purpose: an overwrite is owed from base 2
+    assert.equal(B.view.overwriteOwed, true);
+    await B.debounce(); // the put-back save leaves on base 2
+
+    // A adds a paragraph (v3) before B's save arrives: B's save is refused,
+    // the merge is impossible and the notice stands.
+    await A.cycle();
+    A.insertAfter('p1', 'n1', 'a2');
+    await A.debounce();
+    await A.land();
+    B.saveArrives();
+    await B.saveReturns();
+    if (B.polls.length === 0 && B.timer) {
+        await B.fireTimer();
+    }
+    await B.poll();
+    assert.ok(B.view.conflict);
+
+    B.host().keepMine(); // base 2 -> 3, and the Keep mine save is in the air
+    B.type('B1 and more');
+    await B.debounce(); // owed behind the save in the air; the draft is rewritten
+    assert.equal(B.drafts.get(UUID).baseVersion, 1, 'stamped below the base the owed overwrite began on, not below the moved-up base');
+    B.leave();
+    B.saves.length = 0;
+    B.polls.length = 0;
+    B.engine.stop();
+    B.mounted = false;
+
+    const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
+    await again.open();
+    assert.deepEqual(again.questions, [], 'not offered as an ordinary draft merge');
+    assert.equal(again.view.setAsideFrom, 'draft');
+    await again.poll();
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'A1'],
+        ['n1', 'a2'],
+    ]);
+
+    again.host().putBack();
+    await again.debounce();
+    assert.equal(again.sent.at(-1).overwrite, true, 'putting the text back replaces the version on purpose');
+    await again.land();
+    assert.deepEqual(server.history, [{ version: 3, text: 'A1' }], 'the version it replaced, with A1 in it, is kept');
+});
+
 test('once the overwrite has been accepted, the draft of what is typed next states the true base again', async () => {
     const { B } = await conflicted();
     B.host().keepMine();

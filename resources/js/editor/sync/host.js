@@ -209,6 +209,11 @@ export function unloadSaveBody(json, options = {}) {
  *           loaded). Every save says so (the Keep mine save, a retry, an
  *           ordinary autosave, the unload beacon) until one that said so is
  *           accepted, and the server keeps the replaced version first
+ * @property {number|null} overwriteFloor the base the owed overwrite first
+ *           became owed on; null while none is owed. The draft is stamped
+ *           below it (draftStamp()), so a draft typed after Keep mine moved
+ *           the base up is never merged against a base row written while
+ *           the overwrite was already owed
  * @property {{version: number, ready: boolean}|null} conflict
  * @property {string|null} setAside the writer's own text, as a JSON string,
  *           kept so the page can offer to put it back
@@ -273,6 +278,40 @@ export function unloadSaveBody(json, options = {}) {
  * @param {SyncEnv} env
  */
 export function createSyncHost(view, env) {
+    /**
+     * The version the offline draft is stamped with. The base, unless an
+     * overwrite is owed: then one below the base the overwrite FIRST became
+     * owed on (`overwriteFloor`), or below the base itself if that is lower.
+     *
+     * One below the base alone is not enough. Keep mine moves the base up
+     * without writing a base row, so when an overwrite was already owed
+     * before it (a c2 merge, Put it back), one below the moved-up base can
+     * be exactly the version of the base row that earlier step wrote. A page
+     * opened after a crash would then merge the draft against that row as
+     * if nothing were owed (section 7.1 merges a draft only when no
+     * overwrite is owed), and the other writer's words that the overwrite
+     * was to keep in the history would be kept nowhere. Below the floor, the
+     * draft is older than every row this tab wrote while it was owed, so it
+     * is set aside and Put it back saves it as an overwrite.
+     *
+     * @returns {number}
+     */
+    const draftStamp = () =>
+        view.overwriteOwed ? Math.min(view.baseVersion, view.overwriteFloor ?? view.baseVersion) - 1 : view.baseVersion;
+
+    /**
+     * An overwrite is owed from now on (Keep mine, Put it back, a merge
+     * whose save overwrites). The floor is set only when it was not owed
+     * already: it keeps the earliest base the overwrite has been owed on,
+     * and everything that writes the overwrite off clears both.
+     */
+    const oweOverwrite = () => {
+        if (!view.overwriteOwed || view.overwriteFloor === null || view.overwriteFloor === undefined) {
+            view.overwriteFloor = view.baseVersion;
+        }
+        view.overwriteOwed = true;
+    };
+
     /**
      * Whether one of this tab's own saves is still being waited for.
      *
@@ -373,10 +412,11 @@ export function createSyncHost(view, env) {
         // base, a page opened after a crash or a reload would find a draft
         // of the current version, offer a plain restore, and save it with
         // no overwrite flag: the replaced version would be kept nowhere.
-        // Stamped one below, it is older than the document for every later
-        // page: restoreDraft() sets it aside, and Put it back saves it as
-        // an overwrite.
-        drafts.saveDraft(view.docUuid, json, view.overwriteOwed ? view.baseVersion - 1 : view.baseVersion);
+        // Stamped below it (below the base the overwrite first became owed
+        // on, see draftStamp()), it is older than the document for every
+        // later page: restoreDraft() sets it aside, and Put it back saves
+        // it as an overwrite.
+        drafts.saveDraft(view.docUuid, json, draftStamp());
     }
 
     /**
@@ -595,6 +635,7 @@ export function createSyncHost(view, env) {
             // not, and the put-back save still has to.
             if (overwrite) {
                 view.overwriteOwed = false;
+                view.overwriteFloor = null;
             }
             env.engine()?.saved(result.version);
             if (clearDraftIfSettled(snapshot)) {
@@ -771,6 +812,7 @@ export function createSyncHost(view, env) {
 
         view.unsaved = false;
         view.overwriteOwed = false;
+        view.overwriteFloor = null;
         // The draft now says what the server holds: it is not kept (see
         // edited()).
         const drafts = env.drafts();
@@ -913,6 +955,7 @@ export function createSyncHost(view, env) {
         markConfirmed(JSON.stringify(handle.editor.getJSON()), remote.version);
         // Whatever this tab had put back is no longer in the editor.
         view.overwriteOwed = false;
+        view.overwriteFloor = null;
         // The server now holds newer content than any draft.
         const drafts = env.drafts();
         if (drafts) {
@@ -1144,7 +1187,12 @@ export function createSyncHost(view, env) {
         view.baseVersion = remote.version;
         view.conflict = null;
         markConfirmed(result.changed ? result.theirs : JSON.stringify(handle.editor.getJSON()), remote.version);
-        view.overwriteOwed = result.changed ? view.overwriteOwed || result.overwrites : false;
+        if (result.changed && result.overwrites) {
+            oweOverwrite();
+        } else if (!result.changed) {
+            view.overwriteOwed = false;
+            view.overwriteFloor = null;
+        }
         view.unsaved = result.changed;
         if (!result.changed) {
             view.mergeAttempts = 0; // nothing owed: the row of refusals is over
@@ -1162,15 +1210,16 @@ export function createSyncHost(view, env) {
         view.tick++;
 
         // 8. The draft: of the merged document while something of mine is
-        //    unsaved (stamped one below while an overwrite is owed, as
-        //    edited() stamps it), cleared when the server holds everything.
+        //    unsaved (stamped below the base while an overwrite is owed, as
+        //    edited() stamps it: draftStamp()), cleared when the server holds
+        //    everything.
         const drafts = env.drafts();
         if (drafts) {
             if (result.changed) {
                 drafts.saveDraft(
                     view.docUuid,
                     JSON.stringify(handle.editor.getJSON()),
-                    view.overwriteOwed ? view.baseVersion - 1 : view.baseVersion
+                    draftStamp()
                 );
             } else {
                 drafts.clearDraft(view.docUuid);
@@ -1473,7 +1522,7 @@ export function createSyncHost(view, env) {
         }
 
         view.baseVersion = Math.max(view.baseVersion, target);
-        view.overwriteOwed = true;
+        oweOverwrite();
         // `confirmed` is the document of the version this tab was based on
         // BEFORE the base moved. The base now names a version the editor
         // has never held, so the editor being back at `confirmed` would
@@ -1600,7 +1649,8 @@ export function createSyncHost(view, env) {
         // edited() writes off it has to be stamped as an overwrite (see
         // there), as does a beacon sent before the debounce fires.
         const owedBefore = view.overwriteOwed;
-        view.overwriteOwed = true;
+        const floorBefore = view.overwriteFloor ?? null;
+        oweOverwrite();
 
         try {
             handle.editor.commands.setContent(JSON.parse(view.setAside), { errorOnInvalidContent: true });
@@ -1610,6 +1660,7 @@ export function createSyncHost(view, env) {
         } catch (_) {
             // Nothing was put back, so nothing more is owed than before.
             view.overwriteOwed = owedBefore;
+            view.overwriteFloor = floorBefore;
             view.syncNotice = 'Your text could not be put back.';
         }
     }
@@ -1935,6 +1986,7 @@ export function createSyncHost(view, env) {
         view.unsaved = false;
         markConfirmed(JSON.stringify(handle.editor.getJSON()), version);
         view.overwriteOwed = false;
+        view.overwriteFloor = null;
         adoptVersion(version, { contentLoaded: true });
         view.aiError = '';
         view.tick++;
@@ -1974,7 +2026,12 @@ export function createSyncHost(view, env) {
         view.baseVersion = version;
         view.conflict = null;
         markConfirmed(result.changed ? result.theirs : JSON.stringify(handle.editor.getJSON()), version);
-        view.overwriteOwed = result.changed ? view.overwriteOwed || result.overwrites : false;
+        if (result.changed && result.overwrites) {
+            oweOverwrite();
+        } else if (!result.changed) {
+            view.overwriteOwed = false;
+            view.overwriteFloor = null;
+        }
         view.unsaved = result.changed;
         if (result.lost.length > 0) {
             offerLost(result.lost, 'suggestion', version);
@@ -1989,7 +2046,7 @@ export function createSyncHost(view, env) {
                 drafts.saveDraft(
                     view.docUuid,
                     JSON.stringify(handle.editor.getJSON()),
-                    view.overwriteOwed ? view.baseVersion - 1 : view.baseVersion
+                    draftStamp()
                 );
             } else {
                 drafts.clearDraft(view.docUuid);

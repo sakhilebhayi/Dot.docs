@@ -298,16 +298,17 @@ class EditorSyncWiringTest extends TestCase
     }
 
     /**
-     * The merge (resources/js/editor/sync/host.js, Phase 2) writes seven more
-     * state fields. Like every other, each is declared in the component's
-     * own object, never in the module.
+     * The merge (resources/js/editor/sync/host.js, Phase 2) writes eight more
+     * state fields (overwriteFloor: the base an owed overwrite first became
+     * owed on, which the draft is stamped below). Like every other, each is
+     * declared in the component's own object, never in the module.
      */
     public function test_the_page_declares_the_merge_state_fields_the_host_writes(): void
     {
         $html = $this->editorHtml();
 
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
-        foreach (['merging: null,', 'mergeAttempts: 0,', 'known: null,', 'sentSnapshot: null,', 'unanswered: null,', 'lost: [],', 'putBackSeq: 0,'] as $field) {
+        foreach (['merging: null,', 'mergeAttempts: 0,', 'known: null,', 'sentSnapshot: null,', 'unanswered: null,', 'lost: [],', 'putBackSeq: 0,', 'overwriteFloor: null,'] as $field) {
             $this->assertMatchesRegularExpression('/^\s*'.preg_quote($field, '/').'$/m', $alpine[1], "{$field} is declared");
         }
     }
