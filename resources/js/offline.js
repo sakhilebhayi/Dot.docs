@@ -22,37 +22,68 @@ const STORE_NAME = 'drafts';
  * A draft that cannot be restored is parked under this prefix rather than
  * deleted — the writer declined the restore, or the document has moved on to a
  * newer version — because a mis-click must not destroy the only copy of
- * somebody's offline work. Nothing in the UI reads a parked draft back yet, so
- * without a sweep they accumulate in IndexedDB for ever.
+ * somebody's offline work. The editor page offers a parked draft back (Put it
+ * back in the notice bar); without a sweep they would still accumulate in
+ * IndexedDB for ever.
  */
 export const STALE_PREFIX = 'stale-';
 
-/** How long a parked draft is kept. Seven days, swept on app boot. */
+/**
+ * The last server document a tab held, as it serialises it, with its version
+ * (saveBase()/loadBase()). Written by markConfirmed() in sync/host.js on
+ * open, on an accepted save, on an applied or merged document and on an
+ * adopted restyle - never per keystroke. It is what lets a draft the
+ * document has moved past be MERGED on the next visit instead of only set
+ * aside: the merge needs the document the draft was based on.
+ */
+export const BASE_PREFIX = 'base-';
+
+/**
+ * The blocks a merge could not keep, offered back in the notice bar's lost
+ * row (parkLost()/loadLost()/markLostDismissed()). Its own key, never the
+ * stale- slot Load theirs uses, so neither overwrites the other.
+ */
+export const LOST_PREFIX = 'lost-';
+
+/** The rows the sweep may remove. A live draft (the bare uuid) is never one of them. */
+export const PARKED_PREFIXES = [STALE_PREFIX, LOST_PREFIX, BASE_PREFIX];
+
+/** How long a parked row is kept. Seven days, swept on app boot. */
 export const STALE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Whether a stored row is a parked draft that has outlived the TTL.
+ * Whether a stored row is a parked row (a stale draft, a lost park or a base
+ * row) that has outlived the TTL.
  *
  * Pure, and exported so `npm test` can exercise it without IndexedDB. Rows
- * that are not parked drafts are never expired here: the live draft for a
- * document is the writer's only unsaved copy and age says nothing about it.
+ * that are not parked are never expired here: the live draft for a document
+ * is the writer's only unsaved copy and age says nothing about it. A swept
+ * base row only means that a stale draft falls back to being set aside; a
+ * swept lost park means the copy the Dismiss button promised for 7 days has
+ * had its 7 days.
  *
  * @param {{docUuid?: string, parkedAt?: number, savedAt?: number}} row
  */
-export function staleDraftIsExpired(row, now = Date.now(), ttl = STALE_TTL_MS) {
-    if (!row || typeof row.docUuid !== 'string' || !row.docUuid.startsWith(STALE_PREFIX)) {
+export function parkedRowIsExpired(row, now = Date.now(), ttl = STALE_TTL_MS) {
+    if (!row || typeof row.docUuid !== 'string' || !PARKED_PREFIXES.some((prefix) => row.docUuid.startsWith(prefix))) {
         return false;
     }
 
     // `parkedAt` is when it was parked; `savedAt` is what an older build wrote
-    // at the same moment. A parked row with neither is from a build older than
-    // both and cannot be dated at all, so it goes.
+    // at the same moment (and what a base row carries). A parked row with
+    // neither is from a build older than both and cannot be dated at all, so
+    // it goes.
     const parked = Number(row.parkedAt ?? row.savedAt);
     if (!Number.isFinite(parked) || parked <= 0) {
         return true;
     }
 
     return now - parked > ttl;
+}
+
+/** The rule's older name; the same rule. */
+export function staleDraftIsExpired(row, now = Date.now(), ttl = STALE_TTL_MS) {
+    return parkedRowIsExpired(row, now, ttl);
 }
 
 function openDb() {
@@ -153,7 +184,8 @@ export async function parkStaleDraft(docUuid, json, baseVersion = null) {
 }
 
 /**
- * Delete parked drafts older than the TTL. Called once on app boot.
+ * Delete parked rows (stale drafts, lost parks, base rows) older than the
+ * TTL. Called once on app boot.
  *
  * @returns {Promise<number>} how many rows were removed
  */
@@ -167,7 +199,7 @@ export async function purgeStaleDrafts(now = Date.now(), ttl = STALE_TTL_MS) {
             req.onsuccess = (e) => {
                 const cursor = e.target.result;
                 if (!cursor) return;
-                if (staleDraftIsExpired(cursor.value, now, ttl)) {
+                if (parkedRowIsExpired(cursor.value, now, ttl)) {
                     cursor.delete();
                     removed += 1;
                 }
@@ -192,6 +224,151 @@ export async function clearDraft(docUuid) {
             tx.onerror    = () => reject(tx.error);
         });
     } catch (_) { /* silent */ }
+}
+
+/**
+ * Write the base row: the server document this tab holds as confirmed, and
+ * the version it is. See BASE_PREFIX.
+ */
+export async function saveBase(docUuid, json, baseVersion = null) {
+    try {
+        const db = await openDb();
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            tx.objectStore(STORE_NAME).put({
+                docUuid: BASE_PREFIX + docUuid,
+                json,
+                savedAt: Date.now(),
+                baseVersion: Number.isFinite(baseVersion) ? baseVersion : null,
+            });
+            tx.oncomplete = resolve;
+            tx.onerror    = () => reject(tx.error);
+        });
+    } catch (_) { /* silent — don't break the editor */ }
+}
+
+/**
+ * @returns {Promise<{json: string, baseVersion: number|null}|null>}
+ */
+export async function loadBase(docUuid) {
+    try {
+        const db = await openDb();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const req = tx.objectStore(STORE_NAME).get(BASE_PREFIX + docUuid);
+            req.onsuccess = () => {
+                const row = req.result;
+                const baseVersion = Number(row?.baseVersion);
+                resolve(
+                    typeof row?.json !== 'string'
+                        ? null
+                        : {
+                              json: row.json,
+                              baseVersion: Number.isFinite(baseVersion) && row.baseVersion !== null ? baseVersion : null,
+                          }
+                );
+            };
+            req.onerror   = () => reject(req.error);
+        });
+    } catch (_) {
+        return null;
+    }
+}
+
+/**
+ * Write the lost park: the WHOLE lost list of a document, rewritten on every
+ * merge that lost something and on every put-back; the row's dismissal
+ * stamp does not survive (a new loss is offered again), but the entries
+ * Dismiss all moved aside under `dismissed` do: they stay for the row's 7
+ * days, whatever is offered after them. A plain copy is stored: the page
+ * hands in Alpine's reactive proxy, which IndexedDB cannot clone. See
+ * LOST_PREFIX.
+ */
+export async function parkLost(docUuid, entries, baseVersion = null) {
+    try {
+        const db = await openDb();
+        const plain = JSON.parse(JSON.stringify(entries));
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            // Read the row in the same transaction: `dismissed` is carried over.
+            const req = store.get(LOST_PREFIX + docUuid);
+            req.onsuccess = () => {
+                store.put({
+                    docUuid: LOST_PREFIX + docUuid,
+                    entries: plain,
+                    dismissed: Array.isArray(req.result?.dismissed) ? req.result.dismissed : [],
+                    parkedAt: Date.now(),
+                    baseVersion: Number.isFinite(baseVersion) ? baseVersion : null,
+                });
+            };
+            req.onerror   = () => reject(req.error);
+            tx.oncomplete = resolve;
+            tx.onerror    = () => reject(tx.error);
+        });
+    } catch (_) { /* silent — don't break the editor */ }
+}
+
+/**
+ * @returns {Promise<{entries: object[], dismissed: object[], baseVersion: number|null, parkedAt: number, dismissedAt: number|null}|null>}
+ */
+export async function loadLost(docUuid) {
+    try {
+        const db = await openDb();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const req = tx.objectStore(STORE_NAME).get(LOST_PREFIX + docUuid);
+            req.onsuccess = () => {
+                const row = req.result;
+                const baseVersion = Number(row?.baseVersion);
+                resolve(
+                    !row || !Array.isArray(row.entries)
+                        ? null
+                        : {
+                              entries: row.entries,
+                              dismissed: Array.isArray(row.dismissed) ? row.dismissed : [],
+                              baseVersion: Number.isFinite(baseVersion) && row.baseVersion !== null ? baseVersion : null,
+                              parkedAt: Number(row.parkedAt) || 0,
+                              dismissedAt: Number(row.dismissedAt) || null,
+                          }
+                );
+            };
+            req.onerror   = () => reject(req.error);
+        });
+    } catch (_) {
+        return null;
+    }
+}
+
+/**
+ * Dismiss all: the park stays for its 7 days (the button says so), but it is
+ * not offered again on the next visit. The entries move aside under
+ * `dismissed`, which parkLost() carries over, so a later loss that rewrites
+ * `entries` does not take the dismissed text out of the browser.
+ */
+export async function markLostDismissed(docUuid) {
+    try {
+        const db = await openDb();
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.get(LOST_PREFIX + docUuid);
+            req.onsuccess = () => {
+                if (req.result) {
+                    const row = req.result;
+                    store.put({
+                        ...row,
+                        entries: [],
+                        dismissed: [...(Array.isArray(row.dismissed) ? row.dismissed : []), ...(Array.isArray(row.entries) ? row.entries : [])],
+                        dismissedAt: Date.now(),
+                    });
+                }
+            };
+            req.onerror   = () => reject(req.error);
+            tx.oncomplete = resolve;
+            tx.onerror    = () => reject(tx.error);
+        });
+    } catch (_) { /* silent — don't break the editor */ }
 }
 
 /**

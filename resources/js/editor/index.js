@@ -42,7 +42,18 @@ import { insertBlockTransaction } from './sync/insert';
 import { mergeDocuments } from './sync/merge';
 import { createSyncHost, createTabId, unloadSaveBody } from './sync/host';
 import { createSyncRequest } from './sync/request';
-import { clearDraft, loadDraft, parkStaleDraft, purgeStaleDrafts, saveDraft } from '../offline';
+import {
+    clearDraft,
+    loadBase,
+    loadDraft,
+    loadLost,
+    markLostDismissed,
+    parkLost,
+    parkStaleDraft,
+    purgeStaleDrafts,
+    saveBase,
+    saveDraft,
+} from '../offline';
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 
@@ -829,7 +840,21 @@ window.DotDoc = DotDoc;
 // Offline draft helpers the Blade bridge calls (kept from the pre-JSON editor).
 // parkStaleDraft() is how a draft that cannot be restored is kept instead of
 // deleted; purgeStaleDrafts() (also run on app boot) is what stops those
-// parked drafts accumulating in IndexedDB for ever.
-window.offlineDraft = { saveDraft, loadDraft, clearDraft, parkStaleDraft, purgeStaleDrafts };
+// parked rows accumulating in IndexedDB for ever. saveBase()/loadBase() keep
+// the server document a tab's typing is based on, so a stale draft can be
+// merged on the next visit; parkLost()/loadLost()/markLostDismissed() keep
+// the blocks a merge could not keep, for the notice bar's lost row.
+window.offlineDraft = {
+    saveDraft,
+    loadDraft,
+    clearDraft,
+    parkStaleDraft,
+    purgeStaleDrafts,
+    saveBase,
+    loadBase,
+    parkLost,
+    loadLost,
+    markLostDismissed,
+};
 
 export default DotDoc;
