@@ -39,7 +39,7 @@ import { closeList } from './ui/list';
 import { isContentValid, isEmptyDocument } from './validation';
 import { clearHistoryTransaction, remoteTransaction } from './sync/apply';
 import { createSyncEngine } from './sync/engine';
-import { insertBlockTransaction } from './sync/insert';
+import { focusAfterInsert, insertBlockTransaction } from './sync/insert';
 import { mergeDocuments } from './sync/merge';
 import { createSyncHost, createTabId, unloadSaveBody } from './sync/host';
 import { createSyncRequest } from './sync/request';
@@ -789,10 +789,10 @@ function mount(element, opts = {}) {
          * it replaces nothing.
          *
          * @param {object} json the block, as the lost entry holds it
-         * @param {{anchors?: string[], keepId?: boolean}} options
+         * @param {{anchors?: string[], keepId?: boolean, focus?: boolean}} options `focus`: true only for a press from the keyboard
          * @returns {boolean} false when the block could not go in (nothing changed)
          */
-        insertBlock: (json, { anchors = [], keepId = false } = {}) => {
+        insertBlock: (json, { anchors = [], keepId = false, focus = false } = {}) => {
             if (!json || editor.isDestroyed || !autosave || readOnly) {
                 return false;
             }
@@ -812,11 +812,8 @@ function mount(element, opts = {}) {
                 return false;
             }
 
-            try {
-                editor.commands.focus();
-            } catch (_) {
-                // The block is in and the caret is set; focus is a nicety.
-            }
+            // Focus only for a press from the keyboard: a tap on a phone must not bring the keyboard up.
+            focusAfterInsert(editor.commands, focus);
 
             return true;
         },

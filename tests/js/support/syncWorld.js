@@ -298,6 +298,8 @@ export function makeTab({ server, clock }, name, options = {}) {
         applyCalls: 0,
         mergeCalls: 0,
         insertCalls: [],
+        /** Whether each insertBlock() call asked for the editor to take focus (a press from the keyboard). */
+        insertFocus: [],
         /** This editor cannot open what arrives. */
         refuses: false,
         setContentThrows: false,
@@ -444,8 +446,9 @@ export function makeTab({ server, clock }, name, options = {}) {
             return mergeDocuments(schema, { base, mine: mine ?? clone(content), theirs, echo }, { deletionsWin });
         },
         /** What insertBlock() does: after the first anchor on the page, else the end, else the start; a fresh id unless kept and free. */
-        insertBlock(json, { anchors = [], keepId = false } = {}) {
+        insertBlock(json, { anchors = [], keepId = false, focus = false } = {}) {
             t.insertCalls.push({ json: clone(json), anchors: [...anchors], keepId });
+            t.insertFocus.push(focus);
             if (!json || !autosave || t.insertBlockFails) {
                 return false;
             }

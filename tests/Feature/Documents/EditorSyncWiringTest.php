@@ -179,7 +179,7 @@ class EditorSyncWiringTest extends TestCase
             $handlers[] = $button->getAttribute('@click');
         }
         $this->assertSame(
-            ['keepMine()', 'loadTheirs()', 'putBackLost(0)', 'putBackLost(1)', 'putBackLost(2)', 'putBackLost(3)', 'putBackLost(4)', 'putBackAllLost()', 'dismissLost()', 'putBack()', 'discardSetAside()'],
+            ['keepMine()', 'loadTheirs()', 'putBackLost(0, $event.detail === 0)', 'putBackLost(1, $event.detail === 0)', 'putBackLost(2, $event.detail === 0)', 'putBackLost(3, $event.detail === 0)', 'putBackLost(4, $event.detail === 0)', 'putBackAllLost($event.detail === 0)', 'dismissLost()', 'putBack()', 'discardSetAside()'],
             $handlers,
         );
         $this->assertNotNull($this->notice($bar, 'conflict')->querySelector('button[\@click="keepMine()"][title]'));
@@ -190,7 +190,7 @@ class EditorSyncWiringTest extends TestCase
         $this->assertNotNull($this->notice($bar, 'setAside')->querySelector('button[\@click="discardSetAside()"][title]'));
 
         // And nowhere else on the page: the strip carries no button at all.
-        foreach (['keepMine()', 'loadTheirs()', 'putBackLost(0)', 'putBackLost(1)', 'putBackLost(2)', 'putBackLost(3)', 'putBackLost(4)', 'putBackAllLost()', 'dismissLost()', 'putBack()', 'discardSetAside()'] as $handler) {
+        foreach (['keepMine()', 'loadTheirs()', 'putBackLost(0, $event.detail === 0)', 'putBackLost(1, $event.detail === 0)', 'putBackLost(2, $event.detail === 0)', 'putBackLost(3, $event.detail === 0)', 'putBackLost(4, $event.detail === 0)', 'putBackAllLost($event.detail === 0)', 'dismissLost()', 'putBack()', 'discardSetAside()'] as $handler) {
             $this->assertSame(1, substr_count($html, '@click="'.$handler.'"'));
         }
         $this->assertCount(0, $strip->querySelectorAll('button'));
@@ -493,7 +493,7 @@ class EditorSyncWiringTest extends TestCase
             $this->assertSame("lost[{$i}] ? lost[{$i}].sentence : ''", $item->querySelector('span[x-text]')->getAttribute('x-text'));
             $this->assertSame("lost[{$i}] ? lost[{$i}].excerpt : ''", $item->querySelector('q.doc-notice-excerpt')->getAttribute('x-text'));
             $button = $item->querySelector('button');
-            $this->assertSame("putBackLost({$i})", $button->getAttribute('@click'));
+            $this->assertSame("putBackLost({$i}, \$event.detail === 0)", $button->getAttribute('@click'));
             $this->assertSame('Put it back', $this->words($button));
             $this->assertSame('doc-notice-put-back-lost-does', $button->getAttribute('aria-describedby'));
         }
@@ -508,7 +508,7 @@ class EditorSyncWiringTest extends TestCase
         foreach ($row->querySelectorAll('.doc-notice-actions > button') as $button) {
             $actions[$this->words($button)] = $button->getAttribute('@click');
         }
-        $this->assertSame(['Put them all back' => 'putBackAllLost()', 'Dismiss all' => 'dismissLost()'], $actions);
+        $this->assertSame(['Put them all back' => 'putBackAllLost($event.detail === 0)', 'Dismiss all' => 'dismissLost()'], $actions);
 
         // Static slots, never x-for.
         $this->assertCount(0, $bar->querySelectorAll('template'));
@@ -519,8 +519,8 @@ class EditorSyncWiringTest extends TestCase
 
         // The three delegates hand over to the module.
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
-        $this->assertStringContainsString('putBackLost(index) { this.syncHost().putBackLost(index); }', $alpine[1]);
-        $this->assertStringContainsString('putBackAllLost() { this.syncHost().putBackAllLost(); }', $alpine[1]);
+        $this->assertStringContainsString('putBackLost(index, fromKeyboard) { this.syncHost().putBackLost(index, { focus: fromKeyboard === true }); }', $alpine[1]);
+        $this->assertStringContainsString('putBackAllLost(fromKeyboard) { this.syncHost().putBackAllLost({ focus: fromKeyboard === true }); }', $alpine[1]);
         $this->assertStringContainsString('dismissLost() { this.syncHost().dismissLost(); }', $alpine[1]);
 
         // The row's own styles, beside the bar's, and the excerpt's ink in the contrast gate.

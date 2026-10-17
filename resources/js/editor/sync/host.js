@@ -1458,10 +1458,17 @@ export function createSyncHost(view, env) {
      * writer's edit: undoable, autosaved on the current base, no overwrite
      * owed. The entry goes, and the park is rewritten with the rest.
      *
+     * `options.focus` is true only for a press that came from the keyboard
+     * (the page passes `$event.detail === 0`): a tap on a phone must not
+     * focus the paper, which brings up the on-screen keyboard and scrolls
+     * (`.ai/rules/livewire.md`, the notice bar). The block is in and the
+     * caret is placed either way.
+     *
      * @param {number} index
+     * @param {{focus?: boolean}} [options]
      * @returns {boolean} whether the block went in
      */
-    function putBackLost(index) {
+    function putBackLost(index, options = {}) {
         const handle = env.handle();
         // Fail-closed: nothing may be written into the editor.
         if (cannotWrite(handle)) {
@@ -1475,7 +1482,12 @@ export function createSyncHost(view, env) {
 
         let inserted = false;
         try {
-            inserted = handle.insertBlock(entry.json, { anchors: entry.anchors, keepId: entry.reason === 'deleted' }) === true;
+            inserted =
+                handle.insertBlock(entry.json, {
+                    anchors: entry.anchors,
+                    keepId: entry.reason === 'deleted',
+                    focus: options?.focus === true,
+                }) === true;
         } catch (_) {
             inserted = false;
         }
@@ -1493,9 +1505,9 @@ export function createSyncHost(view, env) {
     }
 
     /** Put them all back: oldest first; the first that cannot go in stops it, and stays listed. */
-    function putBackAllLost() {
+    function putBackAllLost(options = {}) {
         while (view.lost.length > 0) {
-            if (!putBackLost(0)) {
+            if (!putBackLost(0, options)) {
                 return;
             }
         }

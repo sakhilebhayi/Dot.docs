@@ -4593,6 +4593,63 @@ test('Put it back after a D1: my version goes in below theirs with a fresh id, t
     assert.equal(A.view.conflict, null);
 });
 
+/** B lost two items to A (two D1 rounds): two entries in B's lost row. */
+async function lostTwo() {
+    const w = await pair();
+    const { A, B } = w;
+    A.type('Hello A1');
+    B.type('Hello B1');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    B.type('Hello A1 B2');
+    A.type('Hello A2');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.deepEqual(B.lostTexts(), ['Hello B1', 'Hello A1 B2']);
+
+    return w;
+}
+
+test('Put it back hands the editor focus only when the press came from the keyboard: a tap leaves the on-screen keyboard down', async () => {
+    const { B } = await lostOne();
+
+    // The Blade click handler passes `$event.detail === 0`; no argument at all is a tap too.
+    assert.equal(B.host().putBackLost(0), true);
+    assert.deepEqual(B.insertFocus, [false], 'no options: the editor is not asked to focus');
+});
+
+test('Put it back from the keyboard asks for focus, a tap does not, and the block is in either way', async () => {
+    const keyboard = await lostOne();
+    assert.equal(keyboard.B.host().putBackLost(0, { focus: true }), true);
+    assert.deepEqual(keyboard.B.insertFocus, [true]);
+
+    const tap = await lostOne();
+    assert.equal(tap.B.host().putBackLost(0, { focus: false }), true);
+    assert.deepEqual(tap.B.insertFocus, [false]);
+    assert.deepEqual(tap.B.blocks(), keyboard.B.blocks(), 'the same document either way');
+
+    // Anything but the real boolean true is a tap.
+    const odd = await lostOne();
+    assert.equal(odd.B.host().putBackLost(0, { focus: 'yes' }), true);
+    assert.deepEqual(odd.B.insertFocus, [false]);
+});
+
+test('Put them all back passes the press kind to every block it puts back', async () => {
+    const world = await lostTwo();
+    world.B.host().putBackAllLost({ focus: false });
+    assert.deepEqual(world.B.insertFocus, [false, false]);
+
+    const keyed = await lostTwo();
+    keyed.B.host().putBackAllLost({ focus: true });
+    assert.deepEqual(keyed.B.insertFocus, [true, true]);
+
+    const bare = await lostTwo();
+    bare.B.host().putBackAllLost();
+    assert.deepEqual(bare.B.insertFocus, [false, false]);
+});
+
 test('Put it back after a D2 restores the paragraph where it was, with its original id', async () => {
     const { server, A, B } = await twoParagraphs();
     A.insertAfter('p2', 'p3', 'Third');
