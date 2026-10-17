@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
     DISCARD_QUESTION,
+    DISMISS_LOST_CHANGED_NOTICE,
+    DISMISS_LOST_FAILED_NOTICE,
     DISMISS_LOST_QUESTION,
     DRAFT_MERGE_QUESTION,
     LOAD_THEIRS_REPLACES_QUESTION,
@@ -4501,13 +4503,13 @@ test('Dismiss all asks first, empties the row, keeps the park and marks it dismi
     const { B } = await lostOne();
 
     B.confirmAnswer = false;
-    B.host().dismissLost();
+    await B.host().dismissLost();
     assert.deepEqual(B.questions, [DISMISS_LOST_QUESTION]);
     assert.deepEqual(B.lostTexts(), ['Hello B']);
     assert.equal(B.lostPark().dismissedAt, null);
 
     B.confirmAnswer = true;
-    B.host().dismissLost();
+    await B.host().dismissLost();
     assert.deepEqual(B.view.lost, []);
     assert.deepEqual(B.lostPark().entries, []);
     assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B'], 'the park keeps the dismissed text for its 7 days');
@@ -4515,8 +4517,76 @@ test('Dismiss all asks first, empties the row, keeps the park and marks it dismi
     assert.equal(B.text(), 'Hello A');
     assert.equal(B.sent.length, 0);
 
-    B.host().dismissLost();
+    await B.host().dismissLost();
     assert.equal(B.questions.length, 2, 'nothing to dismiss: no question');
+});
+
+test('Dismiss all writes the park first, with the list on the page, and only then stamps it dismissed', async () => {
+    const { B } = await lostOne();
+    B.draftCalls.length = 0;
+
+    await B.host().dismissLost();
+
+    assert.deepEqual(B.draftCalls, ['parkLost', 'markLostDismissed']);
+    assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B']);
+});
+
+test('Dismiss all whose park write fails does not claim the 7 days: the entries stay on the page, the writer is told, nothing is stamped', async () => {
+    const { B } = await lostOne();
+    B.draftCalls.length = 0;
+    B.parkLostFails = true;
+
+    await B.host().dismissLost();
+
+    assert.deepEqual(B.questions, [DISMISS_LOST_QUESTION], 'asked once, as always');
+    assert.deepEqual(B.lostTexts(), ['Hello B'], 'still on the page');
+    assert.deepEqual(B.draftCalls, ['parkLost'], 'markLostDismissed never ran');
+    assert.equal(B.view.syncNotice, DISMISS_LOST_FAILED_NOTICE);
+
+    // The store works again: the same press now dismisses, and the notice is not left behind to mislead.
+    B.parkLostFails = false;
+    await B.host().dismissLost();
+    assert.deepEqual(B.view.lost, []);
+    assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B']);
+    assert.equal(B.view.syncNotice, '', 'the earlier notice does not outlive the success');
+});
+
+test('Dismiss all whose park write THROWS is a failed write too', async () => {
+    const { B } = await lostOne();
+    B.parkLostThrows = true;
+
+    await B.host().dismissLost();
+
+    assert.deepEqual(B.lostTexts(), ['Hello B']);
+    assert.equal(B.view.syncNotice, DISMISS_LOST_FAILED_NOTICE);
+    assert.equal(B.draftCalls.includes('markLostDismissed'), false);
+});
+
+test('Dismiss all while the list changes under it dismisses nothing: what arrived meanwhile was never parked', async () => {
+    const { B } = await lostOne();
+    const real = B.draftStore.parkLost;
+    let arrived = false;
+    B.draftStore.parkLost = async (...args) => {
+        const outcome = await real(...args);
+        if (arrived) {
+            return outcome;
+        }
+        arrived = true;
+        // A loss arrives while the park write is in flight.
+        B.host().offerLost(
+            [{ id: 'p7', type: 'paragraph', reason: 'both', json: para('p7', 'Arrived meanwhile'), anchors: ['p1'], text: 'Arrived meanwhile' }],
+            'merge',
+            3
+        );
+
+        return outcome;
+    };
+
+    await B.host().dismissLost();
+
+    assert.deepEqual(B.lostTexts(), ['Hello B', 'Arrived meanwhile'], 'both stay on the page');
+    assert.equal(B.view.syncNotice, DISMISS_LOST_CHANGED_NOTICE);
+    assert.equal(B.draftCalls.includes('markLostDismissed'), false);
 });
 
 test('the Dismiss all question says the text is in no version, goes from the page and stays in the browser for 7 days', () => {
@@ -4578,7 +4648,7 @@ test('a reload during the lost row re-offers its entries prefixed From your last
 
     // Dismissed: a later page does not offer it.
     const other = await lostOne();
-    other.B.host().dismissLost();
+    await other.B.host().dismissLost();
     const after = makeTab({ server: other.server, clock: other.clock }, 'B4', { drafts: other.B.drafts });
     await after.open();
     assert.deepEqual(after.view.lost, []);
@@ -4591,7 +4661,7 @@ test('a loss after Dismiss all keeps the dismissed copy in the park for its 7 da
     await A.debounce();
     await A.land();
     await B.cycle();
-    B.host().dismissLost();
+    await B.host().dismissLost();
     assert.deepEqual(B.lostPark().entries, []);
     assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B1']);
 
@@ -4715,10 +4785,10 @@ test('fail-closed: Put it back and Put them all back do nothing; Dismiss all wor
     assert.equal(R.view.lost.length, 1);
     assert.equal(R.view.syncNotice, '');
 
-    R.host().dismissLost();
+    await R.host().dismissLost();
     assert.deepEqual(R.view.lost, []);
     assert.deepEqual(R.questions, [DISMISS_LOST_QUESTION]);
-    assert.deepEqual(R.draftCalls, ['markLostDismissed'], 'the park is stamped; no draft is touched');
+    assert.deepEqual(R.draftCalls, ['parkLost', 'markLostDismissed'], 'the park is written and stamped; no draft is touched');
 });
 
 test('the lost row sentences, by reason and source', async () => {
@@ -5338,6 +5408,50 @@ test('an accepted suggestion that could not be applied sets nothing aside: the t
     assert.equal(A.view.setAsideBase, null);
     assert.equal(A.stale(), null, 'nothing is parked');
     assert.equal(A.draftCalls.filter((call) => call === 'parkStaleDraft').length, 0);
+});
+
+test('an accepted suggestion whose forced apply THROWS before the document changed sets nothing aside and reports it unchanged', async () => {
+    const { server, A } = await pair();
+    A.type('A unsaved');
+    A.mergeFails = true;
+    A.handle.applyRemote = () => {
+        throw new Error('a plugin failed before the dispatch');
+    };
+    const suggestion = doc('the accepted suggestion');
+    const version = server.replace(suggestion);
+
+    assert.doesNotThrow(() => A.host().applySuggestion(suggestion, version));
+
+    assert.equal(A.view.aiError, 'That suggestion could not be applied — the document is unchanged.');
+    assert.equal(A.text(), 'A unsaved');
+    assert.equal(A.view.unsaved, true);
+    assert.equal(A.view.setAside, null);
+    assert.equal(A.stale(), null);
+    assert.match(String(A.errors.at(-1)[0]), /accepted suggestion threw/, 'and the cause is logged');
+});
+
+test('an accepted suggestion whose forced apply THROWS after the document changed sets the typing aside: it is parked and offered back', async () => {
+    const { server, A } = await pair();
+    A.type('A unsaved');
+    A.mergeFails = true;
+    const real = A.handle.applyRemote;
+    A.handle.applyRemote = (json, options) => {
+        real(json, options); // the dispatch went through: the typing is gone from the editor
+        throw new Error('a plugin failed inside the dispatch');
+    };
+    const suggestion = doc('the accepted suggestion');
+    const version = server.replace(suggestion);
+
+    assert.doesNotThrow(() => A.host().applySuggestion(suggestion, version));
+
+    assert.equal(A.text(), 'the accepted suggestion');
+    assert.equal(A.view.setAside, JSON.stringify(doc('A unsaved')), 'the typing is offered back');
+    assert.equal(A.view.setAsideFrom, 'conflict');
+    assert.equal(A.view.setAsideBase, version);
+    assert.equal(A.stale(), 'A unsaved', 'and parked');
+    assert.equal(A.draftCalls.filter((call) => call === 'parkStaleDraft').length, 1);
+    assert.match(A.view.aiError, /could only be partly applied/, 'the document is not reported unchanged: it changed');
+    assert.match(String(A.errors.at(-1)[0]), /accepted suggestion threw/, 'and the cause is logged');
 });
 
 test('an accepted suggestion that goes in whole over the typing sets it aside and parks it exactly once', async () => {

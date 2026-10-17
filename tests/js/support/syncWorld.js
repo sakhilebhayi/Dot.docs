@@ -292,6 +292,9 @@ export function makeTab({ server, clock }, name, options = {}) {
         /** The merge is impossible (handle.merge() returns null): the Phase 1 notice path. */
         mergeFails: options.mergeFails ?? false,
         insertBlockFails: false,
+        /** The park write of the lost row fails (parkLost() resolves false), or throws. */
+        parkLostFails: false,
+        parkLostThrows: false,
         /** An IME composition is in progress. */
         composing: false,
         mounted: true,
@@ -477,6 +480,13 @@ export function makeTab({ server, clock }, name, options = {}) {
                   },
                   parkLost: async (uuid, entries, baseVersion) => {
                       t.draftCalls.push('parkLost');
+                      // As offline.js does: false means nothing was stored (and nothing is thrown); the tests can make it so, or make it throw.
+                      if (t.parkLostThrows) {
+                          throw new Error('the store refused the write');
+                      }
+                      if (t.parkLostFails) {
+                          return false;
+                      }
                       // As offline.js does: `entries` is rewritten, `dismissed` is carried over, the row's stamp goes.
                       const held = t.drafts.get(`lost-${uuid}`);
                       t.drafts.set(`lost-${uuid}`, {
@@ -486,6 +496,8 @@ export function makeTab({ server, clock }, name, options = {}) {
                           parkedAt: clock.now,
                           dismissedAt: null,
                       });
+
+                      return true;
                   },
                   loadLost: async (uuid) => {
                       t.draftCalls.push('loadLost');

@@ -18,7 +18,7 @@ const FRESH_ID_ATTEMPTS = 8;
  * same rule. The block is checked against the schema, inserted after the
  * first of its anchors that is on the page (see insertionPoint() in
  * ./narrow.js), and the caret is put at its end so the writer can carry on
- * typing in it.
+ * typing in it (after an atom, never on it: see caretAfterInsert()).
  *
  * An ordinary writer's edit: the caller dispatches it without
  * `addToHistory: false` or `preventUpdate`, so it is undoable, `update`
@@ -78,8 +78,30 @@ export function insertBlockTransaction(state, json, { anchors = [], keepId = fal
 
     const pos = insertionPoint(state.doc, anchors);
     const tr = state.tr.insert(pos, node);
-    // The end of the block's content; after the block for an atom.
-    const end = Math.min(node.isAtom || node.isLeaf ? pos + node.nodeSize : pos + node.nodeSize - 1, tr.doc.content.size);
 
-    return tr.setSelection(Selection.near(tr.doc.resolve(end), -1)).scrollIntoView();
+    return tr.setSelection(caretAfterInsert(tr.doc, pos, node, Selection)).scrollIntoView();
+}
+
+/**
+ * Where the caret goes once the block is in. A block with content: the end of
+ * it, so the writer can carry on typing. An atom (a rule, a page break, a
+ * section break, a contents list) has nothing to type in, and a selection ON
+ * it would be replaced by the first keystroke: the caret goes to the start of
+ * the next text block, else to the end of the one before, and only a page
+ * with no text block at all falls back to whatever is nearest.
+ *
+ * @param {import('prosemirror-model').Node} docNode the document with the block in it
+ * @param {number} pos where the block starts
+ * @param {import('prosemirror-model').Node} node the block
+ * @param {typeof import('prosemirror-state').Selection} Selection
+ * @returns {import('prosemirror-state').Selection}
+ */
+function caretAfterInsert(docNode, pos, node, Selection) {
+    if (node.isAtom || node.isLeaf) {
+        const $after = docNode.resolve(Math.min(pos + node.nodeSize, docNode.content.size));
+
+        return Selection.findFrom($after, 1, true) ?? Selection.findFrom($after, -1, true) ?? Selection.near($after, -1);
+    }
+
+    return Selection.near(docNode.resolve(Math.min(pos + node.nodeSize - 1, docNode.content.size)), -1);
 }

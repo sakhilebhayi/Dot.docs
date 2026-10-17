@@ -439,10 +439,10 @@ async function walkSteps(seed, tabCount, trace) {
         ],
         [
             1,
-            () => {
+            async () => {
                 const tab = pick(tabs);
                 if (tab.view.lost.length > 0) {
-                    tab.host().dismissLost();
+                    await tab.host().dismissLost();
                     trace.push(`${tab.name} dismisses all`);
                 }
             },

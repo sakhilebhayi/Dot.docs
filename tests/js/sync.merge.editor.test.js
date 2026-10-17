@@ -12,7 +12,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table';
 import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
-import { Selection } from 'prosemirror-state';
+import { NodeSelection, Selection, TextSelection } from 'prosemirror-state';
 import { ReplaceStep } from 'prosemirror-transform';
 
 import { clearHistoryTransaction, remoteTransaction } from '../../resources/js/editor/sync/apply.js';
@@ -212,6 +212,30 @@ test('a D1 loser caret lands at the end of the winner paragraph', () => {
     editor.destroy();
 });
 
+test('a merged document that carries one id twice, nested, is repaired by the editor on apply (the limit spec section 13 states)', () => {
+    // The merge checks ids at the top level only. A draft merge that moves p1 into a list while theirs edited p1
+    // keeps both copies: p1 at the top level and p1 inside the list item. The editor never holds one id twice.
+    const { editor } = realEditor(docOf(para('paraXX01', 'One'), para('paraXX02', 'Two')));
+    const merged = docOf(
+        para('paraXX01', 'One, edited by them'),
+        {
+            type: 'bulletList',
+            attrs: { id: 'listXX01' },
+            content: [{ type: 'listItem', attrs: { id: 'itemXX01' }, content: [para('paraXX01', 'One, as I moved it')] }],
+        },
+        para('paraXX02', 'Two')
+    );
+
+    dispatchAsApplyRemoteDoes(editor, merged);
+
+    const ids = idsOf(editor.state.doc);
+    assert.ok(allDifferent(ids), `ids unique after the apply, got ${ids.join(', ')}`);
+    assert.equal(editor.state.doc.firstChild.attrs.id, 'paraXX01', 'the top-level block, which the apply did not touch, keeps the id');
+    assert.equal(editor.state.doc.textBetween(0, editor.state.doc.content.size, '|').includes('One, as I moved it'), true, 'and nothing is lost');
+
+    editor.destroy();
+});
+
 // ───────────────────────────────────────────────────────── Put it back in the real editor
 
 test('insertBlock: a both block gets a fresh id below the winner, a deleted block keeps its id where it was, and both fire update', () => {
@@ -362,6 +386,41 @@ test('insertBlockTransaction decides the ids in tr.doc BEFORE dispatch: the edit
     assert.deepEqual(idsOf(twice.doc).slice(0, 3), ['dupXXXX1', 'dupXXXX2', 'dupXXXX3'], 'the repeated id is asked for again');
 
     editor.destroy();
+});
+
+test('putting back an atom (rule, page break, section break, contents list) leaves a caret after it, never a selection on it', () => {
+    const atoms = [
+        ['horizontalRule', rule('atomXX01')],
+        ['pageBreak', { type: 'pageBreak', attrs: { id: 'atomXX01' } }],
+        ['sectionBreak', { type: 'sectionBreak', attrs: { id: 'atomXX01', setup: {} } }],
+        ['toc', { type: 'toc', attrs: { id: 'atomXX01', depth: 3, entries: [] } }],
+    ];
+
+    for (const [type, json] of atoms) {
+        // Between two paragraphs: the caret is at the start of the one after, so typing goes there and the atom stays.
+        const { editor } = realEditor(docOf(para('paraXX01', 'One'), para('paraXX03', 'Three')));
+        dispatchAsInsertBlockDoes(editor, json, { anchors: ['paraXX01'], keepId: true });
+
+        const types = [];
+        editor.state.doc.forEach((child) => types.push(child.type.name));
+        assert.deepEqual(types, ['paragraph', type, 'paragraph'], type);
+        assert.ok(!(editor.state.selection instanceof NodeSelection), `${type}: not a NodeSelection on the restored atom`);
+        assert.ok(editor.state.selection instanceof TextSelection, `${type}: a text caret`);
+        assert.equal(editor.state.selection.$from.parent.attrs.id, 'paraXX03', `${type}: after the atom`);
+        assert.equal(editor.state.selection.$from.parentOffset, 0, type);
+
+        // Typing at the caret leaves the atom where it is.
+        editor.chain().insertContent({ type: 'text', text: 'x' }).run();
+        assert.deepEqual(blocksOf(editor.state.doc).map(([, text]) => text), ['One', '', 'xThree'], type);
+        editor.destroy();
+
+        // Nothing but an atom can follow: the caret still is not a selection on it (it stays in the paragraph before).
+        const last = realEditor(docOf(para('paraXX01', 'One')));
+        dispatchAsInsertBlockDoes(last.editor, json, { anchors: ['paraXX01'], keepId: true });
+        assert.ok(!(last.editor.state.selection instanceof NodeSelection), `${type} at the end: not a NodeSelection`);
+        assert.ok(last.editor.state.selection instanceof TextSelection, `${type} at the end: a text caret`);
+        last.editor.destroy();
+    }
 });
 
 test('insertBlockTransaction refuses a block the schema accepts but check() does not, and the document is untouched', () => {

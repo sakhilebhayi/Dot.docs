@@ -528,6 +528,23 @@ test('levelEmpty and levelDerived copy, never mutate, and level only what they a
     assert.deepEqual(DERIVED, { toc: ['entries'], crossRef: ['label'] });
 });
 
+test('levelDerived blanks every toc with an array of its own: changing one result never reaches another', () => {
+    const json = docOf([toc('t1', [{ id: 'h1' }]), toc('t2', [{ id: 'h2' }])]);
+
+    const first = levelDerived(json);
+    assert.notStrictEqual(first.content[0].attrs.entries, first.content[1].attrs.entries, 'two contents lists in one document');
+
+    // A caller that changes what it was given...
+    first.content[0].attrs.entries.push({ id: 'poisoned' });
+    first.content[1].attrs.entries.push({ id: 'also poisoned' });
+
+    // ...changes nothing for the next levelling, nor for the other list.
+    const second = levelDerived(json);
+    assert.deepEqual(second.content[0].attrs.entries, []);
+    assert.deepEqual(second.content[1].attrs.entries, []);
+    assert.deepEqual(first.content[1].attrs.entries, [{ id: 'also poisoned' }]);
+});
+
 test('appendLost appends and never replaces; the only entry skipped is an exact duplicate', () => {
     const loss = (text) => ({ id: 'p5', type: 'paragraph', reason: 'both', json: para('p5', text), anchors: ['p5'], text });
     const first = lostEntry(loss('Hello B1'), { source: 'merge', version: 2, n: 0, sentence: 'S' });

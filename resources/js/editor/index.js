@@ -728,7 +728,10 @@ function mount(element, opts = {}) {
 
             try {
                 return mergeDocuments(editor.schema, { base, mine: mine ?? editor.getJSON(), theirs, echo }, { deletionsWin });
-            } catch (_) {
+            } catch (cause) {
+                // Fail closed, as before (the caller shows the notice), but say why: a merge that throws is a bug to find.
+                console.warn('[Dot.Doc] The merge threw and was treated as impossible.', cause);
+
                 return null;
             }
         },
@@ -759,7 +762,10 @@ function mount(element, opts = {}) {
                     Selection,
                 });
                 editor.view.dispatch(tr);
-            } catch (_) {
+            } catch (cause) {
+                // Nothing changed, as before; the cause is logged so a block that cannot go in can be diagnosed.
+                console.warn('[Dot.Doc] Put it back could not insert the block.', cause);
+
                 return false;
             }
 

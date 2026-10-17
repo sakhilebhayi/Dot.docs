@@ -627,7 +627,7 @@ async function run(seed, tabCount) {
         ],
         [
             1,
-            () => {
+            async () => {
                 const tab = pick(slots);
                 if (tab.view.lost.length === 0) {
                     return;
@@ -635,7 +635,7 @@ async function run(seed, tabCount) {
                 if (tab.noDrafts) {
                     tab.view.lost.forEach((entry) => tokensOfEntry(entry).forEach((token) => excused.add(token)));
                 }
-                tab.host().dismissLost();
+                await tab.host().dismissLost();
                 trace.push(`${tab.name} dismisses all`);
             },
         ],

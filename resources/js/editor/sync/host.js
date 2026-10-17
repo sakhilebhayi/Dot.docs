@@ -105,6 +105,20 @@ export const DISMISS_LOST_QUESTION =
     'Dismiss this text? It is in no saved version. It will be removed from this page and kept only in this browser, for 7 days.';
 
 /**
+ * What the notice bar says when Dismiss all could not write the browser copy
+ * its question promised: nothing was dismissed, the entries are still listed.
+ */
+export const DISMISS_LOST_FAILED_NOTICE =
+    'Your text could not be kept in this browser, so nothing was dismissed. It is still listed here.';
+
+/**
+ * What the notice bar says when the list changed while Dismiss all was
+ * writing its browser copy: the new entry was never in that copy, so nothing
+ * was dismissed.
+ */
+export const DISMISS_LOST_CHANGED_NOTICE = 'The list changed while it was being dismissed, so nothing was dismissed. Press Dismiss all again.';
+
+/**
  * What the page asks before it merges a draft the document has moved past
  * (section 7.1). A draft's deletion does not win there: D2 was decided for
  * live co-typing, and a days-old draft's deletion of a block somebody has
@@ -1334,8 +1348,19 @@ export function createSyncHost(view, env) {
      * list, which the next loss's parkLost() carries over). Always asked,
      * because every entry is on the page nowhere. Not fail-closed-gated:
      * like discardSetAside(), it touches neither the editor nor a draft.
+     *
+     * The question promises a copy kept in this browser for 7 days, so the
+     * park is written FIRST, with the list as it is on the page, and the row
+     * is emptied only once that write is known to have stored it (a quota or
+     * a blocked database makes parkLost() resolve false). A write that failed
+     * keeps every entry on the page and says so; so does a list that changed
+     * while the write was in flight, because the new entry is not in that
+     * copy. A browser that keeps no drafts at all has no copy to promise and
+     * dismisses as before.
+     *
+     * @returns {Promise<void>}
      */
-    function dismissLost() {
+    async function dismissLost() {
         if (view.lost.length === 0) {
             return;
         }
@@ -1344,8 +1369,35 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        const drafts = env.drafts();
+        if (drafts) {
+            const dismissing = view.lost;
+            let kept = false;
+            try {
+                kept = (await drafts.parkLost(view.docUuid, dismissing, view.baseVersion)) === true;
+            } catch (_) {
+                kept = false;
+            }
+            if (!kept) {
+                view.syncNotice = DISMISS_LOST_FAILED_NOTICE;
+
+                return;
+            }
+            // Every change of the list makes a new array (offerLost, putBackLost).
+            if (view.lost !== dismissing) {
+                view.syncNotice = DISMISS_LOST_CHANGED_NOTICE;
+
+                return;
+            }
+        }
+
+        // Our own earlier "nothing was dismissed" is no longer true. (A sync notice has no way off the page
+        // but a reload, so it must not be left behind to mislead.)
+        if (view.syncNotice === DISMISS_LOST_FAILED_NOTICE || view.syncNotice === DISMISS_LOST_CHANGED_NOTICE) {
+            view.syncNotice = '';
+        }
         view.lost = [];
-        env.drafts()?.markLostDismissed(view.docUuid);
+        drafts?.markLostDismissed(view.docUuid);
     }
 
     /**
@@ -1967,8 +2019,27 @@ export function createSyncHost(view, env) {
             return;
         }
 
-        if (!handle.applyRemote(content, { force: true })) {
-            view.aiError = 'That suggestion could not be applied — the document is unchanged.';
+        // A throw is a failure like a false answer (mergeSuggestion() treats it
+        // so), with one difference: it can come AFTER the document changed. The
+        // typing is then no longer in the editor, so it is set aside here, as it
+        // would have been on success, and the writer is not told the document
+        // is unchanged.
+        const before = mine ?? JSON.stringify(handle.editor.getJSON());
+        let applied = false;
+        try {
+            applied = handle.applyRemote(content, { force: true }) === true;
+        } catch (cause) {
+            env.log('[Dot.Doc] Applying the accepted suggestion threw.', cause);
+            applied = false;
+        }
+        if (!applied) {
+            const changed = JSON.stringify(handle.editor.getJSON()) !== before;
+            if (changed && mine !== null) {
+                setAsideTyping(mine, version);
+            }
+            view.aiError = changed
+                ? 'That suggestion could only be partly applied. If you had unsaved text it is offered back in the notice; reload the page if the document looks wrong.'
+                : 'That suggestion could not be applied — the document is unchanged.';
             if (retiredSave) {
                 view.resave = true;
             }

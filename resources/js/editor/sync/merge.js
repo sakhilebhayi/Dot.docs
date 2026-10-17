@@ -25,8 +25,12 @@
  * `align: null` against a missing `align` and a re-stamped contents list
  * are not changes; and an OUTPUT copy with the stamps kept, which is what
  * goes on screen. The merged document is built from output nodes and keeps
- * every block's own id, so it passes the server's "Duplicate block id"
- * check by construction.
+ * every block's own id, so no two TOP-LEVEL blocks share one: it passes the
+ * server's "Duplicate block id" check by construction for those. Ids are
+ * checked at the top level only. A nested id can come out twice (a draft
+ * merge that moves p1 into a box while theirs edited p1 keeps both copies);
+ * the editor's block-id repair plugin gives one of them a fresh id when the
+ * merged document is applied (spec section 13).
  *
  * `echo` is the document of a save this tab sent whose answer was lost
  * (section 5.6). Wherever theirs agrees with it, that block's base is
@@ -58,8 +62,8 @@ export const DERIVED = {
     crossRef: ['label'],
 };
 
-/** What a blanked stamp reads as. */
-const DERIVED_BLANK = { entries: [], label: null };
+/** What a blanked stamp reads as: a NEW value every time, so no caller can change what another got. */
+const blankStamp = (key) => (key === 'entries' ? [] : null);
 
 /** How many characters of a lost block the notice shows. */
 export const EXCERPT_LENGTH = 80;
@@ -142,7 +146,7 @@ export function levelDerived(json) {
         const derived = DERIVED[node.type];
         if (derived && node.attrs) {
             derived.forEach((key) => {
-                node.attrs[key] = DERIVED_BLANK[key];
+                node.attrs[key] = blankStamp(key);
             });
         }
         if (Array.isArray(node.content)) {
