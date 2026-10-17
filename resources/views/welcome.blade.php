@@ -173,7 +173,7 @@
                         Real-time document platform
                     </p>
 
-                    <h1 class="font-display font-semibold text-4xl sm:text-5xl lg:text-6xl leading-[1.08] tracking-tight text-[var(--cream)] mb-6">
+                    <h1 class="font-display font-semibold text-4xl sm:text-5xl lg:text-6xl leading-[1.08] sm:leading-none tracking-tight text-[var(--cream)] mb-6">
                         Every edit, seen live.<br>Every version, kept.
                     </h1>
 
@@ -213,7 +213,7 @@
             <div class="max-w-[1400px] mx-auto">
                 <div class="max-w-xl mb-16 reveal" data-reveal>
                     <p class="font-mono text-xs tracking-[0.18em] uppercase text-[var(--blue-deep)] mb-4">What it does</p>
-                    <h2 class="font-display font-semibold text-3xl sm:text-4xl text-[var(--ink)] leading-tight">
+                    <h2 class="font-display font-semibold text-3xl sm:text-4xl text-[var(--ink)] leading-tight sm:leading-10">
                         One document, everyone in it at once
                     </h2>
                 </div>
@@ -246,7 +246,7 @@
                 <div class="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-12 lg:gap-20">
                     <div class="reveal" data-reveal>
                         <p class="font-mono text-xs tracking-[0.18em] uppercase text-[var(--blue-deep)] mb-4">Built for real ownership</p>
-                        <h2 class="font-display font-semibold text-3xl sm:text-4xl text-[var(--ink)] leading-tight mb-5">
+                        <h2 class="font-display font-semibold text-3xl sm:text-4xl text-[var(--ink)] leading-tight sm:leading-10 mb-5">
                             Not everything has to live in a team
                         </h2>
                         <p class="text-[var(--ink-soft)] leading-relaxed max-w-sm">
@@ -283,7 +283,7 @@
             <div class="absolute inset-0" style="background: linear-gradient(180deg, #1f1b14 0%, rgba(31,27,20,0.82) 50%, #1f1b14 100%);"></div>
 
             <div class="relative z-10 max-w-2xl mx-auto text-center reveal" data-reveal>
-                <h2 class="font-display font-semibold text-3xl sm:text-4xl text-[var(--cream)] leading-tight mb-5">
+                <h2 class="font-display font-semibold text-3xl sm:text-4xl text-[var(--cream)] leading-tight sm:leading-10 mb-5">
                     Open a document, or bring your team into one
                 </h2>
                 <p class="text-[var(--cream-80)] leading-relaxed mb-10 max-w-lg mx-auto">
