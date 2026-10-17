@@ -163,10 +163,18 @@ export class FakeServer {
      * restore, an import. `history` (what the Phase 1 tests read) is NOT
      * written, as Phase 1's fake wrote nothing there: a restyle cuts no
      * version. `kept` and `trace` record it for the walk.
+     *
+     * `keeps` says whether the head it replaces is kept as a version, as the
+     * real store does for a restore, an import and an accepted suggestion
+     * (true, the default) and does NOT for a restyle (false:
+     * DocumentStore::restyle() keeps nothing). A restyle changes no text, so
+     * the walk must not count its replaced head as a place a token is kept.
      */
-    replace(json) {
-        this.trace.push({ version: this.version + 1, from: clone(this.json), to: clone(json), overwrite: true });
-        this.kept.push({ version: this.version, json: clone(this.json) });
+    replace(json, { keeps = true } = {}) {
+        this.trace.push({ version: this.version + 1, from: clone(this.json), to: clone(json), overwrite: keeps });
+        if (keeps) {
+            this.kept.push({ version: this.version, json: clone(this.json) });
+        }
         this.version += 1;
         this.json = clone(json);
 
