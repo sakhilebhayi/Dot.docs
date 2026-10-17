@@ -351,4 +351,37 @@ class EditorReadOnlyTest extends TestCase
             ->assertViewHas('canEdit', false)
             ->assertSee('editable: false', false);
     }
+
+    public function test_the_page_can_ask_the_server_whether_this_person_may_still_change_the_document(): void
+    {
+        [$owner, $doc] = $this->ownerAndDocument();
+        $person = $this->collaborator($doc, 'editor');
+
+        $page = Livewire::actingAs($person)->test(Editor::class, ['uuid' => $doc->uuid])
+            ->call('canEdit')
+            ->assertReturned(true);
+
+        DocumentCollaborator::where('document_id', $doc->id)->where('user_id', $person->id)->update(['role' => 'viewer']);
+
+        $page->call('canEdit')->assertReturned(false);
+        $this->assertSame('Original words', $doc->fresh()->search_text, 'asking changes nothing');
+    }
+
+    public function test_a_team_viewer_who_is_an_editor_collaborator_gets_an_editable_page_and_a_team_owner_does_too(): void
+    {
+        [$owner, $doc] = $this->ownerAndDocument();
+        $viewer = $this->teamMember($owner, 'viewer');
+        DocumentCollaborator::create(['document_id' => $doc->id, 'user_id' => $viewer->id, 'role' => 'editor']);
+
+        Livewire::actingAs($viewer)->test(Editor::class, ['uuid' => $doc->uuid])->assertViewHas('canEdit', true);
+
+        // A document a member wrote, in a team somebody else owns.
+        $member = User::factory()->withPersonalTeam()->create();
+        $teamOwner = User::factory()->withPersonalTeam()->create();
+        $teamOwner->currentTeam->users()->attach($member, ['role' => 'editor']);
+        $theirs = app(DocumentStore::class)->create($member, 'Theirs');
+        $theirs->forceFill(['team_id' => $teamOwner->currentTeam->id])->save();
+
+        Livewire::actingAs($teamOwner)->test(Editor::class, ['uuid' => $theirs->uuid])->assertViewHas('canEdit', true);
+    }
 }

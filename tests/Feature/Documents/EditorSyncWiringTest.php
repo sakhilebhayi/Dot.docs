@@ -593,7 +593,7 @@ class EditorSyncWiringTest extends TestCase
         $kept = $row->querySelector('[x-bind\\:hidden="!unsentKept"]');
         $this->assertNotNull($kept);
         $this->assertTrue($kept->hasAttribute('hidden'));
-        $this->assertStringContainsString('was not saved', $this->words($kept));
+        $this->assertStringContainsString('unsent words are not saved', $this->words($kept));
         $this->assertStringContainsString('7 days', $this->words($kept));
     }
 
@@ -617,5 +617,16 @@ class EditorSyncWiringTest extends TestCase
         $this->assertStringContainsString('this.syncHost().saveRefused(status)', $component);
         $this->assertStringContainsString('preventDefault()', $component);
         $this->assertStringContainsString('this.unhookRefusal()', $component);
+
+        // The server is asked before a refusal makes the page read only (a 403 alone is not proof).
+        $this->assertMatchesRegularExpression('/canEdit: \(\) => window\.Livewire\.find\([^)]*\)\.canEdit\(\)/', $component);
+        $this->assertMatchesRegularExpression('/\n\s+accessCheckSince: 0,\n/', $component);
+
+        // A render that draws editable false makes the editor read only too, before the owner check, and the owner is told.
+        $this->assertMatchesRegularExpression(
+            '/if \(this\.editable === false && !handle\.readOnly\) \{\s+handle\.makeReadOnly\(\);.*?\}\s+if \(!this\.owns\) return;/s',
+            $component,
+        );
+        $this->assertStringContainsString('this.syncHost().readOnlyNoticed()', $component);
     }
 }

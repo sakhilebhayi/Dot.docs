@@ -413,6 +413,9 @@ export const commands = [
         name: `ai.${name}`,
         title,
         group: 'system',
+        // A pass only READS (AiAssistant::runAi() asks view access); accepting its result writes, and that is a
+        // button the assistant draws for people who may update.
+        readOnlySafe: true,
         run: (editor) => host(editor, 'ai', { action, param }),
     })),
     {

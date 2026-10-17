@@ -108,39 +108,80 @@ test('the slash menu offers only things you can insert into a blank line', () =>
     }
 });
 
-test('a read only editor is offered only what reads: the exports, searching, opening another document and commenting', () => {
+test('a read only editor is offered what reads: the exports, searching, opening another document, the assistant passes and commenting', () => {
     const listed = paletteCommands({ readOnly: true }).map((command) => command.name);
 
-    assert.deepEqual(
-        listed,
-        ['export.pdf', 'export.word', 'export.html', 'export.markdown', 'search', 'recent.open', 'comment'],
-    );
+    // The assistant's passes are reads: AiAssistant asks only view access to run one, and only
+    // Accept (update access) writes. The palette agrees with the server.
+    assert.deepEqual(listed, [
+        'export.pdf',
+        'export.word',
+        'export.html',
+        'export.markdown',
+        'search',
+        'recent.open',
+        'ai.summarize',
+        'ai.rewrite',
+        'ai.grammar',
+        'ai.continue',
+        'ai.outline',
+        'comment',
+    ]);
     // Nothing that writes, and nothing that sends the person to a page they may not open.
-    for (const absent of ['bold', 'heading.1', 'table', 'undo', 'redo', 'share', 'style.switch', 'ai.summarize', 'ai.continue']) {
+    for (const absent of ['paragraph', 'heading.1', 'table', 'undo', 'redo', 'share', 'style.switch']) {
         assert.ok(!listed.includes(absent), `a read only palette offers ${absent}`);
     }
     assert.ok(paletteCommands().length > listed.length, 'the ordinary palette is unchanged');
 });
 
-test('run() does nothing to a read only editor except the commands that read', () => {
+/**
+ * A stand-in editor whose commands all SUCCEED: every chain method answers with the chain and run() answers true,
+ * and each call is written down. Without the read only gate in run() these commands would run and answer true, so a
+ * test of the gate cannot pass by accident of a command that fails on its own.
+ */
+function standInEditor({ isEditable }) {
     const calls = [];
-    const readOnlyEditor = {
-        isDestroyed: false,
-        isEditable: false,
-        chain: () => {
-            calls.push('chain');
-            throw new Error('a read only editor must not be asked to change');
+    const chain = new Proxy(
+        {},
+        {
+            get: (_, method) => (method === 'run' ? () => (calls.push('run'), true) : () => (calls.push(String(method)), chain)),
         },
-        commands: new Proxy({}, { get: () => () => calls.push('command') }),
-        dotdoc: { onCommand: (name) => calls.push(`host:${name}`), selection: {} },
-        state: { selection: { empty: true, from: 0, to: 0 }, doc: { textBetween: () => '' } },
+    );
+
+    return {
+        calls,
+        editor: {
+            isDestroyed: false,
+            isEditable,
+            chain: () => chain,
+            commands: new Proxy({}, { get: (_, method) => () => (calls.push(`commands.${String(method)}`), true) }),
+            can: () => chain,
+            isActive: () => false,
+            getAttributes: () => ({}),
+            dotdoc: { onCommand: (name) => calls.push(`host:${name}`), selection: {} },
+            state: { selection: { empty: true, from: 0, to: 0 }, doc: { textBetween: () => '' } },
+        },
     };
+}
 
-    for (const name of ['bold', 'heading.1', 'table', 'undo', 'redo', 'highlight', 'pageBreak']) {
-        assert.equal(run(readOnlyEditor, name), false, name);
+test('run() does nothing to a read only editor except the commands that read', () => {
+    const readOnly = standInEditor({ isEditable: false });
+
+    const writing = ['paragraph', 'heading.1', 'quote', 'code', 'list.bullet', 'undo', 'redo'];
+    for (const name of writing) {
+        assert.ok(names.includes(name), `${name} is a registry command (a name that is not one answers false for another reason)`);
+        assert.equal(run(readOnly.editor, name), false, name);
     }
-    assert.deepEqual(calls, [], 'no command was run');
+    assert.deepEqual(readOnly.calls, [], 'no command was run');
 
-    assert.notEqual(run(readOnlyEditor, 'export.pdf'), false);
-    assert.deepEqual(calls, ['host:export.pdf']);
+    assert.notEqual(run(readOnly.editor, 'export.pdf'), false);
+    assert.notEqual(run(readOnly.editor, 'ai.summarize'), false);
+    assert.deepEqual(readOnly.calls, ['host:export.pdf', 'host:ai']);
+
+    // The same stand-in, editable, runs them: the gate is what stopped the calls above.
+    const editable = standInEditor({ isEditable: true });
+    for (const name of writing) {
+        assert.equal(run(editable.editor, name), true, name);
+    }
+    assert.notDeepEqual(editable.calls, []);
 });

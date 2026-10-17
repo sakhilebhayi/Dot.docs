@@ -115,6 +115,12 @@
         // Text typed on this page was left unsent because that refusal came
         // before it was stored; a copy is kept in this browser.
         unsentKept: false,
+        // When the question may I still change this was put to the server
+        // after a save came back 403, and 0 while none is out. The 403
+        // alone is not proof (a firewall, or another action sent with the
+        // save, can cause it), so saves wait for the answer
+        // (sync/host.js, saveRefused()).
+        accessCheckSince: 0,
         // Takes the refusal hook off Livewire when the page is really removed.
         unhookRefusal: null,
         // The document version this page was rendered from, and the version
@@ -242,7 +248,20 @@
             });
             const editor = handle.editor;
 
+            // A render drew editable false (this person's role was lowered
+            // since the page opened) but the editor was mounted editable: it
+            // is made read only now, on whichever object runs this, and the
+            // object that owns the page is told so it can say it in the
+            // notice bar (a later object cannot: its fields are not the
+            // ones the bar reads).
+            if (this.editable === false && !handle.readOnly) {
+                handle.makeReadOnly();
+                window.dispatchEvent(new CustomEvent('dotdoc:read-only'));
+            }
+
             if (!this.owns) return;
+
+            window.addEventListener('dotdoc:read-only', () => this.syncHost().readOnlyNoticed());
 
             // A save the server refuses with 403 means this person may no
             // longer change the document: the page becomes the read only
@@ -340,6 +359,8 @@
                 refreshOutline: () => this.refreshOutline(),
                 // The presence strip is rendered by Livewire.
                 refreshPresence: () => @this.refreshPresence(),
+                // Whether this person may still change the document, from the server.
+                canEdit: () => @this.canEdit(),
                 report: (tone, word) => this.report(tone, word),
                 drafts: () => window.offlineDraft,
                 documentsDiffer: (a, b) => window.DotDoc.documentsDiffer(a, b),
@@ -1077,14 +1098,16 @@
                  `editable` (the server-drawn literal at the top of the
                  x-data object; the host sets it false when a save is refused),
                  and hidden while a stop reason is up, which says more. The
-                 second sentence shows only after a refusal that came with
-                 text typed and not yet stored. Static markup, as everything
+                 second sentence shows only after a refusal that left words
+                 unsent, or text that the lost row or the set-aside row was
+                 offering (those rows are taken away then, and the words stay
+                 parked in this browser). Static markup, as everything
                  in this bar is. --}}
             <div class="doc-notice" hidden x-bind:hidden="editable || !!syncNotice">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
                     <span>You can read this document but not change it.</span>
-                    <span hidden x-bind:hidden="!unsentKept">What you typed since the last save was not saved. A copy is kept in this browser for 7 days.</span>
+                    <span hidden x-bind:hidden="!unsentKept">Your unsent words are not saved. A copy is kept in this browser for 7 days.</span>
                 </p>
             </div>
 

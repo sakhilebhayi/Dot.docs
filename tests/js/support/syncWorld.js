@@ -243,6 +243,7 @@ export const makeView = (version) => ({
     // here was left unsent because the server refused the save.
     editable: true,
     unsentKept: false,
+    accessCheckSince: 0,
 });
 
 export function world(text = 'start') {
@@ -285,6 +286,10 @@ export function makeTab({ server, clock }, name, options = {}) {
         confirmAnswer: options.confirmAnswer ?? true,
         presenceRefreshes: 0,
         outlineRefreshes: 0,
+        canEditAnswer: false,
+        canEditMode: 'answer',
+        canEditCalls: 0,
+        canEditPending: null,
         /** What the page's outline refresh does; a test swaps it to make it fail. */
         refreshOutline: () => Promise.resolve(),
         /** The browser's draft store. Shared between two page loads of one browser. */
@@ -601,6 +606,21 @@ export function makeTab({ server, clock }, name, options = {}) {
         },
         refreshPresence: () => {
             t.presenceRefreshes += 1;
+        },
+        // Editor::canEdit(). `canEditAnswer` is what the server says; `canEditCalls` is how often it was asked.
+        // A test can make the question hang (a Promise it settles by hand) or fail.
+        canEdit: () => {
+            t.canEditCalls += 1;
+            if (t.canEditMode === 'hang') {
+                return new Promise((resolve, reject) => {
+                    t.canEditPending = { resolve, reject };
+                });
+            }
+            if (t.canEditMode === 'fail') {
+                return Promise.reject(new Error('network'));
+            }
+
+            return Promise.resolve(t.canEditAnswer);
         },
         report: (tone, word) => t.reports.push({ tone, word }),
         drafts: () => t.draftStore,
