@@ -229,6 +229,10 @@ export async function clearDraft(docUuid) {
 /**
  * Write the base row: the server document this tab holds as confirmed, and
  * the version it is. See BASE_PREFIX.
+ *
+ * @returns {Promise<boolean>} true once the write has completed; false means
+ *   nothing was stored and the caller still holds the only copy. Nothing is
+ *   thrown.
  */
 export async function saveBase(docUuid, json, baseVersion = null) {
     try {
@@ -243,8 +247,12 @@ export async function saveBase(docUuid, json, baseVersion = null) {
             });
             tx.oncomplete = resolve;
             tx.onerror    = () => reject(tx.error);
+            tx.onabort    = () => reject(tx.error);
         });
-    } catch (_) { /* silent — don't break the editor */ }
+        return true;
+    } catch (_) { /* silent — don't break the editor */
+        return false;
+    }
 }
 
 /**
@@ -283,6 +291,10 @@ export async function loadBase(docUuid) {
  * days, whatever is offered after them. A plain copy is stored: the page
  * hands in Alpine's reactive proxy, which IndexedDB cannot clone. See
  * LOST_PREFIX.
+ *
+ * @returns {Promise<boolean>} true once the write has completed; false means
+ *   nothing was stored and the caller still holds the only copy. Nothing is
+ *   thrown.
  */
 export async function parkLost(docUuid, entries, baseVersion = null) {
     try {
@@ -296,7 +308,7 @@ export async function parkLost(docUuid, entries, baseVersion = null) {
             req.onsuccess = () => {
                 store.put({
                     docUuid: LOST_PREFIX + docUuid,
-                    entries: plain,
+                    entries: Array.isArray(plain) ? plain : [],
                     dismissed: Array.isArray(req.result?.dismissed) ? req.result.dismissed : [],
                     parkedAt: Date.now(),
                     baseVersion: Number.isFinite(baseVersion) ? baseVersion : null,
@@ -305,8 +317,12 @@ export async function parkLost(docUuid, entries, baseVersion = null) {
             req.onerror   = () => reject(req.error);
             tx.oncomplete = resolve;
             tx.onerror    = () => reject(tx.error);
+            tx.onabort    = () => reject(tx.error);
         });
-    } catch (_) { /* silent — don't break the editor */ }
+        return true;
+    } catch (_) { /* silent — don't break the editor */
+        return false;
+    }
 }
 
 /**
@@ -345,6 +361,10 @@ export async function loadLost(docUuid) {
  * not offered again on the next visit. The entries move aside under
  * `dismissed`, which parkLost() carries over, so a later loss that rewrites
  * `entries` does not take the dismissed text out of the browser.
+ *
+ * @returns {Promise<boolean>} true once the write has completed; false means
+ *   nothing was stored and the caller still holds the only copy. Nothing is
+ *   thrown.
  */
 export async function markLostDismissed(docUuid) {
     try {
@@ -367,8 +387,12 @@ export async function markLostDismissed(docUuid) {
             req.onerror   = () => reject(req.error);
             tx.oncomplete = resolve;
             tx.onerror    = () => reject(tx.error);
+            tx.onabort    = () => reject(tx.error);
         });
-    } catch (_) { /* silent — don't break the editor */ }
+        return true;
+    } catch (_) { /* silent — don't break the editor */
+        return false;
+    }
 }
 
 /**
