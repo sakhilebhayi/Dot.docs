@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
     DISCARD_QUESTION,
+    DISMISS_LOST_QUESTION,
+    LOAD_THEIRS_REPLACES_QUESTION,
     MERGE_ATTEMPTS,
     MERGE_FETCH_EXPIRY_MS,
     PUT_BACK_QUESTION,
@@ -2885,7 +2887,7 @@ test('a draft the editor cannot open is kept rather than lost', async () => {
 test('with no draft, and in a browser that cannot keep one, the page simply opens', async () => {
     const w = world();
     const A = await reopened(w, null);
-    assert.deepEqual(A.draftCalls, ['loadDraft', 'saveBase']);
+    assert.deepEqual(A.draftCalls, ['loadLost', 'loadDraft', 'saveBase']);
     assert.equal(A.polls.length, 1);
 
     const B = w.tab('B', { draftStore: false });
@@ -3046,7 +3048,7 @@ test('an edit undone inside the debounce leaves no draft: after somebody saves, 
     assert.equal(again.view.setAsideFrom, null);
     assert.equal(again.stale(), null);
     assert.deepEqual(again.questions, []);
-    assert.deepEqual(again.draftCalls, ['loadDraft', 'saveBase']);
+    assert.deepEqual(again.draftCalls, ['loadLost', 'loadDraft', 'saveBase']);
 });
 
 test('an edit undone after a save leaves no draft either: the draft store is cleared, not rewritten', async () => {
@@ -4243,4 +4245,353 @@ test('handle.applyRemote returning false during a merge ends in the notice: merg
     assert.equal(B.text(), 'B1');
     assert.equal(B.sent.length, 0);
     assert.deepEqual(B.view.lost, []);
+});
+
+// ───────────────────────────────────────────────────────── the lost row: Put it back, Put them all back, Dismiss all
+
+/** B lost p1 to A (D1): one entry in B's lost row. */
+async function lostOne() {
+    const w = await pair();
+    const { A, B } = w;
+    A.type('Hello A');
+    B.type('Hello B');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.deepEqual(B.lostTexts(), ['Hello B']);
+
+    return w;
+}
+
+test('Put it back after a D1: my version goes in below theirs with a fresh id, the autosave saves it without an overwrite, and the park is rewritten', async () => {
+    const { server, A, B } = await lostOne();
+
+    assert.equal(B.host().putBackLost(0), true);
+    assert.deepEqual(B.insertCalls, [{ json: para('p1', 'Hello B'), anchors: ['p1'], keepId: false }]);
+    assert.deepEqual(B.blocks(), [
+        ['p1', 'Hello A'],
+        ['fresh1', 'Hello B'],
+    ]);
+    assert.deepEqual(B.view.lost, []);
+    assert.deepEqual(B.lostPark().entries, [], 'the park holds the rest: nothing');
+    assert.equal(B.view.overwriteOwed, false, 'it replaces nothing');
+    assert.equal(B.view.unsaved, true);
+    assert.equal(B.view.syncNotice, '');
+
+    await B.debounce();
+    assert.deepEqual([B.sent.at(-1).base, B.sent.at(-1).overwrite], [2, false]);
+    await B.land();
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'Hello A'],
+        ['fresh1', 'Hello B'],
+    ]);
+    assert.deepEqual(server.history, []);
+
+    await A.cycle();
+    assert.deepEqual(A.blocks(), blocksOf(server.json));
+    assert.equal(A.view.conflict, null);
+});
+
+test('Put it back after a D2 restores the paragraph where it was, with its original id', async () => {
+    const { server, A, B } = await twoParagraphs();
+    A.insertAfter('p2', 'p3', 'Third');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    B.typeIn('p2', 'World B');
+    A.deleteBlock('p2');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.deepEqual(B.blocks(), [
+        ['p1', 'start'],
+        ['p3', 'Third'],
+    ]);
+
+    assert.equal(B.host().putBackLost(0), true);
+    assert.deepEqual(B.insertCalls.at(-1), { json: para('p2', 'World B'), anchors: ['p1'], keepId: true });
+    assert.deepEqual(B.blocks(), [
+        ['p1', 'start'],
+        ['p2', 'World B'],
+        ['p3', 'Third'],
+    ]);
+
+    await B.debounce();
+    await B.land();
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'start'],
+        ['p2', 'World B'],
+        ['p3', 'Third'],
+    ]);
+    assert.deepEqual(server.history, [], 'an ordinary save: nothing is replaced');
+});
+
+test('offered entries are appended, an exact duplicate is skipped, and the park holds the whole list', async () => {
+    const { B } = await pair();
+    const loss = { id: 'p1', type: 'paragraph', reason: 'both', json: para('p1', 'Hello B'), anchors: ['p1'], text: 'Hello B' };
+
+    B.host().offerLost([loss], 'merge', 2);
+    B.host().offerLost([loss, { ...loss, json: para('p1', 'Hello B2'), text: 'Hello B2' }], 'merge', 3);
+
+    assert.deepEqual(B.lostTexts(), ['Hello B', 'Hello B2']);
+    assert.deepEqual(B.view.lost.map((entry) => entry.key), ['p1:2:0', 'p1:3:1']);
+    assert.deepEqual(B.lostPark().entries.map((entry) => entry.excerpt), ['Hello B', 'Hello B2']);
+    assert.equal(B.draftCalls.filter((call) => call === 'parkLost').length, 2);
+});
+
+test('Dismiss all asks first, empties the row, keeps the park and marks it dismissed; a no changes nothing; an empty row asks nothing', async () => {
+    const { B } = await lostOne();
+
+    B.confirmAnswer = false;
+    B.host().dismissLost();
+    assert.deepEqual(B.questions, [DISMISS_LOST_QUESTION]);
+    assert.deepEqual(B.lostTexts(), ['Hello B']);
+    assert.equal(B.lostPark().dismissedAt, null);
+
+    B.confirmAnswer = true;
+    B.host().dismissLost();
+    assert.deepEqual(B.view.lost, []);
+    assert.deepEqual(B.lostPark().entries, []);
+    assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B'], 'the park keeps the dismissed text for its 7 days');
+    assert.equal(B.lostPark().dismissedAt, B.env.now());
+    assert.equal(B.text(), 'Hello A');
+    assert.equal(B.sent.length, 0);
+
+    B.host().dismissLost();
+    assert.equal(B.questions.length, 2, 'nothing to dismiss: no question');
+});
+
+test('the Dismiss all question says the text is in no version, goes from the page and stays in the browser for 7 days', () => {
+    assert.equal(
+        DISMISS_LOST_QUESTION,
+        'Dismiss this text? It is in no saved version. It will be removed from this page and kept only in this browser, for 7 days.'
+    );
+});
+
+test('a reload during the lost row re-offers its entries prefixed From your last visit, and Put it back still works; a dismissed park is not re-offered', async () => {
+    const { server, clock, B } = await lostOne();
+
+    const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
+    await again.open();
+    assert.deepEqual(
+        again.view.lost.map((entry) => [entry.source, entry.reason, entry.excerpt, entry.sentence]),
+        [
+            [
+                'parked',
+                'both',
+                'Hello B',
+                'From your last visit: This paragraph was changed elsewhere at the same moment. The other version is on the page; this is yours.',
+            ],
+        ]
+    );
+    assert.deepEqual(again.draftCalls, ['loadLost', 'loadDraft', 'saveBase'], 'the park is read before the draft');
+
+    assert.equal(again.host().putBackLost(0), true);
+    assert.deepEqual(again.blocks(), [
+        ['p1', 'Hello A'],
+        ['fresh1', 'Hello B'],
+    ]);
+    assert.deepEqual(again.view.lost, []);
+    assert.deepEqual(again.lostPark().entries, []);
+
+    // Parked a second time (as `parked`) and reopened: the prefix is not doubled.
+    const parkedAgain = makeTab({ server, clock }, 'B3', { drafts: new Map() });
+    parkedAgain.drafts.set(LOST, {
+        entries: [
+            {
+                key: 'p1:2:0',
+                id: 'p1',
+                type: 'paragraph',
+                reason: 'both',
+                source: 'parked',
+                json: para('p1', 'Hello B'),
+                anchors: ['p1'],
+                version: 2,
+                sentence: 'From your last visit: S',
+                excerpt: 'Hello B',
+            },
+        ],
+        baseVersion: 2,
+        parkedAt: clock.now,
+        dismissedAt: null,
+    });
+    await parkedAgain.open();
+    assert.deepEqual(parkedAgain.view.lost.map((entry) => entry.sentence), ['From your last visit: S']);
+
+    // Dismissed: a later page does not offer it.
+    const other = await lostOne();
+    other.B.host().dismissLost();
+    const after = makeTab({ server: other.server, clock: other.clock }, 'B4', { drafts: other.B.drafts });
+    await after.open();
+    assert.deepEqual(after.view.lost, []);
+});
+
+test('a loss after Dismiss all keeps the dismissed copy in the park for its 7 days, and a reopen offers only the live entries', async () => {
+    const { server, clock, A, B } = await pair();
+    A.type('Hello A1');
+    B.type('Hello B1');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    B.host().dismissLost();
+    assert.deepEqual(B.lostPark().entries, []);
+    assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B1']);
+
+    // The next loss rewrites the park: the dismissed copy is carried over, not dropped.
+    B.type('Hello A1 B2');
+    A.type('Hello A2');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.deepEqual(B.lostTexts(), ['Hello A1 B2']);
+    assert.deepEqual(B.lostPark().entries.map((entry) => entry.excerpt), ['Hello A1 B2']);
+    assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B1'], 'the dismissed copy survives the rewrite');
+    assert.equal(B.lostPark().dismissedAt, null, 'the new loss is offered again on the next visit');
+
+    const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
+    await again.open();
+    assert.deepEqual(again.lostTexts(), ['Hello A1 B2'], 'the dismissed entry is not re-offered');
+});
+
+test('Put them all back puts every item back oldest first, each below the winner, stops at the first failure and says so', async () => {
+    const { A, B } = await pair();
+    A.type('Hello A1');
+    B.type('Hello B1');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    B.type('Hello A1 B2');
+    A.type('Hello A2');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.deepEqual(B.lostTexts(), ['Hello B1', 'Hello A1 B2']);
+
+    // The first goes in; the second cannot.
+    const real = B.handle.insertBlock;
+    let calls = 0;
+    B.handle.insertBlock = (json, options) => {
+        calls += 1;
+
+        return calls === 2 ? false : real(json, options);
+    };
+    B.host().putBackAllLost();
+    assert.deepEqual(B.blocks(), [
+        ['p1', 'Hello A2'],
+        ['fresh1', 'Hello B1'],
+    ]);
+    assert.deepEqual(B.lostTexts(), ['Hello A1 B2'], 'the one that could not go in stays');
+    assert.equal(B.view.syncNotice, 'Your text could not be put back.');
+
+    // Working again: the rest goes in, directly below the winner.
+    B.handle.insertBlock = real;
+    B.host().putBackAllLost();
+    assert.deepEqual(B.blocks(), [
+        ['p1', 'Hello A2'],
+        ['fresh2', 'Hello A1 B2'],
+        ['fresh1', 'Hello B1'],
+    ]);
+    assert.deepEqual(B.view.lost, []);
+    assert.deepEqual(B.lostPark().entries, []);
+});
+
+test('Put it back does nothing for an entry that is not there', async () => {
+    const { B } = await lostOne();
+
+    assert.equal(B.host().putBackLost(3), false);
+    assert.deepEqual(B.insertCalls, []);
+    assert.deepEqual(B.lostTexts(), ['Hello B']);
+    assert.equal(B.view.syncNotice, '');
+});
+
+test('fail-closed: Put it back and Put them all back do nothing; Dismiss all works', async () => {
+    const w = world();
+    const R = w.tab('R', { failClosed: true });
+    await R.open();
+    R.view.lost = [
+        { key: 'p1:2:0', id: 'p1', type: 'paragraph', reason: 'both', source: 'merge', json: para('p1', 'x'), anchors: ['p1'], version: 2, sentence: 'S', excerpt: 'x' },
+    ];
+
+    assert.equal(R.host().putBackLost(0), false);
+    R.host().putBackAllLost();
+    assert.deepEqual(R.insertCalls, []);
+    assert.equal(R.view.lost.length, 1);
+    assert.equal(R.view.syncNotice, '');
+
+    R.host().dismissLost();
+    assert.deepEqual(R.view.lost, []);
+    assert.deepEqual(R.questions, [DISMISS_LOST_QUESTION]);
+    assert.deepEqual(R.draftCalls, ['markLostDismissed'], 'the park is stamped; no draft is touched');
+});
+
+test('the lost row sentences, by reason and source', async () => {
+    const { A } = await pair();
+    const sentence = A.host().sentenceFor;
+
+    assert.equal(sentence('both', 'merge', 'paragraph'), 'This paragraph was changed elsewhere at the same moment. The other version is on the page; this is yours.');
+    assert.equal(sentence('deleted', 'merge', 'table'), 'This table was removed elsewhere while you were typing in it.');
+    assert.equal(sentence('both', 'draft', 'list'), 'This list was changed in the document after your draft was written. The document\'s version is on the page; this is the draft\'s.');
+    assert.equal(sentence('deleted', 'draft', 'heading'), 'This heading was removed from the document after your draft was written.');
+    assert.equal(sentence('both', 'suggestion', 'paragraph'), 'This paragraph was rewritten by the accepted suggestion. The suggestion\'s version is on the page; this is yours.');
+    assert.equal(sentence('deleted', 'suggestion', 'callout'), 'The accepted suggestion removed this callout while you were typing in it.');
+});
+
+test('Put it back pressed while a save that carried the overwrite is in the air: the answer does not write off the overwrite the put-back text still owes', async () => {
+    const { server, A, B } = await twoParagraphs();
+    // B has a set-aside offer standing from a draft it declined (set directly: this is what a declined draft merge leaves).
+    B.view.setAside = JSON.stringify(docOf(para('p1', 'older text'), para('p2', 'World')));
+    B.view.setAsideFrom = 'draft';
+    B.view.setAsideBase = B.view.baseVersion;
+    // c2: B deletes p2 while A edits p2 and saves; B's merged save carries the overwrite.
+    B.deleteBlock('p2');
+    A.typeIn('p2', 'World A');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.equal(B.view.overwriteOwed, true);
+    assert.equal(B.sent.at(-1).overwrite, true);
+    assert.equal(B.saves.length, 1, 'the flagged save is in the air');
+
+    // While it is in the air, the writer presses Put it back and confirms.
+    B.host().putBack();
+    assert.equal(B.view.overwriteOwed, true);
+    B.saveArrives();
+    await B.saveReturns();
+    assert.equal(B.view.overwriteOwed, true, 'the answer settled the text that save carried, not the text put back after it left');
+
+    await B.debounce();
+    await B.land();
+    assert.equal(B.sent.at(-1).overwrite, true, 'the put-back save replaces the stored head: it says so');
+    assert.ok(server.history.length >= 2, 'both replaced heads are in the history');
+    assert.equal(B.view.overwriteOwed, false);
+});
+
+test('Load theirs while a text is already set aside asks first: a no changes nothing, a yes sets the new text aside in place of the old one', async () => {
+    const { server, A, B } = await conflicted({ B: { confirmAnswer: false } });
+    await B.host().loadTheirs(); // asks nothing: no text was set aside yet. B1 is set aside, B shows A1
+    assert.deepEqual(B.questions, []);
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')));
+
+    // B types again on the loaded version, and A saves once more: the notice again.
+    B.type('B2');
+    A.type('A2');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.equal(B.view.conflict.version, 3);
+    assert.equal(B.view.conflict.ready, true);
+
+    await B.host().loadTheirs();
+    assert.deepEqual(B.questions, [LOAD_THEIRS_REPLACES_QUESTION]);
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'a no leaves the earlier offer where it was');
+    assert.equal(B.text(), 'B2');
+    assert.equal(B.engine.pending.version, 3, 'and the waiting document is not taken');
+    assert.notEqual(B.view.conflict, null);
+
+    B.confirmAnswer = true;
+    await B.host().loadTheirs();
+    assert.equal(B.text(), 'A2');
+    assert.equal(B.view.setAside, JSON.stringify(doc('B2')), 'a yes: the typing now on the page is what is offered back');
+    assert.equal(B.stale(), 'B2');
+    assert.equal(server.version, 3);
 });

@@ -90,6 +90,21 @@ export const DISCARD_QUESTION =
     'Discard this text? It is in no saved version. It will be removed from this page and kept only in this browser, for 7 days.';
 
 /**
+ * What Load theirs asks when a text is already set aside and offered back: the
+ * new text takes the offer's place, and the earlier one is then in no version
+ * and in no park.
+ */
+export const LOAD_THEIRS_REPLACES_QUESTION =
+    'A text is already set aside from earlier. Loading theirs sets your text on the page aside instead, and the earlier text will be gone. Continue?';
+
+/**
+ * What Dismiss all asks before it empties the lost row (section 6.5). Always
+ * asked: every entry is text a merge established is on the page nowhere.
+ */
+export const DISMISS_LOST_QUESTION =
+    'Dismiss this text? It is in no saved version. It will be removed from this page and kept only in this browser, for 7 days.';
+
+/**
  * This tab's identity for presence and the sync poll. Per page load, not
  * per browser: two tabs of one account are two tabs.
  *
@@ -1197,6 +1212,101 @@ export function createSyncHost(view, env) {
     }
 
     /**
+     * Put it back (section 6.4): the lost block at `index` goes back on the
+     * page, below the version that won (a `both` block, with a fresh id) or
+     * where it was before it was removed (a `deleted` block, with its own
+     * id, so comments and cross-references on it come back). An ordinary
+     * writer's edit: undoable, autosaved on the current base, no overwrite
+     * owed. The entry goes, and the park is rewritten with the rest.
+     *
+     * @param {number} index
+     * @returns {boolean} whether the block went in
+     */
+    function putBackLost(index) {
+        const handle = env.handle();
+        // Fail-closed: nothing may be written into the editor.
+        if (!handle || handle.autosaves === false) {
+            return false;
+        }
+
+        const entry = view.lost[index];
+        if (!entry) {
+            return false;
+        }
+
+        let inserted = false;
+        try {
+            inserted = handle.insertBlock(entry.json, { anchors: entry.anchors, keepId: entry.reason === 'deleted' }) === true;
+        } catch (_) {
+            inserted = false;
+        }
+        if (!inserted) {
+            view.syncNotice = 'Your text could not be put back.';
+
+            return false;
+        }
+
+        view.lost = view.lost.filter((_, at) => at !== index);
+        env.drafts()?.parkLost(view.docUuid, view.lost, view.baseVersion);
+
+        return true;
+    }
+
+    /** Put them all back: oldest first; the first that cannot go in stops it, and stays listed. */
+    function putBackAllLost() {
+        while (view.lost.length > 0) {
+            if (!putBackLost(0)) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * Dismiss all (section 6.5): the row is emptied; the park stays for its
+     * 7 days and is stamped dismissed, so the next visit does not offer it
+     * again (markLostDismissed() moves the entries to the row's `dismissed`
+     * list, which the next loss's parkLost() carries over). Always asked,
+     * because every entry is on the page nowhere. Not fail-closed-gated:
+     * like discardSetAside(), it touches neither the editor nor a draft.
+     */
+    function dismissLost() {
+        if (view.lost.length === 0) {
+            return;
+        }
+
+        if (!env.confirm(DISMISS_LOST_QUESTION)) {
+            return;
+        }
+
+        view.lost = [];
+        env.drafts()?.markLostDismissed(view.docUuid);
+    }
+
+    /**
+     * The re-offer after a reload (section 6.6): a parked list that was not
+     * dismissed comes back into the lost row, each entry marked as from the
+     * last visit. Two tabs of one browser share the row (it is keyed per
+     * document, as drafts are): known, stated.
+     */
+    async function reofferLost(drafts) {
+        let row = null;
+        try {
+            row = await drafts.loadLost(view.docUuid);
+        } catch (_) {
+            row = null;
+        }
+        if (!row || row.dismissedAt || !Array.isArray(row.entries) || row.entries.length === 0) {
+            return;
+        }
+
+        view.lost = row.entries.map((entry) => ({
+            ...entry,
+            source: 'parked',
+            sentence: entry.source === 'parked' ? entry.sentence : `From your last visit: ${entry.sentence}`,
+        }));
+    }
+
+    /**
      * A newer version exists and this tab has unsaved typing. Stop saving
      * and ask; the draft keeps the text in the meantime. `version` is the
      * version that is in the way: Keep mine needs only that number, not
@@ -1302,6 +1412,14 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        // A text is already set aside and offered. Load theirs sets THIS tab's
+        // text aside in its place, and the stale- park holds one text only, so
+        // the earlier one would be nowhere: ask first, before the engine's
+        // document is taken (a no changes nothing).
+        if (view.setAside && engine.pending && !env.confirm(LOAD_THEIRS_REPLACES_QUESTION)) {
+            return;
+        }
+
         const waiting = engine.takeRemote();
         if (!waiting) {
             engine.refetch(view.baseVersion);
@@ -1391,6 +1509,8 @@ export function createSyncHost(view, env) {
 
         try {
             handle.editor.commands.setContent(JSON.parse(view.setAside), { errorOnInvalidContent: true });
+            // The saves sent so far did not carry this text (see persist()).
+            view.putBackSeq = view.saveSeq;
             forgetSetAside();
         } catch (_) {
             // Nothing was put back, so nothing more is owed than before.
@@ -1485,6 +1605,12 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        // BEFORE the draft, the lost row: a list parked by a merge in an
+        // earlier visit of this browser is offered again, and the draft
+        // merge below appends its own losses to it. offerLost() parks the
+        // WHOLE list, so the earlier park must be read first, or it would be
+        // overwritten and the fresh entries read back as last visit's.
+        await reofferLost(drafts);
         await restoreDraftIfRestorable(drafts, handle);
         // The awaits above can see `confirmed` nulled (a save that failed or
         // expired): then the known document of this very version is the
@@ -1728,6 +1854,9 @@ export function createSyncHost(view, env) {
         loadTheirs,
         putBack,
         discardSetAside,
+        putBackLost,
+        putBackAllLost,
+        dismissLost,
         membersChanged,
         restoreDraft,
         applySuggestion,
