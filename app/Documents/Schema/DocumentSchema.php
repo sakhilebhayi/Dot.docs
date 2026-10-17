@@ -25,16 +25,35 @@ class DocumentSchema
         ]];
     }
 
+    /**
+     * Give every block a valid id that no block EARLIER in the document has.
+     *
+     * A block whose id is missing, malformed or already taken by an earlier
+     * block (document order: a parent before its children, siblings top to
+     * bottom, at every depth) gets a fresh one. The first holder of an id
+     * keeps it, so an id that is already unique never changes and running
+     * this twice changes nothing the second time.
+     *
+     * `$seen` is shared by reference through a plain loop. It used to be
+     * carried through array_map() with arrow functions, which capture their
+     * variables BY VALUE: every sibling got its own copy, duplicates between
+     * siblings survived, and validate() then refused the save.
+     */
     public function ensureIds(array $doc): array
     {
         $seen = [];
         $content = $doc['content'] ?? [];
-        $doc['content'] = array_map(fn ($n) => $this->ensureNodeIds($n, $seen), is_array($content) ? $content : []);
+        $doc['content'] = $this->ensureIdsIn(is_array($content) ? $content : [], $seen);
         $doc['attrs'] = array_merge(['schema' => self::VERSION, 'style' => 'report', 'vars' => []], $doc['attrs'] ?? []);
 
         return $doc;
     }
 
+    /**
+     * @param  array<array-key, bool>  $seen  shared by reference, in document order
+     *
+     * @param-out  array<array-key, bool>  $seen
+     */
     private function ensureNodeIds(array $node, array &$seen): array
     {
         if (in_array($node['type'] ?? '', self::BLOCKS, true)) {
@@ -52,10 +71,27 @@ class DocumentSchema
             $node['attrs'] = array_merge($attrs, ['id' => $id]);
         }
         if (isset($node['content']) && is_array($node['content'])) {
-            $node['content'] = array_map(fn ($c) => $this->ensureNodeIds($c, $seen), $node['content']);
+            $node['content'] = $this->ensureIdsIn($node['content'], $seen);
         }
 
         return $node;
+    }
+
+    /**
+     * @param  array<int|string, mixed>  $nodes
+     * @param  array<array-key, bool>  $seen  shared by reference, in document order
+     *
+     * @param-out  array<array-key, bool>  $seen
+     *
+     * @return array<int|string, mixed>
+     */
+    private function ensureIdsIn(array $nodes, array &$seen): array
+    {
+        foreach ($nodes as $key => $node) {
+            $nodes[$key] = $this->ensureNodeIds($node, $seen);
+        }
+
+        return $nodes;
     }
 
     /** Alignments HtmlRenderer will put in a `style` attribute. */

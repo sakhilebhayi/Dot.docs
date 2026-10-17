@@ -35,6 +35,131 @@ class DocumentSchemaTest extends TestCase
         $this->assertArrayNotHasKey('attrs', $out['content'][0]['content'][0]);
     }
 
+    /** @return list<string> every block id in document order */
+    private function blockIdsInOrder(DocumentSchema $schema, array $doc): array
+    {
+        $ids = [];
+        $schema->walk($doc, function (array $node) use (&$ids): void {
+            if (in_array($node['type'] ?? '', DocumentSchema::BLOCKS, true)) {
+                $ids[] = $node['attrs']['id'];
+            }
+        });
+
+        return $ids;
+    }
+
+    private function para(?string $id, string $text = 'x'): array
+    {
+        $node = ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => $text]]];
+        if ($id !== null) {
+            $node['attrs'] = ['id' => $id];
+        }
+
+        return $node;
+    }
+
+    public function test_ensure_ids_gives_a_fresh_id_to_the_second_of_two_sibling_paragraphs_sharing_one(): void
+    {
+        $schema = new DocumentSchema;
+        $doc = ['type' => 'doc', 'content' => [$this->para('aaaaaaaa', 'first'), $this->para('aaaaaaaa', 'second')]];
+
+        $out = $schema->ensureIds($doc);
+
+        $this->assertSame('aaaaaaaa', $out['content'][0]['attrs']['id'], 'the first in document order keeps its id');
+        $this->assertNotSame('aaaaaaaa', $out['content'][1]['attrs']['id']);
+        $this->assertTrue(BlockId::isValid($out['content'][1]['attrs']['id']));
+        $this->assertSame('second', $out['content'][1]['content'][0]['text'], 'only the id changes');
+        $this->assertSame([], $schema->validate($out));
+    }
+
+    public function test_ensure_ids_repairs_a_triple_duplicate_keeping_only_the_first(): void
+    {
+        $schema = new DocumentSchema;
+        $doc = ['type' => 'doc', 'content' => [
+            $this->para('aaaaaaaa'), $this->para('aaaaaaaa'), $this->para('aaaaaaaa'),
+        ]];
+
+        $out = $schema->ensureIds($doc);
+
+        $ids = $this->blockIdsInOrder($schema, $out);
+        $this->assertSame('aaaaaaaa', $ids[0]);
+        $this->assertCount(3, array_unique($ids));
+        $this->assertSame([], $schema->validate($out));
+    }
+
+    public function test_ensure_ids_repairs_a_paragraph_inside_a_list_item_that_shares_an_id_with_a_top_level_paragraph(): void
+    {
+        $schema = new DocumentSchema;
+        $doc = ['type' => 'doc', 'content' => [
+            $this->para('aaaaaaaa', 'top'),
+            ['type' => 'bulletList', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => [
+                ['type' => 'listItem', 'attrs' => ['id' => 'cccccccc'], 'content' => [$this->para('aaaaaaaa', 'nested')]],
+            ]],
+        ]];
+
+        $out = $schema->ensureIds($doc);
+
+        $this->assertSame('aaaaaaaa', $out['content'][0]['attrs']['id'], 'the top-level paragraph comes first');
+        $nested = $out['content'][1]['content'][0]['content'][0];
+        $this->assertSame('nested', $nested['content'][0]['text']);
+        $this->assertNotSame('aaaaaaaa', $nested['attrs']['id']);
+        $this->assertSame('bbbbbbbb', $out['content'][1]['attrs']['id']);
+        $this->assertSame('cccccccc', $out['content'][1]['content'][0]['attrs']['id']);
+        $this->assertSame([], $schema->validate($out));
+    }
+
+    public function test_ensure_ids_keeps_the_first_in_document_order_even_when_it_is_the_nested_one(): void
+    {
+        $schema = new DocumentSchema;
+        $doc = ['type' => 'doc', 'content' => [
+            ['type' => 'bulletList', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => [
+                ['type' => 'listItem', 'attrs' => ['id' => 'cccccccc'], 'content' => [$this->para('aaaaaaaa', 'nested')]],
+            ]],
+            $this->para('aaaaaaaa', 'top'),
+        ]];
+
+        $out = $schema->ensureIds($doc);
+
+        $this->assertSame('aaaaaaaa', $out['content'][0]['content'][0]['content'][0]['attrs']['id']);
+        $this->assertNotSame('aaaaaaaa', $out['content'][1]['attrs']['id']);
+        $this->assertSame([], $schema->validate($out));
+    }
+
+    public function test_ensure_ids_repairs_a_missing_id_and_a_duplicate_in_the_same_document(): void
+    {
+        $schema = new DocumentSchema;
+        $doc = ['type' => 'doc', 'content' => [
+            $this->para(null, 'no id'), $this->para('aaaaaaaa'), $this->para('aaaaaaaa'), $this->para('not an id!'),
+        ]];
+
+        $out = $schema->ensureIds($doc);
+
+        $ids = $this->blockIdsInOrder($schema, $out);
+        $this->assertSame('aaaaaaaa', $ids[1]);
+        $this->assertCount(4, array_unique($ids));
+        $this->assertSame([], $schema->validate($out));
+    }
+
+    public function test_ensure_ids_leaves_a_document_whose_ids_are_already_unique_byte_identical_and_is_idempotent(): void
+    {
+        $schema = new DocumentSchema;
+        $doc = ['type' => 'doc', 'attrs' => ['schema' => 1, 'style' => 'report', 'vars' => []], 'content' => [
+            $this->para('aaaaaaaa'),
+            ['type' => 'bulletList', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => [
+                ['type' => 'listItem', 'attrs' => ['id' => 'cccccccc'], 'content' => [$this->para('dddddddd')]],
+            ]],
+        ]];
+
+        $once = $schema->ensureIds($doc);
+
+        $this->assertSame(json_encode($doc), json_encode($once));
+        $this->assertSame(json_encode($once), json_encode($schema->ensureIds($once)));
+
+        $broken = ['type' => 'doc', 'content' => [$this->para('aaaaaaaa'), $this->para('aaaaaaaa')]];
+        $fixed = $schema->ensureIds($broken);
+        $this->assertSame(json_encode($fixed), json_encode($schema->ensureIds($fixed)), 'a repaired document is stable');
+    }
+
     public function test_validate_rejects_unknown_nodes_and_duplicate_ids(): void
     {
         $schema = new DocumentSchema;
