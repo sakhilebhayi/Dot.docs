@@ -34,7 +34,7 @@ class EcosystemAuthController extends Controller
 
             $user = $identity ? $provision($identity) : null;
 
-            if ($user && $identity) {
+            if ($user !== null) {
                 $syncTeams($user, $identity);
             }
         }
