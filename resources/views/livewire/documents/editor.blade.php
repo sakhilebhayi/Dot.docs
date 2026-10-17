@@ -336,6 +336,9 @@
         loadTheirs() { return this.syncHost().loadTheirs(); },
         putBack() { this.syncHost().putBack(); },
         discardSetAside() { this.syncHost().discardSetAside(); },
+        putBackLost(index) { this.syncHost().putBackLost(index); },
+        putBackAllLost() { this.syncHost().putBackAllLost(); },
+        dismissLost() { this.syncHost().dismissLost(); },
         membersChanged(members) { this.syncHost().membersChanged(members); },
         restoreDraftIfRestorable() { return this.syncHost().restoreDraft(); },
         applySuggestion(content, version) { this.syncHost().applySuggestion(content, version); },
@@ -873,7 +876,7 @@
             <div class="doc-notice" hidden x-bind:hidden="!conflict">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
-                    <span>Not saved — this document was changed elsewhere while you were typing. Choose one.</span>
+                    <span>Not saved — this document was changed elsewhere while you were typing, and the two could not be combined. Choose one.</span>
                 </p>
                 <span class="doc-notice-actions">
                     <button type="button" class="tool tool-mono" @click="keepMine()"
@@ -885,6 +888,79 @@
                             title="Show the newer version. You can put your text back afterwards.">Load theirs</button>
                     <span id="doc-notice-keep-mine-does" hidden>Save your version over the newer one. The other version is kept in the history.</span>
                     <span id="doc-notice-load-theirs-does" hidden>Show the newer version. You can put your text back afterwards.</span>
+                </span>
+            </div>
+
+            {{-- ── The lost row (Phase 2) ────────────────────────────────
+                 What a merge could not keep: a paragraph both people changed
+                 at the same moment (theirs stays on the page, this is yours),
+                 or one somebody removed while you were typing in it. Each
+                 item is offered back on its own: Put it back puts it below
+                 the version that is there now, or where it was before it was
+                 removed, as an ordinary edit the autosave sends. Items are
+                 appended and never withdrawn; a copy of the whole list is
+                 parked in this browser for 7 days (sync/host.js, offerLost()).
+
+                 Five STATIC item slots switched with hidden, not x-for: the
+                 wiring test pins every element, and no Alpine pattern new to
+                 this bar is introduced (the Phase 1 bar faults were only
+                 visible in a browser). LOST_ROWS in sync/host.js is the same
+                 five; a sixth item and beyond are counted in the last line and
+                 come back with Put them all back. Nothing here is rendered by
+                 the server: Livewire ignores the whole bar. --}}
+            <div class="doc-notice" hidden x-bind:hidden="!lost.length">
+                <p class="doc-notice-text">
+                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                    <span>Not everything you typed could be kept. Each item below stays here until you put it back or dismiss it; a copy is kept in this browser for 7 days.</span>
+                </p>
+                <ul class="doc-notice-list">
+                    <li class="doc-notice-item" hidden x-bind:hidden="!lost[0]">
+                        <span x-text="lost[0] ? lost[0].sentence : ''"></span>
+                        <q class="doc-notice-excerpt" x-text="lost[0] ? lost[0].excerpt : ''"></q>
+                        <button type="button" class="tool tool-mono" @click="putBackLost(0)"
+                                aria-describedby="doc-notice-put-back-lost-does"
+                                title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
+                    </li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="!lost[1]">
+                        <span x-text="lost[1] ? lost[1].sentence : ''"></span>
+                        <q class="doc-notice-excerpt" x-text="lost[1] ? lost[1].excerpt : ''"></q>
+                        <button type="button" class="tool tool-mono" @click="putBackLost(1)"
+                                aria-describedby="doc-notice-put-back-lost-does"
+                                title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
+                    </li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="!lost[2]">
+                        <span x-text="lost[2] ? lost[2].sentence : ''"></span>
+                        <q class="doc-notice-excerpt" x-text="lost[2] ? lost[2].excerpt : ''"></q>
+                        <button type="button" class="tool tool-mono" @click="putBackLost(2)"
+                                aria-describedby="doc-notice-put-back-lost-does"
+                                title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
+                    </li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="!lost[3]">
+                        <span x-text="lost[3] ? lost[3].sentence : ''"></span>
+                        <q class="doc-notice-excerpt" x-text="lost[3] ? lost[3].excerpt : ''"></q>
+                        <button type="button" class="tool tool-mono" @click="putBackLost(3)"
+                                aria-describedby="doc-notice-put-back-lost-does"
+                                title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
+                    </li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="!lost[4]">
+                        <span x-text="lost[4] ? lost[4].sentence : ''"></span>
+                        <q class="doc-notice-excerpt" x-text="lost[4] ? lost[4].excerpt : ''"></q>
+                        <button type="button" class="tool tool-mono" @click="putBackLost(4)"
+                                aria-describedby="doc-notice-put-back-lost-does"
+                                title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
+                    </li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="lost.length <= 5">And <span x-text="lost.length - 5"></span> more. Put them all back restores every item, these included.</li>
+                </ul>
+                <span class="doc-notice-actions">
+                    <button type="button" class="tool tool-mono" @click="putBackAllLost()"
+                            aria-describedby="doc-notice-put-back-all-lost-does"
+                            title="Put every item back on the page, oldest first: each below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put them all back</button>
+                    <button type="button" class="tool tool-mono" @click="dismissLost()"
+                            aria-describedby="doc-notice-dismiss-lost-does"
+                            title="Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts.">Dismiss all</button>
+                    <span id="doc-notice-put-back-lost-does" hidden>Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.</span>
+                    <span id="doc-notice-put-back-all-lost-does" hidden>Put every item back on the page, oldest first: each below the version that is there now, or where it was before it was removed. Nothing else on the page changes.</span>
+                    <span id="doc-notice-dismiss-lost-does" hidden>Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts.</span>
                 </span>
             </div>
 

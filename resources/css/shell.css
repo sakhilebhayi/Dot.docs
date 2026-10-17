@@ -1459,6 +1459,40 @@ button.list-row {
 }
 
 /*
+ * The lost row's items (editor.blade.php, Phase 2): one block a merge could
+ * not keep per item, oldest first, each with its sentence, its excerpt and
+ * its own Put it back. The list takes a line of its own under the row's
+ * sentence; an item wraps like the row does. An item is switched with the
+ * hidden attribute, which `.doc-notice [hidden]` above covers.
+ */
+.doc-notice-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    flex: 1 1 100%;
+    min-width: 0;
+    /* Five items of two or three lines each would make the sticky .doc-head taller than a phone's viewport and put Put them all back and Dismiss all out of reach: the list scrolls inside the row. */
+    max-height: 40vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.doc-notice-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2);
+}
+
+.doc-notice-excerpt {
+    color: var(--ink-soft);
+    overflow-wrap: anywhere;
+}
+
+/*
  * A tool on the bar above draws no edge until you go near it. Here the button
  * is the answer the sentence asks for, so it shows itself as one: the edge and
  * the fill of .btn, at the tool's own size.
