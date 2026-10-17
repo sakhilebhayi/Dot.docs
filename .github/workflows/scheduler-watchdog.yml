@@ -23,9 +23,22 @@ jobs:
         env:
           HOST: doc.infodot.co.za
         run: |
-          set -euo pipefail
+          set -uo pipefail
           body="$(mktemp)"
-          code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 20 -H "Accept: application/json" "https://$HOST/up/scheduler" || echo 000)
-          echo "GET https://$HOST/up/scheduler -> $code"
+          # The probe answers 200 (fresh) or 503 (the app says stale): both are
+          # real answers. Anything else -- the shared host's edge firewall
+          # refusing a GitHub runner IP (403, ~2-7% of requests), a timeout
+          # (000), a gateway error -- may be transient, so retry before
+          # raising an alarm that emails the owner.
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 20 -H "Accept: application/json" "https://$HOST/up/scheduler" || echo 000)
+            echo "attempt $attempt: GET /up/scheduler -> $code"
+            case "$code" in 200|503) break ;; esac
+            [ "$attempt" -lt 3 ] && sleep 30
+          done
           cat "$body"; echo
-          [ "$code" = "200" ] || { echo "::error::Scheduler probe answered HTTP $code: the scheduler or the queue worker has not run recently on $HOST (or the site is down)."; exit 1; }
+          case "$code" in
+            200) exit 0 ;;
+            503) echo "::error::The app answered 503: the scheduler or the queue worker has not run recently on $HOST."; exit 1 ;;
+            *)   echo "::error::Probe unreachable or refused on all 3 attempts (last HTTP $code). 403 = the host's edge firewall blocking GitHub runners; 000/5xx = the site may be down."; exit 1 ;;
+          esac
