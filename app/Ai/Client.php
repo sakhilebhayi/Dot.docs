@@ -40,7 +40,13 @@ class Client
      */
     private const MAX_LOGGED_EXCEPTION_MESSAGE_LENGTH = 200;
 
-    public function __construct(private Usage $usage) {}
+    public function __construct(private Usage $usage, private ?Guard $guard = null) {}
+
+    /** Refuse a REAL model call that the kill switch or a daily budget forbids. Never called for the mock provider. */
+    private function guard(array $opts): void
+    {
+        ($this->guard ?? app(Guard::class))->assertAllowed($opts);
+    }
 
     /**
      * @param  'draft'|'compose'|'quick'  $role
@@ -56,6 +62,8 @@ class Client
 
             return $result;
         }
+
+        $this->guard($opts);
 
         [$result, $fallbackUsed] = $this->attemptChain(
             $this->chainFor($role),
@@ -92,6 +100,8 @@ class Client
 
             return [];
         }
+
+        $this->guard($opts);
 
         [$result, $fallbackUsed] = $this->attemptChain(
             $this->chainFor($role),
