@@ -91,11 +91,12 @@ export const DISCARD_QUESTION =
 
 /**
  * What Load theirs asks when a text is already set aside and offered back: the
- * new text takes the offer's place, and the earlier one is then in no version
- * and in no park.
+ * new text takes the offer's place, so the earlier one is no longer offered
+ * on the page. A browser that keeps drafts still holds it in a kept park for
+ * 7 days (parkStaleDraft keeps earlier parks); one that does not has no copy.
  */
 export const LOAD_THEIRS_REPLACES_QUESTION =
-    'A text is already set aside from earlier. Loading theirs sets your text on the page aside instead, and the earlier text will be gone. Continue?';
+    'A text is already set aside from earlier. Loading theirs sets your text on the page aside instead, and the earlier text will no longer be offered here. Continue?';
 
 /**
  * What Dismiss all asks before it empties the lost row (section 6.5). Always

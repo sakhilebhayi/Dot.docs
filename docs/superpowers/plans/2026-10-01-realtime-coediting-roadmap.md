@@ -221,8 +221,8 @@ socket drops. Needs the owner to choose and pay for the outside service.
    under the other with a notice (recommended), or keep yours and drop
    theirs.
 3. **Delete beats typing.** If one person deletes a paragraph while another
-   is typing in it, the typing in that paragraph is lost. This is standard
-   for this kind of merging. Accept?
+   is typing in it, the deletion wins and the typed words are offered back
+   to the person who typed them (decided 2026-10-16, built in Phase 2).
 4. **Reloads.** Restoring a version, importing over a document or accepting
    an AI suggestion would reload the editor for everyone who has it open,
    keeping their last unsent seconds as recoverable text. Accept?
