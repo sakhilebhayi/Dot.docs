@@ -9,6 +9,7 @@ use App\Http\Controllers\DocumentSyncController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\FileViewController;
 use App\Http\Controllers\PublishedDocumentController;
+use App\Http\Controllers\SchedulerProbeController;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
 use App\Livewire\Documents\Index;
@@ -26,6 +27,11 @@ use Illuminate\Support\Str;
 use Laravel\Jetstream\Jetstream;
 
 Route::get('/auth/ecosystem', [EcosystemAuthController::class, 'handle'])->name('auth.ecosystem');
+
+// Public liveness probe (no auth, no secrets): answers 503 once the cron
+// scheduler or the queue worker has not been heard from. Watched from GitHub by
+// .github/workflows/scheduler-watchdog.yml.
+Route::get('/up/scheduler', SchedulerProbeController::class)->name('up.scheduler');
 
 Route::get('/', function () {
     return view('welcome');
