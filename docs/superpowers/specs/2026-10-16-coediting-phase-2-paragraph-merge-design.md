@@ -541,7 +541,6 @@ Different paragraphs (poll-first and refusal-first with one tab throttled); D1 w
 - The Livewire save still carries the document in the snapshot both ways (Phase 5).
 - Drafts from before Phase 2 (no base row) are set aside as today.
 - The echo rule remembers one snapshot. When two sends in a row both go unanswered and the first was stored, the tab's own words come back as a lost-row offer. Nothing is lost.
-- A save whose request keeps failing is resent at the pace of the poll, with no back-off.
 
 ---
 
@@ -666,3 +665,9 @@ Three limits of section 13 are closed; each has a test written first and a mutat
 Review fixes to the three (2026-10-17): the merged draft is stamped with `draftStamp()` (an overwrite owed by the gap rule survives a crash before the save: the reopened page sets the draft aside). A text offered from the queue keeps the label its park had (`from`: Load theirs and an unmergeable suggestion are 'conflict', a stale draft is 'draft') and has NO base version (`setAsideBase` null), so Put it back asks its questions and Discard always asks `DISCARD_QUESTION` (it is in no saved version). The queue is not offered while a conflict, a merge or a stop reason stands; the offer is held (`parkOfferPending`) and made on the poll tick after they clear. Discard does not offer the same text straight back when the store could not write the mark. Dismiss all marks the dismissed entries in every row of the document (it passes the list its page showed), so a tab whose row was adopted still dismisses for good. A page whose adoption returned nothing reads the rows.
 
 Stated limits of two tabs in one browser (not closed): (1) a second tab can be offered a set-aside text that a LIVE first tab is still showing (the parks are per browser, not per tab), and may put it back or discard it (it asks); the first tab then still shows it. (2) After an adoption an entry can sit in two rows until the next reload (the adopting tab's row, and the still-open tab's recreated one); an entry one tab PUT BACK is only removed from that tab's row, so after a reload it can be offered once more from the other row, and putting it back again duplicates the block. Nothing is lost.
+
+---
+
+## 20. Back-off for a save whose request keeps failing (2026-10-17)
+
+The limit "a save whose request keeps failing is resent at the pace of the poll, with no back-off" (section 13) is closed. After a failed REQUEST (no answer from the application) the page counts the failures in a row (`saveFailures`) and holds the next send until `saveRetryAt`: no hold after the first failure (resent at the next poll tick, as before), then 5, 10, 20 and 40 s, then 60 s at most. A send happens on the first poll tick at or after the hold, with the newest text; a keystroke does not bypass the hold. The word stays Not saved and the draft keeps the text. Any answer to a save, accepted or refused, resets the count; Keep mine is not held; other tabs are unaffected. The unload beacon is unchanged (a held text is carried by the draft). Tests: the schedule 0, 0, 5, 15, 35, 75, 135, 195 s, the cap, the resets, a new edit while held, two tabs, Keep mine; mutations (no hold, an unbounded hold, no reset, the force bypass removed) each fail one. The failure walk's quiesce moves its clock past the cap.
