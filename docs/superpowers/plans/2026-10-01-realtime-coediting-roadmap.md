@@ -194,6 +194,46 @@ only undoes your own typing.
 - A convergence test with two and three headless editors, run under plain
   `node --test`, exists **before** anything ships.
 
+**How to read the metrics (decide Phase 3 on these, not on a feeling).** The
+editor page counts, per document and day, what Phase 2 had to do, and never
+anything somebody wrote: merges and whether they left something over, the
+lost-row offers by kind and what the writer did with them, conflict notices,
+saves resent after a failed request, read only downgrades, and how many
+OTHER people were in the document, in seconds. Collection is on by default
+(`DOCS_SYNC_METRICS=false` switches it off); rows older than 120 days are
+deleted nightly. After two to three weeks of real use run, on the server,
+`php artisan sync:report --days=21` (`--json` for a machine). Its last line is
+the one to read, for example "In the last 21 days: 9 same-paragraph clashes
+across 4 documents; 310 minutes with two or more editors at once." Read it
+like this (a rule of thumb, not a measurement):
+
+- *Same-paragraph clashes* (`lost_both_live`) are the only thing Phase 3
+  fixes: two people changed the same paragraph within the autosave and poll
+  delay of each other (a few seconds) and the later saver's version was
+  offered back. Deletions against typing
+  (`lost_deleted_live`) are a different case Phase 3 does not remove.
+- *Rare* (a handful in three weeks, mostly one or two documents, and almost
+  every one put back with one click in `lost_put_back`): do not build Phase 3.
+  Phase 2 meets the need; spend the days on Phase 4 or 5.
+- *Every week, on several documents*, or a clash for a large share of the time
+  people share a document (`clashes_per_hour` in the JSON): build it, staged
+  (3a + 3b first). A high `lost_dismissed` against `lost_put_back` means
+  people drop the offered text instead of keeping it, which makes a clash cost
+  more than the numbers suggest.
+- *Few minutes with two or more editors*: the sample is too thin to decide
+  either way; keep collecting. Co-writing wanted as a promise is a product
+  decision whatever the numbers say.
+- Read the rest as the health of Phase 1 and 2, not of Phase 3: conflict
+  notices (`conflict_*`) should be rare, `backoff_*` and `save_resent` show a
+  document whose saves keep failing (a 413 or a 500), `echo_resolved` counts
+  merges the echo rule saved from a false clash, and `readonly_*` counts
+  people downgraded while the page was open.
+- The time with company counts people PRESENT with the document open (a
+  reader included, not only people typing), takes the busiest person's count
+  rather than the sum, and so can run a little high when one person has two
+  tabs open; it is a ceiling on "typing at the same moment", not a count of
+  it.
+
 ### Phase 4 - See each other: named carets and selections (3-4 days)
 
 Remote carets and selections with name labels, reported as block id plus
