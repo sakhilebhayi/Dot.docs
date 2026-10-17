@@ -54,5 +54,13 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(10)->by($request->ip().'|'.$target);
         });
+
+        // The editor's counter flush (POST /documents/{uuid}/sync-metrics):
+        // once a minute and on leaving the page, so twelve a minute is far
+        // more than a real tab sends. Per person AND document, never per IP:
+        // colleagues behind one office address look like one IP.
+        RateLimiter::for('sync-metrics', function (Request $request) {
+            return Limit::perMinute(12)->by(($request->user()?->getAuthIdentifier() ?? $request->ip()).'|'.$request->route('uuid'));
+        });
     }
 }
