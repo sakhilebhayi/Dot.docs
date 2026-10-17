@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { SAVE_EXPIRY_MS } from '../../resources/js/editor/sync/host.js';
-import { LOST, STALE, UUID, blocksOf, para, world } from './support/syncWorld.js';
+import { LOST, STALE, UUID, blocksOf, deletionLedger, para, world } from './support/syncWorld.js';
 
 /**
  * The random walk with the failures of section 11 switched on. Same fake world
@@ -13,15 +13,22 @@ import { LOST, STALE, UUID, blocksOf, para, world } from './support/syncWorld.js
  * suggestion, a tab that dies and reopens over its own draft store, an
  * individual Put it back, and a browser that keeps no drafts.
  *
- * Checked after every step:
+ * Checked at every save request and after every step:
  *   A. "Saved" is never said while the editor holds a token no stored version
- *      ever had.
+ *      ever had;
+ *   HELD       no save request leaves a tab while its merge fetch is out;
+ *   STALEBASE  no save states a base lower than the version the tab knows;
+ *   BACK       a tab's base version never decreases;
+ *   EXP        after a poll or a failed poll, no merge fetch is still out 15 s
+ *              after it began (the expiry has fired);
  * Checked once everything has landed:
  *   B. an accepted save that dropped a token nobody knowingly deleted said it
- *      overwrites;
+ *      overwrites (a deletion excuses the drops of the person who made it; a
+ *      token that comes back is not excused again once they have seen it
+ *      stored, see deletionLedger in support/syncWorld.js);
  *   C. no document is sent twice on one base, unless the first request failed
- *      or was given up on (15 s), or an accepted suggestion retired the first
- *      (one repeat per tab and base, see the check below);
+ *      or was given up on (15 s), or an accepted suggestion retired that very
+ *      request (and only a send made after the suggestion repeats it);
  *   D. every tab converges on the server's document, and a fresh token typed
  *      on each tab is saved;
  *   E. no token is lost without a trace (a version, the lost row, a set-aside
@@ -30,6 +37,11 @@ import { LOST, STALE, UUID, blocksOf, para, world } from './support/syncWorld.js
  *      notice or merge is left standing;
  *   G. no overwrite is still owed;
  *   H. no duplicate block id.
+ *
+ * Wider than it should be (open, see the Task 12 report, Fix round 2): a Phase 1
+ * stale- park holds one text, and every token of a park that another park
+ * replaces is excused for the rest of the run, whichever path replaced it and
+ * wherever else the token is.
  *
  * What it does NOT cover: characters inside one block, two tabs of one
  * browser sharing a draft, and the server's own failures.
@@ -102,7 +114,12 @@ async function run(seed, tabCount) {
     const trace = [];
     const violations = [];
     const typed = new Map(); // token -> who typed it, and where
-    const knowinglyDeleted = new Set(); // tokens in a block somebody deleted on purpose
+    const ledger = deletionLedger(tokensIn, (slot) => {
+        const tab = slots[slot];
+
+        return Math.max(tab.view.baseVersion, tab.view.known ? tab.view.known.version : 0);
+    }); // tokens in a block somebody deleted on purpose, and whose save dropped them
+    let actorSlot = -1;
     const everStored = new Set(); // tokens any stored version has ever held
     const excused = new Set(); // tokens the writer, or a browser without drafts, knowingly let go
     const lateAnswers = []; // lost answers that may still arrive
@@ -114,32 +131,64 @@ async function run(seed, tabCount) {
     const actors = new Map();
     tokensIn(server.json).forEach((token) => everStored.add(token));
 
+    // B, judged as each version is stored: who sent it decides what was knowingly deleted.
+    let judged = 0;
+    const judgeStoredVersions = () => {
+        while (judged < server.trace.length) {
+            const row = server.trace[judged];
+            judged += 1;
+            const silent = ledger.stored(row, actorSlot);
+            if (silent.length > 0 && !row.overwrite) {
+                violations.push(`B: version ${row.version} dropped ${silent.join(',')} from the head without saying it overwrites (by ${JSON.stringify(actors.get(row.version))})`);
+            }
+        }
+    };
     const realSave = server.save.bind(server);
     server.save = (json, base, overwrite = false) => {
         const result = realSave(json, base, overwrite);
         if (result.ok) {
             actors.set(result.version, { actor, base, overwrite });
         }
+        judgeStoredVersions();
 
         return result;
+    };
+    const realReplace = server.replace.bind(server);
+    server.replace = (json, options) => {
+        const version = realReplace(json, options);
+        actorSlot = -1; // a restore, an import, an accepted suggestion: nobody's deletion
+        judgeStoredVersions();
+
+        return version;
+    };
+    // Who is sending: the slot is the person (a reopened tab is the same person's browser).
+    const sends = (tab, what) => {
+        actor = `${tab.name}.${what}`;
+        actorSlot = tab.slot;
     };
 
     const track = (tab) => {
         const realArrive = tab.saveArrives;
         tab.saveArrives = () => {
-            actor = `${tab.name}.saveArrives`;
+            sends(tab, 'saveArrives');
 
             return realArrive();
         };
         const realLeave = tab.leave;
         tab.leave = () => {
-            actor = `${tab.name}.beacon`;
+            sends(tab, 'beacon');
 
             return realLeave();
         };
         // When each save was sent and answered, for invariant C.
         const realSend = tab.env.save;
         tab.env.save = (json, baseVersion, overwrite) => {
+            if (tab.view.merging) {
+                violations.push(`HELD: ${tab.name} sent a save while its merge fetch was out`);
+            }
+            if (tab.view.known && baseVersion < tab.view.known.version) {
+                violations.push(`STALEBASE: ${tab.name} sent a save on v${baseVersion} while it knows v${tab.view.known.version}`);
+            }
             const promise = realSend(json, baseVersion, overwrite);
             const record = tab.sent[tab.sent.length - 1];
             record.at = clock.now;
@@ -217,10 +266,23 @@ async function run(seed, tabCount) {
         });
     };
 
+    // EXP: a poll or a failed poll is when a merge fetch that began 15 s ago must be given up on.
+    const checkExpiry = (tab) => {
+        if (tab.view.merging && clock.now - tab.view.merging.since >= SAVE_EXPIRY_MS) {
+            violations.push(`EXP: ${tab.name} still merging ${clock.now - tab.view.merging.since} ms after the fetch began`);
+        }
+    };
+
     // A. checked after every step
     const afterStep = (label) => {
         server.trace.forEach((row) => tokensIn(row.to).forEach((token) => everStored.add(token)));
         server.kept.forEach((row) => tokensIn(row.json).forEach((token) => everStored.add(token)));
+        for (const tab of slots) {
+            if (tab.lastBase !== undefined && tab.view.baseVersion < tab.lastBase) {
+                violations.push(`BACK: ${tab.name} base went back from ${tab.lastBase} to ${tab.view.baseVersion} (after: ${label})`);
+            }
+            tab.lastBase = tab.view.baseVersion;
+        }
         for (const tab of slots) {
             const untouched = tab.sent.length === 0 && tab.reports.length === 1;
             if (tab.word() === 'Saved' && !untouched) {
@@ -290,7 +352,7 @@ async function run(seed, tabCount) {
                     return;
                 }
                 const [id] = pick(blocks);
-                tokensIn({ content: [tab.block(id)] }).forEach((token) => knowinglyDeleted.add(token));
+                ledger.deleted(tab.slot, tokensIn({ content: [tab.block(id)] }));
                 tab.deleteBlock(id);
                 trace.push(`${tab.name} deletes ${id}`);
             },
@@ -358,7 +420,7 @@ async function run(seed, tabCount) {
                 }
                 const record = tab.saveNeverAnswers();
                 if (record.result === undefined && random() < 0.5) {
-                    actor = `${tab.name}.lostAnswerStored`;
+                    sends(tab, 'lostAnswerStored');
                     record.result = server.save(record.json, record.base, record.overwrite);
                 }
                 lateAnswers.push({ tab, record });
@@ -373,7 +435,7 @@ async function run(seed, tabCount) {
                 }
                 const { tab, record } = lateAnswers.splice(Math.floor(random() * lateAnswers.length), 1)[0];
                 if (record.result === undefined) {
-                    actor = `${tab.name}.late`;
+                    sends(tab, 'late');
                     record.result = server.save(record.json, record.base, record.overwrite);
                 }
                 record.resolve(record.result);
@@ -391,7 +453,7 @@ async function run(seed, tabCount) {
                 }
                 const record = tab.saves.shift();
                 if (record.result === undefined && random() < 0.5) {
-                    actor = `${tab.name}.failedButStored`;
+                    sends(tab, 'failedButStored');
                     server.save(record.json, record.base, record.overwrite);
                 }
                 record.reject(new Error('network'));
@@ -409,6 +471,7 @@ async function run(seed, tabCount) {
                 if (tab.polls.length > 0) {
                     await tab.poll();
                     trace.push(`${tab.name} polls (v${server.version})`);
+                    checkExpiry(tab);
                 }
             },
         ],
@@ -422,6 +485,7 @@ async function run(seed, tabCount) {
                 if (tab.polls.length > 0) {
                     await (random() < 0.5 ? tab.pollAnswers(500, null) : tab.pollFails());
                     trace.push(`${tab.name} poll fails`);
+                    checkExpiry(tab);
                 }
             },
         ],
@@ -485,12 +549,13 @@ async function run(seed, tabCount) {
                 typed.set(token, { author: 'suggestion', block: content.content[0].attrs.id });
                 content.content[0].content = [{ type: 'text', text: `suggested ${token}` }];
                 const version = server.replace(content);
-                // applySuggestion retires any save this tab has in the air; note its base for invariant C.
+                // applySuggestion retires any save this tab has in the air; note which one and when, for invariant C.
                 if (tab.view.saving > 0) {
                     const inTheAir = tab.sent.filter((record) => record.answered === false);
+                    const suggestionSeq = ++events;
                     (inTheAir.length > 0 ? inTheAir : tab.sent.slice(-1)).forEach((record) => {
-                        tab.retiredBases ??= new Map();
-                        tab.retiredBases.set(record.base, 1);
+                        tab.retired ??= [];
+                        tab.retired.push({ record, suggestionSeq });
                     });
                 }
                 tab.host().applySuggestion(content, version);
@@ -502,8 +567,11 @@ async function run(seed, tabCount) {
             () => {
                 const tab = pick(slots);
                 if (tab.view.lost.length > 0) {
+                    // Now and then the editor cannot take the block (insertBlock() returns false): the entry must stay.
+                    tab.insertBlockFails = random() < 0.3;
                     tab.host().putBackLost(Math.floor(random() * tab.view.lost.length));
-                    trace.push(`${tab.name} puts one back`);
+                    trace.push(`${tab.name} puts one back (insertBlock fails=${tab.insertBlockFails})`);
+                    tab.insertBlockFails = false;
                 }
             },
         ],
@@ -603,6 +671,7 @@ async function run(seed, tabCount) {
     }
     for (const { tab, record } of lateAnswers.splice(0)) {
         if (record.result === undefined) {
+            sends(tab, 'quiesceLate');
             record.result = server.save(record.json, record.base, record.overwrite);
         }
         if (!tab.dead) {
@@ -720,7 +789,6 @@ async function run(seed, tabCount) {
     // ── E. no token is lost without a trace.
     const kept = new Set(tokensIn(server.json));
     server.kept.forEach((row) => tokensIn(row.json).forEach((token) => kept.add(token)));
-    knowinglyDeleted.forEach((token) => kept.add(token));
     excused.forEach((token) => kept.add(token));
     slots.forEach((tab) => {
         tab.view.lost.forEach((entry) => tokensOfEntry(entry).forEach((token) => kept.add(token)));
@@ -733,19 +801,13 @@ async function run(seed, tabCount) {
             }
         }
     });
-    const silently = [...typed.keys()].filter((token) => !kept.has(token));
+    const silently = [...typed.keys()].filter((token) => !kept.has(token) && !ledger.excuses(token));
     if (silently.length > 0) {
         violations.push(`E: tokens lost without a trace: ${silently.map((token) => `${token} by ${typed.get(token).author} in ${typed.get(token).block}`).join(', ')}`);
     }
 
-    // ── B. a save that dropped content said it overwrites.
-    server.trace.forEach(({ version, from, to, overwrite }) => {
-        const after = tokensIn(to);
-        const dropped = [...tokensIn(from)].filter((token) => !after.has(token) && !knowinglyDeleted.has(token));
-        if (dropped.length > 0 && !overwrite) {
-            violations.push(`B: version ${version} dropped ${dropped.join(',')} from the head without saying it overwrites (by ${JSON.stringify(actors.get(version))})`);
-        }
-    });
+    // ── B. a save that dropped content said it overwrites: judged as each version was stored (judgeStoredVersions).
+    judgeStoredVersions();
 
     // ── C. no document is sent twice on one base, unless the first request failed or was given up on.
     allTabs.forEach((tab) => {
@@ -760,13 +822,13 @@ async function run(seed, tabCount) {
                 const unansweredThen = !earlier.answered || earlier.answerSeq > record.sendSeq;
                 // A failed request, or a save given up on after 15 s (it may answer late), may be sent again.
                 let legitimate = (earlier.answered === 'failed' && earlier.answerSeq < record.sendSeq) || (unansweredThen && waited >= SAVE_EXPIRY_MS);
-                // The one narrow allowance: an accepted suggestion retired a save of this tab that was in the
-                // air on this base (applySuggestion zeroes the count, by design). The suggestion cannot always be
-                // merged at once, so the tab keeps its typing owed on the same, now stale, base and the next poll
-                // resends it; the server refuses it (it is already past that base) and the normal conflict path
-                // runs. A wasted round trip, nothing lost. Exactly one repeat per (tab, base) is allowed.
-                if (!legitimate && tab.retiredBases?.get(record.base) === 1) {
-                    tab.retiredBases.set(record.base, 0);
+                // The one narrow allowance: an accepted suggestion retired THIS earlier request (applySuggestion zeroes
+                // the count, by design). The suggestion cannot always be merged at once, so the tab keeps its typing
+                // owed on the same, now stale, base and the next poll resends it; the server refuses it (it is already
+                // past that base) and the normal conflict path runs. A wasted round trip, nothing lost. It excuses a
+                // send made AFTER the suggestion that retired the earlier one, and only a repeat of that very request:
+                // a third send repeats the second, which no suggestion retired.
+                if (!legitimate && tab.retired?.some((entry) => entry.record === earlier && record.sendSeq > entry.suggestionSeq)) {
                     legitimate = true;
                 }
                 if (!legitimate) {

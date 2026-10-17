@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { LOST, blocksOf, world } from './support/syncWorld.js';
+import { LOST, blocksOf, deletionLedger, world } from './support/syncWorld.js';
 
 /**
  * The random-walk convergence harness (section 12 of the Phase 2 spec).
@@ -12,7 +12,7 @@ import { LOST, blocksOf, world } from './support/syncWorld.js';
  * fire, letting saves reach the server and answer, polling, letting the
  * clock move, and now and then putting the lost row back or dismissing it.
  * Then everything that is in flight is let land (quiesce), and six things
- * must hold:
+ * must hold at the end, and three about the saving itself throughout:
  *
  *   1. every tab's document equals the server's (convergence);
  *   2. no token typed by anybody is silently lost: each is in the server
@@ -28,11 +28,25 @@ import { LOST, blocksOf, world } from './support/syncWorld.js';
  *   5. no tab owes an overwrite once everything has landed;
  *   6. every accepted save that dropped a token from the head that nobody
  *      knowingly deleted said it overwrites, so the head is in the history.
+ *      A deletion excuses only the saves of the person who made it; once it
+ *      is stored and the person has seen that, a token that reappears on the
+ *      server (put back, restored) is no longer excused, so a later silent
+ *      drop of it fails (see deletionLedger in support/syncWorld.js).
+ *
+ * and, from the repairs of dry run 2 (section 11), at every request and step:
+ *
+ *   HELD       no save request leaves a tab while its merge fetch is out
+ *              (`view.merging`);
+ *   STALEBASE  no save states a base lower than the version the tab already
+ *              knows (`view.known.version`): a merged save goes out on the
+ *              version it was merged onto;
+ *   BACK       a tab's `baseVersion` never decreases.
  *
  * Seeds 1 to 50 by default; `WALK_SEEDS=<n>` runs seeds 1 to n (the dry run
  * ran 2000 once: 4000 tests, about 12 seconds); `WALK_SEED=<n>` replays one.
- * On a failure the message carries the seed, the replay command and the last
- * thirty steps.
+ * On a failure, whatever its kind (an invariant, or a quiesce that does not
+ * come to rest), the message carries the seed, the tab count, the replay
+ * command and the last forty steps.
  *
  * This walk never fails a request or loses an answer: the failures of
  * section 11 (a lost or late save answer, a failed save or poll, the clock
@@ -48,6 +62,8 @@ const SEEDS = process.env.WALK_SEED
     ? [Number(process.env.WALK_SEED)]
     : Array.from({ length: Number(process.env.WALK_SEEDS ?? 50) }, (_, index) => index + 1);
 const TOKEN = /^t\d+$/;
+const TRACE_TAIL = 40;
+const replayWith = (seed) => `replay with WALK_SEED=${seed} node --test tests/js/sync.merge.walk.test.js`;
 
 /** A small seeded generator: the same seed gives the same walk on every machine. */
 function mulberry32(seed) {
@@ -170,7 +186,26 @@ async function quiesce(tabs, trace) {
     throw new Error(`did not quiesce in ${QUIESCE_ROUNDS} rounds:\n${states.join('\n')}`);
 }
 
+/** Says which walk failed and how to run it again, whatever the failure was. */
 async function walk(seed, tabCount) {
+    const trace = [];
+    try {
+        return await walkSteps(seed, tabCount, trace);
+    } catch (error) {
+        if (error && error.walkContext) {
+            throw error;
+        }
+        const wrapped = new Error(
+            `${error && error.message ? error.message : error} (seed ${seed}, ${tabCount} tabs; ${replayWith(seed)})\n${trace.slice(-TRACE_TAIL).join('\n')}`,
+            { cause: error }
+        );
+        wrapped.walkContext = true;
+
+        throw wrapped;
+    }
+}
+
+async function walkSteps(seed, tabCount, trace) {
     const random = mulberry32(seed);
     const pick = (list) => list[Math.floor(random() * list.length)];
     const w = world();
@@ -186,6 +221,56 @@ async function walk(seed, tabCount) {
     for (const tab of tabs) {
         await tab.cycle();
     }
+
+    const { server } = w;
+    let judged = 0;
+    const judgeStoredSaves = () => {
+        while (judged < server.trace.length) {
+            const row = server.trace[judged];
+            judged += 1;
+            const silent = ledger.stored(row, sender);
+            if (silent.length > 0 && !row.overwrite) {
+                droppedWithoutSaying.push(`version ${row.version} (sent by ${sender}) dropped ${silent.join(', ')} from the head without saying it overwrites`);
+            }
+        }
+    };
+    const realStore = server.save.bind(server);
+    server.save = (json, base, overwrite = false) => {
+        const result = realStore(json, base, overwrite);
+        judgeStoredSaves();
+
+        return result;
+    };
+    tabs.forEach((tab) => {
+        const realArrive = tab.saveArrives;
+        tab.saveArrives = () => {
+            sender = tab.name;
+
+            return realArrive();
+        };
+    });
+
+    tabs.forEach((tab) => {
+        const realSend = tab.env.save;
+        tab.env.save = (json, baseVersion, overwrite) => {
+            if (tab.view.merging) {
+                savingFaults.push(`HELD: ${tab.name} sent a save while its merge fetch was out`);
+            }
+            if (tab.view.known && baseVersion < tab.view.known.version) {
+                savingFaults.push(`STALEBASE: ${tab.name} sent a save on v${baseVersion} while it knows v${tab.view.known.version}`);
+            }
+
+            return realSend(json, baseVersion, overwrite);
+        };
+    });
+    const checkBases = (label) => {
+        tabs.forEach((tab) => {
+            if (tab.lastBase !== undefined && tab.view.baseVersion < tab.lastBase) {
+                savingFaults.push(`BACK: ${tab.name} base went back from ${tab.lastBase} to ${tab.view.baseVersion} (after: ${label})`);
+            }
+            tab.lastBase = tab.view.baseVersion;
+        });
+    };
 
     // Every merge that could not be done, with its inputs: there should be
     // none (invariant 4), and when there is one the ids say which case it was.
@@ -210,9 +295,17 @@ async function walk(seed, tabCount) {
 
     /** token -> {author, block}: who typed what where. */
     const typed = new Map();
-    /** Tokens that were in the deleter's own copy of a block when they deleted it. */
-    const knowinglyDeleted = new Set();
-    const trace = [];
+    /** Tokens that were in the deleter's own copy of a block when they deleted it, and whose deletion has been stored. */
+    const ledger = deletionLedger(tokensIn, (name) => {
+        const tab = tabs.find((candidate) => candidate.name === name);
+
+        return Math.max(tab.view.baseVersion, tab.view.known ? tab.view.known.version : 0);
+    });
+    let sender = 'unknown';
+    /** Invariant 6, judged as each save is stored, against the set as it stood then. */
+    const droppedWithoutSaying = [];
+    /** HELD, STALEBASE and BACK, found while the walk ran. */
+    const savingFaults = [];
     let tokens = 0;
     let inserted = 0;
 
@@ -252,7 +345,7 @@ async function walk(seed, tabCount) {
                     return;
                 }
                 const [id] = pick(blocks);
-                tokensIn({ content: [tab.block(id)] }).forEach((token) => knowinglyDeleted.add(token));
+                ledger.deleted(tab.name, tokensIn({ content: [tab.block(id)] }));
                 tab.deleteBlock(id);
                 trace.push(`${tab.name} deletes ${id}`);
             },
@@ -361,19 +454,21 @@ async function walk(seed, tabCount) {
 
     for (let step = 0; step < STEPS; step += 1) {
         await draw()();
+        checkBases(trace[trace.length - 1] ?? 'start');
     }
     await quiesce(tabs, trace);
+    checkBases('quiesce');
+    judgeStoredSaves();
 
-    return { w, tabs, typed, knowinglyDeleted, trace };
+    return { w, tabs, typed, ledger, droppedWithoutSaying, savingFaults, trace };
 }
 
 for (const seed of SEEDS) {
     for (const tabCount of [2, 3]) {
         test(`seed ${seed}, ${tabCount} tabs: every tab converges on the server and no token is silently lost`, async () => {
-            const { w, tabs, typed, knowinglyDeleted, trace } = await walk(seed, tabCount);
+            const { w, tabs, typed, ledger, droppedWithoutSaying, savingFaults, trace } = await walk(seed, tabCount);
             const { server } = w;
-            const because = (what) =>
-                `${what} (seed ${seed}, ${tabCount} tabs; replay with WALK_SEED=${seed} node --test tests/js/sync.merge.walk.test.js)\n${trace.slice(-30).join('\n')}`;
+            const because = (what) => `${what} (seed ${seed}, ${tabCount} tabs; ${replayWith(seed)})\n${trace.slice(-TRACE_TAIL).join('\n')}`;
 
             // 1. Convergence.
             tabs.forEach((tab) => {
@@ -391,8 +486,7 @@ for (const seed of SEEDS) {
                 }
             });
             server.kept.forEach((row) => tokensIn(row.json).forEach((token) => kept.add(token)));
-            knowinglyDeleted.forEach((token) => kept.add(token));
-            const silentlyLost = [...typed.keys()].filter((token) => !kept.has(token));
+            const silentlyLost = [...typed.keys()].filter((token) => !kept.has(token) && !ledger.excuses(token));
             assert.deepEqual(
                 silentlyLost,
                 [],
@@ -414,14 +508,12 @@ for (const seed of SEEDS) {
                 assert.equal(tab.view.overwriteOwed, false, because(`${tab.name} still owes an overwrite`));
             });
 
-            // 6. A head that lost a token nobody knowingly deleted was kept.
-            server.trace.forEach(({ version, from, to, overwrite }) => {
-                const after = tokensIn(to);
-                const dropped = [...tokensIn(from)].filter((token) => !after.has(token) && !knowinglyDeleted.has(token));
-                if (dropped.length > 0) {
-                    assert.ok(overwrite, because(`version ${version} dropped ${dropped.join(', ')} from the head without saying it overwrites`));
-                }
-            });
+            // 6. A head that lost a token nobody knowingly deleted was kept
+            //    (judged as each save was stored, against who had deleted what by then).
+            assert.deepEqual(droppedWithoutSaying, [], because(`a save dropped what nobody deleted: ${droppedWithoutSaying.join('; ')}`));
+
+            // HELD, STALEBASE, BACK: the saving itself.
+            assert.deepEqual(savingFaults, [], because(`the saving broke its own rules: ${savingFaults.slice(0, 5).join('; ')}`));
 
             // And the walk did something.
             assert.ok(typed.size > 0, because('nothing was typed'));
@@ -429,3 +521,34 @@ for (const seed of SEEDS) {
         });
     }
 }
+
+// The ledger of knowing deletions (support/syncWorld.js) that invariant 6 and
+// the walk of failures judge by. It is the walks' own measuring stick, so it is
+// measured here: a deletion excuses its own person, and only until the token
+// has come back after they saw the deletion stored.
+test('deletionLedger: a deletion excuses its own person and ends once the token is back and was seen', () => {
+    const doc = (...words) => ({ content: [{ type: 'paragraph', content: words.map((text) => ({ type: 'text', text })) }] });
+    const row = (version, from, to) => ({ version, from, to });
+    let seen = { A: 0, B: 0 };
+    const ledger = deletionLedger(tokensIn, (person) => seen[person]);
+
+    // A deletes t1 (in A's copy of the block); A's save that stores it is excused, B's drop of it would not be.
+    ledger.deleted('A', ['t1']);
+    assert.deepEqual(ledger.stored(row(2, doc('t1', 't2'), doc('t2')), 'B'), ['t1'], 'another person dropping it is not excused');
+    ledger.stored(row(3, doc('t2'), doc('t1', 't2')), 'B'); // it is back
+    assert.deepEqual(ledger.stored(row(4, doc('t1', 't2'), doc('t2')), 'A'), [], 'A deleted it, and has not seen anything since');
+
+    // A has now seen version 4 (the deletion stored) and the token comes back: a later drop is silent, A's too.
+    seen = { A: 4, B: 4 };
+    ledger.stored(row(5, doc('t2'), doc('t1', 't2')), 'B');
+    assert.deepEqual(ledger.stored(row(6, doc('t1', 't2'), doc('t2')), 'A'), ['t1'], 'it came back after the deletion was stored and seen');
+    assert.equal(ledger.excuses('t1'), false);
+
+    // Two people delete it while it is there; the first one's stored deletion does not excuse the second one's.
+    ledger.stored(row(7, doc('t2'), doc('t3', 't2')), 'B');
+    ledger.deleted('A', ['t3']);
+    ledger.deleted('B', ['t3']);
+    assert.deepEqual(ledger.stored(row(8, doc('t3', 't2'), doc('t2')), 'B'), []);
+    ledger.stored(row(9, doc('t2'), doc('t3', 't2')), 'A');
+    assert.deepEqual(ledger.stored(row(10, doc('t3', 't2'), doc('t2')), 'A'), [], 'A\'s own deletion was never stored, so it still stands');
+});

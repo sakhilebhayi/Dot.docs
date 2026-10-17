@@ -734,3 +734,78 @@ export async function conflicted(options = {}) {
 
     return w;
 }
+
+/**
+ * Who knowingly deleted what, for the random walks (both of them use it).
+ *
+ * "Knowingly deleted" means every token that was in the deleter's own copy of
+ * the block at the moment they deleted it: deleted(person, tokens). That
+ * excuses the drops of that same person's saves (stored(), told who sent the
+ * save), and only theirs: another person's deletion is another event, and a
+ * save of somebody else that drops the token is not excused by it. The
+ * excuse ends with the token coming back: once the person's deletion has been
+ * stored (their save dropped the token from the head) and the token then
+ * reappears on the server (put back, restored), and the person has seen the
+ * version that stored the deletion (`seenBy`), a later drop of it by anybody
+ * is silent again. A person who has NOT seen their deletion stored (the
+ * answer was lost, the tab died, their draft still holds it) still means it:
+ * the same deletion, sent again, stays excused.
+ *
+ * @param {(json: object) => Set<string>} tokensIn the walk's own token reader
+ * @param {(person: *) => number} seenBy the newest server version that person's page has taken in
+ */
+export function deletionLedger(tokensIn, seenBy) {
+    /** token -> person -> the version that stored their deletion, or null while none has */
+    const owed = new Map();
+    /** tokens whose latest removal from the head was somebody's knowing deletion */
+    const gone = new Set();
+
+    return {
+        deleted(person, tokens) {
+            tokens.forEach((token) => {
+                if (!owed.has(token)) {
+                    owed.set(token, new Map());
+                }
+                owed.get(token).set(person, null);
+            });
+        },
+        /**
+         * An accepted save (or a restore) replaced `row.from` with `row.to`.
+         *
+         * @returns {string[]} the tokens it dropped from the head that its sender had not deleted
+         */
+        stored(row, person) {
+            const before = tokensIn(row.from);
+            const after = tokensIn(row.to);
+            const silent = [];
+            [...before]
+                .filter((token) => !after.has(token))
+                .forEach((token) => {
+                    const people = owed.get(token);
+                    if (people && people.has(person)) {
+                        people.set(person, row.version);
+                        gone.add(token);
+                    } else {
+                        gone.delete(token);
+                        silent.push(token);
+                    }
+                });
+            [...after]
+                .filter((token) => !before.has(token))
+                .forEach((token) => {
+                    gone.delete(token);
+                    owed.get(token)?.forEach((storedAt, who, people) => {
+                        if (storedAt !== null && seenBy(who) >= storedAt) {
+                            people.delete(who);
+                        }
+                    });
+                });
+
+            return silent;
+        },
+        /** Whether a token that is nowhere to be found went with somebody's deletion. */
+        excuses(token) {
+            return gone.has(token) || (owed.get(token)?.size ?? 0) > 0;
+        },
+    };
+}
