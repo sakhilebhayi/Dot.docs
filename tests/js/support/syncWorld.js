@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Schema } from 'prosemirror-model';
 
 import { createSyncEngine } from '../../../resources/js/editor/sync/engine.js';
-import { createSyncHost, unloadSaveBody } from '../../../resources/js/editor/sync/host.js';
+import { beaconWanted, createSyncHost, unloadSaveBody } from '../../../resources/js/editor/sync/host.js';
 import { mergeDocuments } from '../../../resources/js/editor/sync/merge.js';
 import { chooseNextPark, dismissInRows, keepKeyFor, unionLostRows } from '../../../resources/js/offline.js';
 
@@ -97,6 +97,8 @@ export class FakeServer {
         this.present = new Map();
         /** The next save is rejected, as DocumentSchema rejects a bad document. */
         this.rejectNext = false;
+        /** What the poll says about each tab's role (`can_edit`), by tab name; a tab with no entry gets no field (an old server). */
+        this.canEditByTab = new Map();
         /** Fresh ids the fake insertBlock() hands out: one counter per world, so two tabs never put a block back under one id. */
         this.fresh = 0;
     }
@@ -194,6 +196,9 @@ export class FakeServer {
             members: [...this.present.keys()].map((_, index) => ({ id: index + 1 })),
             others: this.present.size - 1,
         };
+        if (this.canEditByTab.has(payload.tab)) {
+            body.can_edit = this.canEditByTab.get(payload.tab);
+        }
 
         if (this.version > payload.version) {
             body.changed = true;
@@ -298,6 +303,10 @@ export function makeTab({ server, clock }, name, options = {}) {
         applyCalls: 0,
         mergeCalls: 0,
         insertCalls: [],
+        /** Whether each insertBlock() call asked for the editor to take focus (a press from the keyboard). */
+        insertFocus: [],
+        /** How often the editor was asked to take focus by the host itself (not by insertBlock()). */
+        focusCalls: 0,
         /** This editor cannot open what arrives. */
         refuses: false,
         setContentThrows: false,
@@ -334,24 +343,36 @@ export function makeTab({ server, clock }, name, options = {}) {
         onUpdate();
     };
 
+    // The document the last unload beacon carried: one beacon per document content, as the bundle's lastBeaconed.
+    let lastBeaconed = null;
+
     const flushSave = ({ beacon = false } = {}) => {
         saveTimer = null;
-        if (!dirty || !autosave) {
+        if (!autosave || readOnly) {
+            return false;
+        }
+        // The bundle's rule: on the way out, the host may say text is owed that the bundle counts as sent.
+        const unsent = beacon && t.host().unsentAtUnload();
+        if (!dirty && !unsent) {
             return false;
         }
 
         const json = clone(content);
         const serialised = JSON.stringify(json);
-        if (serialised === lastSaved) {
+        const changed = serialised !== lastSaved;
+        if (!changed && !unsent) {
             dirty = false;
 
             return false;
         }
 
-        dirty = false;
-        lastSaved = serialised;
-
         if (beacon) {
+            if (!beaconWanted({ dirty, changed, unsent, sentAlready: serialised === lastBeaconed })) {
+                return false;
+            }
+            dirty = false;
+            lastSaved = serialised;
+            lastBeaconed = serialised;
             // navigator.sendBeacon(): the browser delivers the body after
             // the page has gone. Built by the function the bundle's
             // beaconSave() builds it with, from the mount options the Blade
@@ -367,6 +388,9 @@ export function makeTab({ server, clock }, name, options = {}) {
 
             return true;
         }
+
+        dirty = false;
+        lastSaved = serialised;
 
         // The bundle's onChange, which the page wires to persist().
         t.host().persist(json);
@@ -388,6 +412,11 @@ export function makeTab({ server, clock }, name, options = {}) {
         editor: {
             getJSON: () => clone(content),
             commands: {
+                focus() {
+                    t.focusCalls += 1;
+
+                    return true;
+                },
                 setContent(json) {
                     if (t.setContentThrows) {
                         throw new Error('invalid content');
@@ -448,8 +477,9 @@ export function makeTab({ server, clock }, name, options = {}) {
             return mergeDocuments(schema, { base, mine: mine ?? clone(content), theirs, echo }, { deletionsWin });
         },
         /** What insertBlock() does: after the first anchor on the page, else the end, else the start; a fresh id unless kept and free. */
-        insertBlock(json, { anchors = [], keepId = false } = {}) {
+        insertBlock(json, { anchors = [], keepId = false, focus = false } = {}) {
             t.insertCalls.push({ json: clone(json), anchors: [...anchors], keepId });
+            t.insertFocus.push(focus);
             if (!json || !autosave || t.insertBlockFails) {
                 return false;
             }

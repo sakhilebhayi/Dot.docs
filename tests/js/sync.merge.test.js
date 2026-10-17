@@ -497,9 +497,22 @@ test('blockWord names every block type the editor has, and anything else is a bl
         ].map(blockWord),
         [
             'paragraph', 'heading', 'list', 'list', 'task list', 'quote', 'code block', 'rule',
-            'image', 'figure', 'table', 'contents list', 'page break', 'section break', 'callout', 'columns', 'block',
+            'image', 'figure', 'table', 'contents list', 'page break', 'section break', 'callout', 'column layout', 'block',
         ]
     );
+});
+
+test('every block word is a singular noun phrase, so each lost-row sentence reads: This <word> was ...', () => {
+    const types = [
+        'paragraph', 'heading', 'bulletList', 'orderedList', 'taskList', 'blockquote', 'codeBlock', 'horizontalRule',
+        'image', 'figure', 'table', 'toc', 'pageBreak', 'sectionBreak', 'callout', 'columns', 'column', 'listItem', 'doc',
+    ];
+    for (const type of types) {
+        const word = blockWord(type);
+        assert.ok(!/s$/.test(word), `${type} -> "${word}" must be singular (the sentences say This ${word} was ...)`);
+        assert.ok(/^[a-z]+( [a-z]+)?$/.test(word), `${type} -> "${word}" is one or two plain words`);
+    }
+    assert.equal(blockWord('columns'), 'column layout');
 });
 
 test('isEmptyBlock is content.size, never textContent: a paragraph holding only a variable chip is not empty', () => {

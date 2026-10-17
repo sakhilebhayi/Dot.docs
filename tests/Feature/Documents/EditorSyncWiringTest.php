@@ -93,6 +93,14 @@ class EditorSyncWiringTest extends TestCase
         // option the beacon never says so and the server keeps nothing of
         // the version it replaces.
         $this->assertStringContainsString('getOverwrite: () => this.overwriteOwed', $alpine[1]);
+        $this->assertStringContainsString('getUnsent: () => this.syncHost().unsentAtUnload()', $alpine[1]);
+
+        // And the bundle's unload flush asks the module (beaconWanted(), tested in tests/js/sync.host.test.js)
+        // and the page's getUnsent, so a document handed over to Livewire whose request failed still goes by beacon.
+        $bundle = file_get_contents(resource_path('js/editor/index.js'));
+        $this->assertStringContainsString('beaconWanted({ dirty, changed, unsent, sentAlready: serialised === lastBeaconed })', $bundle);
+        $this->assertStringContainsString('const unsent = beacon && hostHoldsUnsent();', $bundle);
+        $this->assertStringContainsString("typeof opts.getUnsent === 'function' && opts.getUnsent() === true", $bundle);
     }
 
     /**
@@ -211,6 +219,8 @@ class EditorSyncWiringTest extends TestCase
         // It is announced.
         $this->assertSame('status', $bar->getAttribute('role'));
         $this->assertSame('polite', $bar->getAttribute('aria-live'));
+        // role=status is implicitly atomic: without this a change to one lost-row item re-reads every visible row.
+        $this->assertSame('false', $bar->getAttribute('aria-atomic'));
 
         // The five notices, in this order (the read only sentence sits before the stop reasons). Each is hidden
         // in the markup the server sends, so it does not show before Alpine runs.
@@ -241,7 +251,7 @@ class EditorSyncWiringTest extends TestCase
             $handlers[] = $button->getAttribute('@click');
         }
         $this->assertSame(
-            ['keepMine()', 'loadTheirs()', 'putBackLost(0)', 'putBackLost(1)', 'putBackLost(2)', 'putBackLost(3)', 'putBackLost(4)', 'putBackAllLost()', 'dismissLost()', 'putBack()', 'discardSetAside()'],
+            ['keepMine()', 'loadTheirs()', 'putBackLost(0, $event.detail === 0)', 'putBackLost(1, $event.detail === 0)', 'putBackLost(2, $event.detail === 0)', 'putBackLost(3, $event.detail === 0)', 'putBackLost(4, $event.detail === 0)', 'putBackAllLost($event.detail === 0)', 'dismissLost()', 'putBack()', 'discardSetAside()'],
             $handlers,
         );
         $this->assertNotNull($this->notice($bar, 'conflict')->querySelector('button[\@click="keepMine()"][title]'));
@@ -252,7 +262,7 @@ class EditorSyncWiringTest extends TestCase
         $this->assertNotNull($this->notice($bar, 'setAside')->querySelector('button[\@click="discardSetAside()"][title]'));
 
         // And nowhere else on the page: the strip carries no button at all.
-        foreach (['keepMine()', 'loadTheirs()', 'putBackLost(0)', 'putBackLost(1)', 'putBackLost(2)', 'putBackLost(3)', 'putBackLost(4)', 'putBackAllLost()', 'dismissLost()', 'putBack()', 'discardSetAside()'] as $handler) {
+        foreach (['keepMine()', 'loadTheirs()', 'putBackLost(0, $event.detail === 0)', 'putBackLost(1, $event.detail === 0)', 'putBackLost(2, $event.detail === 0)', 'putBackLost(3, $event.detail === 0)', 'putBackLost(4, $event.detail === 0)', 'putBackAllLost($event.detail === 0)', 'dismissLost()', 'putBack()', 'discardSetAside()'] as $handler) {
             $this->assertSame(1, substr_count($html, '@click="'.$handler.'"'));
         }
         $this->assertCount(0, $strip->querySelectorAll('button'));
@@ -485,7 +495,7 @@ class EditorSyncWiringTest extends TestCase
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
         $this->assertMatchesRegularExpression('/^\s*setAsideFrom: null,$/m', $alpine[1]);
         $this->assertMatchesRegularExpression('/^\s*setAsideBase: null,$/m', $alpine[1]);
-        $this->assertStringContainsString('discardSetAside() { this.syncHost().discardSetAside(); }', $alpine[1]);
+        $this->assertStringContainsString('discardSetAside() { return this.pressed(this.syncHost().discardSetAside()); }', $alpine[1]);
     }
 
     /**
@@ -507,9 +517,15 @@ class EditorSyncWiringTest extends TestCase
 
         $described = 0;
         foreach ($bar->querySelectorAll('button') as $button) {
-            $id = (string) $button->getAttribute('aria-describedby');
-            $this->assertNotSame('', $id, $this->words($button).' is described');
+            $ids = preg_split('/\s+/', trim((string) $button->getAttribute('aria-describedby')));
+            $this->assertNotSame([''], $ids, $this->words($button).' is described');
+            // The description that says what the button does is the LAST id: a lost-row button names its own item first.
+            $id = (string) array_pop($ids);
             $this->assertCount(1, $dom->querySelectorAll('[id="'.$id.'"]'));
+            foreach ($ids as $own) {
+                $this->assertCount(1, $dom->querySelectorAll('[id="'.$own.'"]'), "{$own} names the item the button acts on");
+                $this->assertNotNull($bar->querySelector('[id="'.$own.'"]'), 'inside the bar');
+            }
             $description = $bar->querySelector('[id="'.$id.'"]');
             $this->assertNotNull($description, 'the description is inside the bar');
             $this->assertTrue($description->hasAttribute('hidden'), 'it is read with the button, not shown');
@@ -523,6 +539,19 @@ class EditorSyncWiringTest extends TestCase
         $this->assertSame('noticePressed($event)', $bar->getAttribute('@click'));
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
         $this->assertStringContainsString('noticePressed(event) {', $alpine[1]);
+
+        // An action the writer declined or that failed reports false and leaves the focus where it is: the five
+        // question-asking or failing actions go through pressed(), and the refocus is decided in the module.
+        $this->assertStringContainsString('pressed(result) { this.lastPress = result; return result; }', $alpine[1]);
+        $this->assertStringContainsString('lastPress: undefined,', $alpine[1]);
+        $this->assertStringContainsString('this.syncHost().refocusAfterPress(completed)', $alpine[1]);
+        foreach ([
+            'putBack() { return this.pressed(this.syncHost().putBack()); }',
+            'discardSetAside() { return this.pressed(this.syncHost().discardSetAside()); }',
+            'loadTheirs() { return this.pressed(this.syncHost().loadTheirs()); }',
+        ] as $delegate) {
+            $this->assertStringContainsString($delegate, $alpine[1]);
+        }
     }
 
     /**
@@ -552,12 +581,26 @@ class EditorSyncWiringTest extends TestCase
             $item = $items->item($i);
             $this->assertTrue($item->hasAttribute('hidden'));
             $this->assertSame("!lost[{$i}]", $item->getAttribute('x-bind:hidden'));
-            $this->assertSame("lost[{$i}] ? lost[{$i}].sentence : ''", $item->querySelector('span[x-text]')->getAttribute('x-text'));
             $this->assertSame("lost[{$i}] ? lost[{$i}].excerpt : ''", $item->querySelector('q.doc-notice-excerpt')->getAttribute('x-text'));
             $button = $item->querySelector('button');
-            $this->assertSame("putBackLost({$i})", $button->getAttribute('@click'));
+            $this->assertSame("putBackLost({$i}, \$event.detail === 0)", $button->getAttribute('@click'));
             $this->assertSame('Put it back', $this->words($button));
-            $this->assertSame('doc-notice-put-back-lost-does', $button->getAttribute('aria-describedby'));
+            // Six buttons named Put it back: each says which item it is for, by the ids of its own sentence and excerpt,
+            // before the description of what the button does (the one id the six share).
+            $this->assertSame(
+                "doc-notice-lost-{$i}-count doc-notice-lost-{$i}-sentence doc-notice-lost-{$i}-excerpt doc-notice-put-back-lost-does",
+                $button->getAttribute('aria-describedby'),
+            );
+            // Two items can share their first 80 characters (both versions of one paragraph): the ordinal tells them apart.
+            $count = $item->querySelector("#doc-notice-lost-{$i}-count");
+            $this->assertNotNull($count);
+            $this->assertSame('sr-only', $count->getAttribute('class'));
+            $this->assertSame('lost.length > 1 ? \'Item '.($i + 1).' of \' + lost.length + \'. \' : \'\'', $count->getAttribute('x-text'));
+            $sentence = $item->querySelector("#doc-notice-lost-{$i}-sentence");
+            $this->assertNotNull($sentence);
+            $this->assertSame('doc-notice-sentence', $sentence->getAttribute('class'));
+            $this->assertSame("lost[{$i}] ? lost[{$i}].sentence : ''", $sentence->getAttribute('x-text'));
+            $this->assertSame("doc-notice-lost-{$i}-excerpt", $item->querySelector('q.doc-notice-excerpt')->getAttribute('id'));
         }
         $overflow = $items->item(5);
         $this->assertTrue($overflow->hasAttribute('hidden'));
@@ -570,7 +613,7 @@ class EditorSyncWiringTest extends TestCase
         foreach ($row->querySelectorAll('.doc-notice-actions > button') as $button) {
             $actions[$this->words($button)] = $button->getAttribute('@click');
         }
-        $this->assertSame(['Put them all back' => 'putBackAllLost()', 'Dismiss all' => 'dismissLost()'], $actions);
+        $this->assertSame(['Put them all back' => 'putBackAllLost($event.detail === 0)', 'Dismiss all' => 'dismissLost()'], $actions);
 
         // Static slots, never x-for.
         $this->assertCount(0, $bar->querySelectorAll('template'));
@@ -581,17 +624,30 @@ class EditorSyncWiringTest extends TestCase
 
         // The three delegates hand over to the module.
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
-        $this->assertStringContainsString('putBackLost(index) { this.syncHost().putBackLost(index); }', $alpine[1]);
-        $this->assertStringContainsString('putBackAllLost() { this.syncHost().putBackAllLost(); }', $alpine[1]);
-        $this->assertStringContainsString('dismissLost() { this.syncHost().dismissLost(); }', $alpine[1]);
+        $this->assertStringContainsString('putBackLost(index, fromKeyboard) { return this.pressed(this.syncHost().putBackLost(index, { focus: fromKeyboard === true })); }', $alpine[1]);
+        $this->assertStringContainsString('putBackAllLost(fromKeyboard) { return this.pressed(this.syncHost().putBackAllLost({ focus: fromKeyboard === true })); }', $alpine[1]);
+        $this->assertStringContainsString('dismissLost() { return this.pressed(this.syncHost().dismissLost()); }', $alpine[1]);
 
         // The row's own styles, beside the bar's, and the excerpt's ink in the contrast gate.
         $css = file_get_contents(resource_path('css/shell.css'));
-        foreach (['.doc-notice-list', '.doc-notice-item', '.doc-notice-excerpt'] as $selector) {
+        foreach (['.doc-notice-list', '.doc-notice-item', '.doc-notice-sentence', '.doc-notice-excerpt'] as $selector) {
             $this->assertStringContainsString($selector.' {', $css, "{$selector} is styled");
         }
         $this->assertMatchesRegularExpression('/\.doc-notice-list \{[^}]*max-height:/', $css, 'the list is bounded so the sticky bar cannot outgrow the viewport');
-        $this->assertStringContainsString("'.doc-notice-excerpt',", file_get_contents(base_path('scripts/design/contrast-dom.mjs')));
+        // About 40% of the viewport for the whole sticky head (the list gets what is left after the 11rem the rest takes), with a
+        // floor of about one item and an edge shadow that says there is more (checked in a real browser at 360x640: 42%).
+        $this->assertStringContainsString('max-height: clamp(5.5rem, calc(40vh - 11rem), 22rem);', $css);
+        $this->assertMatchesRegularExpression('/\.doc-notice-list \{[^}]*background:[^}]*no-repeat local/s', $css, 'a scroll shadow, so the list says it scrolls');
+        // At a phone's width one WHOLE item (sentence, excerpt, Put it back) fits in the list: 12px type, tighter gaps and a
+        // 7.5rem floor (measured at 360x640: item 103px, list 120px, head 39%).
+        $this->assertMatchesRegularExpression('/@media \(max-width: 420px\) \{\s*\.doc-notice:has\(\.doc-notice-list\) \{/', $css);
+        $this->assertStringContainsString('max-height: clamp(7.5rem, calc(40vh - 11rem), 22rem);', $css);
+        $this->assertMatchesRegularExpression('/\.doc-notice-sentence,\s*\.doc-notice-excerpt \{\s*font-size: var\(--t-micro\);/', $css);
+        // And the top bar no longer pushes the page sideways at a phone width: it tightens, and below 360px it scrolls on its own.
+        $this->assertMatchesRegularExpression('/@media \(max-width: 420px\) \{\s*\.topbar \{[^}]*overflow-x: auto;/s', $css);
+        $gate = file_get_contents(base_path('scripts/design/contrast-dom.mjs'));
+        $this->assertStringContainsString("'.doc-notice-excerpt',", $gate);
+        $this->assertStringContainsString("'.doc-notice-sentence',", $gate, 'the item sentence is measured by the contrast gate');
     }
 
     /**

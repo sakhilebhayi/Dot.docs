@@ -12,6 +12,9 @@
  *     but only if the host is `clean`. A tab with unsaved typing is told
  *     there is a conflict instead; a tab with a save in flight is left
  *     alone until that save settles; a read-only tab is never written to.
+ *   - Every answer may carry `can_edit`, whether this person may still
+ *     change the document; the host is told (`onAccess`) so that a
+ *     downgrade is noticed on the next poll.
  *   - After every poll that completed, answered or not, it gives the host a
  *     tick (`onPolled`), so that what the host does on a timer of its own
  *     (sending a save that is owed) does not depend on the poll being
@@ -59,6 +62,7 @@ const STOP_REASONS = { 401: 'signed-out', 419: 'signed-out', 403: 'forbidden', 4
  *     applyRemote: (remote: {version: number, json: object, outline: object|null, css: string|null}) => boolean,
  *     onConflict: (remote: {version: number, json: object, outline: object|null, css: string|null}) => void,
  *     onRefused: (remote: {version: number, json: object, outline: object|null, css: string|null}) => void,
+ *     onAccess?: (canEdit: boolean) => void,
  *     onMembers: (members: object[], others: number) => void,
  *     onPolled?: () => void,
  *     onStopped: (reason: 'signed-out'|'forbidden'|'gone') => void,
@@ -218,6 +222,19 @@ export function createSyncEngine(options) {
 
             const body = response.body;
             others = Number(body.others) || 0;
+            // The person's role rides on the answer (`can_edit`, a boolean).
+            // Handed over first, so a page whose role was lowered is read
+            // only before anything else this answer causes (a save that is
+            // owed goes out from onMembers). Absent from an older server
+            // and ignored by an older host: the field is additive, which is
+            // why PROTOCOL did not move. A throw must not end the loop.
+            if (typeof body.can_edit === 'boolean') {
+                try {
+                    host.onAccess?.(body.can_edit);
+                } catch (_) {
+                    // Keep polling.
+                }
+            }
             // A host callback that throws must not end the loop: the next
             // poll would never be armed, and the tab would stop following
             // and drop out of presence with nothing on screen to say so.

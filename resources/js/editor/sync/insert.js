@@ -105,3 +105,27 @@ function caretAfterInsert(docNode, pos, node, Selection) {
 
     return Selection.near(docNode.resolve(Math.min(pos + node.nodeSize - 1, docNode.content.size)), -1);
 }
+
+/**
+ * Hand the keyboard to the paper after Put it back, but only when the press
+ * came from the keyboard. A tap on a phone must leave the on-screen keyboard
+ * down and the page where it is: `focus()` brings the keyboard up and
+ * scrolls. The block is in and the caret is placed either way (the
+ * transaction set the selection); this is only about focus.
+ *
+ * @param {{focus: () => unknown}} commands the editor's commands
+ * @param {boolean} focus true for a press from the keyboard
+ * @returns {boolean} whether focus was asked for
+ */
+export function focusAfterInsert(commands, focus) {
+    if (focus !== true) {
+        return false;
+    }
+    try {
+        commands.focus();
+    } catch (_) {
+        // The block is in and the caret is set; focus is a nicety.
+    }
+
+    return true;
+}

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { blockWord } from '../../resources/js/editor/sync/merge.js';
 import {
     DISCARD_QUESTION,
     DISMISS_LOST_CHANGED_NOTICE,
@@ -15,6 +16,7 @@ import {
     PUT_BACK_UNSAVED_WARNING,
     SAVE_EXPIRY_MS,
     SAVE_RETRY_DELAYS_MS,
+    beaconWanted,
     createSyncHost,
     createTabId,
     unloadSaveBody,
@@ -837,6 +839,190 @@ test('the unload beacon sends a real boolean, whatever the page hands it, and no
     assert.deepEqual(unloadSaveBody(doc('x')), { _token: '', content: doc('x'), base_version: null, overwrite: false });
 });
 
+// ───────────────────────────────────────────────────────── the unload beacon carries text a failed or held save left unsent
+
+test('beaconWanted: a changed, dirty document goes; an unsent one goes even when the bundle counts it as sent; the same content never goes twice', () => {
+    const base = { dirty: false, changed: false, unsent: false, sentAlready: false };
+    const table = [
+        [{}, false],
+        [{ dirty: true }, false, 'dirty but nothing changed since the last hand-over'],
+        [{ dirty: true, changed: true }, true],
+        [{ changed: true }, false, 'changed and not dirty: housekeeping, nothing the writer typed'],
+        [{ unsent: true }, true, 'handed over, request failed or held: counted as sent by the bundle'],
+        [{ dirty: true, changed: true, sentAlready: true }, false],
+        [{ unsent: true, sentAlready: true }, false],
+    ];
+    for (const [given, wanted, why] of table) {
+        assert.equal(beaconWanted({ ...base, ...given }), wanted, `${JSON.stringify(given)} ${why ?? ''}`);
+    }
+});
+
+test('a tab closed after its save request FAILED sends the unsent text by beacon, on the same base', async () => {
+    const { server, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+    assert.equal(A.word(), 'Not saved');
+    assert.equal(A.view.unsaved, true);
+
+    A.leave();
+
+    assert.deepEqual(
+        A.beacons.map((beacon) => [beacon.text, beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]),
+        [['A1', 1, false, 200]]
+    );
+    assert.equal(server.text(), 'A1');
+    assert.equal(server.version, 2);
+});
+
+test('a tab closed while the back-off HOLDS its save sends the unsent text by beacon', async () => {
+    const { clock, server, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+    clock.now += 1;
+    await A.cycle();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+    assert.ok(A.view.saveRetryAt > clock.now, 'the second failure in a row holds the next send');
+
+    A.type('A1 more');
+    A.leave();
+
+    assert.deepEqual(A.beacons.map((beacon) => [beacon.text, beacon.body.base_version]), [['A1 more', 1]]);
+    assert.equal(server.text(), 'A1 more');
+});
+
+test('a tab closed after its save was given up on (no answer in fifteen seconds, which is how a failed fetch looks) beacons the text', async () => {
+    const { clock, server, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    A.saveNeverAnswers();
+
+    // Given up on: the request got no answer, the text is owed, and nothing has been confirmed since.
+    clock.now += SAVE_EXPIRY_MS;
+    assert.equal(A.view.unanswered, null, 'no poll tick has noticed that the save was given up on');
+    assert.equal(A.view.saveFailures, 0, 'Livewire never rejected: the page cannot count it as a failure');
+    A.leave();
+
+    assert.deepEqual(A.beacons.map((beacon) => [beacon.text, beacon.body.base_version, beacon.body.overwrite]), [['A1', 1, false]]);
+    assert.equal(server.text(), 'A1');
+});
+
+test('the beacon of a failed save carries an owed overwrite, and a stale base writes nothing and keeps nothing', async () => {
+    const { server, A, B } = await pair();
+    B.type('B1');
+    await B.debounce();
+    await B.land();
+    A.type('A1');
+    await A.debounce();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+    A.view.overwriteOwed = true;
+
+    A.leave();
+
+    assert.deepEqual(A.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]), [[1, true, 409]]);
+    assert.equal(server.text(), 'B1', 'the server refused it: nothing was overwritten');
+    assert.deepEqual(server.history, []);
+    assert.equal(A.draft(), 'A1', 'the offline draft is the safety net');
+});
+
+test('the same unsent text is never beaconed twice (pagehide, then destroy)', async () => {
+    const { A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+
+    A.leave();
+    A.leave();
+    assert.equal(A.beacons.length, 1);
+
+    A.type('A1 and more');
+    A.leave();
+    assert.deepEqual(A.beacons.map((beacon) => beacon.text), ['A1', 'A1 and more'], 'new content is a new beacon');
+});
+
+test('nothing is beaconed for text that is saved or typed on a read only page; a save in the air is beaconed once', async () => {
+    const saved = await pair();
+    saved.A.type('A1');
+    await saved.A.debounce();
+    await saved.A.land();
+    saved.A.leave();
+    assert.deepEqual(saved.A.beacons, [], 'saved: nothing is owed');
+
+    // A save still in the air is beaconed (CHANGED from "not beaconed": the closing page aborts the request, and the page cannot
+    // tell a dead request from a slow one). Both state the same base: one write is stored, the other is refused as stale,
+    // and an overwrite flag cuts no second history version.
+    const inTheAir = await pair();
+    inTheAir.A.type('A1');
+    await inTheAir.A.debounce();
+    inTheAir.A.leave();
+    assert.deepEqual(inTheAir.A.beacons.map((beacon) => [beacon.text, beacon.body.base_version, beacon.answer.status]), [['A1', 1, 200]]);
+    inTheAir.A.saveArrives();
+    assert.equal(inTheAir.A.saves[0].result.conflict, true, 'the request that was in the air is refused as stale');
+    assert.equal(inTheAir.server.version, 2, 'one write');
+    assert.deepEqual(inTheAir.server.history, []);
+
+    const readOnly = await pair();
+    readOnly.A.type('A1');
+    await readOnly.A.debounce();
+    readOnly.A.saves.shift().reject(new Error('network'));
+    await settle();
+    readOnly.A.handle.makeReadOnly();
+    readOnly.A.leave();
+    assert.deepEqual(readOnly.A.beacons, [], 'a read only page never writes');
+
+    const served = world();
+    const reader = served.tab('R', { readOnly: true });
+    await reader.open();
+    reader.view.unsaved = true;
+    reader.view.saveFailures = 2;
+    reader.leave();
+    assert.deepEqual(reader.beacons, []);
+});
+
+test('unsentAtUnload: unsaved text after a failure or a hold, never on a read only or fail-closed page', async () => {
+    const { clock, A } = await pair();
+    const unsent = () => A.host().unsentAtUnload();
+    assert.equal(unsent(), false, 'nothing typed');
+
+    A.view.unsaved = true;
+    assert.equal(unsent(), false, 'unsaved but no request has failed');
+
+    A.view.saveFailures = 1;
+    assert.equal(unsent(), true, 'the last request failed');
+
+    A.view.saveFailures = 0;
+    A.view.saveRetryAt = clock.now + 5000;
+    assert.equal(unsent(), true, 'held by the back-off');
+
+    A.view.saveRetryAt = clock.now - 1;
+    assert.equal(unsent(), false);
+
+    A.view.saveRetryAt = 0;
+    A.view.unanswered = JSON.stringify(doc('x'));
+    assert.equal(unsent(), true, 'a save was given up on or failed and nothing has been confirmed since');
+
+    A.view.unanswered = null;
+    A.view.saveFailures = 0;
+    A.view.saving = 1;
+    A.view.savingSince = clock.now;
+    assert.equal(unsent(), true, 'a save in the air, however young: the closing page aborts its request');
+    A.view.saving = 0;
+
+    A.view.saveFailures = 2;
+    A.view.unsaved = false;
+    assert.equal(unsent(), false, 'what the editor holds is what the server confirmed');
+
+    A.view.unsaved = true;
+    A.view.editable = false;
+    assert.equal(unsent(), false, 'a read only page');
+});
+
 test('an ordinary tab closed inside the debounce sends a beacon that does not overwrite', async () => {
     const { server, A } = await pair();
     A.type('A last words');
@@ -1127,7 +1313,7 @@ test('Keep mine fails, the writer types on, the page dies: reopened, the draft i
     assert.deepEqual(server.history, []);
 });
 
-test('an overwrite owed from a merge is still owed after Keep mine and a reopen: the draft is set aside, not merged, and the other writer\'s words are kept', async () => {
+test('an overwrite owed from a merge, then Keep mine with its save still in the air when the tab closes: the beacon carries it as an overwrite and the other writer\'s words are kept in the history', async () => {
     const holdsT31 = (json) => JSON.stringify(json).includes('t31');
     const w = world();
     const { server } = w;
@@ -1164,7 +1350,12 @@ test('an overwrite owed from a merge is still owed after Keep mine and a reopen:
     A.insertAfter('p1', 'n9', 'a1');
     await A.debounce(); // owed behind the save in the air; the draft is rewritten
     assert.equal(A.drafts.get(UUID).baseVersion, 2, 'stamped below the base the owed overwrite began on, not below the moved-up base');
-    A.leave(); // nothing is waiting in the debounce: no beacon
+    // The Keep mine save is still in the air when the tab closes: the unload beacon carries the text as well (the same
+    // base and overwrite flag the Keep mine save states), so the choice the writer made is not lost with the request.
+    A.leave();
+    assert.deepEqual(A.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]), [[4, true, 200]]);
+    assert.ok(!holdsT31(server.json), 'A\'s version replaced the head, as Keep mine said');
+    assert.ok(server.kept.some((row) => holdsT31(row.json)), 'and C\'s words are kept in the history first');
     A.saves.length = 0;
     A.polls.length = 0;
     A.engine.stop();
@@ -1172,21 +1363,15 @@ test('an overwrite owed from a merge is still owed after Keep mine and a reopen:
 
     const again = w.tab('A2', { drafts: A.drafts });
     await again.open();
-    assert.deepEqual(again.questions, [], 'not offered as an ordinary draft merge');
-    assert.equal(again.view.setAsideFrom, 'draft');
-    await again.poll();
-    await C.cycle();
-    assert.ok(holdsT31(server.json), 'C\'s words are still in the document');
-    assert.ok(holdsT31(C.handle.editor.getJSON()));
-
-    again.host().putBack();
-    await again.debounce();
-    assert.equal(again.sent.at(-1).overwrite, true, 'putting the text back replaces the version on purpose');
-    await again.land();
-    assert.ok(server.kept.some((row) => holdsT31(row.json)), 'C\'s words are kept in the history');
+    assert.deepEqual(again.questions, [], 'the draft is what the document holds now: nothing to merge, nothing to ask');
+    assert.equal(again.view.setAside, null);
+    assert.deepEqual(again.blocks(), [
+        ['p1', 'start'],
+        ['n9', 'a1'],
+    ]);
 });
 
-test('an overwrite owed from Put it back is still owed after Keep mine and a reopen: the draft is set aside, not merged over the version it was to replace', async () => {
+test('an overwrite owed from Put it back, then Keep mine with its save still in the air when the tab closes: the beacon carries it as an overwrite and the replaced version is kept in the history', async () => {
     const { server, clock, A, B } = await conflicted();
     await B.host().loadTheirs(); // B shows v2 (A1); B1 is set aside
     B.host().putBack(); // B1 is to replace v2 on purpose: an overwrite is owed from base 2
@@ -1211,7 +1396,11 @@ test('an overwrite owed from Put it back is still owed after Keep mine and a reo
     B.type('B1 and more');
     await B.debounce(); // owed behind the save in the air; the draft is rewritten
     assert.equal(B.drafts.get(UUID).baseVersion, 1, 'stamped below the base the owed overwrite began on, not below the moved-up base');
+    // The Keep mine save is still in the air when the tab closes: the beacon carries the text, as an overwrite on the moved-up base.
     B.leave();
+    assert.deepEqual(B.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]), [[3, true, 200]]);
+    assert.deepEqual(blocksOf(server.json), [['p1', 'B1 and more']]);
+    assert.deepEqual(server.history, [{ version: 3, text: 'A1' }], 'the version it replaced, with A1 in it, is kept first');
     B.saves.length = 0;
     B.polls.length = 0;
     B.engine.stop();
@@ -1219,19 +1408,9 @@ test('an overwrite owed from Put it back is still owed after Keep mine and a reo
 
     const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
     await again.open();
-    assert.deepEqual(again.questions, [], 'not offered as an ordinary draft merge');
-    assert.equal(again.view.setAsideFrom, 'draft');
-    await again.poll();
-    assert.deepEqual(blocksOf(server.json), [
-        ['p1', 'A1'],
-        ['n1', 'a2'],
-    ]);
-
-    again.host().putBack();
-    await again.debounce();
-    assert.equal(again.sent.at(-1).overwrite, true, 'putting the text back replaces the version on purpose');
-    await again.land();
-    assert.deepEqual(server.history, [{ version: 3, text: 'A1' }], 'the version it replaced, with A1 in it, is kept');
+    assert.deepEqual(again.questions, [], 'the draft is what the document holds now: nothing to ask');
+    assert.equal(again.view.setAside, null);
+    assert.deepEqual(again.blocks(), [['p1', 'B1 and more']]);
 });
 
 test('once the overwrite has been accepted, the draft of what is typed next states the true base again', async () => {
@@ -3283,15 +3462,17 @@ test('the beacon stored the last words and others saved since: the draft is offe
     assert.equal(B.text(), 'A last words, then B one and B two');
 });
 
-test('a save in the air when the tab closed landed, and others saved since: putting the draft back asks first', async () => {
+test('a save in the air when the tab closed is beaconed too; it lands once, and when others build on it putting the draft back still asks first', async () => {
     const { server, clock, A, B } = await pair();
     A.type('A last words');
     await A.debounce();
-    // The tab is closed with the save in the air. The server stores it;
-    // the answer reaches nobody, so the draft is never cleared.
+    // The tab is closed with the save in the air. The unload beacon carries the text as well (it used to be left to the
+    // request alone): the server stores it once, and the request, if it arrives, is refused as stale and writes nothing.
     A.leave();
-    assert.equal(A.beacons.length, 0, 'nothing was left for a beacon to send');
+    assert.deepEqual(A.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]), [[1, false, 200]]);
     A.saveArrives();
+    assert.equal(A.saves[0].result.conflict, true, 'the request is refused as stale: one write, not two');
+    assert.equal(server.version, 2);
     assert.equal(server.text(), 'A last words');
     assert.equal(A.draft(), 'A last words');
 
@@ -3306,7 +3487,7 @@ test('a save in the air when the tab closed landed, and others saved since: putt
     assert.equal(again.view.setAsideFrom, 'draft');
 
     again.host().putBack();
-    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION, PUT_BACK_QUESTION]);
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION, PUT_BACK_QUESTION], 'B built on the same paragraph: the page still asks first');
     assert.equal(again.text(), 'A last words, then B');
     await again.debounce();
     assert.equal(again.sent.length, 0);
@@ -4591,6 +4772,81 @@ test('Put it back after a D1: my version goes in below theirs with a fresh id, t
     await A.cycle();
     assert.deepEqual(A.blocks(), blocksOf(server.json));
     assert.equal(A.view.conflict, null);
+});
+
+/** B lost two items to A (two D1 rounds): two entries in B's lost row. */
+async function lostTwo() {
+    const w = await pair();
+    const { A, B } = w;
+    A.type('Hello A1');
+    B.type('Hello B1');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    B.type('Hello A1 B2');
+    A.type('Hello A2');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.deepEqual(B.lostTexts(), ['Hello B1', 'Hello A1 B2']);
+
+    return w;
+}
+
+test('Put it back hands the editor focus only when the press came from the keyboard: a tap leaves the on-screen keyboard down', async () => {
+    const { B } = await lostOne();
+
+    // The Blade click handler passes `$event.detail === 0`; no argument at all is a tap too.
+    assert.equal(B.host().putBackLost(0), true);
+    assert.deepEqual(B.insertFocus, [false], 'no options: the editor is not asked to focus');
+});
+
+test('Put it back from the keyboard asks for focus, a tap does not, and the block is in either way', async () => {
+    const keyboard = await lostOne();
+    assert.equal(keyboard.B.host().putBackLost(0, { focus: true }), true);
+    assert.deepEqual(keyboard.B.insertFocus, [true]);
+
+    const tap = await lostOne();
+    assert.equal(tap.B.host().putBackLost(0, { focus: false }), true);
+    assert.deepEqual(tap.B.insertFocus, [false]);
+    assert.deepEqual(tap.B.blocks(), keyboard.B.blocks(), 'the same document either way');
+
+    // Anything but the real boolean true is a tap.
+    const odd = await lostOne();
+    assert.equal(odd.B.host().putBackLost(0, { focus: 'yes' }), true);
+    assert.deepEqual(odd.B.insertFocus, [false]);
+});
+
+test('Put them all back focuses the paper once, at the end, only after a keyboard press that put every item in', async () => {
+    const tap = await lostTwo();
+    tap.B.host().putBackAllLost({ focus: false });
+    assert.deepEqual(tap.B.insertFocus, [false, false]);
+    assert.equal(tap.B.focusCalls, 0);
+
+    const bare = await lostTwo();
+    bare.B.host().putBackAllLost();
+    assert.equal(bare.B.focusCalls, 0);
+
+    const keyed = await lostTwo();
+    assert.equal(keyed.B.host().putBackAllLost({ focus: true }), true);
+    assert.deepEqual(keyed.B.insertFocus, [false, false], 'no block takes focus on its own');
+    assert.equal(keyed.B.focusCalls, 1, 'one focus, after the last item went in');
+});
+
+test('Put them all back that stops part way leaves a keyboard user where they were: no focus at all', async () => {
+    const { B } = await lostTwo();
+    const real = B.handle.insertBlock;
+    let calls = 0;
+    B.handle.insertBlock = (json, options) => {
+        calls += 1;
+
+        return calls === 1 ? real(json, options) : false;
+    };
+
+    assert.equal(B.host().putBackAllLost({ focus: true }), false);
+    assert.equal(B.view.lost.length, 1, 'the second stays listed');
+    assert.deepEqual(B.insertFocus, [false], 'the first went in without taking focus');
+    assert.equal(B.focusCalls, 0);
 });
 
 test('Put it back after a D2 restores the paragraph where it was, with its original id', async () => {
@@ -7081,6 +7337,290 @@ test('a re-render that draws editable false makes the page say so: the same read
     const reports = writer.reports.length;
     writer.host().readOnlyNoticed();
     assert.equal(writer.reports.length, reports, 'said once');
+});
+
+test('a column layout reads right in every lost-row sentence', async () => {
+    const { A } = await pair();
+    const word = blockWord('columns');
+    const sentences = ['both', 'deleted'].flatMap((reason) =>
+        ['merge', 'draft', 'suggestion'].map((source) => A.host().sentenceFor(reason, source, word))
+    );
+
+    assert.deepEqual(sentences, [
+        'This column layout was changed elsewhere at the same moment. The other version is on the page; this is yours.',
+        'This column layout was changed in the document after your draft was written. The document\'s version is on the page; this is the draft\'s.',
+        'This column layout was rewritten by the accepted suggestion. The suggestion\'s version is on the page; this is yours.',
+        'This column layout was removed elsewhere while you were typing in it.',
+        'This column layout was removed from the document after your draft was written.',
+        'The accepted suggestion removed this column layout while you were typing in it.',
+    ]);
+    for (const sentence of sentences) {
+        assert.ok(!/columns/.test(sentence), sentence);
+    }
+});
+
+// ───────────────────────────────────────────────────────── an action reports whether it completed (the focus follows it)
+
+test('Dismiss all reports false when declined, when the copy cannot be kept and the unkept question is declined, and when there is nothing; true when the row emptied', async () => {
+    const declined = await lostOne();
+    declined.B.confirmAnswer = false;
+    assert.equal(await declined.B.host().dismissLost(), false);
+    assert.equal(declined.B.view.lost.length, 1, 'the row stays');
+
+    const nothing = world();
+    const N = nothing.tab('N');
+    await N.open();
+    assert.equal(await N.host().dismissLost(), false);
+
+    const unkept = await lostOne();
+    unkept.B.parkLostFails = true;
+    assert.equal(await unkept.B.host().dismissLost(), false, 'the copy could not be written: the row stays');
+    assert.equal(unkept.B.view.lost.length, 1);
+    unkept.B.confirmAnswer = false;
+    assert.equal(await unkept.B.host().dismissLost(), false, 'and the second question declined');
+    unkept.B.confirmAnswer = true;
+    assert.equal(await unkept.B.host().dismissLost(), true, 'dropped without a copy, knowingly');
+    assert.deepEqual(unkept.B.view.lost, []);
+
+    const done = await lostOne();
+    assert.equal(await done.B.host().dismissLost(), true);
+    assert.deepEqual(done.B.view.lost, []);
+});
+
+test('Discard reports false when declined and true when the offer went', async () => {
+    const w = world();
+    const R = w.tab('R', { confirmAnswer: false });
+    await R.open();
+    R.view.setAside = JSON.stringify(doc('set aside'));
+    R.view.setAsideFrom = 'conflict';
+    R.view.setAsideBase = 1;
+
+    assert.equal(R.host().discardSetAside(), false);
+    assert.notEqual(R.view.setAside, null, 'the offer stands');
+
+    R.confirmAnswer = true;
+    assert.equal(R.host().discardSetAside(), true);
+    assert.equal(R.view.setAside, null);
+
+    // A draft from an earlier visit is withdrawn without a question.
+    R.confirmAnswer = false;
+    R.view.setAside = JSON.stringify(doc('older'));
+    R.view.setAsideFrom = 'draft';
+    R.view.setAsideBase = 1;
+    assert.equal(R.host().discardSetAside(), true);
+});
+
+test('Put it back (the set-aside text) reports false when there is nothing, when declined and when the editor refuses; true when it went in', async () => {
+    const w = world();
+    const R = w.tab('R', { confirmAnswer: false });
+    await R.open();
+    assert.equal(R.host().putBack(), false, 'nothing is set aside');
+
+    R.view.setAside = JSON.stringify(doc('older text'));
+    R.view.setAsideFrom = 'draft';
+    R.view.setAsideBase = 1;
+    assert.equal(R.host().putBack(), false, 'declined');
+    assert.notEqual(R.view.setAside, null);
+
+    R.confirmAnswer = true;
+    R.setContentThrows = true;
+    assert.equal(R.host().putBack(), false, 'the editor refused it');
+    assert.equal(R.view.syncNotice, 'Your text could not be put back.');
+
+    R.setContentThrows = false;
+    assert.equal(R.host().putBack(), true);
+    assert.equal(R.text(), 'older text');
+    assert.equal(R.view.setAside, null);
+});
+
+test('Put them all back reports true only when every item went in; false when there is nothing or one stayed', async () => {
+    const empty = await pair();
+    assert.equal(empty.B.host().putBackAllLost(), false);
+
+    const stuck = await lostTwo();
+    stuck.B.insertBlockFails = true;
+    assert.equal(stuck.B.host().putBackAllLost(), false);
+    assert.equal(stuck.B.view.lost.length, 2);
+    stuck.B.insertBlockFails = false;
+    assert.equal(stuck.B.host().putBackAllLost(), true);
+    assert.deepEqual(stuck.B.view.lost, []);
+});
+
+test('Load theirs reports false when declined or when there is nothing to show yet, and true when the newer document showed', async () => {
+    const { A, B } = await conflicted({ B: { confirmAnswer: false } });
+    assert.equal(await B.host().loadTheirs(), true);
+
+    B.type('B2');
+    A.type('A2');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.equal(await B.host().loadTheirs(), false, 'a text is already set aside and the question was declined');
+    assert.equal(B.text(), 'B2');
+
+    const bare = world();
+    const T = bare.tab('T');
+    assert.equal(await T.host().loadTheirs(), false, 'no engine yet');
+});
+
+test('refocusAfterPress: the keyboard goes back to the paper unless the action reported false', async () => {
+    const { A } = await pair();
+    const host = A.host();
+    assert.equal(host.refocusAfterPress(true), true);
+    assert.equal(host.refocusAfterPress(undefined), true, 'Keep mine reports nothing: its row goes away');
+    assert.equal(host.refocusAfterPress(false), false, 'declined or failed: the row stays and so does the focus');
+    assert.equal(host.refocusAfterPress(null), true);
+});
+
+// ───────────────────────────────────────────────────────── the role arrives with the poll
+
+test('a poll that says can_edit false turns an editing page into the read only page, words parked, without asking the server again', async () => {
+    const { server, writer } = await readerAndWriter();
+    writer.type('typed before the downgrade');
+    await writer.debounce();
+    writer.saves.shift().reject(new Error('network'));
+    await settle();
+
+    server.canEditByTab.set('W', false);
+    await writer.cycle();
+
+    assert.equal(writer.view.editable, false);
+    assert.equal(writer.handle.readOnly, true);
+    assert.equal(writer.view.unsentKept, true);
+    assert.deepEqual(writer.reports.at(-1), { tone: 'idle', word: 'Read only' });
+    assert.equal(writer.parks().length, 1);
+    assert.equal(textOf(JSON.parse(writer.parks()[0].json)), 'typed before the downgrade');
+    assert.equal(writer.canEditCalls, 0, 'the poll is the server answering');
+    assert.equal(writer.presenceRefreshes > 0, true, 'the page is rendered again so the server-drawn controls follow');
+
+    // Nothing is sent from here, and the poll keeps following.
+    const sent = writer.sent.length;
+    writer.type('and more');
+    await writer.debounce();
+    await writer.cycle();
+    assert.equal(writer.sent.length, sent);
+});
+
+test('a page that cannot be downgraded twice: a second can_edit false is said once', async () => {
+    const { server, writer } = await readerAndWriter();
+    server.canEditByTab.set('W', false);
+    await writer.cycle();
+    const reports = writer.reports.length;
+    const parks = writer.parks().length;
+
+    await writer.cycle();
+    assert.equal(writer.reports.length, reports);
+    assert.equal(writer.parks().length, parks);
+});
+
+test('can_edit true on a read only page does not re-enable it: a reload does that', async () => {
+    const { server, writer } = await readerAndWriter();
+    server.canEditByTab.set('W', false);
+    await writer.cycle();
+    assert.equal(writer.view.editable, false);
+
+    server.canEditByTab.set('W', true);
+    await writer.cycle();
+    assert.equal(writer.view.editable, false);
+    assert.equal(writer.handle.readOnly, true);
+    assert.deepEqual(writer.reports.at(-1), { tone: 'idle', word: 'Read only' });
+
+    // A page the server drew read only stays so as well.
+    const { server: other, reader } = await readerAndWriter();
+    other.canEditByTab.set('R', true);
+    await reader.cycle();
+    assert.equal(reader.view.editable, false);
+    assert.equal(reader.handle.readOnly, true);
+});
+
+test('a page with no can_edit in the answer behaves as before: an old server changes nothing', async () => {
+    const { writer } = await readerAndWriter();
+    writer.type('W1');
+    await writer.debounce();
+    await writer.land();
+    await writer.cycle();
+
+    assert.equal(writer.view.editable, true);
+    assert.equal(writer.handle.readOnly, false);
+    assert.equal(writer.view.unsaved, false);
+});
+
+test('can_edit true answers the question a refused save asked: the hold is lifted and the text goes again', async () => {
+    const { server, writer } = await refusedWriter({ canEditMode: 'hang' });
+    writer.host().saveRefused(403);
+    await settle();
+    assert.ok(writer.view.accessCheckSince > 0, 'the page is waiting for the server to say');
+    assert.equal(writer.view.editable, true);
+
+    server.canEditByTab.set('W', true);
+    await writer.cycle();
+
+    assert.equal(writer.view.accessCheckSince, 0);
+    assert.equal(writer.view.editable, true);
+    assert.equal(writer.handle.readOnly, false);
+    assert.equal(writer.sent.length, 2, 'the owed text went out again');
+    assert.equal(writer.sent[1].text, 'words in the air');
+});
+
+test('can_edit false answers the question a refused save asked: read only at once, and the words typed during the hold are parked too', async () => {
+    const { server, writer } = await refusedWriter({ canEditMode: 'hang' });
+    writer.host().saveRefused(403);
+    await settle();
+    assert.equal(writer.parks().length, 1, 'parked when the save was refused');
+    assert.equal(textOf(JSON.parse(writer.parks()[0].json)), 'words in the air');
+
+    // Typed while the question is out: the hold keeps the text owed, and the first park does not hold it.
+    writer.type('words in the air, and more typed during the hold');
+    await writer.debounce();
+
+    server.canEditByTab.set('W', false);
+    await writer.cycle();
+
+    assert.equal(writer.view.editable, false);
+    assert.equal(writer.view.accessCheckSince, 0);
+    assert.equal(writer.view.unsentKept, true);
+    const parked = writer.parks().map((park) => textOf(JSON.parse(park.json)));
+    assert.ok(parked.includes('words in the air, and more typed during the hold'), 'the newest words are parked');
+    assert.ok(parked.includes('words in the air'), 'and the earlier copy stays');
+
+    // The question that was still out answers late: nothing happens.
+    writer.canEditPending.resolve(true);
+    await settle();
+    assert.equal(writer.view.editable, false);
+});
+
+test('accessFromPoll takes only a real boolean: anything else changes nothing', async () => {
+    const { writer } = await readerAndWriter();
+    const refreshes = writer.presenceRefreshes;
+    for (const odd of [undefined, null, 'false', 0, '', {}]) {
+        writer.host().accessFromPoll(odd);
+    }
+
+    assert.equal(writer.view.editable, true);
+    assert.equal(writer.handle.readOnly, false);
+    assert.equal(writer.presenceRefreshes, refreshes);
+
+    // Not even the question a refused save left out is answered by something that is not a boolean.
+    const held = await refusedWriter({ canEditMode: 'hang' });
+    held.writer.host().saveRefused(403);
+    await settle();
+    const since = held.writer.view.accessCheckSince;
+    assert.ok(since > 0);
+    held.writer.host().accessFromPoll('true');
+    held.writer.host().accessFromPoll(1);
+    assert.equal(held.writer.view.accessCheckSince, since);
+});
+
+test('can_edit false on a fail-closed page is the same read only word, and nothing is parked or written', async () => {
+    const w = world();
+    const A = w.tab('A', { failClosed: true });
+    await A.open();
+    w.server.canEditByTab.set('A', false);
+    await A.cycle();
+
+    assert.equal(A.parks().length, 0);
+    assert.deepEqual(A.drafts.size, 0);
+    assert.equal(A.sent.length, 0);
 });
 
 test('read only: a signed-out stop does not tell a reader to keep editing', async () => {
