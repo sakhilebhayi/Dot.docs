@@ -86,6 +86,20 @@ jobs:
           $PHP artisan down --retry=30 || true
 
           git reset --hard origin/main
+
+          # Production invariant (ecosystem audit 2026-10-17, defect D9): with
+          # APP_DEBUG=true any error, even a harmless 405, answers every
+          # visitor with a ~840 KB debug page (source, stack frames, server
+          # paths). Force it off on every deploy, BEFORE the config cache is
+          # built, so a hand-edited .env cannot quietly put it back.
+          if [ -f .env ]; then
+            if grep -q '^APP_DEBUG=' .env; then
+              sed -i 's/^APP_DEBUG=.*/APP_DEBUG=false/' .env
+            else
+              printf '\nAPP_DEBUG=false\n' >> .env
+            fi
+            echo "== APP_DEBUG forced to false: $(grep '^APP_DEBUG=' .env | tail -1)"
+          fi
           composer install --no-interaction --optimize-autoloader --no-dev
 
           $PHP artisan migrate --force
@@ -293,6 +307,17 @@ jobs:
               FAILED=1
             fi
           done < "$WORK/unique"
+
+          # No debug page. POST to /up (a GET-only route) is a harmless 405: a
+          # production app answers it with ~1 KB, a debug-mode one with a
+          # stack-trace page of several hundred KB.
+          curl -s --max-time 30 -o "$WORK/probe.html" -X POST "$SITE_URL/up" || true
+          if grep -qiE 'vendor/laravel|stack trace' "$WORK/probe.html" 2>/dev/null; then
+            echo "::error::POST $SITE_URL/up answered with a debug error page ($(wc -c < "$WORK/probe.html" | tr -d ' ') bytes): APP_DEBUG is still on. Check the production .env and the config cache."
+            FAILED=1
+          else
+            echo "No debug page on POST $SITE_URL/up ($(wc -c < "$WORK/probe.html" | tr -d ' ') bytes)."
+          fi
 
           if [ "$FAILED" -ne 0 ]; then
             echo "::error::Smoke check failed: the live site does not load its own pages or build assets (see above). The deploy is NOT healthy."
