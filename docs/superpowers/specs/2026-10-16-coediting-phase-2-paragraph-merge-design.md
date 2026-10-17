@@ -390,7 +390,7 @@ Single quotes only inside attribute values; nothing server-rendered; the existin
 
 - **Live draft** (`<uuid>`): unchanged rules (version-keyed recency, stamped below the base the overwrite first became owed on while `overwriteOwed` (`draftStamp()`, section 17), cleared only when a save settled).
 - **`base-<uuid>`**: `{docUuid, json: confirmed, baseVersion, savedAt}`, written by `markConfirmed()` only (open, accepted save, applied/merged document, adopted restyle), never per keystroke. `loadBase(uuid) → {json, baseVersion} | null`.
-- **`lost-<uuid>`**: `{docUuid, entries, baseVersion, parkedAt, dismissedAt?}`.
+- **`lost-<uuid>@<tabId>`** (one row per tab; section 19): `{docUuid, entries, dismissed, baseVersion, parkedAt, dismissedAt?}`. A plain `lost-<uuid>` is still read.
 - **Sweep**: `parkedRowIsExpired(row, now, ttl)` expires `stale-`, `lost-` and `base-` rows older than `STALE_TTL_MS` (by `parkedAt`, else `savedAt`); `staleDraftIsExpired` stays as an alias; a live draft is never swept. A swept base only means the draft falls back to today's set-aside path.
 - `window.offlineDraft` exposes `saveBase`, `loadBase`, `parkLost`, `loadLost`, `markLostDismissed`.
 
@@ -533,16 +533,13 @@ Different paragraphs (poll-first and refusal-first with one tab throttled); D1 w
 - A block whose id the server re-stamps (invalid or duplicate id) or that TipTap re-ids on a block conversion (`toggleHeading` runs `setNode`, which may stamp a fresh id — to be pinned by one test in the plan) looks like delete + insert: the typist's words are offered back although nobody deleted anything.
 - Block ids are checked for duplicates at the top level only (`mergeDocuments()` returns null for a top-level block without an id or two top-level blocks sharing one). A merged document can carry one id twice when one copy is nested (a draft merge that moves p1 into a box or list while theirs edited p1 keeps both). That is not refused: the editor's block-id repair plugin (`BlockIdRepair`) gives one of the two a fresh id when the merged document is applied, and the block the apply did not touch keeps the id (pinned by a test in `sync.merge.editor.test.js`). No depth-wide check is built.
 - Pressing Enter in the middle of a paragraph that somebody else changes at the same moment can store the words after the split twice: the split's new block is kept as mine's insertion while the paragraph itself is offered back (or lost). Joining paragraphs (Backspace at a paragraph start) has the mirror effect: the joined paragraph's words survive only in the lost row. Nothing is lost.
-- A restore that brings back exactly the content of a draft's base makes the draft merge (7.1) see the blocks as unchanged since the draft was typed, so the draft's deletions apply and the merged save carries no overwrite flag (seed 42519 of the failure walk, 2 tabs). Nothing is lost: the version the save replaces is in the history and the words are in it (invariant E holds); the failure walk excuses it as the person's own deletion, re-stated at reopen for what the draft deletes relative to its base row.
 - The echo is not applied to block ORDER: after a stored-but-unanswered save that moved blocks, a later move by the same tab can be undone silently by the order comparison against the base.
 - An accepted suggestion that retires a save in the air sets no echo, so the tab's own stored words can come back from a later merge as a lost-row offer. Nothing is lost.
-- Two tabs of one browser share the live draft, the base row and the lost park (keyed per document).
+- Two tabs of one browser share the live draft and the base row (keyed per document). The lost list is per tab (section 19).
 - A tab closed inside the debounce in a browser that cannot keep drafts loses its last words (Phase 1 limit).
 - A merge during a restore/import/suggestion splices the typist's new blocks at the end when every anchor is gone.
 - The Livewire save still carries the document in the snapshot both ways (Phase 5).
 - Drafts from before Phase 2 (no base row) are set aside as today.
-- Two tabs of one document in one browser can overwrite each other's lost list: each rewrites the whole `lost-` park from its own view. The pages are not affected, only the copy that survives a reload.
-- Parks are kept, not overwritten (`stale-<uuid>@<ms>`), but a kept park is recoverable only by hand, for 7 days. Nothing in the page offers it.
 - The echo rule remembers one snapshot. When two sends in a row both go unanswered and the first was stored, the tab's own words come back as a lost-row offer. Nothing is lost.
 - A save whose request keeps failing is resent at the pace of the poll, with no back-off.
 
@@ -655,3 +652,13 @@ Stated limits added (section 13): Enter and Backspace around a concurrent change
 Left for the owner, not done: focus moving to the editor on Put it back (a phone keyboard may open), six buttons with one accessible name, `role="status"` re-reading the whole bar, grammar and excerpt polish of the item sentences (`blockWord('columns')`, list and table excerpts, a lost block whose winner was deleted going to the end), the item sentence in the contrast gate, two lens-1 minors, and telling the person whose saved paragraph a c2 merge deleted.
 
 Documentation: `.ai/rules/editor.md` was corrected in seven places and gained the points above; section 10 and decision 16 say `MERGE_ATTEMPTS` is 5; the roadmap's decision 2 is recorded as decided (D1) and its "Nothing is dropped" states the limits.
+
+---
+
+## 19. Limits closed after the final review (2026-10-17)
+
+Three limits of section 13 are closed; each has a test written first and a mutation that fails it.
+
+1. **A restore or any gap of versions** (was: "a restore that brings back exactly the content of a draft's base"). A merge built on a base more than one version older than the document it merges into owes the overwrite when its result no longer holds a top-level block theirs holds. It is decided in `sync/host.js` (`owesOverwrite()`), not in `merge.js`, for the live merge, the draft merge and the suggestion merge, and sends the flag so the server keeps the replaced version in the history. A gap of exactly one version owes nothing. Cost: an extra history row in the gap case. The failure walk's narrow excuse for seed 42519 is removed; the seed passes on the product.
+2. **Two tabs of one browser and the lost list** (was: they can overwrite each other's list). Each tab writes only its own row, `lost-<uuid>@<tabId>`. On open a page takes every row of its document into its own and deletes the others in one transaction, so each entry has one owner; Put it back and Dismiss all rewrite or mark the owner's row. The 7-day sweep dates every row by its own `parkedAt`. A plain `lost-<uuid>` row is still read. `offline.js` is tested against a small fake IndexedDB. Not built: a walk with two tabs sharing one browser (the shared live draft and base row are not in the walk model).
+3. **Kept parks** (was: recoverable only by hand). A park made because the page set a text aside is marked offerable. When the writer puts the standing text back or discards it, every park holding it is marked resolved (the rows stay for their 7 days) and the page offers the newest park that is offerable and not resolved, as a draft from an earlier visit; the same is done once at page open when nothing is set aside. It never replaces a text on offer, never offers what the page already shows, and a text the writer dealt with is not offered again. Rows are not promoted to the plain key (flags give the order and the single offer without moving rows). Load theirs' question says the earlier text is offered again where the browser keeps drafts.
