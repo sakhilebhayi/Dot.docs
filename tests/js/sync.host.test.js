@@ -7338,6 +7338,119 @@ test('a column layout reads right in every lost-row sentence', async () => {
     }
 });
 
+// ───────────────────────────────────────────────────────── an action reports whether it completed (the focus follows it)
+
+test('Dismiss all reports false when declined, when the copy cannot be kept and the unkept question is declined, and when there is nothing; true when the row emptied', async () => {
+    const declined = await lostOne();
+    declined.B.confirmAnswer = false;
+    assert.equal(await declined.B.host().dismissLost(), false);
+    assert.equal(declined.B.view.lost.length, 1, 'the row stays');
+
+    const nothing = world();
+    const N = nothing.tab('N');
+    await N.open();
+    assert.equal(await N.host().dismissLost(), false);
+
+    const unkept = await lostOne();
+    unkept.B.parkLostFails = true;
+    assert.equal(await unkept.B.host().dismissLost(), false, 'the copy could not be written: the row stays');
+    assert.equal(unkept.B.view.lost.length, 1);
+    unkept.B.confirmAnswer = false;
+    assert.equal(await unkept.B.host().dismissLost(), false, 'and the second question declined');
+    unkept.B.confirmAnswer = true;
+    assert.equal(await unkept.B.host().dismissLost(), true, 'dropped without a copy, knowingly');
+    assert.deepEqual(unkept.B.view.lost, []);
+
+    const done = await lostOne();
+    assert.equal(await done.B.host().dismissLost(), true);
+    assert.deepEqual(done.B.view.lost, []);
+});
+
+test('Discard reports false when declined and true when the offer went', async () => {
+    const w = world();
+    const R = w.tab('R', { confirmAnswer: false });
+    await R.open();
+    R.view.setAside = JSON.stringify(doc('set aside'));
+    R.view.setAsideFrom = 'conflict';
+    R.view.setAsideBase = 1;
+
+    assert.equal(R.host().discardSetAside(), false);
+    assert.notEqual(R.view.setAside, null, 'the offer stands');
+
+    R.confirmAnswer = true;
+    assert.equal(R.host().discardSetAside(), true);
+    assert.equal(R.view.setAside, null);
+
+    // A draft from an earlier visit is withdrawn without a question.
+    R.confirmAnswer = false;
+    R.view.setAside = JSON.stringify(doc('older'));
+    R.view.setAsideFrom = 'draft';
+    R.view.setAsideBase = 1;
+    assert.equal(R.host().discardSetAside(), true);
+});
+
+test('Put it back (the set-aside text) reports false when there is nothing, when declined and when the editor refuses; true when it went in', async () => {
+    const w = world();
+    const R = w.tab('R', { confirmAnswer: false });
+    await R.open();
+    assert.equal(R.host().putBack(), false, 'nothing is set aside');
+
+    R.view.setAside = JSON.stringify(doc('older text'));
+    R.view.setAsideFrom = 'draft';
+    R.view.setAsideBase = 1;
+    assert.equal(R.host().putBack(), false, 'declined');
+    assert.notEqual(R.view.setAside, null);
+
+    R.confirmAnswer = true;
+    R.setContentThrows = true;
+    assert.equal(R.host().putBack(), false, 'the editor refused it');
+    assert.equal(R.view.syncNotice, 'Your text could not be put back.');
+
+    R.setContentThrows = false;
+    assert.equal(R.host().putBack(), true);
+    assert.equal(R.text(), 'older text');
+    assert.equal(R.view.setAside, null);
+});
+
+test('Put them all back reports true only when every item went in; false when there is nothing or one stayed', async () => {
+    const empty = await pair();
+    assert.equal(empty.B.host().putBackAllLost(), false);
+
+    const stuck = await lostTwo();
+    stuck.B.insertBlockFails = true;
+    assert.equal(stuck.B.host().putBackAllLost(), false);
+    assert.equal(stuck.B.view.lost.length, 2);
+    stuck.B.insertBlockFails = false;
+    assert.equal(stuck.B.host().putBackAllLost(), true);
+    assert.deepEqual(stuck.B.view.lost, []);
+});
+
+test('Load theirs reports false when declined or when there is nothing to show yet, and true when the newer document showed', async () => {
+    const { A, B } = await conflicted({ B: { confirmAnswer: false } });
+    assert.equal(await B.host().loadTheirs(), true);
+
+    B.type('B2');
+    A.type('A2');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    assert.equal(await B.host().loadTheirs(), false, 'a text is already set aside and the question was declined');
+    assert.equal(B.text(), 'B2');
+
+    const bare = world();
+    const T = bare.tab('T');
+    assert.equal(await T.host().loadTheirs(), false, 'no engine yet');
+});
+
+test('refocusAfterPress: the keyboard goes back to the paper unless the action reported false', async () => {
+    const { A } = await pair();
+    const host = A.host();
+    assert.equal(host.refocusAfterPress(true), true);
+    assert.equal(host.refocusAfterPress(undefined), true, 'Keep mine reports nothing: its row goes away');
+    assert.equal(host.refocusAfterPress(false), false, 'declined or failed: the row stays and so does the focus');
+    assert.equal(host.refocusAfterPress(null), true);
+});
+
 // ───────────────────────────────────────────────────────── the role arrives with the poll
 
 test('a poll that says can_edit false turns an editing page into the read only page, words parked, without asking the server again', async () => {

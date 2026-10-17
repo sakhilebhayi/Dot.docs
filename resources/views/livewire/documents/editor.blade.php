@@ -91,6 +91,7 @@
         parkOfferPending: false,
         // Consecutive saves whose request failed, and the time before which the next one is held back (sync/host.js, SAVE_RETRY_DELAYS_MS).
         saveFailures: 0,
+        lastPress: undefined,
         saveRetryAt: 0,
         // A reason the page can no longer stay in step (signed out, access
         // removed, document deleted, a version this editor cannot open).
@@ -169,9 +170,16 @@
         // document the writer has just asked to look at. No scrolling:
         // nobody asked to go anywhere. This is page glue about focus, not a
         // decision about a save; sync/host.js has no DOM.
+        // An action that was declined or failed (it returned false) leaves the focus where it is: the
+        // row stays, and moving the keyboard to the paper would take it away from the button.
+        pressed(result) { this.lastPress = result; return result; },
         noticePressed(event) {
+            const done = this.lastPress;
+            this.lastPress = undefined;
             if (event.detail !== 0 || !event.target.closest('button')) return;
-            this.ed()?.commands.focus(null, { scrollIntoView: false });
+            Promise.resolve(done).then((completed) => {
+                if (this.syncHost().refocusAfterPress(completed)) this.ed()?.commands.focus(null, { scrollIntoView: false });
+            });
         },
 
         init() {
@@ -397,12 +405,12 @@
         applyFromSync(remote, options) { return this.syncHost().applyFromSync(remote, options); },
         enterConflict(version) { this.syncHost().enterConflict(version); },
         keepMine() { this.syncHost().keepMine(); },
-        loadTheirs() { return this.syncHost().loadTheirs(); },
-        putBack() { this.syncHost().putBack(); },
-        discardSetAside() { this.syncHost().discardSetAside(); },
-        putBackLost(index, fromKeyboard) { this.syncHost().putBackLost(index, { focus: fromKeyboard === true }); },
-        putBackAllLost(fromKeyboard) { this.syncHost().putBackAllLost({ focus: fromKeyboard === true }); },
-        dismissLost() { this.syncHost().dismissLost(); },
+        loadTheirs() { return this.pressed(this.syncHost().loadTheirs()); },
+        putBack() { return this.pressed(this.syncHost().putBack()); },
+        discardSetAside() { return this.pressed(this.syncHost().discardSetAside()); },
+        putBackLost(index, fromKeyboard) { return this.pressed(this.syncHost().putBackLost(index, { focus: fromKeyboard === true })); },
+        putBackAllLost(fromKeyboard) { return this.pressed(this.syncHost().putBackAllLost({ focus: fromKeyboard === true })); },
+        dismissLost() { return this.pressed(this.syncHost().dismissLost()); },
         membersChanged(members) { this.syncHost().membersChanged(members); },
         restoreDraftIfRestorable() { return this.syncHost().restoreDraft(); },
         applySuggestion(content, version) { this.syncHost().applySuggestion(content, version); },

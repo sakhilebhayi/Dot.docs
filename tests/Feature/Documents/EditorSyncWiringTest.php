@@ -431,7 +431,7 @@ class EditorSyncWiringTest extends TestCase
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
         $this->assertMatchesRegularExpression('/^\s*setAsideFrom: null,$/m', $alpine[1]);
         $this->assertMatchesRegularExpression('/^\s*setAsideBase: null,$/m', $alpine[1]);
-        $this->assertStringContainsString('discardSetAside() { this.syncHost().discardSetAside(); }', $alpine[1]);
+        $this->assertStringContainsString('discardSetAside() { return this.pressed(this.syncHost().discardSetAside()); }', $alpine[1]);
     }
 
     /**
@@ -475,6 +475,19 @@ class EditorSyncWiringTest extends TestCase
         $this->assertSame('noticePressed($event)', $bar->getAttribute('@click'));
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
         $this->assertStringContainsString('noticePressed(event) {', $alpine[1]);
+
+        // An action the writer declined or that failed reports false and leaves the focus where it is: the five
+        // question-asking or failing actions go through pressed(), and the refocus is decided in the module.
+        $this->assertStringContainsString('pressed(result) { this.lastPress = result; return result; }', $alpine[1]);
+        $this->assertStringContainsString('lastPress: undefined,', $alpine[1]);
+        $this->assertStringContainsString('this.syncHost().refocusAfterPress(completed)', $alpine[1]);
+        foreach ([
+            'putBack() { return this.pressed(this.syncHost().putBack()); }',
+            'discardSetAside() { return this.pressed(this.syncHost().discardSetAside()); }',
+            'loadTheirs() { return this.pressed(this.syncHost().loadTheirs()); }',
+        ] as $delegate) {
+            $this->assertStringContainsString($delegate, $alpine[1]);
+        }
     }
 
     /**
@@ -547,9 +560,9 @@ class EditorSyncWiringTest extends TestCase
 
         // The three delegates hand over to the module.
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
-        $this->assertStringContainsString('putBackLost(index, fromKeyboard) { this.syncHost().putBackLost(index, { focus: fromKeyboard === true }); }', $alpine[1]);
-        $this->assertStringContainsString('putBackAllLost(fromKeyboard) { this.syncHost().putBackAllLost({ focus: fromKeyboard === true }); }', $alpine[1]);
-        $this->assertStringContainsString('dismissLost() { this.syncHost().dismissLost(); }', $alpine[1]);
+        $this->assertStringContainsString('putBackLost(index, fromKeyboard) { return this.pressed(this.syncHost().putBackLost(index, { focus: fromKeyboard === true })); }', $alpine[1]);
+        $this->assertStringContainsString('putBackAllLost(fromKeyboard) { return this.pressed(this.syncHost().putBackAllLost({ focus: fromKeyboard === true })); }', $alpine[1]);
+        $this->assertStringContainsString('dismissLost() { return this.pressed(this.syncHost().dismissLost()); }', $alpine[1]);
 
         // The row's own styles, beside the bar's, and the excerpt's ink in the contrast gate.
         $css = file_get_contents(resource_path('css/shell.css'));
