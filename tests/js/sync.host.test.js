@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createSyncEngine } from '../../resources/js/editor/sync/engine.js';
 import {
     DISCARD_QUESTION,
     PUT_BACK_QUESTION,
@@ -11,519 +10,18 @@ import {
     createTabId,
     unloadSaveBody,
 } from '../../resources/js/editor/sync/host.js';
+import { STALE, UUID, conflicted, doc, makeTab, makeView, pair, settle, world } from './support/syncWorld.js';
 
 /**
  * The page's half of the sync state machine (sync/host.js), driven together
- * with the REAL polling engine (sync/engine.js) against fakes for everything
- * outside those two:
- *
- *   - a fake server that keeps a document, a version and the versions it was
- *     told to keep, and answers saves as Editor::saveContent() does
- *     ({ok, conflict, version}) and polls as the sync endpoint does;
- *   - a fake editor handle that follows the bundle's own rules for `pending`
- *     (the debounce is armed or a flush is owed) and for applyRemote() (it
- *     refuses over unsaved typing unless forced);
- *   - a fake draft store, an injected clock and a captured timer;
- *   - saves and polls that are answered BY HAND, so "a save in the air" is a
- *     state a test can hold for as long as it needs;
- *   - `leave()`, the page going away: the bundle's pagehide flush, which
- *     goes by beacon to the fake server's autosave endpoint, after which
- *     nothing answers that tab any more.
- *
- * What stands in for the Blade component is `view`, a plain object with the
- * component's state fields, and `open()` / `startSync()`, which make the same
- * calls the component's init() makes. Every call builds its host from the view
- * afresh, exactly as the component's one-line delegates do.
+ * with the REAL polling engine (sync/engine.js) and the REAL merge
+ * (sync/merge.js) against the fake world in support/syncWorld.js: a fake
+ * server, a block-shaped fake editor handle, a fake draft store, an
+ * injected clock, saves and polls answered by hand. `doc(text)` is the
+ * one-paragraph document (block p1) every case below is written against;
+ * `t.text()`, `server.text()`, a save's `.text` and a beacon's `.text` are
+ * the text of that paragraph.
  */
-
-/** Let every pending promise callback run. */
-const settle = () => new Promise((resolve) => setImmediate(resolve));
-const clone = (value) => JSON.parse(JSON.stringify(value));
-const doc = (text) => ({ type: 'doc', text });
-const UUID = 'doc-uuid';
-const STALE = `stale-${UUID}`;
-
-class FakeServer {
-    constructor(text) {
-        this.version = 1;
-        this.json = doc(text);
-        /** Versions kept in the history before being replaced on purpose. */
-        this.history = [];
-        this.present = new Map();
-        /** The next save is rejected, as DocumentSchema rejects a bad document. */
-        this.rejectNext = false;
-    }
-
-    /** Editor::saveContent($content, $baseVersion, $overwrite). */
-    save(json, base, overwrite = false) {
-        if (this.rejectNext) {
-            this.rejectNext = false;
-
-            return { ok: false, conflict: false, version: this.version };
-        }
-
-        if (base === null || base === undefined) {
-            return { ok: false, conflict: false, version: this.version };
-        }
-
-        if (base !== this.version) {
-            return { ok: false, conflict: true, version: this.version };
-        }
-
-        if (overwrite) {
-            this.history.push({ version: this.version, text: this.json.text });
-        }
-
-        this.version += 1;
-        this.json = clone(json);
-
-        return { ok: true, conflict: false, version: this.version };
-    }
-
-    /**
-     * POST /documents/{uuid}/autosave, the unload beacon's endpoint
-     * (DocumentAutosaveController): the same save, stated in a JSON body.
-     */
-    autosave(body) {
-        const valid =
-            body &&
-            body.content &&
-            body.content.type === 'doc' &&
-            Number.isInteger(body.base_version) &&
-            body.base_version >= 1 &&
-            // Laravel's `boolean` rule, when the field is there at all.
-            (!('overwrite' in body) || [true, false, 1, 0, '1', '0'].includes(body.overwrite));
-        if (!valid) {
-            return { status: 422, body: { message: 'The given data was invalid.' } };
-        }
-
-        const result = this.save(body.content, body.base_version, [true, 1, '1'].includes(body.overwrite));
-        if (result.ok) {
-            return { status: 200, body: { version: result.version } };
-        }
-
-        return result.conflict
-            ? { status: 409, body: { conflict: true, version: result.version } }
-            : { status: 422, body: { message: 'The given data was invalid.' } };
-    }
-
-    /** A save that states no base: a style change, an accepted suggestion. */
-    replace(json) {
-        this.version += 1;
-        this.json = clone(json);
-
-        return this.version;
-    }
-
-    /** POST /documents/{uuid}/sync. */
-    sync(payload) {
-        this.present.set(payload.tab, true);
-
-        const body = {
-            version: this.version,
-            changed: false,
-            members: [...this.present.keys()].map((_, index) => ({ id: index + 1 })),
-            others: this.present.size - 1,
-        };
-
-        if (this.version > payload.version) {
-            body.changed = true;
-            body.json = clone(this.json);
-            body.outline = { numbers: {}, of: this.version };
-            body.css = `.paper{--v:${this.version}}`;
-        }
-
-        return { status: 200, body };
-    }
-}
-
-/** The state fields of the Blade component, as a page rendered at `version` has them. */
-const makeView = (version) => ({
-    saving: 0,
-    savingSince: 0,
-    saveSeq: 0,
-    expiredSaveSeq: 0,
-    unsaved: false,
-    resave: false,
-    confirmed: null,
-    overwriteOwed: false,
-    conflict: null,
-    setAside: null,
-    setAsideFrom: null,
-    setAsideBase: null,
-    syncNotice: '',
-    memberKey: '',
-    docUuid: UUID,
-    documentVersion: version,
-    baseVersion: version,
-    aiError: '',
-    tick: 0,
-});
-
-function world(text = 'start') {
-    const server = new FakeServer(text);
-    const clock = { now: 1_000_000 };
-
-    return { server, clock, tab: (name, options) => makeTab({ server, clock }, name, options) };
-}
-
-/**
- * One open editor tab.
- *
- * @param {{server: FakeServer, clock: {now: number}}} world
- * @param {string} name
- * @param {{failClosed?: boolean, drafts?: Map, draftStore?: boolean, confirmAnswer?: boolean}} options
- */
-function makeTab({ server, clock }, name, options = {}) {
-    const t = {
-        name,
-        view: makeView(server.version),
-        /** Saves in the air, oldest first. */
-        saves: [],
-        /** Every save this tab has sent. */
-        sent: [],
-        /** Every unload beacon this tab has sent, with the server's answer (which no page ever reads). */
-        beacons: [],
-        /** Polls in the air, oldest first. */
-        polls: [],
-        /** The payload of every poll this tab has sent. */
-        polled: [],
-        timer: null,
-        engine: null,
-        visible: true,
-        reports: [],
-        infos: [],
-        errors: [],
-        outlines: [],
-        css: [],
-        questions: [],
-        confirmAnswer: options.confirmAnswer ?? true,
-        presenceRefreshes: 0,
-        outlineRefreshes: 0,
-        /** What the page's outline refresh does; a test swaps it to make it fail. */
-        refreshOutline: () => Promise.resolve(),
-        /** The browser's draft store. Shared between two page loads of one browser. */
-        drafts: options.drafts ?? new Map(),
-        draftCalls: [],
-        applyCalls: 0,
-        /** This editor cannot open what arrives. */
-        refuses: false,
-        setContentThrows: false,
-        mounted: true,
-    };
-
-    // ---- the editor handle, with the bundle's own bookkeeping
-    let content = clone(server.json);
-    let dirty = false;
-    let saveTimer = null;
-    let lastSaved = JSON.stringify(content);
-    const autosave = !options.failClosed;
-    let onUpdate = () => {};
-
-    const emitUpdate = () => {
-        if (autosave) {
-            dirty = true;
-            saveTimer = 'armed';
-        }
-        onUpdate();
-    };
-
-    const flushSave = ({ beacon = false } = {}) => {
-        saveTimer = null;
-        if (!dirty || !autosave) {
-            return false;
-        }
-
-        const json = clone(content);
-        const serialised = JSON.stringify(json);
-        if (serialised === lastSaved) {
-            dirty = false;
-
-            return false;
-        }
-
-        dirty = false;
-        lastSaved = serialised;
-
-        if (beacon) {
-            // navigator.sendBeacon(): the browser delivers the body after
-            // the page has gone. Built by the function the bundle's
-            // beaconSave() builds it with, from the mount options the Blade
-            // component passes: both are read now, at the moment of leaving.
-            const body = clone(
-                unloadSaveBody(json, {
-                    csrfToken: 'csrf',
-                    getBaseVersion: () => t.view.baseVersion,
-                    getOverwrite: () => t.view.overwriteOwed,
-                })
-            );
-            t.beacons.push({ body, answer: server.autosave(body) });
-
-            return true;
-        }
-
-        // The bundle's onChange, which the page wires to persist().
-        t.host().persist(json);
-
-        return true;
-    };
-
-    t.handle = {
-        editor: {
-            getJSON: () => clone(content),
-            commands: {
-                setContent(json) {
-                    if (t.setContentThrows) {
-                        throw new Error('invalid content');
-                    }
-                    content = clone(json);
-                    emitUpdate();
-
-                    return true;
-                },
-            },
-        },
-        get autosaves() {
-            return autosave;
-        },
-        get pending() {
-            return dirty || saveTimer !== null;
-        },
-        applyRemote(json, { force = false } = {}) {
-            t.applyCalls += 1;
-            if (!json || !autosave || t.refuses) {
-                return false;
-            }
-            if (!force && (dirty || saveTimer !== null)) {
-                return false;
-            }
-            content = clone(json);
-            saveTimer = null;
-            dirty = false;
-            lastSaved = JSON.stringify(content);
-
-            return true;
-        },
-    };
-
-    // ---- the browser's draft store (window.offlineDraft)
-    t.draftStore =
-        options.draftStore === false
-            ? undefined
-            : {
-                  saveDraft: async (uuid, json, baseVersion) => {
-                      t.draftCalls.push('saveDraft');
-                      t.drafts.set(uuid, { json, baseVersion });
-                  },
-                  loadDraft: async (uuid) => {
-                      t.draftCalls.push('loadDraft');
-
-                      return t.drafts.get(uuid) ?? null;
-                  },
-                  clearDraft: async (uuid) => {
-                      t.draftCalls.push('clearDraft');
-                      t.drafts.delete(uuid);
-                  },
-                  parkStaleDraft: async (uuid, json, baseVersion) => {
-                      t.draftCalls.push('parkStaleDraft');
-                      t.drafts.set(`stale-${uuid}`, { json, baseVersion });
-                  },
-              };
-
-    // ---- everything the page hands the module
-    t.env = {
-        handle: () => (t.mounted ? t.handle : null),
-        engine: () => t.engine,
-        save: (json, baseVersion, overwrite) =>
-            new Promise((resolve, reject) => {
-                const save = { json: clone(json), base: baseVersion, overwrite, resolve, reject, result: undefined };
-                t.saves.push(save);
-                t.sent.push(save);
-            }),
-        refreshOutline: () => {
-            t.outlineRefreshes += 1;
-
-            return t.refreshOutline();
-        },
-        refreshPresence: () => {
-            t.presenceRefreshes += 1;
-        },
-        report: (tone, word) => t.reports.push({ tone, word }),
-        drafts: () => t.draftStore,
-        documentsDiffer: (a, b) => JSON.stringify(a) !== JSON.stringify(b),
-        showOutline: (outline) => t.outlines.push(outline),
-        showCss: (css) => t.css.push(css),
-        confirm: (question) => {
-            t.questions.push(question);
-
-            return t.confirmAnswer;
-        },
-        now: () => clock.now,
-        info: (...args) => t.infos.push(args.join(' ')),
-        log: (...args) => t.errors.push(args),
-    };
-
-    /** Built afresh for every call, as the component's delegates do. */
-    t.host = () => createSyncHost(t.view, t.env);
-
-    // ---- what the component's init() does
-    t.startSync = () => {
-        if (t.engine) {
-            return;
-        }
-
-        t.engine = createSyncEngine({
-            version: t.view.baseVersion,
-            tab: name,
-            request: (payload) =>
-                new Promise((resolve, reject) => {
-                    t.polls.push({ payload, resolve, reject });
-                    t.polled.push(payload);
-                }),
-            visible: () => t.visible,
-            host: t.host().engineHost(),
-            setTimer: (fn, ms) => {
-                t.timer = { fn, ms };
-
-                return t.timer;
-            },
-            clearTimer: (id) => {
-                if (t.timer === id) {
-                    t.timer = null;
-                }
-            },
-        });
-        t.engine.start();
-    };
-
-    /** The editor is mounted and the page listens to its updates. */
-    t.mount = () => {
-        t.host().opened();
-        onUpdate = () => t.host().edited();
-    };
-    t.open = async () => {
-        t.mount();
-        t.host()
-            .restoreDraft()
-            .finally(() => t.startSync());
-        await settle();
-    };
-
-    // ---- what a person does
-    t.type = (text) => {
-        content = { ...content, text };
-        emitUpdate();
-    };
-    /** The bundle's 1.2 second debounce fires. */
-    t.debounce = async () => {
-        flushSave();
-        await settle();
-    };
-    /**
-     * The tab is closed, or the writer follows a link: pagehide flushes what
-     * the debounce still holds by beacon. The page is gone afterwards. A
-     * save already in the air may still reach the server (saveArrives()),
-     * but its answer reaches nobody, and the draft store stays as it is.
-     */
-    t.leave = () => {
-        flushSave({ beacon: true });
-    };
-
-    // ---- what the network does
-    /** The oldest save that has not reached the server reaches it. */
-    t.saveArrives = () => {
-        const save = t.saves.find((candidate) => candidate.result === undefined);
-        save.result = server.save(save.json, save.base, save.overwrite);
-    };
-    /** The oldest save's answer reaches the tab. */
-    t.saveReturns = async () => {
-        const save = t.saves.shift();
-        save.resolve(save.result);
-        await settle();
-    };
-    /** Every save in the air reaches the server and is answered, the ones that causes included. */
-    t.land = async () => {
-        let landed = 0;
-        while (t.saves.length > 0) {
-            landed += 1;
-            assert.ok(landed <= 20, 'the tab keeps sending saves and never comes to rest');
-            t.saveArrives();
-            await t.saveReturns();
-        }
-    };
-    /** The oldest save's answer never comes. Returned, so a test can let it answer late. */
-    t.saveNeverAnswers = () => t.saves.shift();
-    /** The oldest poll in the air is answered by the server. */
-    t.poll = async () => {
-        const poll = t.polls.shift();
-        poll.resolve(server.sync(poll.payload));
-        await settle();
-    };
-    /** The oldest poll in the air is answered with this instead. */
-    t.pollAnswers = async (status, body) => {
-        t.polls.shift().resolve({ status, body });
-        await settle();
-    };
-    /** The oldest poll in the air never reaches the server: the request itself fails. */
-    t.pollFails = async () => {
-        t.polls.shift().reject(new Error('network'));
-        await settle();
-    };
-    t.fireTimer = async () => {
-        const { fn } = t.timer;
-        t.timer = null;
-        fn();
-        await settle();
-    };
-    /** One full poll: the timer fires (unless a poll is already in the air) and the server answers. */
-    t.cycle = async () => {
-        if (t.polls.length === 0) {
-            await t.fireTimer();
-        }
-        await t.poll();
-    };
-
-    // ---- what a test reads
-    t.text = () => content.text;
-    t.word = () => t.reports.at(-1)?.word;
-    t.words = () => t.reports.map((report) => report.word);
-    t.draft = () => (t.drafts.has(UUID) ? JSON.parse(t.drafts.get(UUID).json).text : null);
-    t.stale = () => (t.drafts.has(STALE) ? JSON.parse(t.drafts.get(STALE).json).text : null);
-
-    return t;
-}
-
-/** Two people with the same document open, each already told the other is here. */
-async function pair(options = {}) {
-    const w = world();
-    const A = w.tab('A', options.A);
-    const B = w.tab('B', options.B);
-    await A.open();
-    await B.open();
-    await A.poll();
-    await B.poll();
-    await A.cycle();
-
-    return { ...w, A, B };
-}
-
-/**
- * Both typed at the same moment. A's save landed first (version 2); B heard
- * of it through its poll while still inside its debounce, and now shows the
- * notice. B's own autosave has fired since and was not sent.
- */
-async function conflicted(options = {}) {
-    const w = await pair(options);
-    const { A, B } = w;
-    A.type('A1');
-    B.type('B1');
-    await A.debounce();
-    await A.land();
-    await B.cycle();
-    await B.debounce();
-
-    return w;
-}
 
 // ───────────────────────────────────────────────────────── following
 
@@ -541,7 +39,7 @@ test('one person types, the other follows: the document is applied, the base mov
     await A.debounce();
     assert.equal(A.word(), 'Saving');
     assert.deepEqual(
-        A.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        A.sent.map((save) => [save.text, save.base, save.overwrite]),
         [['A1', 1, false]]
     );
 
@@ -689,7 +187,7 @@ test('a tab with unsaved typing does not follow: the notice is raised, first wit
     await B.poll();
     assert.deepEqual(B.view.conflict, { version: 2, ready: true });
     assert.equal(B.text(), 'B1', 'nothing was written over the typing');
-    assert.equal(server.json.text, 'A1', 'and nothing was written over the other person');
+    assert.equal(server.text(), 'A1', 'and nothing was written over the other person');
     assert.equal(B.draft(), 'B1', 'the draft keeps the text in the meantime');
 
     // The engine raises it again on every poll while it stands.
@@ -762,7 +260,7 @@ test('Keep mine: the base moves up, the save says it overwrites, the replaced ve
     assert.equal(B.view.baseVersion, 2);
     assert.equal(B.word(), 'Saving');
     assert.deepEqual(
-        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        B.sent.map((save) => [save.text, save.base, save.overwrite]),
         [['B1', 2, true]]
     );
     assert.notEqual(B.view.conflict, null, 'the notice stays until the save has landed');
@@ -770,7 +268,7 @@ test('Keep mine: the base moves up, the save says it overwrites, the replaced ve
 
     await B.land();
     assert.equal(server.version, 3);
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
     assert.equal(B.view.conflict, null);
     assert.equal(B.view.baseVersion, 3);
@@ -795,7 +293,7 @@ test('Keep mine pressed inside the debounce saves what the editor holds, once', 
 
     B.host().keepMine();
     await B.land();
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.equal(B.view.unsaved, true, 'the debounce is still armed, so the save has not settled');
     assert.equal(B.draft(), 'B1');
 
@@ -804,7 +302,7 @@ test('Keep mine pressed inside the debounce saves what the editor holds, once', 
     await B.land();
     assert.equal(B.view.conflict, null);
     assert.equal(B.view.unsaved, false);
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
 });
 
 test('Keep mine does nothing when there is no conflict', async () => {
@@ -838,14 +336,14 @@ test('Keep mine refused because somebody saved again: the next press saves over 
 
     B.host().keepMine();
     await B.land();
-    assert.equal(server.json.text, 'A2', 'the first press was refused: version 3 was in the way');
+    assert.equal(server.text(), 'A2', 'the first press was refused: version 3 was in the way');
     assert.equal(B.view.conflict.version, 3);
     assert.equal(B.text(), 'B1');
 
     B.host().keepMine();
     assert.equal(B.sent.at(-1).base, 3);
     await B.land();
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 3, text: 'A2' }]);
     assert.equal(B.view.conflict, null);
 });
@@ -867,7 +365,7 @@ test('Keep mine after a lost Keep mine: it saves over the newest version the eng
     assert.equal(B.sent.at(-1).base, 3);
     assert.equal(B.sent.at(-1).overwrite, true);
     await B.land();
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 3, text: 'A2' }]);
 });
 
@@ -927,11 +425,11 @@ test('Put it back: the text returns, its save says it overwrites, and the replac
 
     await B.debounce();
     assert.deepEqual(
-        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        B.sent.map((save) => [save.text, save.base, save.overwrite]),
         [['B1', 2, true]]
     );
     await B.land();
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
     assert.equal(B.view.overwriteOwed, false);
     assert.equal(B.word(), 'Saved');
@@ -1072,7 +570,7 @@ test('Keep mine and Load theirs both do nothing while a save is in the air', asy
     assert.equal(B.engine.pending.version, 2, 'the waiting document was not taken');
 
     await B.land();
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.equal(B.view.conflict, null);
 });
 
@@ -1199,11 +697,11 @@ test('Put it back after the document has moved on asks first, and a no changes n
     assert.equal(B.view.setAside, null);
     await B.debounce();
     assert.deepEqual(
-        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        B.sent.map((save) => [save.text, save.base, save.overwrite]),
         [['B1', 3, true]]
     );
     await B.land();
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 3, text: 'A2 newer work' }]);
 });
 
@@ -1219,7 +717,7 @@ test('Put it back after this tab own later save asks first too', async () => {
     B.host().putBack();
     assert.deepEqual(B.questions, [PUT_BACK_QUESTION]);
     assert.equal(B.text(), 'A1 and new work by B');
-    assert.equal(server.json.text, 'A1 and new work by B');
+    assert.equal(server.text(), 'A1 and new work by B');
     assert.equal(B.sent.length, 1);
 });
 
@@ -1321,11 +819,11 @@ test('Put it back, then the tab is closed inside the debounce: the beacon says i
     // Closed, or a link followed, before the debounce fires.
     B.leave();
     assert.deepEqual(
-        B.beacons.map((beacon) => [beacon.body.content.text, beacon.body.base_version, beacon.body.overwrite]),
+        B.beacons.map((beacon) => [beacon.text, beacon.body.base_version, beacon.body.overwrite]),
         [['B1', 2, true]]
     );
     assert.equal(B.beacons[0].answer.status, 200);
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }], 'the other person version is kept first');
 });
 
@@ -1338,7 +836,7 @@ test('Keep mine marks the overwrite as owed when it moves the base up, until a s
     assert.equal(B.view.overwriteOwed, true, 'owed from the moment the base states the other person version');
 
     await B.land();
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.equal(B.view.overwriteOwed, false, 'an accepted save that said so settles it');
 
     B.type('B1 and on');
@@ -1351,7 +849,7 @@ test('a Keep mine save the server rejects leaves the overwrite owed: the beacon 
     server.rejectNext = true;
     B.host().keepMine();
     await B.land();
-    assert.equal(server.json.text, 'A1', 'nothing was stored');
+    assert.equal(server.text(), 'A1', 'nothing was stored');
     assert.equal(B.view.baseVersion, 2, 'the base stays moved up');
     assert.equal(B.view.overwriteOwed, true);
     assert.equal(B.word(), 'Not saved');
@@ -1361,10 +859,10 @@ test('a Keep mine save the server rejects leaves the overwrite owed: the beacon 
     B.type('B1 and more');
     B.leave();
     assert.deepEqual(
-        B.beacons.map((beacon) => [beacon.body.content.text, beacon.body.base_version, beacon.body.overwrite]),
+        B.beacons.map((beacon) => [beacon.text, beacon.body.base_version, beacon.body.overwrite]),
         [['B1 and more', 2, true]]
     );
-    assert.equal(server.json.text, 'B1 and more');
+    assert.equal(server.text(), 'B1 and more');
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
 });
 
@@ -1379,7 +877,7 @@ test('a Keep mine save cut off by leaving: the beacon of what was typed since ca
         B.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]),
         [[2, true, 200]]
     );
-    assert.equal(server.json.text, 'B1 and more');
+    assert.equal(server.text(), 'B1 and more');
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
 });
 
@@ -1391,7 +889,7 @@ test('a Keep mine save that did land before the beacon: the beacon is refused an
     B.leave();
 
     assert.equal(B.beacons[0].answer.status, 409, 'the base it states is no longer current: nothing is overwritten blind');
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
 });
 
@@ -1426,14 +924,14 @@ test('after Keep mine the editor being back at the old confirmed document settle
     // text with no version kept. The owed save goes instead, and says so.
     assert.equal(B.view.unsaved, true);
     assert.deepEqual(
-        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        B.sent.map((save) => [save.text, save.base, save.overwrite]),
         [
             ['start', 2, true],
             ['start', 3, true],
         ]
     );
     await B.land();
-    assert.equal(server.json.text, 'start');
+    assert.equal(server.text(), 'start');
     assert.deepEqual(server.history, [{ version: 3, text: 'A1' }]);
     assert.equal(B.view.overwriteOwed, false);
     assert.equal(B.view.confirmed, JSON.stringify(doc('start')));
@@ -1451,7 +949,7 @@ test('a Keep mine save refused against this tab own newer version is sent again,
     B.saveArrives();
     await B.saveReturns();
     assert.deepEqual(
-        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        B.sent.map((save) => [save.text, save.base, save.overwrite]),
         [
             ['B1', 2, true],
             ['B1', 3, true],
@@ -1460,7 +958,7 @@ test('a Keep mine save refused against this tab own newer version is sent again,
     );
 
     await B.land();
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 3, text: 'A1' }]);
     assert.equal(B.view.overwriteOwed, false);
 });
@@ -1481,7 +979,7 @@ test('a Keep mine save that is lost: the ordinary autosave that goes out later s
     clock.now += SAVE_EXPIRY_MS;
     await B.cycle();
     assert.deepEqual(
-        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        B.sent.map((save) => [save.text, save.base, save.overwrite]),
         [
             ['B1', 2, true],
             ['B1 and more', 3, true],
@@ -1489,7 +987,7 @@ test('a Keep mine save that is lost: the ordinary autosave that goes out later s
         'not the Keep mine save itself, and it replaces the other person text all the same'
     );
     await B.land();
-    assert.equal(server.json.text, 'B1 and more');
+    assert.equal(server.text(), 'B1 and more');
     assert.deepEqual(server.history, [{ version: 3, text: 'A1' }]);
     assert.equal(B.view.overwriteOwed, false);
 });
@@ -1499,7 +997,7 @@ test('Put it back while an ordinary save is in the air: that save answering does
     await B.host().loadTheirs();
     B.type('A1 plus an edit');
     await B.debounce();
-    assert.deepEqual([B.sent[0].json.text, B.sent[0].base, B.sent[0].overwrite], ['A1 plus an edit', 2, false]);
+    assert.deepEqual([B.sent[0].text, B.sent[0].base, B.sent[0].overwrite], ['A1 plus an edit', 2, false]);
 
     // Put it back before that save has answered (the page asks first: the
     // text on it is not saved yet).
@@ -1510,12 +1008,12 @@ test('Put it back while an ordinary save is in the air: that save answering does
     // The ordinary save is accepted. It did not carry the overwrite, so its
     // answer does not settle it.
     await B.land();
-    assert.equal(server.json.text, 'A1 plus an edit');
+    assert.equal(server.text(), 'A1 plus an edit');
     assert.equal(B.view.overwriteOwed, true);
 
     await B.debounce();
     assert.deepEqual(
-        B.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        B.sent.map((save) => [save.text, save.base, save.overwrite]),
         [
             ['A1 plus an edit', 2, false],
             ['B1', 3, true],
@@ -1523,7 +1021,7 @@ test('Put it back while an ordinary save is in the air: that save answering does
     );
     await B.land();
     assert.equal(B.view.overwriteOwed, false);
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 3, text: 'A1 plus an edit' }]);
 });
 
@@ -1551,11 +1049,11 @@ test('Put it back, then the page dies before anything is sent: reopened, the tex
     assert.deepEqual(again.questions, [PUT_BACK_QUESTION]);
     await again.debounce();
     assert.deepEqual(
-        again.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        again.sent.map((save) => [save.text, save.base, save.overwrite]),
         [['B1', 2, true]]
     );
     await again.land();
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
 });
 
@@ -1577,7 +1075,7 @@ test('Keep mine fails, the writer types on, the page dies: reopened, the text is
     again.host().putBack();
     await again.debounce();
     assert.deepEqual(
-        again.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        again.sent.map((save) => [save.text, save.base, save.overwrite]),
         [['B1 and more', 2, true]]
     );
     await again.land();
@@ -1612,13 +1110,13 @@ test('an autosave fired while a Keep mine save is in the air is sent when that s
     await B.saveReturns();
     assert.equal(B.view.conflict, null);
     assert.equal(B.sent.length, 2, 'the owed save is sent with no further keystroke');
-    assert.deepEqual([B.sent[1].json.text, B.sent[1].base, B.sent[1].overwrite], ['B1 and more', 3, false]);
+    assert.deepEqual([B.sent[1].text, B.sent[1].base, B.sent[1].overwrite], ['B1 and more', 3, false]);
     assert.notEqual(B.word(), 'Saved', 'the status does not say Saved while text is unsent');
     assert.equal(B.view.unsaved, true);
 
     await B.land();
     assert.equal(server.version, 4);
-    assert.equal(server.json.text, 'B1 and more');
+    assert.equal(server.text(), 'B1 and more');
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
     assert.equal(B.view.unsaved, false);
     assert.equal(B.word(), 'Saved');
@@ -1644,11 +1142,11 @@ test('an autosave fired while a Keep mine save is in the air is sent even when t
     await settle();
     assert.equal(B.view.conflict, null);
     assert.equal(B.sent.length, 2, 'the owed save is sent with no further keystroke');
-    assert.deepEqual([B.sent[1].json.text, B.sent[1].base], ['B1 and more', 3]);
+    assert.deepEqual([B.sent[1].text, B.sent[1].base], ['B1 and more', 3]);
     assert.notEqual(B.word(), 'Saved');
 
     await B.land();
-    assert.equal(server.json.text, 'B1 and more');
+    assert.equal(server.text(), 'B1 and more');
     assert.equal(B.view.unsaved, false);
     assert.equal(B.view.saving, 0, 'an answer that comes after the tab stopped waiting is not counted twice');
     assert.equal(B.word(), 'Saved');
@@ -1667,7 +1165,7 @@ test('a save that expired answers late while its own conflict is showing: the te
     // nobody else touched the document (a stated limit of this phase).
     clock.now += SAVE_EXPIRY_MS + 1000;
     await A.cycle();
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['T1', 1]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base], ['T1', 1]);
     A.saveArrives();
     await A.saveReturns();
     assert.deepEqual(A.view.conflict, { version: 2, ready: true });
@@ -1684,12 +1182,12 @@ test('a save that expired answers late while its own conflict is showing: the te
     assert.equal(A.view.conflict, null);
     assert.equal(A.view.baseVersion, 2);
     assert.equal(A.sent.length, 3, 'the text typed since is sent with no further keystroke');
-    assert.deepEqual([A.sent[2].json.text, A.sent[2].base, A.sent[2].overwrite], ['T1 more', 2, false]);
+    assert.deepEqual([A.sent[2].text, A.sent[2].base, A.sent[2].overwrite], ['T1 more', 2, false]);
     assert.notEqual(A.word(), 'Saved', 'the status does not say Saved while text is unsent');
 
     await A.land();
     assert.equal(server.version, 3);
-    assert.equal(server.json.text, 'T1 more');
+    assert.equal(server.text(), 'T1 more');
     assert.equal(A.view.unsaved, false);
     assert.equal(A.view.saving, 0);
     assert.equal(A.word(), 'Saved');
@@ -1704,7 +1202,7 @@ test('a Keep mine save given up on, then Load theirs: its late answer is logged 
     B.saveArrives();
     const late = B.saveNeverAnswers();
     assert.equal(server.version, 3);
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
 
     // The tab gives up on it, and the writer chooses Load theirs: the page
     // shows the other person's version 2.
@@ -1751,7 +1249,7 @@ test('a Keep mine save that answers in time, at the last second, is applied as b
     assert.equal(B.view.conflict, null);
     assert.equal(B.view.overwriteOwed, false);
     assert.equal(B.word(), 'Saved');
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(B.errors, []);
 });
 
@@ -1838,13 +1336,13 @@ test('autosaves in a row: the next waits for the one in the air and is sent on t
     A.saveArrives();
     await A.saveReturns();
     assert.equal(A.sent.length, 2);
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['one two three', 2]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base], ['one two three', 2]);
     assert.equal(A.draft(), 'one two three', 'the draft outlives a save that stored older text');
     assert.equal(A.view.unsaved, true);
 
     await A.land();
     assert.equal(server.version, 3);
-    assert.equal(server.json.text, 'one two three');
+    assert.equal(server.text(), 'one two three');
     assert.equal(A.view.conflict, null, 'the tab did not conflict with itself');
     assert.equal(A.view.unsaved, false);
     assert.equal(A.draft(), null);
@@ -1866,7 +1364,7 @@ test('a save that answers while the writer is typing again leaves the next send 
     assert.equal(A.host().syncState(), 'dirty');
 
     await A.debounce();
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['one two', 2]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base], ['one two', 2]);
 });
 
 test('a save refused against a version this tab is already based on is sent again, not shown as a conflict', async () => {
@@ -1881,11 +1379,11 @@ test('a save refused against a version this tab is already based on is sent agai
     A.saveArrives();
     await A.saveReturns();
     assert.equal(A.view.conflict, null, 'refused by this tab own version: not a conflict');
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base, A.sent[1].overwrite], ['A1', 2, false]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base, A.sent[1].overwrite], ['A1', 2, false]);
 
     await A.land();
     assert.equal(server.version, 3);
-    assert.equal(server.json.text, 'A1');
+    assert.equal(server.text(), 'A1');
     assert.deepEqual(server.history, []);
     assert.equal(A.view.conflict, null);
     assert.equal(A.word(), 'Saved');
@@ -1902,7 +1400,7 @@ test('a save whose answer is lost is sent again and raises the notice against it
     await A.cycle();
     await A.land();
     assert.deepEqual(A.view.conflict, { version: 2, ready: true });
-    assert.equal(server.json.text, 'A1');
+    assert.equal(server.text(), 'A1');
     assert.equal(A.text(), 'A1');
 });
 
@@ -1927,7 +1425,7 @@ test('an owed save that comes due while the debounce is armed over unchanged tex
     // The first save answers.
     A.saveArrives();
     await A.saveReturns();
-    assert.equal(server.json.text, 'A');
+    assert.equal(server.text(), 'A');
     assert.equal(A.sent.length, 1, 'the debounce is armed, so nothing is sent yet');
     assert.equal(A.view.resave, true, 'and the save stays owed');
     assert.equal(A.view.unsaved, true);
@@ -1943,7 +1441,7 @@ test('an owed save that comes due while the debounce is armed over unchanged tex
     // The next tick sends it.
     await A.cycle();
     assert.deepEqual(
-        A.sent.map((save) => [save.json.text, save.base, save.overwrite]),
+        A.sent.map((save) => [save.text, save.base, save.overwrite]),
         [
             ['A', 1, false],
             ['A and B', 2, false],
@@ -1953,7 +1451,7 @@ test('an owed save that comes due while the debounce is armed over unchanged tex
 
     await A.land();
     assert.equal(server.version, 3);
-    assert.equal(server.json.text, 'A and B');
+    assert.equal(server.text(), 'A and B');
     assert.equal(A.view.unsaved, false);
     assert.equal(A.view.resave, false);
     assert.equal(A.word(), 'Saved');
@@ -1973,14 +1471,14 @@ test('Saved is said only when the stored document is what the editor holds', asy
 
     // The answer arrives while the writer is typing on.
     await A.land();
-    assert.equal(server.json.text, 'one');
+    assert.equal(server.text(), 'one');
     assert.equal(A.word(), 'Editing', 'not Saved: the editor holds more than was stored');
     assert.equal(A.view.unsaved, true);
 
     await A.debounce();
     assert.equal(A.word(), 'Saving');
     await A.land();
-    assert.equal(server.json.text, 'one two');
+    assert.equal(server.text(), 'one two');
     assert.equal(A.word(), 'Saved');
 });
 
@@ -1999,7 +1497,7 @@ test('a debounce that does send what was owed is not followed by a second send',
     assert.equal(A.view.resave, true, 'owed while the debounce is armed');
 
     await A.debounce();
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['A and B and C', 2]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base], ['A and B and C', 2]);
     await A.cycle();
     assert.equal(A.sent.length, 2, 'the owed save waits for the one the debounce sent');
 
@@ -2007,7 +1505,7 @@ test('a debounce that does send what was owed is not followed by a second send',
     await A.cycle();
     assert.equal(A.sent.length, 2);
     assert.equal(A.view.resave, false);
-    assert.equal(server.json.text, 'A and B and C');
+    assert.equal(server.text(), 'A and B and C');
     assert.equal(A.word(), 'Saved');
 });
 
@@ -2068,9 +1566,9 @@ test('adoptVersion inside the debounce, over text the debounce will not send aga
     assert.equal(A.view.resave, true);
 
     await A.poll();
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['A1', 2]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base], ['A1', 2]);
     await A.land();
-    assert.equal(server.json.text, 'A1');
+    assert.equal(server.text(), 'A1');
     assert.equal(A.word(), 'Saved');
 });
 
@@ -2113,7 +1611,7 @@ test('the page knows the text is unsaved from the first keystroke until a save o
     server.rejectNext = true;
     await A.cycle();
     await A.land();
-    assert.equal(server.json.text, 'start');
+    assert.equal(server.text(), 'start');
     assert.equal(A.view.unsaved, true, 'after a save the server refused');
     assert.equal(A.word(), 'Not saved');
 
@@ -2121,7 +1619,7 @@ test('the page knows the text is unsaved from the first keystroke until a save o
     A.type('A2');
     await A.debounce();
     await A.land();
-    assert.equal(server.json.text, 'A2');
+    assert.equal(server.text(), 'A2');
     assert.equal(A.view.unsaved, false);
     assert.equal(A.word(), 'Saved');
 });
@@ -2135,10 +1633,10 @@ test('a save that never answers is owed again after fifteen seconds: the poll se
     clock.now += SAVE_EXPIRY_MS;
     await A.cycle();
     assert.equal(A.sent.length, 2, 'every answered poll is the moment to send a save that never answered');
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['A1', 1]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base], ['A1', 1]);
 
     await A.land();
-    assert.equal(server.json.text, 'A1');
+    assert.equal(server.text(), 'A1');
     assert.equal(A.view.unsaved, false);
 });
 
@@ -2155,10 +1653,10 @@ test('a save that never answers is owed again after fifteen seconds when syncSta
 
     await A.cycle();
     assert.equal(A.sent.length, 2);
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['A1', 1]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base], ['A1', 1]);
 
     await A.land();
-    assert.equal(server.json.text, 'A1');
+    assert.equal(server.text(), 'A1');
 });
 
 test('a save that never answers does not stop the notice: when somebody else saves, the text is kept and asked about', async () => {
@@ -2179,7 +1677,7 @@ test('a save that never answers does not stop the notice: when somebody else sav
     await A.cycle();
     assert.equal(A.view.conflict.version, 2);
     assert.equal(A.text(), 'A long paragraph');
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
 });
 
 // ───────────────────────────────────────────────────────── a save given up on while the polls are blocked
@@ -2210,7 +1708,7 @@ for (const [what, blocked] of BLOCKED_POLLS) {
         A.type('A2');
         await A.debounce();
         assert.deepEqual(
-            A.sent.map((save) => [save.json.text, save.base]),
+            A.sent.map((save) => [save.text, save.base]),
             [
                 ['A1', 1],
                 ['A2', 1],
@@ -2220,7 +1718,7 @@ for (const [what, blocked] of BLOCKED_POLLS) {
         assert.equal(A.word(), 'Saving');
 
         await A.land();
-        assert.equal(server.json.text, 'A2');
+        assert.equal(server.text(), 'A2');
         assert.equal(A.view.unsaved, false);
         assert.equal(A.view.saving, 0);
         assert.equal(A.word(), 'Saved');
@@ -2251,7 +1749,7 @@ for (const [what, blocked] of BLOCKED_POLLS) {
         await A.fireTimer();
         await blocked(A);
         assert.deepEqual(
-            A.sent.map((save) => [save.json.text, save.base]),
+            A.sent.map((save) => [save.text, save.base]),
             [
                 ['A1', 1],
                 ['A2', 1],
@@ -2260,7 +1758,7 @@ for (const [what, blocked] of BLOCKED_POLLS) {
         );
 
         await A.land();
-        assert.equal(server.json.text, 'A2');
+        assert.equal(server.text(), 'A2');
         assert.equal(A.view.unsaved, false);
         assert.equal(A.word(), 'Saved');
     });
@@ -2281,7 +1779,7 @@ test('five minutes of typing behind blocked polls and one lost save: every autos
         await A.pollAnswers(403, null);
     }
 
-    assert.equal(server.json.text, 'A30');
+    assert.equal(server.text(), 'A30');
     assert.equal(A.view.unsaved, false);
     assert.equal(A.view.saving, 0);
     assert.equal(A.word(), 'Saved');
@@ -2289,7 +1787,7 @@ test('five minutes of typing behind blocked polls and one lost save: every autos
     // Round 3's autosave gave up on the lost save and went out, carrying the
     // whole document, so round 2 was never sent on its own.
     assert.deepEqual(
-        A.sent.map((save) => save.json.text),
+        A.sent.map((save) => save.text),
         ['A1', ...Array.from({ length: 28 }, (_, index) => `A${index + 3}`)]
     );
 });
@@ -2605,7 +2103,7 @@ test('an edit undone inside the debounce, then back online with the server ahead
     assert.equal(B.text(), 'A1 newer work');
     assert.equal(B.view.baseVersion, 2);
     assert.equal(B.sent.length, 0);
-    assert.equal(server.json.text, 'A1 newer work');
+    assert.equal(server.text(), 'A1 newer work');
     assert.deepEqual(server.history, []);
 });
 
@@ -2648,11 +2146,11 @@ test('an undo handed over while the save of the undone text is in the air is not
 
     B.saveArrives();
     await B.saveReturns();
-    assert.equal(server.json.text, 'startx');
-    assert.deepEqual([B.sent[1].json.text, B.sent[1].base], ['start', 2]);
+    assert.equal(server.text(), 'startx');
+    assert.deepEqual([B.sent[1].text, B.sent[1].base], ['start', 2]);
 
     await B.land();
-    assert.equal(server.json.text, 'start', 'the server ends at what the editor shows');
+    assert.equal(server.text(), 'start', 'the server ends at what the editor shows');
     assert.equal(B.text(), 'start');
     assert.equal(B.view.unsaved, false);
     assert.equal(B.word(), 'Saved');
@@ -2669,7 +2167,7 @@ for (const [who, notices] of [
         // The server stores it, and the answer never comes.
         B.saveArrives();
         B.saveNeverAnswers();
-        assert.equal(server.json.text, 'startx');
+        assert.equal(server.text(), 'startx');
 
         B.type('start');
         await B.debounce();
@@ -2685,7 +2183,7 @@ for (const [who, notices] of [
         assert.notEqual(B.word(), 'Saved');
 
         await B.cycle();
-        assert.deepEqual([B.sent[1].json.text, B.sent[1].base], ['start', 1]);
+        assert.deepEqual([B.sent[1].text, B.sent[1].base], ['start', 1]);
         await B.land();
         await B.cycle();
         // Refused against the tab's own stored save: the notice (a stated
@@ -2696,7 +2194,7 @@ for (const [who, notices] of [
 
         B.host().keepMine();
         await B.land();
-        assert.equal(server.json.text, 'start');
+        assert.equal(server.text(), 'start');
         assert.equal(B.view.confirmed, JSON.stringify(doc('start')), 'an accepted save is confirmed again');
         assert.equal(B.word(), 'Saved');
     });
@@ -2716,9 +2214,9 @@ test('an undo handed over while a save was in the air is sent when that save req
     assert.equal(B.word(), 'Not saved');
 
     await B.cycle();
-    assert.deepEqual([B.sent[1].json.text, B.sent[1].base], ['start', 1], 'not written off: it is sent');
+    assert.deepEqual([B.sent[1].text, B.sent[1].base], ['start', 1], 'not written off: it is sent');
     await B.land();
-    assert.equal(server.json.text, 'start');
+    assert.equal(server.text(), 'start');
     assert.equal(B.view.unsaved, false);
     assert.equal(B.word(), 'Saved');
 });
@@ -2808,10 +2306,10 @@ test('adoptVersion: a conflict at or below the adopted version clears, and the o
     A.host().adoptVersion(styled);
     assert.equal(A.view.conflict, null);
     assert.equal(A.view.baseVersion, 2);
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base, A.sent[1].overwrite], ['A1', 2, false]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base, A.sent[1].overwrite], ['A1', 2, false]);
 
     await A.land();
-    assert.equal(server.json.text, 'A1');
+    assert.equal(server.text(), 'A1');
     assert.deepEqual(server.history, [], 'it was never an overwrite');
 });
 
@@ -3041,7 +2539,7 @@ test('before the engine has started, a save and its refusal are handled without 
     assert.equal(A.view.unsaved, true);
     await A.debounce();
     await A.land();
-    assert.equal(w.server.json.text, 'A1');
+    assert.equal(w.server.text(), 'A1');
     assert.equal(A.view.baseVersion, 2);
     assert.equal(A.view.unsaved, false);
 
@@ -3063,7 +2561,7 @@ test('before the engine has started, a save and its refusal are handled without 
     // Keep mine needs only the number.
     A.host().keepMine();
     await A.land();
-    assert.equal(w.server.json.text, 'A2');
+    assert.equal(w.server.text(), 'A2');
     assert.deepEqual(w.server.history, [{ version: 3, text: 'somebody else' }]);
     assert.equal(A.view.conflict, null);
 });
@@ -3104,10 +2602,10 @@ test('back online: a tab with unsaved text sends it', async () => {
 
     A.host().backOnline();
     assert.equal(A.sent.length, 2);
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['typed offline', 1]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base], ['typed offline', 1]);
 
     await A.land();
-    assert.equal(server.json.text, 'typed offline');
+    assert.equal(server.text(), 'typed offline');
     assert.equal(A.view.unsaved, false);
     assert.equal(A.draft(), null);
 });
@@ -3123,7 +2621,7 @@ test('back online: text whose rejected save left it unsent is sent', async () =>
     A.host().backOnline();
     assert.equal(A.sent.length, 2);
     await A.land();
-    assert.equal(server.json.text, 'A1');
+    assert.equal(server.text(), 'A1');
 });
 
 test('back online inside the debounce sends nothing: the debounce does', async () => {
@@ -3144,7 +2642,7 @@ test('back online inside the debounce sends nothing: the debounce does', async (
     await A.cycle();
     assert.equal(A.sent.length, 1);
     assert.equal(A.view.resave, false);
-    assert.equal(server.json.text, 'A1');
+    assert.equal(server.text(), 'A1');
     assert.equal(A.word(), 'Saved');
 });
 
@@ -3172,9 +2670,9 @@ test('back online inside the debounce, over text the debounce will not send agai
     assert.notEqual(A.word(), 'Saved');
 
     await A.poll();
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['one two', 1]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base], ['one two', 1]);
     await A.land();
-    assert.equal(server.json.text, 'one two');
+    assert.equal(server.text(), 'one two');
     assert.equal(A.view.unsaved, false);
     assert.equal(A.word(), 'Saved');
     assert.equal(A.draft(), null);
@@ -3195,9 +2693,9 @@ test('back online inside the debounce, after a save that failed outright: the ow
     assert.equal(A.sent.length, 1, 'the bundle finds nothing new to send');
 
     await A.poll();
-    assert.deepEqual([A.sent[1].json.text, A.sent[1].base], ['one', 1]);
+    assert.deepEqual([A.sent[1].text, A.sent[1].base], ['one', 1]);
     await A.land();
-    assert.equal(server.json.text, 'one');
+    assert.equal(server.text(), 'one');
     assert.equal(A.word(), 'Saved');
 });
 
@@ -3227,9 +2725,9 @@ test('a draft based on the current version is restored, and kept until its save 
 
     await A.poll();
     await A.debounce();
-    assert.deepEqual([A.sent[0].json.text, A.sent[0].base], ['offline work', 1]);
+    assert.deepEqual([A.sent[0].text, A.sent[0].base], ['offline work', 1]);
     await A.land();
-    assert.equal(w.server.json.text, 'offline work');
+    assert.equal(w.server.text(), 'offline work');
     assert.equal(A.draft(), null);
 });
 
@@ -3263,7 +2761,7 @@ test('a draft the document has moved past is parked and set aside, and can be pu
     A.host().putBack();
     assert.deepEqual(A.questions, [PUT_BACK_QUESTION], 'a draft from an earlier visit is never put back unasked');
     await A.debounce();
-    assert.deepEqual([A.sent[0].json.text, A.sent[0].base, A.sent[0].overwrite], ['offline work', 2, true]);
+    assert.deepEqual([A.sent[0].text, A.sent[0].base, A.sent[0].overwrite], ['offline work', 2, true]);
     await A.land();
     assert.deepEqual(w.server.history, [{ version: 2, text: 'version 2 by somebody' }]);
 });
@@ -3379,7 +2877,7 @@ test('reloading instead of choosing: the text comes back set aside, and Put it b
     assert.deepEqual(again.questions, [PUT_BACK_QUESTION]);
     await again.debounce();
     await again.land();
-    assert.equal(server.json.text, 'B1');
+    assert.equal(server.text(), 'B1');
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
 });
 
@@ -3390,10 +2888,10 @@ test('the beacon stored the last words and nobody saved since: the draft is park
     A.type('A last words');
     A.leave();
     assert.deepEqual(
-        A.beacons.map((beacon) => [beacon.body.content.text, beacon.body.base_version, beacon.answer.status]),
+        A.beacons.map((beacon) => [beacon.text, beacon.body.base_version, beacon.answer.status]),
         [['A last words', 1, 200]]
     );
-    assert.equal(server.json.text, 'A last words');
+    assert.equal(server.text(), 'A last words');
     assert.equal(A.draft(), 'A last words', 'the page was gone before it could clear its draft');
 
     const again = makeTab({ server, clock }, 'A2', { drafts: A.drafts });
@@ -3459,7 +2957,7 @@ test('a save in the air when the tab closed landed, and others saved since: putt
     A.leave();
     assert.equal(A.beacons.length, 0, 'nothing was left for a beacon to send');
     A.saveArrives();
-    assert.equal(server.json.text, 'A last words');
+    assert.equal(server.text(), 'A last words');
     assert.equal(A.draft(), 'A last words');
 
     await B.cycle();
@@ -3477,7 +2975,7 @@ test('a save in the air when the tab closed landed, and others saved since: putt
     assert.equal(again.text(), 'A last words, then B');
     await again.debounce();
     assert.equal(again.sent.length, 0);
-    assert.equal(server.json.text, 'A last words, then B');
+    assert.equal(server.text(), 'A last words, then B');
 });
 
 test('a save in the air when the tab closed landed and nobody saved since: nothing is offered', async () => {
