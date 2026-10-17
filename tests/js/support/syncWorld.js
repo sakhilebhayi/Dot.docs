@@ -758,18 +758,28 @@ export async function conflicted(options = {}) {
  * excuses the drops of that same person's saves (stored(), told who sent the
  * save), and only theirs: another person's deletion is another event, and a
  * save of somebody else that drops the token is not excused by it. The
- * excuse ends with the token coming back: once the person's deletion has been
- * stored (their save dropped the token from the head) and the token then
- * reappears on the server (put back, restored), and the person has seen the
- * version that stored the deletion (`seenBy`), a later drop of it by anybody
- * is silent again. A person who has NOT seen their deletion stored (the
- * answer was lost, the tab died, their draft still holds it) still means it:
- * the same deletion, sent again, stays excused.
+ * excuse ends with the token coming back AND the person seeing it: once the
+ * person's deletion has been stored (their save dropped the token from the
+ * head), it ends when that person's page holds the token again (`onPage()`,
+ * which the walks call after every step and before judging every stored
+ * version), and from then on a later drop of it by anybody is silent again.
+ * A person who has NOT seen the token come back (the answer was lost, the
+ * tab died, their draft still holds the deletion, or their merge applied
+ * their own pending deletion again over a version that had it) still means
+ * it: the same deletion, sent again, stays excused.
+ *
+ * `seenBy` is the older measure, kept for the direct test: the excuse also
+ * ends when the token reappears on the server after the person's page has
+ * taken in the version that stored the deletion. The walks do not pass it.
+ * A base version is not what the person saw: a merge can move the base past
+ * the stored deletion while applying that same person's deletion again (case
+ * c1), so the token never showed on their page, and the next save of the same
+ * deletion was reported as a silent drop.
  *
  * @param {(json: object) => Set<string>} tokensIn the walk's own token reader
- * @param {(person: *) => number} seenBy the newest server version that person's page has taken in
+ * @param {(person: *) => number} [seenBy] the newest server version that person's page has taken in
  */
-export function deletionLedger(tokensIn, seenBy) {
+export function deletionLedger(tokensIn, seenBy = () => -Infinity) {
     /** token -> person -> the version that stored their deletion, or null while none has */
     const owed = new Map();
     /** tokens whose latest removal from the head was somebody's knowing deletion */
@@ -817,6 +827,22 @@ export function deletionLedger(tokensIn, seenBy) {
                 });
 
             return silent;
+        },
+        /**
+         * The person's page holds these tokens now: a stored deletion of
+         * theirs that has come back is seen, and no longer excused. A
+         * deletion not stored yet is left alone: it is still on its way.
+         *
+         * @param {*} person
+         * @param {Iterable<string>} tokens
+         */
+        onPage(person, tokens) {
+            for (const token of tokens) {
+                const people = owed.get(token);
+                if (people && people.has(person) && people.get(person) !== null) {
+                    people.delete(person);
+                }
+            }
         },
         /** Whether a token that is nowhere to be found went with somebody's deletion. */
         excuses(token) {

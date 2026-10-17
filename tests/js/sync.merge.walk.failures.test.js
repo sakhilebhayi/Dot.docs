@@ -27,8 +27,9 @@ import { LOST, STALE, UUID, blocksOf, deletionLedger, para, world } from './supp
  * Checked once everything has landed:
  *   B. an accepted save that dropped a token nobody knowingly deleted said it
  *      overwrites (a deletion excuses the drops of the person who made it; a
- *      token that comes back is not excused again once they have seen it
- *      stored, see deletionLedger in support/syncWorld.js);
+ *      token that comes back after the deletion was stored is not excused
+ *      again once it is on that person's page, see deletionLedger in
+ *      support/syncWorld.js);
  *   C. no document is sent twice on one base, unless the first request failed
  *      or was given up on (15 s), or an accepted suggestion retired that very
  *      request (and only a send made after the suggestion repeats it);
@@ -118,11 +119,10 @@ async function run(seed, tabCount) {
     const trace = [];
     const violations = [];
     const typed = new Map(); // token -> who typed it, and where
-    const ledger = deletionLedger(tokensIn, (slot) => {
-        const tab = slots[slot];
-
-        return Math.max(tab.view.baseVersion, tab.view.known ? tab.view.known.version : 0);
-    }); // tokens in a block somebody deleted on purpose, and whose save dropped them
+    // Tokens in a block somebody deleted on purpose, and whose save dropped
+    // them; excused until that person's page holds the token again (onPage).
+    const ledger = deletionLedger(tokensIn);
+    const pagesSeen = () => slots.forEach((tab) => ledger.onPage(tab.slot, tokensIn(tab.handle.editor.getJSON())));
     let actorSlot = -1;
     const everStored = new Set(); // tokens any stored version has ever held
     const excused = new Set(); // tokens the writer, or a browser without drafts, knowingly let go
@@ -139,6 +139,7 @@ async function run(seed, tabCount) {
     // B, judged as each version is stored: who sent it decides what was knowingly deleted.
     let judged = 0;
     const judgeStoredVersions = () => {
+        pagesSeen();
         while (judged < server.trace.length) {
             const row = server.trace[judged];
             judged += 1;
@@ -301,6 +302,7 @@ async function run(seed, tabCount) {
     // A. checked after every step
     const afterStep = (label) => {
         parksKept(label);
+        pagesSeen();
         server.trace.forEach((row) => tokensIn(row.to).forEach((token) => everStored.add(token)));
         server.kept.forEach((row) => tokensIn(row.json).forEach((token) => everStored.add(token)));
         for (const tab of slots) {

@@ -29,9 +29,9 @@ import { LOST, blocksOf, deletionLedger, world } from './support/syncWorld.js';
  *   6. every accepted save that dropped a token from the head that nobody
  *      knowingly deleted said it overwrites, so the head is in the history.
  *      A deletion excuses only the saves of the person who made it; once it
- *      is stored and the person has seen that, a token that reappears on the
- *      server (put back, restored) is no longer excused, so a later silent
- *      drop of it fails (see deletionLedger in support/syncWorld.js).
+ *      is stored, a token that reappears (put back, restored) is no longer
+ *      excused from the moment it is on that person's page again, so a later
+ *      silent drop of it fails (see deletionLedger in support/syncWorld.js).
  *
  * and, from the repairs of dry run 2 (section 11), at every request and step:
  *
@@ -235,6 +235,7 @@ async function walkSteps(seed, tabCount, trace) {
     const { server } = w;
     let judged = 0;
     const judgeStoredSaves = () => {
+        pagesSeen();
         while (judged < server.trace.length) {
             const row = server.trace[judged];
             judged += 1;
@@ -306,11 +307,9 @@ async function walkSteps(seed, tabCount, trace) {
     /** token -> {author, block}: who typed what where. */
     const typed = new Map();
     /** Tokens that were in the deleter's own copy of a block when they deleted it, and whose deletion has been stored. */
-    const ledger = deletionLedger(tokensIn, (name) => {
-        const tab = tabs.find((candidate) => candidate.name === name);
-
-        return Math.max(tab.view.baseVersion, tab.view.known ? tab.view.known.version : 0);
-    });
+    // Excused until that person's page holds the token again (onPage).
+    const ledger = deletionLedger(tokensIn);
+    const pagesSeen = () => tabs.forEach((tab) => ledger.onPage(tab.name, tokensIn(tab.handle.editor.getJSON())));
     let sender = 'unknown';
     /** Invariant 6, judged as each save is stored, against the set as it stood then. */
     const droppedWithoutSaying = [];
@@ -465,6 +464,7 @@ async function walkSteps(seed, tabCount, trace) {
     for (let step = 0; step < STEPS; step += 1) {
         await draw()();
         checkBases(trace[trace.length - 1] ?? 'start');
+        pagesSeen();
     }
     await quiesce(tabs, trace);
     checkBases('quiesce');
@@ -573,4 +573,20 @@ test('deletionLedger: a deletion excuses its own person and ends once the token 
     assert.deepEqual(ledger.stored(row(8, doc('t3', 't2'), doc('t2')), 'B'), []);
     ledger.stored(row(9, doc('t2'), doc('t3', 't2')), 'A');
     assert.deepEqual(ledger.stored(row(10, doc('t3', 't2'), doc('t2')), 'A'), [], 'A\'s own deletion was never stored, so it still stands');
+
+    // As the walks use it, with no seen-version reader: a stored deletion is
+    // excused until the token is on that person's page again. A's merge moving
+    // A's base past the stored deletion while applying A's own deletion again
+    // (case c1) is not seeing the token come back.
+    const onPage = deletionLedger(tokensIn);
+    onPage.deleted('A', ['t4']);
+    onPage.onPage('A', ['t2', 't4']); // not stored yet: still on its way, still excused
+    assert.deepEqual(onPage.stored(row(11, doc('t4', 't2'), doc('t2')), 'A'), [], 'A deleted it');
+    onPage.stored(row(12, doc('t2'), doc('t4', 't2')), 'B'); // it is back on the server
+    onPage.onPage('A', ['t2']); // A's page does not hold it
+    assert.deepEqual(onPage.stored(row(13, doc('t4', 't2'), doc('t2')), 'A'), [], 'A never saw it come back: the same deletion, sent again');
+    onPage.stored(row(14, doc('t2'), doc('t4', 't2')), 'B'); // back again
+    onPage.onPage('A', ['t4', 't2']); // and now A's page holds it
+    assert.equal(onPage.excuses('t4'), false, 'seen on the page: no longer excused');
+    assert.deepEqual(onPage.stored(row(15, doc('t4', 't2'), doc('t2')), 'A'), ['t4'], 'a drop after A saw it is silent, A\'s too');
 });
