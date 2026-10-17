@@ -511,9 +511,14 @@ class EditorSyncWiringTest extends TestCase
             // Six buttons named Put it back: each says which item it is for, by the ids of its own sentence and excerpt,
             // before the description of what the button does (the one id the six share).
             $this->assertSame(
-                "doc-notice-lost-{$i}-sentence doc-notice-lost-{$i}-excerpt doc-notice-put-back-lost-does",
+                "doc-notice-lost-{$i}-count doc-notice-lost-{$i}-sentence doc-notice-lost-{$i}-excerpt doc-notice-put-back-lost-does",
                 $button->getAttribute('aria-describedby'),
             );
+            // Two items can share their first 80 characters (both versions of one paragraph): the ordinal tells them apart.
+            $count = $item->querySelector("#doc-notice-lost-{$i}-count");
+            $this->assertNotNull($count);
+            $this->assertSame('sr-only', $count->getAttribute('class'));
+            $this->assertSame('lost.length > 1 ? \'Item '.($i + 1).' of \' + lost.length + \'. \' : \'\'', $count->getAttribute('x-text'));
             $sentence = $item->querySelector("#doc-notice-lost-{$i}-sentence");
             $this->assertNotNull($sentence);
             $this->assertSame('doc-notice-sentence', $sentence->getAttribute('class'));

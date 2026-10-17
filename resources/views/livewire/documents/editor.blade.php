@@ -1001,38 +1001,43 @@
                 </p>
                 <ul class="doc-notice-list">
                     <li class="doc-notice-item" hidden x-bind:hidden="!lost[0]">
+                        <span class="sr-only" id="doc-notice-lost-0-count" x-text="lost.length > 1 ? 'Item 1 of ' + lost.length + '. ' : ''"></span>
                         <span class="doc-notice-sentence" id="doc-notice-lost-0-sentence" x-text="lost[0] ? lost[0].sentence : ''"></span>
                         <q class="doc-notice-excerpt" id="doc-notice-lost-0-excerpt" x-text="lost[0] ? lost[0].excerpt : ''"></q>
                         <button type="button" class="tool tool-mono" @click="putBackLost(0, $event.detail === 0)"
-                                aria-describedby="doc-notice-lost-0-sentence doc-notice-lost-0-excerpt doc-notice-put-back-lost-does"
+                                aria-describedby="doc-notice-lost-0-count doc-notice-lost-0-sentence doc-notice-lost-0-excerpt doc-notice-put-back-lost-does"
                                 title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
                     </li>
                     <li class="doc-notice-item" hidden x-bind:hidden="!lost[1]">
+                        <span class="sr-only" id="doc-notice-lost-1-count" x-text="lost.length > 1 ? 'Item 2 of ' + lost.length + '. ' : ''"></span>
                         <span class="doc-notice-sentence" id="doc-notice-lost-1-sentence" x-text="lost[1] ? lost[1].sentence : ''"></span>
                         <q class="doc-notice-excerpt" id="doc-notice-lost-1-excerpt" x-text="lost[1] ? lost[1].excerpt : ''"></q>
                         <button type="button" class="tool tool-mono" @click="putBackLost(1, $event.detail === 0)"
-                                aria-describedby="doc-notice-lost-1-sentence doc-notice-lost-1-excerpt doc-notice-put-back-lost-does"
+                                aria-describedby="doc-notice-lost-1-count doc-notice-lost-1-sentence doc-notice-lost-1-excerpt doc-notice-put-back-lost-does"
                                 title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
                     </li>
                     <li class="doc-notice-item" hidden x-bind:hidden="!lost[2]">
+                        <span class="sr-only" id="doc-notice-lost-2-count" x-text="lost.length > 1 ? 'Item 3 of ' + lost.length + '. ' : ''"></span>
                         <span class="doc-notice-sentence" id="doc-notice-lost-2-sentence" x-text="lost[2] ? lost[2].sentence : ''"></span>
                         <q class="doc-notice-excerpt" id="doc-notice-lost-2-excerpt" x-text="lost[2] ? lost[2].excerpt : ''"></q>
                         <button type="button" class="tool tool-mono" @click="putBackLost(2, $event.detail === 0)"
-                                aria-describedby="doc-notice-lost-2-sentence doc-notice-lost-2-excerpt doc-notice-put-back-lost-does"
+                                aria-describedby="doc-notice-lost-2-count doc-notice-lost-2-sentence doc-notice-lost-2-excerpt doc-notice-put-back-lost-does"
                                 title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
                     </li>
                     <li class="doc-notice-item" hidden x-bind:hidden="!lost[3]">
+                        <span class="sr-only" id="doc-notice-lost-3-count" x-text="lost.length > 1 ? 'Item 4 of ' + lost.length + '. ' : ''"></span>
                         <span class="doc-notice-sentence" id="doc-notice-lost-3-sentence" x-text="lost[3] ? lost[3].sentence : ''"></span>
                         <q class="doc-notice-excerpt" id="doc-notice-lost-3-excerpt" x-text="lost[3] ? lost[3].excerpt : ''"></q>
                         <button type="button" class="tool tool-mono" @click="putBackLost(3, $event.detail === 0)"
-                                aria-describedby="doc-notice-lost-3-sentence doc-notice-lost-3-excerpt doc-notice-put-back-lost-does"
+                                aria-describedby="doc-notice-lost-3-count doc-notice-lost-3-sentence doc-notice-lost-3-excerpt doc-notice-put-back-lost-does"
                                 title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
                     </li>
                     <li class="doc-notice-item" hidden x-bind:hidden="!lost[4]">
+                        <span class="sr-only" id="doc-notice-lost-4-count" x-text="lost.length > 1 ? 'Item 5 of ' + lost.length + '. ' : ''"></span>
                         <span class="doc-notice-sentence" id="doc-notice-lost-4-sentence" x-text="lost[4] ? lost[4].sentence : ''"></span>
                         <q class="doc-notice-excerpt" id="doc-notice-lost-4-excerpt" x-text="lost[4] ? lost[4].excerpt : ''"></q>
                         <button type="button" class="tool tool-mono" @click="putBackLost(4, $event.detail === 0)"
-                                aria-describedby="doc-notice-lost-4-sentence doc-notice-lost-4-excerpt doc-notice-put-back-lost-does"
+                                aria-describedby="doc-notice-lost-4-count doc-notice-lost-4-sentence doc-notice-lost-4-excerpt doc-notice-put-back-lost-does"
                                 title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
                     </li>
                     <li class="doc-notice-item" hidden x-bind:hidden="lost.length <= 5"><span>And <span x-text="lost.length - 5"></span> more. Put them all back restores every item, these included.</span></li>
