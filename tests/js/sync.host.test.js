@@ -5387,6 +5387,87 @@ test('Load theirs: typing while the unsaved text is being parked is parked too, 
     assert.equal(B.text(), 'A1');
 });
 
+test('a draft deletion of a block that LOOKS unchanged across a gap of versions owes the overwrite: the replaced version is kept (seed 42519 shape)', async () => {
+    const { server, again } = await deadTabWithDraft(
+        async (A, B) => {
+            A.deleteBlock('p2'); // the draft deletes p2
+            A.typeIn('p1', 'start A');
+            // Meanwhile p2 is changed and changed back by somebody else (a restore of the very content the draft was based on).
+            B.typeIn('p2', 'World B');
+            await B.debounce();
+            await B.land();
+            B.typeIn('p2', 'World');
+            await B.debounce();
+            await B.land();
+        },
+        { version: 4 }
+    );
+    await settle();
+
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION]);
+    assert.deepEqual(again.blocks(), [['p1', 'start A']], 'the draft deletion applies');
+    assert.equal(again.view.overwriteOwed, true, 'and the save is owed as an overwrite');
+
+    await again.poll();
+    assert.deepEqual([again.sent[0].base, again.sent[0].overwrite], [4, true]);
+    await again.land();
+    assert.ok(JSON.stringify(server.kept).includes('World'), 'the version that had p2 is in the history');
+});
+
+test('a draft deletion across a gap of exactly one version does not owe the overwrite', async () => {
+    const { again } = await deadTabWithDraft((A, B) => {
+        A.deleteBlock('p2');
+        A.typeIn('p1', 'start A');
+        B.typeIn('p1', 'start B'); // one version later; p2 is untouched
+    });
+    await settle();
+
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION]);
+    assert.equal(again.view.overwriteOwed, false);
+    await again.poll();
+    assert.deepEqual([again.sent[0].base, again.sent[0].overwrite], [3, false]);
+});
+
+test('a live merge across a gap of versions owes the overwrite when it deletes a block that looks unchanged, and not across one version', async () => {
+    const { server, A, B } = await twoParagraphs();
+    B.deleteBlock('p2'); // unsaved, on base 2
+    A.typeIn('p2', 'World A');
+    await A.debounce();
+    await A.land(); // v3
+    A.typeIn('p2', 'World');
+    await A.debounce();
+    await A.land(); // v4: p2 is back to what it was at v2
+    await B.cycle(); // B hears of v4 while it holds unsaved typing: merged
+
+    assert.equal(server.version, 4);
+    assert.deepEqual(B.blocks(), [['p1', 'start']], 'B\'s deletion stands');
+    assert.equal(B.view.overwriteOwed, true);
+    await B.debounce();
+    assert.deepEqual([B.sent.at(-1).base, B.sent.at(-1).overwrite], [4, true]);
+
+    // One version only: no overwrite is owed.
+    const second = await twoParagraphs();
+    second.B.deleteBlock('p2');
+    second.A.typeIn('p1', 'start A');
+    await second.A.debounce();
+    await second.A.land(); // v3, p2 untouched
+    await second.B.cycle();
+    assert.equal(second.B.view.overwriteOwed, false);
+});
+
+test('a suggestion merge across a gap of versions owes the overwrite when it deletes a block that looks unchanged', async () => {
+    const { server, A } = await twoParagraphs();
+    A.deleteBlock('p2'); // unsaved typing: the deletion of p2
+    server.replace(docOf(para('p1', 'start'), para('p2', 'World'))); // v3
+    const suggestion = docOf(para('p1', 'Suggested start'), para('p2', 'World'));
+    const version = server.replace(suggestion); // v4: p2 is as it was at v2
+
+    A.host().applySuggestion(suggestion, version);
+
+    assert.deepEqual(A.blocks(), [['p1', 'Suggested start']]);
+    assert.equal(A.view.overwriteOwed, true);
+});
+
 test('a declined draft merge parks the draft and sets it aside, as today', async () => {
     const { server, again } = await deadTabWithDraft(
         (A, B) => {

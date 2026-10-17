@@ -1114,6 +1114,36 @@ export function createSyncHost(view, env) {
     }
 
     /**
+     * Whether a merge owes the overwrite flag. The merge says so itself for
+     * case c2 (my deletion beats a block they edited). It cannot see a block
+     * that was changed and changed back in a GAP of versions: theirs equals the
+     * base for it, my deletion reads as a plain c1 and carries no flag, though
+     * the version in the gap had other words in it. So when the base is more
+     * than one version older than the document merged into, a merged result
+     * that no longer holds a top-level block theirs holds owes the overwrite
+     * too, and the server keeps the replaced version in the history. Cost: an
+     * extra history row in the gap case.
+     *
+     * @param {{merged: object, overwrites: boolean}} result
+     * @param {number} baseVersion the version the base document is of
+     * @param {number} theirsVersion the version of the document merged into
+     * @param {object} theirsJson that document
+     * @returns {boolean}
+     */
+    function owesOverwrite(result, baseVersion, theirsVersion, theirsJson) {
+        if (result.overwrites) {
+            return true;
+        }
+        if (!(theirsVersion - baseVersion > 1)) {
+            return false;
+        }
+
+        const kept = new Set((result.merged?.content ?? []).map((block) => block?.attrs?.id));
+
+        return (theirsJson?.content ?? []).some((block) => block?.attrs?.id != null && !kept.has(block.attrs.id));
+    }
+
+    /**
      * A newer server document has arrived while this tab holds unsaved
      * typing: merge it, or raise the notice when that cannot be done
      * (section 5.5). The engine calls this through onConflict (a poll
@@ -1223,11 +1253,12 @@ export function createSyncHost(view, env) {
         //    leaves nothing of mine to save (changed false) sends nothing, so
         //    no save is left to carry the flag: it is cleared.
         const wasUnsaved = view.unsaved;
+        const overwrites = owesOverwrite(result, view.baseVersion, remote.version, remote.json);
         view.merging = null;
         view.baseVersion = remote.version;
         view.conflict = null;
         markConfirmed(result.changed ? result.theirs : JSON.stringify(handle.editor.getJSON()), remote.version);
-        if (result.changed && result.overwrites) {
+        if (result.changed && overwrites) {
             oweOverwrite();
         } else if (!result.changed) {
             view.overwriteOwed = false;
@@ -1559,8 +1590,9 @@ export function createSyncHost(view, env) {
         // await, so nothing can slip in), the typing counting as part of
         // theirs, the page's document.
         let current = null;
+        const theirsNow = handle.editor.getJSON();
         try {
-            current = handle.merge(JSON.parse(base.json), handle.editor.getJSON(), { mine: parsed, deletionsWin: false });
+            current = handle.merge(JSON.parse(base.json), theirsNow, { mine: parsed, deletionsWin: false });
         } catch (_) {
             current = null;
         }
@@ -1568,6 +1600,8 @@ export function createSyncHost(view, env) {
             return false;
         }
         result = current;
+        // A draft deletion across a gap of versions can look like a plain one (see owesOverwrite()).
+        const overwrites = owesOverwrite(result, draft.baseVersion, view.documentVersion, theirsNow);
 
         let applied = false;
         try {
@@ -1586,6 +1620,9 @@ export function createSyncHost(view, env) {
         // editor's own autosave: `unsaved` is never lowered here, and it is
         // owed to the tick.
         view.unsaved = view.unsaved || result.changed;
+        if (result.changed && overwrites) {
+            oweOverwrite();
+        }
         if (view.unsaved) {
             // The page said Saved when it opened; the merged text is not.
             env.report('idle', 'Editing');
@@ -2223,12 +2260,13 @@ export function createSyncHost(view, env) {
             return false;
         }
 
+        const overwrites = owesOverwrite(result, view.baseVersion, version, content);
         view.merging = null;
         view.mergeAttempts = 0;
         view.baseVersion = version;
         view.conflict = null;
         markConfirmed(result.changed ? result.theirs : JSON.stringify(handle.editor.getJSON()), version);
-        if (result.changed && result.overwrites) {
+        if (result.changed && overwrites) {
             oweOverwrite();
         } else if (!result.changed) {
             view.overwriteOwed = false;
