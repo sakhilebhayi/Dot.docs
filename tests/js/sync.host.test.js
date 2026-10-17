@@ -4817,18 +4817,36 @@ test('Put it back from the keyboard asks for focus, a tap does not, and the bloc
     assert.deepEqual(odd.B.insertFocus, [false]);
 });
 
-test('Put them all back passes the press kind to every block it puts back', async () => {
-    const world = await lostTwo();
-    world.B.host().putBackAllLost({ focus: false });
-    assert.deepEqual(world.B.insertFocus, [false, false]);
-
-    const keyed = await lostTwo();
-    keyed.B.host().putBackAllLost({ focus: true });
-    assert.deepEqual(keyed.B.insertFocus, [true, true]);
+test('Put them all back focuses the paper once, at the end, only after a keyboard press that put every item in', async () => {
+    const tap = await lostTwo();
+    tap.B.host().putBackAllLost({ focus: false });
+    assert.deepEqual(tap.B.insertFocus, [false, false]);
+    assert.equal(tap.B.focusCalls, 0);
 
     const bare = await lostTwo();
     bare.B.host().putBackAllLost();
-    assert.deepEqual(bare.B.insertFocus, [false, false]);
+    assert.equal(bare.B.focusCalls, 0);
+
+    const keyed = await lostTwo();
+    assert.equal(keyed.B.host().putBackAllLost({ focus: true }), true);
+    assert.deepEqual(keyed.B.insertFocus, [false, false], 'no block takes focus on its own');
+    assert.equal(keyed.B.focusCalls, 1, 'one focus, after the last item went in');
+});
+
+test('Put them all back that stops part way leaves a keyboard user where they were: no focus at all', async () => {
+    const { B } = await lostTwo();
+    const real = B.handle.insertBlock;
+    let calls = 0;
+    B.handle.insertBlock = (json, options) => {
+        calls += 1;
+
+        return calls === 1 ? real(json, options) : false;
+    };
+
+    assert.equal(B.host().putBackAllLost({ focus: true }), false);
+    assert.equal(B.view.lost.length, 1, 'the second stays listed');
+    assert.deepEqual(B.insertFocus, [false], 'the first went in without taking focus');
+    assert.equal(B.focusCalls, 0);
 });
 
 test('Put it back after a D2 restores the paragraph where it was, with its original id', async () => {

@@ -35,6 +35,7 @@
  * row (offerLost(), putBackLost(), dismissLost()).
  */
 
+import { focusAfterInsert } from './insert.js';
 import { appendLost, blockWord, lostEntry } from './merge.js';
 
 /** How long a save is waited for before it is taken as never answering. */
@@ -1586,6 +1587,9 @@ export function createSyncHost(view, env) {
 
     /**
      * Put them all back: oldest first; the first that cannot go in stops it, and stays listed.
+     * The editor takes focus ONCE, at the end, and only when every item went in and the press
+     * came from the keyboard (`options.focus`): a partial failure must not leave a keyboard user
+     * in the paper, away from the button and the row that is still there.
      *
      * @returns {boolean} whether every item went in (false: one stayed, or there was nothing)
      */
@@ -1593,10 +1597,15 @@ export function createSyncHost(view, env) {
         if (view.lost.length === 0) {
             return false;
         }
+        const each = { ...options, focus: false };
         while (view.lost.length > 0) {
-            if (!putBackLost(0, options)) {
+            if (!putBackLost(0, each)) {
                 return false;
             }
+        }
+        const handle = env.handle();
+        if (options?.focus === true && handle?.editor?.commands) {
+            focusAfterInsert(handle.editor.commands, true);
         }
 
         return true;

@@ -305,6 +305,8 @@ export function makeTab({ server, clock }, name, options = {}) {
         insertCalls: [],
         /** Whether each insertBlock() call asked for the editor to take focus (a press from the keyboard). */
         insertFocus: [],
+        /** How often the editor was asked to take focus by the host itself (not by insertBlock()). */
+        focusCalls: 0,
         /** This editor cannot open what arrives. */
         refuses: false,
         setContentThrows: false,
@@ -406,6 +408,11 @@ export function makeTab({ server, clock }, name, options = {}) {
         editor: {
             getJSON: () => clone(content),
             commands: {
+                focus() {
+                    t.focusCalls += 1;
+
+                    return true;
+                },
                 setContent(json) {
                     if (t.setContentThrows) {
                         throw new Error('invalid content');
