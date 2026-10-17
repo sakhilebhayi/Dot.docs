@@ -97,6 +97,8 @@ export class FakeServer {
         this.present = new Map();
         /** The next save is rejected, as DocumentSchema rejects a bad document. */
         this.rejectNext = false;
+        /** What the poll says about each tab's role (`can_edit`), by tab name; a tab with no entry gets no field (an old server). */
+        this.canEditByTab = new Map();
         /** Fresh ids the fake insertBlock() hands out: one counter per world, so two tabs never put a block back under one id. */
         this.fresh = 0;
     }
@@ -194,6 +196,9 @@ export class FakeServer {
             members: [...this.present.keys()].map((_, index) => ({ id: index + 1 })),
             others: this.present.size - 1,
         };
+        if (this.canEditByTab.has(payload.tab)) {
+            body.can_edit = this.canEditByTab.get(payload.tab);
+        }
 
         if (this.version > payload.version) {
             body.changed = true;

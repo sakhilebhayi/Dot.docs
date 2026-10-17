@@ -2739,6 +2739,47 @@ export function createSyncHost(view, env) {
     }
 
     /**
+     * The sync poll said whether this person may still change the document
+     * (`can_edit`, asked of the same gate as Editor::canEdit()). A poll
+     * answer is the server speaking, so it is as good as the answer to
+     * `env.canEdit()`:
+     *
+     *   - false: the same read only page a confirmed canEdit() = false makes
+     *     (lockReadOnly()), words parked. When a refused save has already
+     *     parked them and the question is still out, they are not parked a
+     *     second time.
+     *   - true: never re-enables a page that is read only (a reload does
+     *     that: the server draws the page again). It answers only the
+     *     question a refused save left out, the one case where this page
+     *     is held and was never told no: the hold is lifted and the text
+     *     goes again, exactly as accessAnswered() does on a yes.
+     *   - anything but a boolean: nothing (an older server sends no field).
+     *
+     * @param {unknown} canEdit
+     */
+    function accessFromPoll(canEdit) {
+        if (typeof canEdit !== 'boolean' || view.editable === false) {
+            return;
+        }
+
+        if (canEdit === false) {
+            if (view.accessCheckSince > 0) {
+                // Parked when the save was refused (saveRefused()).
+                lockReadOnly(view.unsaved || view.unsentKept);
+
+                return;
+            }
+            readOnlyNoticed();
+
+            return;
+        }
+
+        if (view.accessCheckSince > 0) {
+            accessAnswered(view.accessCheckSince, true, false);
+        }
+    }
+
+    /**
      * The server answered a save with `status`. A 403 does not say WHY: this
      * person's access may have been lowered, but it is also what a request
      * answers when ANOTHER action sent with it was refused (a Move beside an
@@ -2833,6 +2874,8 @@ export function createSyncHost(view, env) {
     function engineHost() {
         return {
             state: () => syncState(),
+            // The role that rides on every poll (see accessFromPoll()).
+            onAccess: (canEdit) => accessFromPoll(canEdit),
             applyRemote: (remote) => applyFromSync(remote),
             // A newer document while this tab holds unsaved typing: merged,
             // or the notice when that cannot be done.
@@ -2912,6 +2955,7 @@ export function createSyncHost(view, env) {
         isSaveRequest,
         saveRefused,
         readOnlyNoticed,
+        accessFromPoll,
         engineHost,
     };
 }

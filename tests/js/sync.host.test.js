@@ -7317,6 +7317,150 @@ test('a re-render that draws editable false makes the page say so: the same read
     assert.equal(writer.reports.length, reports, 'said once');
 });
 
+// ───────────────────────────────────────────────────────── the role arrives with the poll
+
+test('a poll that says can_edit false turns an editing page into the read only page, words parked, without asking the server again', async () => {
+    const { server, writer } = await readerAndWriter();
+    writer.type('typed before the downgrade');
+    await writer.debounce();
+    writer.saves.shift().reject(new Error('network'));
+    await settle();
+
+    server.canEditByTab.set('W', false);
+    await writer.cycle();
+
+    assert.equal(writer.view.editable, false);
+    assert.equal(writer.handle.readOnly, true);
+    assert.equal(writer.view.unsentKept, true);
+    assert.deepEqual(writer.reports.at(-1), { tone: 'idle', word: 'Read only' });
+    assert.equal(writer.parks().length, 1);
+    assert.equal(textOf(JSON.parse(writer.parks()[0].json)), 'typed before the downgrade');
+    assert.equal(writer.canEditCalls, 0, 'the poll is the server answering');
+    assert.equal(writer.presenceRefreshes > 0, true, 'the page is rendered again so the server-drawn controls follow');
+
+    // Nothing is sent from here, and the poll keeps following.
+    const sent = writer.sent.length;
+    writer.type('and more');
+    await writer.debounce();
+    await writer.cycle();
+    assert.equal(writer.sent.length, sent);
+});
+
+test('a page that cannot be downgraded twice: a second can_edit false is said once', async () => {
+    const { server, writer } = await readerAndWriter();
+    server.canEditByTab.set('W', false);
+    await writer.cycle();
+    const reports = writer.reports.length;
+    const parks = writer.parks().length;
+
+    await writer.cycle();
+    assert.equal(writer.reports.length, reports);
+    assert.equal(writer.parks().length, parks);
+});
+
+test('can_edit true on a read only page does not re-enable it: a reload does that', async () => {
+    const { server, writer } = await readerAndWriter();
+    server.canEditByTab.set('W', false);
+    await writer.cycle();
+    assert.equal(writer.view.editable, false);
+
+    server.canEditByTab.set('W', true);
+    await writer.cycle();
+    assert.equal(writer.view.editable, false);
+    assert.equal(writer.handle.readOnly, true);
+    assert.deepEqual(writer.reports.at(-1), { tone: 'idle', word: 'Read only' });
+
+    // A page the server drew read only stays so as well.
+    const { server: other, reader } = await readerAndWriter();
+    other.canEditByTab.set('R', true);
+    await reader.cycle();
+    assert.equal(reader.view.editable, false);
+    assert.equal(reader.handle.readOnly, true);
+});
+
+test('a page with no can_edit in the answer behaves as before: an old server changes nothing', async () => {
+    const { writer } = await readerAndWriter();
+    writer.type('W1');
+    await writer.debounce();
+    await writer.land();
+    await writer.cycle();
+
+    assert.equal(writer.view.editable, true);
+    assert.equal(writer.handle.readOnly, false);
+    assert.equal(writer.view.unsaved, false);
+});
+
+test('can_edit true answers the question a refused save asked: the hold is lifted and the text goes again', async () => {
+    const { server, writer } = await refusedWriter({ canEditMode: 'hang' });
+    writer.host().saveRefused(403);
+    await settle();
+    assert.ok(writer.view.accessCheckSince > 0, 'the page is waiting for the server to say');
+    assert.equal(writer.view.editable, true);
+
+    server.canEditByTab.set('W', true);
+    await writer.cycle();
+
+    assert.equal(writer.view.accessCheckSince, 0);
+    assert.equal(writer.view.editable, true);
+    assert.equal(writer.handle.readOnly, false);
+    assert.equal(writer.sent.length, 2, 'the owed text went out again');
+    assert.equal(writer.sent[1].text, 'words in the air');
+});
+
+test('can_edit false answers the question a refused save asked: read only at once, and the text is not parked twice', async () => {
+    const { server, writer } = await refusedWriter({ canEditMode: 'hang' });
+    writer.host().saveRefused(403);
+    await settle();
+    assert.equal(writer.parks().length, 1, 'parked when the save was refused');
+
+    server.canEditByTab.set('W', false);
+    await writer.cycle();
+
+    assert.equal(writer.view.editable, false);
+    assert.equal(writer.view.accessCheckSince, 0);
+    assert.equal(writer.view.unsentKept, true);
+    assert.equal(writer.parks().length, 1);
+
+    // The question that was still out answers late: nothing happens.
+    writer.canEditPending.resolve(true);
+    await settle();
+    assert.equal(writer.view.editable, false);
+});
+
+test('accessFromPoll takes only a real boolean: anything else changes nothing', async () => {
+    const { writer } = await readerAndWriter();
+    const refreshes = writer.presenceRefreshes;
+    for (const odd of [undefined, null, 'false', 0, '', {}]) {
+        writer.host().accessFromPoll(odd);
+    }
+
+    assert.equal(writer.view.editable, true);
+    assert.equal(writer.handle.readOnly, false);
+    assert.equal(writer.presenceRefreshes, refreshes);
+
+    // Not even the question a refused save left out is answered by something that is not a boolean.
+    const held = await refusedWriter({ canEditMode: 'hang' });
+    held.writer.host().saveRefused(403);
+    await settle();
+    const since = held.writer.view.accessCheckSince;
+    assert.ok(since > 0);
+    held.writer.host().accessFromPoll('true');
+    held.writer.host().accessFromPoll(1);
+    assert.equal(held.writer.view.accessCheckSince, since);
+});
+
+test('can_edit false on a fail-closed page is the same read only word, and nothing is parked or written', async () => {
+    const w = world();
+    const A = w.tab('A', { failClosed: true });
+    await A.open();
+    w.server.canEditByTab.set('A', false);
+    await A.cycle();
+
+    assert.equal(A.parks().length, 0);
+    assert.deepEqual(A.drafts.size, 0);
+    assert.equal(A.sent.length, 0);
+});
+
 test('read only: a signed-out stop does not tell a reader to keep editing', async () => {
     const { reader, writer } = await readerAndWriter();
 
