@@ -1325,7 +1325,7 @@ export function createSyncHost(view, env) {
         );
         view.lost = appendLost(view.lost, entries);
         clearLostNotices();
-        env.drafts()?.parkLost(view.docUuid, view.lost, view.baseVersion);
+        env.drafts()?.parkLost(view.docUuid, view.lost, view.baseVersion, view.tabId);
         env.info(`[Dot.Doc] ${entries.length} block(s) could not be kept by the ${source} and are offered back in the notice bar.`);
     }
 
@@ -1400,7 +1400,7 @@ export function createSyncHost(view, env) {
 
         clearLostNotices();
         view.lost = view.lost.filter((_, at) => at !== index);
-        env.drafts()?.parkLost(view.docUuid, view.lost, view.baseVersion);
+        env.drafts()?.parkLost(view.docUuid, view.lost, view.baseVersion, view.tabId);
 
         return true;
     }
@@ -1428,7 +1428,7 @@ export function createSyncHost(view, env) {
         clearLostNotices();
         view.lost = [];
         try {
-            Promise.resolve(env.drafts()?.markLostDismissed(view.docUuid)).catch(() => {});
+            Promise.resolve(env.drafts()?.markLostDismissed(view.docUuid, view.tabId)).catch(() => {});
         } catch (_) {
             // Nothing more can be done.
         }
@@ -1475,7 +1475,7 @@ export function createSyncHost(view, env) {
         const dismissing = view.lost;
         let kept = false;
         try {
-            kept = drafts ? (await drafts.parkLost(view.docUuid, dismissing, view.baseVersion)) === true : false;
+            kept = drafts ? (await drafts.parkLost(view.docUuid, dismissing, view.baseVersion, view.tabId)) === true : false;
         } catch (_) {
             kept = false;
         }
@@ -1502,7 +1502,7 @@ export function createSyncHost(view, env) {
         // but a reload, so it must not be left behind to mislead.)
         clearLostNotices();
         view.lost = [];
-        drafts.markLostDismissed(view.docUuid);
+        drafts.markLostDismissed(view.docUuid, view.tabId);
     }
 
     /**
@@ -1514,7 +1514,9 @@ export function createSyncHost(view, env) {
     async function reofferLost(drafts) {
         let row = null;
         try {
-            row = await drafts.loadLost(view.docUuid);
+            // Every tab's rows of this document become this tab's own (adoptLost()), so each entry has
+            // one owner and Put it back and Dismiss all touch no other tab's row.
+            row = await (drafts.adoptLost ? drafts.adoptLost(view.docUuid, view.tabId) : drafts.loadLost(view.docUuid));
         } catch (_) {
             row = null;
         }

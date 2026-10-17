@@ -852,7 +852,7 @@ async function run(seed, tabCount) {
             if (key === UUID || key === STALE || key.startsWith(`${STALE}@`)) {
                 // The live draft, the latest park, and every earlier park (kept under stale-<uuid>@<ms>).
                 tokensOfString(row.json).forEach((token) => kept.add(token));
-            } else if (key === LOST) {
+            } else if (key === LOST || key.startsWith(`${LOST}@`)) {
                 [...(row.entries ?? []), ...(row.dismissed ?? [])].forEach((entry) => tokensOfEntry(entry).forEach((token) => kept.add(token)));
             }
         }

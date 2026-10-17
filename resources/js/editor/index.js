@@ -46,6 +46,7 @@ import {
     clearDraft,
     loadBase,
     loadDraft,
+    adoptLost,
     loadLost,
     markLostDismissed,
     parkLost,
@@ -860,6 +861,7 @@ window.offlineDraft = {
     loadBase,
     parkLost,
     loadLost,
+    adoptLost,
     markLostDismissed,
 };
 

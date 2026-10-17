@@ -3036,7 +3036,7 @@ test('a draft the editor cannot open is kept rather than lost', async () => {
 test('with no draft, and in a browser that cannot keep one, the page simply opens', async () => {
     const w = world();
     const A = await reopened(w, null);
-    assert.deepEqual(A.draftCalls, ['loadLost', 'loadDraft', 'saveBase']);
+    assert.deepEqual(A.draftCalls, ['adoptLost', 'loadDraft', 'saveBase']);
     assert.equal(A.polls.length, 1);
 
     const B = w.tab('B', { draftStore: false });
@@ -3210,7 +3210,7 @@ test('an edit undone inside the debounce leaves no draft: after somebody saves, 
     assert.equal(again.view.setAsideFrom, null);
     assert.equal(again.stale(), null);
     assert.deepEqual(again.questions, []);
-    assert.deepEqual(again.draftCalls, ['loadLost', 'loadDraft', 'saveBase']);
+    assert.deepEqual(again.draftCalls, ['adoptLost', 'loadDraft', 'saveBase']);
 });
 
 test('an edit undone after a save leaves no draft either: the draft store is cleared, not rewritten', async () => {
@@ -4804,7 +4804,7 @@ test('a reload during the lost row re-offers its entries prefixed From your last
             ],
         ]
     );
-    assert.deepEqual(again.draftCalls, ['loadLost', 'loadDraft', 'saveBase'], 'the park is read before the draft');
+    assert.deepEqual(again.draftCalls, ['adoptLost', 'loadDraft', 'saveBase'], 'the park is taken before the draft is read');
 
     assert.equal(again.host().putBackLost(0), true);
     assert.deepEqual(again.blocks(), [
@@ -4952,6 +4952,57 @@ test('a Put it back whose insertBlock THROWS is a failure too: the entry stays, 
     B.host().putBackAllLost();
     assert.deepEqual(B.lostTexts(), ['Hello B']);
     assert.equal(B.view.syncNotice, 'Your text could not be put back.');
+});
+
+const lossOf = (id, text) => ({ id, type: 'paragraph', reason: 'both', json: para(id, text), anchors: ['p1'], text });
+
+test('two tabs of one browser each park their own lost row: neither erases the other, and a reload offers both', async () => {
+    const w = world();
+    const shared = new Map();
+    const X = w.tab('X', { drafts: shared });
+    const Y = w.tab('Y', { drafts: shared });
+    await X.open();
+    await Y.open();
+
+    X.host().offerLost([lossOf('p7', 'from tab X')], 'merge', 2);
+    Y.host().offerLost([lossOf('p8', 'from tab Y')], 'merge', 2);
+    X.host().offerLost([lossOf('p9', 'more from X')], 'merge', 3); // X rewrites its list: Y's row is not touched
+
+    assert.deepEqual([...shared.keys()].filter((key) => key.startsWith('lost-')).sort(), [`lost-${UUID}@X`, `lost-${UUID}@Y`]);
+    assert.deepEqual(shared.get(`lost-${UUID}@Y`).entries.map((entry) => entry.excerpt), ['from tab Y']);
+    assert.deepEqual(shared.get(`lost-${UUID}@X`).entries.map((entry) => entry.excerpt), ['from tab X', 'more from X']);
+
+    // Both pages reload: the new page is offered everything, from both tabs.
+    const Z = w.tab('Z', { drafts: shared });
+    await Z.open();
+    assert.deepEqual(Z.lostTexts().sort(), ['from tab X', 'from tab Y', 'more from X']);
+    assert.deepEqual([...shared.keys()].filter((key) => key.startsWith('lost-')), [`lost-${UUID}@Z`], 'every entry has one owner now');
+
+    // Dismissing marks the owner's row; another reload offers nothing, and nothing was erased.
+    await Z.host().dismissLost();
+    const V = w.tab('V', { drafts: shared });
+    await V.open();
+    assert.deepEqual(V.view.lost, []);
+    assert.deepEqual(shared.get(`lost-${UUID}@V`).dismissed.map((entry) => entry.excerpt).sort(), ['from tab X', 'from tab Y', 'more from X'], 'the dismissed copies travel with the row');
+});
+
+test('after a reload one tab\'s Put it back and the other tab\'s entries do not touch each other\'s rows', async () => {
+    const w = world();
+    const shared = new Map();
+    const X = w.tab('X', { drafts: shared });
+    await X.open();
+    X.host().offerLost([lossOf('p7', 'from tab X')], 'merge', 2);
+    const Y = w.tab('Y', { drafts: shared });
+    await Y.open(); // adopts X's row
+    X.host().offerLost([lossOf('p9', 'X again')], 'merge', 3); // X, still open, writes its (recreated) row
+
+    assert.deepEqual(Y.lostTexts(), ['from tab X']);
+    assert.deepEqual(shared.get(`lost-${UUID}@Y`).entries.map((entry) => entry.excerpt), ['from tab X']);
+    assert.ok(shared.get(`lost-${UUID}@X`).entries.map((entry) => entry.excerpt).includes('X again'));
+
+    assert.equal(Y.host().putBackLost(0), true);
+    assert.deepEqual(shared.get(`lost-${UUID}@Y`).entries, []);
+    assert.ok(shared.get(`lost-${UUID}@X`).entries.map((entry) => entry.excerpt).includes('X again'), 'X\'s row is not rewritten by Y');
 });
 
 test('Put it back does nothing for an entry that is not there', async () => {

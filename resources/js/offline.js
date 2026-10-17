@@ -349,19 +349,98 @@ export async function loadBase(docUuid) {
 }
 
 /**
- * Write the lost park: the WHOLE lost list of a document, rewritten on every
- * merge that lost something and on every put-back; the row's dismissal
- * stamp does not survive (a new loss is offered again), but the entries
- * Dismiss all moved aside under `dismissed` do: they stay for the row's 7
- * days, whatever is offered after them. A plain copy is stored: the page
- * hands in Alpine's reactive proxy, which IndexedDB cannot clone. See
- * LOST_PREFIX.
+ * The key of a tab's own lost row: `lost-<uuid>@<tabId>`. Two tabs of one
+ * document in one browser share the database, so each writes only its own row
+ * and neither can erase the other's entries. With no tab id (an old caller)
+ * the key is the plain `lost-<uuid>` of the build that wrote one row per
+ * document, which loadLost() and adoptLost() still read.
+ */
+function lostKey(docUuid, tabId = '') {
+    return LOST_PREFIX + docUuid + (tabId ? `@${tabId}` : '');
+}
+
+/**
+ * Every lost row of a document, plain and per tab: the rows whose key starts
+ * with `lost-<uuid>`. Read inside the caller's transaction.
+ */
+function readLostRows(store, docUuid, done) {
+    const rows = [];
+    const prefix = LOST_PREFIX + docUuid;
+    const cursor = store.openCursor(IDBKeyRange.bound(prefix, prefix + '\uffff'));
+    cursor.onsuccess = () => {
+        const at = cursor.result;
+        if (at) {
+            // `lost-<uuid>` itself, or `lost-<uuid>@<tab>`: never another document's row.
+            if (at.key === prefix || at.key.startsWith(prefix + '@')) {
+                rows.push(at.value);
+            }
+            at.continue();
+
+            return;
+        }
+        done(rows);
+    };
+}
+
+/**
+ * The lost rows of a document as one list: rows oldest first (by their own
+ * parkedAt, then key), each row's entries in order, an exact duplicate (the
+ * same id with identical json) kept once. Pure, and exported for `npm test`.
+ *
+ * @param {object[]} rows
+ * @returns {{entries: object[], dismissed: object[], baseVersion: number|null, parkedAt: number, dismissedAt: number|null}|null}
+ */
+export function unionLostRows(rows) {
+    const usable = rows.filter((row) => row && Array.isArray(row.entries));
+    if (usable.length === 0) {
+        return null;
+    }
+
+    const ordered = [...usable].sort((a, b) => (Number(a.parkedAt) || 0) - (Number(b.parkedAt) || 0) || String(a.docUuid).localeCompare(String(b.docUuid)));
+    const seen = new Set();
+    const merge = (lists) => {
+        const out = [];
+        lists.forEach((list) =>
+            list.forEach((entry) => {
+                const identity = `${entry.id}|${JSON.stringify(entry.json)}`;
+                if (!seen.has(identity)) {
+                    seen.add(identity);
+                    out.push(entry);
+                }
+            })
+        );
+
+        return out;
+    };
+    const entries = merge(ordered.map((row) => row.entries));
+    seen.clear();
+    const dismissed = merge(ordered.map((row) => (Array.isArray(row.dismissed) ? row.dismissed : [])));
+    const newest = ordered[ordered.length - 1];
+    const baseVersion = Number(newest.baseVersion);
+
+    return {
+        entries,
+        dismissed,
+        baseVersion: Number.isFinite(baseVersion) && newest.baseVersion !== null ? baseVersion : null,
+        parkedAt: Number(newest.parkedAt) || 0,
+        // Something on offer means the list is not dismissed, whichever row was.
+        dismissedAt: entries.length > 0 ? null : Math.max(0, ...ordered.map((row) => Number(row.dismissedAt) || 0)) || null,
+    };
+}
+
+/**
+ * Write this tab's lost row: the tab's WHOLE lost list, rewritten on every
+ * merge that lost something and on every put-back; the row's dismissal stamp
+ * does not survive (a new loss is offered again), but the entries Dismiss all
+ * moved aside under `dismissed` do: they stay for the row's 7 days, whatever
+ * is offered after them. A plain copy is stored: the page hands in Alpine's
+ * reactive proxy, which IndexedDB cannot clone. See LOST_PREFIX and lostKey().
  *
  * @returns {Promise<boolean>} true once the write has completed; false means
  *   nothing was stored and the caller still holds the only copy. Nothing is
  *   thrown.
  */
-export async function parkLost(docUuid, entries, baseVersion = null) {
+export async function parkLost(docUuid, entries, baseVersion = null, tabId = '') {
     try {
         const db = await openDb();
         const plain = JSON.parse(JSON.stringify(entries));
@@ -369,10 +448,11 @@ export async function parkLost(docUuid, entries, baseVersion = null) {
             const tx = db.transaction(STORE_NAME, 'readwrite');
             const store = tx.objectStore(STORE_NAME);
             // Read the row in the same transaction: `dismissed` is carried over.
-            const req = store.get(LOST_PREFIX + docUuid);
+            const key = lostKey(docUuid, tabId);
+            const req = store.get(key);
             req.onsuccess = () => {
                 store.put({
-                    docUuid: LOST_PREFIX + docUuid,
+                    docUuid: key,
                     entries: Array.isArray(plain) ? plain : [],
                     dismissed: Array.isArray(req.result?.dismissed) ? req.result.dismissed : [],
                     parkedAt: Date.now(),
@@ -391,6 +471,9 @@ export async function parkLost(docUuid, entries, baseVersion = null) {
 }
 
 /**
+ * Every tab's lost entries of a document as one list (unionLostRows()), read
+ * only. A plain `lost-<uuid>` row is read too.
+ *
  * @returns {Promise<{entries: object[], dismissed: object[], baseVersion: number|null, parkedAt: number, dismissedAt: number|null}|null>}
  */
 export async function loadLost(docUuid) {
@@ -398,23 +481,59 @@ export async function loadLost(docUuid) {
         const db = await openDb();
         return await new Promise((resolve, reject) => {
             const tx = db.transaction(STORE_NAME, 'readonly');
-            const req = tx.objectStore(STORE_NAME).get(LOST_PREFIX + docUuid);
-            req.onsuccess = () => {
-                const row = req.result;
-                const baseVersion = Number(row?.baseVersion);
-                resolve(
-                    !row || !Array.isArray(row.entries)
-                        ? null
-                        : {
-                              entries: row.entries,
-                              dismissed: Array.isArray(row.dismissed) ? row.dismissed : [],
-                              baseVersion: Number.isFinite(baseVersion) && row.baseVersion !== null ? baseVersion : null,
-                              parkedAt: Number(row.parkedAt) || 0,
-                              dismissedAt: Number(row.dismissedAt) || null,
-                          }
-                );
-            };
-            req.onerror   = () => reject(req.error);
+            let result = null;
+            readLostRows(tx.objectStore(STORE_NAME), docUuid, (rows) => {
+                result = unionLostRows(rows);
+            });
+            tx.oncomplete = () => resolve(result);
+            tx.onerror    = () => reject(tx.error);
+            tx.onabort    = () => reject(tx.error);
+        });
+    } catch (_) {
+        return null;
+    }
+}
+
+/**
+ * What a page does on open with the lost rows of its document: take ALL of
+ * them (every earlier tab's, and a plain one) into THIS tab's own row and
+ * delete the others, in one transaction, so each entry has exactly one owner
+ * from then on. Put it back and Dismiss all rewrite or mark the owner's row
+ * and nobody else's. Returns the list taken (unionLostRows()), or null when
+ * there was nothing, or when the write failed (nothing changed then).
+ *
+ * @returns {Promise<{entries: object[], dismissed: object[], baseVersion: number|null, parkedAt: number, dismissedAt: number|null}|null>}
+ */
+export async function adoptLost(docUuid, tabId = '') {
+    try {
+        const db = await openDb();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const own = lostKey(docUuid, tabId);
+            let result = null;
+            readLostRows(store, docUuid, (rows) => {
+                result = unionLostRows(rows);
+                if (result === null) {
+                    return;
+                }
+                rows.forEach((row) => {
+                    if (row.docUuid !== own) {
+                        store.delete(row.docUuid);
+                    }
+                });
+                store.put({
+                    docUuid: own,
+                    entries: result.entries,
+                    dismissed: result.dismissed,
+                    parkedAt: result.parkedAt || Date.now(),
+                    baseVersion: result.baseVersion,
+                    ...(result.dismissedAt ? { dismissedAt: result.dismissedAt } : {}),
+                });
+            });
+            tx.oncomplete = () => resolve(result);
+            tx.onerror    = () => reject(tx.error);
+            tx.onabort    = () => reject(tx.error);
         });
     } catch (_) {
         return null;
@@ -425,19 +544,20 @@ export async function loadLost(docUuid) {
  * Dismiss all: the park stays for its 7 days (the button says so), but it is
  * not offered again on the next visit. The entries move aside under
  * `dismissed`, which parkLost() carries over, so a later loss that rewrites
- * `entries` does not take the dismissed text out of the browser.
+ * `entries` does not take the dismissed text out of the browser. Marks this
+ * tab's OWN row; another tab's entries are still on offer.
  *
  * @returns {Promise<boolean>} true once the write has completed; false means
  *   nothing was stored and the caller still holds the only copy. Nothing is
  *   thrown.
  */
-export async function markLostDismissed(docUuid) {
+export async function markLostDismissed(docUuid, tabId = '') {
     try {
         const db = await openDb();
         await new Promise((resolve, reject) => {
             const tx = db.transaction(STORE_NAME, 'readwrite');
             const store = tx.objectStore(STORE_NAME);
-            const req = store.get(LOST_PREFIX + docUuid);
+            const req = store.get(lostKey(docUuid, tabId));
             req.onsuccess = () => {
                 if (req.result) {
                     const row = req.result;

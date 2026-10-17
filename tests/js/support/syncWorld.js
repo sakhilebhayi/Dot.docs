@@ -5,7 +5,7 @@ import { Schema } from 'prosemirror-model';
 import { createSyncEngine } from '../../../resources/js/editor/sync/engine.js';
 import { createSyncHost, unloadSaveBody } from '../../../resources/js/editor/sync/host.js';
 import { mergeDocuments } from '../../../resources/js/editor/sync/merge.js';
-import { keepKeyFor } from '../../../resources/js/offline.js';
+import { keepKeyFor, unionLostRows } from '../../../resources/js/offline.js';
 
 /**
  * The fake world the sync host is tested in (sync.host.test.js) and walked
@@ -255,7 +255,7 @@ export function world(text = 'start') {
 export function makeTab({ server, clock }, name, options = {}) {
     const t = {
         name,
-        view: makeView(server.version),
+        view: { ...makeView(server.version), tabId: name },
         /** Saves in the air, oldest first. */
         saves: [],
         /** Every save this tab has sent. */
@@ -448,6 +448,13 @@ export function makeTab({ server, clock }, name, options = {}) {
         },
     };
 
+    // The lost rows of a document in this browser's store: the plain `lost-<uuid>` and every `lost-<uuid>@<tab>`.
+    const lostKeyOf = (uuid, tabId) => `lost-${uuid}${tabId ? `@${tabId}` : ''}`;
+    const lostRowsOf = (uuid) =>
+        [...t.drafts.entries()]
+            .filter(([key]) => key === `lost-${uuid}` || key.startsWith(`lost-${uuid}@`))
+            .map(([key, row]) => ({ ...row, docUuid: key }));
+
     // ---- the browser's draft store (window.offlineDraft)
     t.draftStore =
         options.draftStore === false
@@ -485,7 +492,7 @@ export function makeTab({ server, clock }, name, options = {}) {
 
                       return t.drafts.get(`base-${uuid}`) ?? null;
                   },
-                  parkLost: async (uuid, entries, baseVersion) => {
+                  parkLost: async (uuid, entries, baseVersion, tabId = '') => {
                       t.draftCalls.push('parkLost');
                       // As offline.js does: false means nothing was stored (and nothing is thrown); the tests can make it so, or make it throw.
                       if (t.parkLostThrows) {
@@ -494,9 +501,11 @@ export function makeTab({ server, clock }, name, options = {}) {
                       if (t.parkLostFails) {
                           return false;
                       }
-                      // As offline.js does: `entries` is rewritten, `dismissed` is carried over, the row's stamp goes.
-                      const held = t.drafts.get(`lost-${uuid}`);
-                      t.drafts.set(`lost-${uuid}`, {
+                      // As offline.js does: this tab's OWN row, `entries` rewritten, `dismissed` carried over, the row's stamp goes.
+                      const key = lostKeyOf(uuid, tabId);
+                      const held = t.drafts.get(key);
+                      t.drafts.set(key, {
+                          docUuid: key,
                           entries: clone(entries),
                           dismissed: held ? clone(held.dismissed ?? []) : [],
                           baseVersion,
@@ -508,13 +517,36 @@ export function makeTab({ server, clock }, name, options = {}) {
                   },
                   loadLost: async (uuid) => {
                       t.draftCalls.push('loadLost');
-                      const row = t.drafts.get(`lost-${uuid}`);
 
-                      return row ? { ...row, entries: clone(row.entries), dismissed: clone(row.dismissed ?? []) } : null;
+                      return clone(unionLostRows(lostRowsOf(uuid)));
                   },
-                  markLostDismissed: async (uuid) => {
+                  adoptLost: async (uuid, tabId = '') => {
+                      t.draftCalls.push('adoptLost');
+                      const rows = lostRowsOf(uuid);
+                      const union = unionLostRows(rows);
+                      if (union === null) {
+                          return null;
+                      }
+                      const own = lostKeyOf(uuid, tabId);
+                      rows.forEach((row) => {
+                          if (row.docUuid !== own) {
+                              t.drafts.delete(row.docUuid);
+                          }
+                      });
+                      t.drafts.set(own, {
+                          docUuid: own,
+                          entries: clone(union.entries),
+                          dismissed: clone(union.dismissed),
+                          baseVersion: union.baseVersion,
+                          parkedAt: union.parkedAt || clock.now,
+                          dismissedAt: union.dismissedAt,
+                      });
+
+                      return clone(union);
+                  },
+                  markLostDismissed: async (uuid, tabId = '') => {
                       t.draftCalls.push('markLostDismissed');
-                      const row = t.drafts.get(`lost-${uuid}`);
+                      const row = t.drafts.get(lostKeyOf(uuid, tabId));
                       if (row) {
                           row.dismissed = [...(row.dismissed ?? []), ...row.entries];
                           row.entries = [];
@@ -726,7 +758,7 @@ export function makeTab({ server, clock }, name, options = {}) {
         ...(t.drafts.has(STALE) ? [t.drafts.get(STALE)] : []),
     ];
     t.lostTexts = () => t.view.lost.map((entry) => entry.excerpt);
-    t.lostPark = () => t.drafts.get(LOST) ?? null;
+    t.lostPark = () => t.drafts.get(lostKeyOf(UUID, t.view.tabId)) ?? t.drafts.get(LOST) ?? null;
 
     return t;
 }

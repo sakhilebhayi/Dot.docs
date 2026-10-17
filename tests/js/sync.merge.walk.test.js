@@ -491,10 +491,11 @@ for (const seed of SEEDS) {
                 tab.view.lost.forEach((entry) => tokensIn({ content: [entry.json] }).forEach((token) => kept.add(token)));
                 // Every park the tab ever wrote (the latest, and the earlier ones kept under stale-<uuid>@<ms>).
                 tab.parks().forEach((row) => tokensIn(JSON.parse(row.json)).forEach((token) => kept.add(token)));
-                const park = tab.drafts.get(LOST);
-                if (park) {
-                    // What is offered, and what Dismiss all moved aside: both are in the browser.
-                    [...park.entries, ...park.dismissed].forEach((entry) => tokensIn({ content: [entry.json] }).forEach((token) => kept.add(token)));
+                // Every lost row of the document (one per tab, and a plain one): what is offered, and what Dismiss all moved aside.
+                for (const [key, park] of tab.drafts.entries()) {
+                    if (key === LOST || key.startsWith(`${LOST}@`)) {
+                        [...park.entries, ...park.dismissed].forEach((entry) => tokensIn({ content: [entry.json] }).forEach((token) => kept.add(token)));
+                    }
                 }
             });
             server.kept.forEach((row) => tokensIn(row.json).forEach((token) => kept.add(token)));
