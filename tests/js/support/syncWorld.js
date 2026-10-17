@@ -263,7 +263,7 @@ export function world(text = 'start') {
  *
  * @param {{server: FakeServer, clock: {now: number}}} world
  * @param {string} name
- * @param {{failClosed?: boolean, readOnly?: boolean, drafts?: Map, draftStore?: boolean, confirmAnswer?: boolean, mergeFails?: boolean}} options
+ * @param {{failClosed?: boolean, readOnly?: boolean, drafts?: Map, draftStore?: boolean, confirmAnswer?: boolean, mergeFails?: boolean, metrics?: boolean}} options
  */
 export function makeTab({ server, clock }, name, options = {}) {
     const t = {
@@ -319,6 +319,10 @@ export function makeTab({ server, clock }, name, options = {}) {
         /** An IME composition is in progress. */
         composing: false,
         mounted: true,
+        /** What the page's counters were told: [kind, detail], in order (only when the tab was made with `metrics`). */
+        metrics: [],
+        /** The counters blow up when told something. */
+        metricThrows: false,
     };
 
     // ---- the editor handle, with the bundle's own bookkeeping
@@ -666,6 +670,18 @@ export function makeTab({ server, clock }, name, options = {}) {
         info: (...args) => t.infos.push(args.join(' ')),
         log: (...args) => t.errors.push(args),
     };
+
+    // The page's counters (sync/metrics.js) are an optional part of env: the module asks `typeof env.metric`, and
+    // the walks and every older test run without it. `metrics: true` here, or WALK_METRICS=1 for the walks
+    // (which then run with a recorder in place and must come out the same), puts a recorder in.
+    if (options.metrics === true || process.env.WALK_METRICS === '1') {
+        t.env.metric = (kind, detail) => {
+            if (t.metricThrows) {
+                throw new Error('the counters blew up');
+            }
+            t.metrics.push([kind, clone(detail ?? null)]);
+        };
+    }
 
     /** Built afresh for every call, as the component's delegates do. */
     t.host = () => createSyncHost(t.view, t.env);

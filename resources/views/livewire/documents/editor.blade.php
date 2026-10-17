@@ -106,8 +106,8 @@
         isOffline: !navigator.onLine,
         docUuid: '{{ $document->uuid }}',
         // Whether the server drew this page for somebody who may change the
-        // document (DocumentPolicy::update()). The ONE server-drawn literal
-        // besides the versions and the uuid, and a plain boolean: it is the
+        // document (DocumentPolicy::update()). The only server-drawn literal
+        // that decides a gate (besides the versions, the uuid and metricsOn), and a plain boolean: it is the
         // page-load truth sync/host.js decides read only by (a person who may
         // not change the document never saves, drafts or sends a beacon, and
         // the editor is mounted not editable). It turns false on this object
@@ -125,6 +125,10 @@
         accessCheckSince: 0,
         // Takes the refusal hook off Livewire when the page is really removed.
         unhookRefusal: null,
+        // Whether the server collects the co-editing counters (config docs.sync_metrics, env DOCS_SYNC_METRICS).
+        // A plain boolean, the same on every render of one deploy, so it never changes this string between
+        // renders. The counters themselves live in sync/metrics.js and on the editor element.
+        metricsOn: {{ config('docs.sync_metrics') ? 'true' : 'false' }},
         // The document version this page was rendered from, and the version
         // the last successful save reported. Draft recency is decided by
         // VERSION, never by a clock: `savedAt` comes off the browser and
@@ -274,6 +278,8 @@
 
             if (!this.owns) return;
 
+            this.startMetrics();
+
             window.addEventListener('dotdoc:read-only', () => this.syncHost().readOnlyNoticed());
 
             // A save the server refuses with 403 means this person may no
@@ -333,6 +339,8 @@
             // stop seeing a face that is no longer here. By beacon, like the
             // unload save: nothing else is delivered from a closing page.
             window.addEventListener('pagehide', () => {
+                // The counters go after the editor's own pagehide flush (registered when it was mounted, so it runs first and its beacon takes the shared budget first), and never in the way: a beacon, nothing awaited, nothing thrown.
+                try { this.syncMetrics()?.flush({ beacon: true }); } catch (_) {}
                 if (typeof navigator.sendBeacon !== 'function') return;
                 navigator.sendBeacon(
                     '{{ route('documents.sync', $document->uuid) }}',
@@ -395,6 +403,9 @@
                 now: () => Date.now(),
                 info: (...args) => console.info(...args),
                 log: (...args) => console.error(...args),
+                // What happened, as counts (sync/metrics.js). Nothing comes back and nothing waits on it. Switched
+                // off, there is no env.metric at all, so the host does no extra work for a counter nobody keeps.
+                metric: this.metricsOn ? (kind, detail) => this.syncMetrics()?.record(kind, detail) : undefined,
             });
         },
 
@@ -430,6 +441,35 @@
         // reactive data, for the same reason the editor handle is.
         syncEngine() {
             return this.$refs.editorEl?.__dotdocSync ?? null;
+        },
+
+        // The co-editing counters, parked on the element for the same reason
+        // (and so every data object reaches the same one). Null when the
+        // server switched counting off. The once-a-minute flush is an ordinary
+        // POST; only the flush on leaving is a beacon, with the token in the
+        // body as the other unload beacons have it. Whatever goes wrong with
+        // either is dropped by the module.
+        syncMetrics() {
+            return this.$refs.editorEl?.__dotdocMetrics ?? null;
+        },
+
+        startMetrics() {
+            const host = this.$refs.editorEl;
+            if (!this.metricsOn || !host || host.__dotdocMetrics || !window.DotDoc?.sync?.createMetrics) return;
+
+            const url = '{{ route('documents.sync-metrics', $document->uuid) }}';
+            host.__dotdocMetrics = window.DotDoc.sync.createMetrics({
+                now: () => Date.now(),
+                token: () => document.querySelector('meta[name=csrf-token]').content,
+                send: (body) => fetch(url, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body,
+                }).then((response) => response.ok),
+                beacon: (body) => typeof navigator.sendBeacon === 'function'
+                    && navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })),
+            });
         },
 
         startSync() {
@@ -569,6 +609,10 @@
             if (this.owns) {
                 window.DotDoc?.get(this.$refs.editorEl)?.destroy();
             }
+            // The counters leave by beacon AFTER the editor's own destroy, which flushes the unsaved text by beacon:
+            // the browser shares one 64 KiB budget between a page's beacons, and the document comes first.
+            try { this.syncMetrics()?.flush({ beacon: true }); } catch (_) {}
+            if (this.$refs.editorEl) this.$refs.editorEl.__dotdocMetrics = null;
         },
 
         // Apply an AI result to the editor.

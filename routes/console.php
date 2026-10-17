@@ -33,6 +33,11 @@ Schedule::command('queue:work --queue=mail,default --stop-when-empty --max-time=
 // trace in the same SQLite file as the documents.
 Schedule::command('queue:prune-failed --hours=168')->daily();
 
+// The co-editing counters (App\Services\SyncMetrics) are one row per document,
+// person, day and kind: small, but nothing else ever deletes them. 120 days is
+// long enough to read a trend and short enough to stay a few thousand rows.
+Schedule::command('sync:prune-metrics')->daily();
+
 // Liveness of the platform itself. /up/scheduler reports this heartbeat's
 // age and answers 503 once it is older than
 // SchedulerProbeController::SCHEDULER_STALE_SECONDS; the Scheduler Watchdog
