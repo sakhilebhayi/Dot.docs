@@ -1697,8 +1697,9 @@ export function createSyncHost(view, env) {
         }
 
         // A text is already set aside and offered. Load theirs sets THIS tab's
-        // text aside in its place, and the stale- park holds one text only, so
-        // the earlier one would be nowhere: ask first, before the engine's
+        // text aside in its place, and the page offers one set-aside text at a
+        // time (the earlier one stays parked, under a kept key, but nothing in
+        // the page would offer it any more): ask first, before the engine's
         // document is taken (a no changes nothing).
         if (view.setAside && engine.pending && !env.confirm(LOAD_THEIRS_REPLACES_QUESTION)) {
             return;
@@ -2094,8 +2095,8 @@ export function createSyncHost(view, env) {
             return;
         }
         if (mine !== null && view.setAside) {
-            // One text is set aside at a time (the offer, and the stale- park
-            // that backs it). Setting this one aside would replace the offer.
+            // One text is set aside at a time (the offer; its park is kept
+            // either way). Setting this one aside would replace the offer.
             // The suggestion is already stored as version `version` (accepting
             // it saved it): it is not pending any more, so the writer is not
             // sent back to accept it. The next poll delivers it to this tab,

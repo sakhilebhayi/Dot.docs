@@ -1021,7 +1021,12 @@
             {{-- The page can no longer stay in step: signed out, access
                  removed, the document gone, or a version this editor cannot
                  open. Also said here: a newer version or the writer's own
-                 text that could not be put into the editor. --}}
+                 text that could not be put into the editor, and the lost
+                 row's three notices (a block that could not be put back, a
+                 Dismiss all that could not keep its browser copy or found
+                 the list changed). Those three are never written over one of
+                 the stop reasons and go when the list changes or empties
+                 (sync/host.js, setLostNotice() and clearLostNotices()). --}}
             <div class="doc-notice" hidden x-bind:hidden="!syncNotice">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>

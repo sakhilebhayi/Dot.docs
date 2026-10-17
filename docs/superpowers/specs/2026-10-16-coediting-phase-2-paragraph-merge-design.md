@@ -173,7 +173,7 @@ The merge generates no ids: every output block keeps its source id, so the merge
 
 ### 5.1 Actors
 
-`persist()`, `saveAnswered()`, `beginMerge()`, `mergeOrConflict()`, `expireMerging()`, `applyFromSync()`, `engineHost().onConflict`, the unchanged engine. Constants: `MERGE_ATTEMPTS = 3`, `MERGE_FETCH_EXPIRY_MS = SAVE_EXPIRY_MS` (15 s).
+`persist()`, `saveAnswered()`, `beginMerge()`, `mergeOrConflict()`, `expireMerging()`, `applyFromSync()`, `engineHost().onConflict`, the unchanged engine. Constants: `MERGE_ATTEMPTS = 5`, `MERGE_FETCH_EXPIRY_MS = SAVE_EXPIRY_MS` (15 s).
 
 ### 5.2 Follow (clean tab) — unchanged path, per-block apply
 
@@ -274,7 +274,7 @@ Sequence (the Phase 1 stated limit): A types X, save S1 leaves (base v1), stored
 ### 5.8 The merged save answers
 
 - **ok**: existing path; `mergeAttempts = 0`; `markConfirmed(snapshot, version)`. Convergence: A saves v2; B merges and saves v3; A polls, follows or merges (its own block untouched), saves v4 only if it typed meanwhile.
-- **conflict again**: 5.4 again; the third merge's refusal (`mergeAttempts >= 3`) → `enterConflict()` with the merged document as "mine" (Keep mine saves it as an overwrite; Load theirs sets it aside: Phase 1 paths unchanged).
+- **conflict again**: 5.4 again; the fifth merge's refusal (`mergeAttempts >= 5`) → `enterConflict()` with the merged document as "mine" (Keep mine saves it as an overwrite; Load theirs sets it aside: Phase 1 paths unchanged).
 - **rejected** (`ok:false, conflict:false`): "Not saved" with the draft kept; nothing further automatic (as today).
 
 ### 5.9 Guards that stay or are added
@@ -361,9 +361,9 @@ Decision: **five static item slots** switched with `hidden`, not `x-for`. The wi
   <span class="doc-notice-actions">
     <button type="button" class="tool tool-mono" @click="putBackAllLost()" aria-describedby="doc-notice-put-back-lost-does">Put them all back</button>
     <button type="button" class="tool tool-mono" @click="dismissLost()" aria-describedby="doc-notice-dismiss-lost-does"
-            title="Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts.">Dismiss all</button>
+            title="Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts. If this browser cannot keep it, you are asked again before it is dropped.">Dismiss all</button>
     <span id="doc-notice-put-back-lost-does" hidden>Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.</span>
-    <span id="doc-notice-dismiss-lost-does" hidden>Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts.</span>
+    <span id="doc-notice-dismiss-lost-does" hidden>Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts. If this browser cannot keep it, you are asked again before it is dropped.</span>
   </span>
 </div>
 ```
@@ -405,10 +405,13 @@ if (base && base.baseVersion === draft.baseVersion):
     if (!result.changed && !result.lost.length) { drafts.clearDraft(uuid); return }      // the beacon stored it, or it is all in the document
     if (!env.confirm(DRAFT_MERGE_QUESTION)) → today's park + whole-document set-aside ('draft'); return
     await drafts.parkStaleDraft(uuid, draft.json, draft.baseVersion); drafts.clearDraft(uuid)   // pre-merge copy recoverable, as today
+    result = handle.merge(JSON.parse(base.json), editor.getJSON(), { mine: parsed, deletionsWin: false })
+      // AGAIN, from the editor as it is now (the page is editable while the question is open and the park is written;
+      // the first result would wipe that typing). Synchronous to the apply: nothing can slip in.
     if (handle.applyRemote(result.merged, { force: true })):
-       view.unsaved = result.changed;                        // confirmed stays: opened() set it to the page document = theirs
+       view.unsaved = view.unsaved || result.changed;        // never lowered; confirmed stays: opened() set it to the page document = theirs
        if (result.lost.length) offerLost(result.lost, 'draft', view.baseVersion)
-       if (result.changed) { drafts.saveDraft(uuid, JSON.stringify(editor.getJSON()), view.baseVersion); view.resave = true }
+       if (view.unsaved) { drafts.saveDraft(uuid, JSON.stringify(editor.getJSON()), view.baseVersion); view.resave = true }
            // sent by the first tick once startSync() has run (restoreDraft() runs before it)
        env.info(...); return
 // fall through: today's park + set-aside, unchanged
@@ -447,7 +450,7 @@ if (base && base.baseVersion === draft.baseVersion):
 
 - Polling: unchanged (1.5 s with company, 10 s alone, none hidden; a quiet poll never loads content).
 - A poll-triggered merge costs nothing extra: the document, outline and css were already in the "behind" response; it brings the tab's save forward by up to 1.2 s (at most one save per incoming version).
-- A refusal-triggered merge costs one extra "behind" response (the same body `refetch()` fetches for today's conflict) plus the merged save (a Livewire request carrying the document in the argument and the snapshot both ways, as today). Bounded: at most `MERGE_ATTEMPTS = 3` merges after refusals in a row, and a fetch unanswered for 15 s ends the loop in the notice.
+- A refusal-triggered merge costs one extra "behind" response (the same body `refetch()` fetches for today's conflict) plus the merged save (a Livewire request carrying the document in the argument and the snapshot both ways, as today). Bounded: at most `MERGE_ATTEMPTS = 5` merges after refusals in a row, and a fetch unanswered for 15 s ends the loop in the notice.
 - `engine.saved(remote.version)` after a merge stops the consumed document being re-downloaded on every poll.
 - IndexedDB: one `base-` write per confirmed version (not per keystroke); one `lost-` write per merge that lost something and per put-back/dismiss.
 - Server load per save unchanged; two typists now save about every 1.2 s each plus one fetch and one save per refusal. Phase 5 measures it on the host (unmeasured, as Phase 1 states).
@@ -529,6 +532,9 @@ Different paragraphs (poll-first and refusal-first with one tab throttled); D1 w
 - Normalise drift: `confirmed` after an accepted save is what the editor sent, not what `DocumentSchema::normalise()` stored (control characters stripped, an invalid `align` dropped). A block the server altered and the writer edits again reads as D1 and the new typing is offered back, not kept. Rare; closing it needs `saveContent()` to return the stored JSON (Phase 5).
 - A block whose id the server re-stamps (invalid or duplicate id) or that TipTap re-ids on a block conversion (`toggleHeading` runs `setNode`, which may stamp a fresh id — to be pinned by one test in the plan) looks like delete + insert: the typist's words are offered back although nobody deleted anything.
 - Block ids are checked for duplicates at the top level only (`mergeDocuments()` returns null for a top-level block without an id or two top-level blocks sharing one). A merged document can carry one id twice when one copy is nested (a draft merge that moves p1 into a box or list while theirs edited p1 keeps both). That is not refused: the editor's block-id repair plugin (`BlockIdRepair`) gives one of the two a fresh id when the merged document is applied, and the block the apply did not touch keeps the id (pinned by a test in `sync.merge.editor.test.js`). No depth-wide check is built.
+- Pressing Enter in the middle of a paragraph that somebody else changes at the same moment can store the words after the split twice: the split's new block is kept as mine's insertion while the paragraph itself is offered back (or lost). Joining paragraphs (Backspace at a paragraph start) has the mirror effect: the joined paragraph's words survive only in the lost row. Nothing is lost.
+- The echo is not applied to block ORDER: after a stored-but-unanswered save that moved blocks, a later move by the same tab can be undone silently by the order comparison against the base.
+- An accepted suggestion that retires a save in the air sets no echo, so the tab's own stored words can come back from a later merge as a lost-row offer. Nothing is lost.
 - Two tabs of one browser share the live draft, the base row and the lost park (keyed per document).
 - A tab closed inside the debounce in a browser that cannot keep drafts loses its last words (Phase 1 limit).
 - A merge during a restore/import/suggestion splices the typist's new blocks at the end when every anchor is gone.
@@ -564,7 +570,7 @@ The step log (`prosemirror-collab`) replaces `mergeDocuments`, `merging`, `merge
 13. **No `isReplacement` threshold**: a restore, import or suggestion is merged like any remote document (nothing is lost; insertions fall to the end when every anchor is gone). A guessed threshold would reintroduce the notice on a heuristic. The owner may overturn this (a notice instead of a merge for whole-document replacements) at the cost of ~20 lines.
 14. **`recent`/`vanishedBlocks` (telling the c2 victim) is not built** — a heuristic that also fires on deliberate deletes; open question 1.
 15. **Narrowing inside a block only for textblocks**; a narrowed step that fails is retried whole before the per-block path is abandoned (server-assisted/Judge 2).
-16. **`MERGE_ATTEMPTS = 3`, `MERGE_FETCH_EXPIRY_MS = 15 s`, `LOST_ROWS = 5`, `anchors` capped at 5** — starting values; `FAST_MS` and these are the knobs to measure on production.
+16. **`MERGE_ATTEMPTS = 5`, `MERGE_FETCH_EXPIRY_MS = 15 s`, `LOST_ROWS = 5`, `anchors` capped at 5** — starting values; `FAST_MS` and these are the knobs to measure on production.
 17. **`base-` rows expire with the 7-day sweep** (bounded storage; an open tab rewrites its row on every accepted save).
 18. **Dismiss all always asks** (every entry is on the page nowhere) and stamps the park `dismissedAt` instead of deleting it (the button's 7-day promise holds); dismissed parks are not re-offered.
 19. **The dead `version-restored` dispatch is removed** in this phase's docs pass.
@@ -624,3 +630,27 @@ Third round, made while executing the plan (2026-10-17):
 - Section 11: the row "Save answer lost / request fails" gains the resend of defect 3, and the row on a browser that cannot keep IndexedDB gains the Dismiss all behaviour above.
 - Section 13 gains four limits: two tabs of one document in one browser can overwrite each other's lost list; a kept stale park is recoverable only by hand, for 7 days; the echo rule remembers one snapshot, so two unanswered sends in a row make a tab's own words come back as a lost-row offer (nothing lost; so the "Nothing" that section 2 promises for a lost answer is not met in that case); a save whose request keeps failing is resent at poll pace with no back-off (whether Livewire raises its own error each time was not checked).
 - `LOAD_THEIRS_REPLACES_QUESTION` (in `sync/host.js`) no longer says the earlier text "will be gone": it says the earlier text "will no longer be offered here", which is true with or without a kept copy (changed after the final review; a browser that keeps drafts still holds the text for 7 days, recoverable by hand).
+
+---
+
+## 18. Final review (2026-10-17, at 753c4db)
+
+Three reviewers read the finished branch, each through one lens (the merge core and the apply path; the save loop and silent loss; the page, the markup, the rules and the docs), and ran about 49,000 further random-walk runs. No word was found lost without a trace except as below. What they found, and what was done:
+
+Silent loss, fixed (tests first, each with a mutation that fails them):
+
+- The draft merge (7.1) computed its result from the editor before the question and the park of the pre-merge copy, then applied it after: typing in that gap was wiped, and typing during the base read could lower `unsaved` so that nothing ever sent it. The merge is now made again from the editor as it is after the last await, `unsaved` is never lowered there, and the tick is owed the text. Load theirs captured the text before its park: it now parks again until the editor holds what was parked.
+- A late answer of a save given up on was believed when the base number matched, which Keep mine followed by Load theirs makes true again while the page shows another document (seed 20730, pre-existing on main). The answer is now believed only while the server document the tab knows is the one it held when the save left.
+- A poll that brought the awaited merge document after 15 s raised the notice, because the expiry ran before the same poll delivered it. The expiry now runs from the poll tick, after delivery.
+- Two deletions that leave nothing gave the stand-in paragraph the id of a block offered back, so Put it back could not return that block under its own id; the stand-in now takes the id of the last block of mine that is not offered back, or none (the editor assigns one). The carried trailing paragraph is checked against ids at any depth.
+
+Writer-visible, fixed:
+
+- The lost-row header no longer promises a copy kept in the browser (the write can fail and is not reported); the Dismiss all question and title say it, and a Dismiss after a failed write asks again, then drops the text from the page, stamps an earlier stored list dismissed and says the text may not be recoverable.
+- The lost row's three notices are written only over an empty notice, never over a stop reason, and cleared when the list changes or empties or the next Put it back works; the two new suggestion sentences are one short line each; the overflow line is one item.
+
+Stated limits added (section 13): Enter and Backspace around a concurrent change; the echo and block order; an accepted suggestion and the echo.
+
+Left for the owner, not done: focus moving to the editor on Put it back (a phone keyboard may open), six buttons with one accessible name, `role="status"` re-reading the whole bar, grammar and excerpt polish of the item sentences (`blockWord('columns')`, list and table excerpts, a lost block whose winner was deleted going to the end), the item sentence in the contrast gate, two lens-1 minors, and telling the person whose saved paragraph a c2 merge deleted.
+
+Documentation: `.ai/rules/editor.md` was corrected in seven places and gained the points above; section 10 and decision 16 say `MERGE_ATTEMPTS` is 5; the roadmap's decision 2 is recorded as decided (D1) and its "Nothing is dropped" states the limits.
