@@ -433,3 +433,55 @@ test('editor-form.json is what this editor serialises for the fixture document',
 
     editor.destroy();
 });
+
+// ───────────────────────────────────────────────────────── the real pair: the editor's form against the server's
+
+const STORED = fileURLToPath(new URL('../fixtures/merge/stored-form.json', import.meta.url));
+
+test(
+    'the stored form merges with the editor form as no change and no loss, both ways round, and a real edit stays mine',
+    { skip: !existsSync(STORED) && 'stored-form.json is produced by MergeFixtureTest: php artisan test --compact tests/Feature/Documents/MergeFixtureTest.php' },
+    () => {
+        const editorForm = JSON.parse(readFileSync(FIXTURE, 'utf8'));
+        const storedForm = JSON.parse(readFileSync(STORED, 'utf8'));
+        const { editor } = realEditor(editorForm);
+        const schema = editor.schema;
+
+        // The page typed nothing; the server re-stamped and re-serialised. A follow: nothing of mine.
+        const stored = mergeDocuments(schema, { base: editorForm, mine: editorForm, theirs: storedForm });
+        assert.notEqual(stored, null);
+        assert.equal(stored.changed, false, 'a canonicalisation difference is not a change');
+        assert.deepEqual(stored.lost, []);
+        assert.equal(stored.overwrites, false);
+
+        // The other way round: a tab that loaded the stored form against the editor's form.
+        const back = mergeDocuments(schema, { base: storedForm, mine: storedForm, theirs: editorForm });
+        assert.notEqual(back, null);
+        assert.equal(back.changed, false);
+        assert.deepEqual(back.lost, []);
+
+        // The writer edited ONE paragraph after the server stored the document: only that block is mine,
+        // and the stamps the server wrote are on screen.
+        const typed = JSON.parse(JSON.stringify(editorForm));
+        typed.content[typed.content.length - 1].content = [{ type: 'text', text: 'Centred end, and more.' }];
+        const edited = mergeDocuments(schema, { base: editorForm, mine: typed, theirs: storedForm });
+        assert.notEqual(edited, null);
+        assert.equal(edited.changed, true);
+        assert.deepEqual(edited.lost, []);
+        assert.equal(edited.merged.content.at(-1).content[0].text, 'Centred end, and more.');
+        assert.deepEqual(edited.merged.content[2].attrs.entries, storedForm.content[2].attrs.entries, 'the stamped contents list is on screen');
+
+        // The writer also edited the paragraph that holds the cross-reference (the server stamped its label) and
+        // the contents list (the server stamped its entries): both blocks are mine, and nothing is offered back.
+        const stamped = JSON.parse(JSON.stringify(editorForm));
+        stamped.content[1].content.push({ type: 'text', text: ' (checked)' });
+        stamped.content[2].attrs.depth = 2;
+        const stampedMerge = mergeDocuments(schema, { base: editorForm, mine: stamped, theirs: storedForm });
+        assert.notEqual(stampedMerge, null);
+        assert.deepEqual(stampedMerge.lost, [], 'a server stamp inside a block the writer edited is not a change by somebody else');
+        assert.ok(stampedMerge.merged.content[1].content.at(-1).text.endsWith(' (checked)'));
+        assert.equal(stampedMerge.merged.content[2].attrs.depth, 2);
+
+        editor.destroy();
+    }
+);
