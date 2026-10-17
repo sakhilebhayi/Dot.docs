@@ -89,6 +89,9 @@
         putBackSeq: 0,
         // An offer of a kept park was held back (a conflict, a merge or a stop reason stood): the poll tick makes it when they clear.
         parkOfferPending: false,
+        // Consecutive saves whose request failed, and the time before which the next one is held back (sync/host.js, SAVE_RETRY_DELAYS_MS).
+        saveFailures: 0,
+        saveRetryAt: 0,
         // A reason the page can no longer stay in step (signed out, access
         // removed, document deleted, a version this editor cannot open).
         // Shown in the notice bar.

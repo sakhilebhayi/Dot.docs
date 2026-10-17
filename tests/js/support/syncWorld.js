@@ -237,6 +237,8 @@ export const makeView = (version) => ({
     lost: [],
     putBackSeq: 0,
     parkOfferPending: false,
+    saveFailures: 0,
+    saveRetryAt: 0,
 });
 
 export function world(text = 'start') {

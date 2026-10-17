@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { SAVE_EXPIRY_MS } from '../../resources/js/editor/sync/host.js';
+import { SAVE_EXPIRY_MS, SAVE_RETRY_DELAYS_MS } from '../../resources/js/editor/sync/host.js';
 import { LOST, STALE, UUID, blocksOf, deletionLedger, para, world } from './support/syncWorld.js';
 
 /**
@@ -719,7 +719,9 @@ async function run(seed, tabCount) {
 
     // ── Quiesce with a healthy network: the clock past every expiry, composition and impossible merges off,
     //    late answers delivered, notices answered, every tab given the chance to save and poll.
-    clock.now += SAVE_EXPIRY_MS + 100;
+    // Past the 15 s expiries AND the longest hold a run of failed save requests can leave (the back-off cap), so a
+    // held send is due when the healthy rounds begin: the checks below are not loosened, the clock simply moves.
+    clock.now += SAVE_EXPIRY_MS + SAVE_RETRY_DELAYS_MS.at(-1) + 100;
     for (const tab of slots) {
         tab.composing = false;
         tab.mergeFails = false;

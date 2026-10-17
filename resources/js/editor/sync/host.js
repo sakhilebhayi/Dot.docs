@@ -50,6 +50,18 @@ export const SAVE_EXPIRY_MS = 15000;
  */
 export const MERGE_ATTEMPTS = 5;
 
+/**
+ * How long a save is held back after its REQUEST failed (the Livewire call
+ * rejected: no answer from the application), by the number of failures in a
+ * row. The first failure is resent at the next poll tick as before; then the
+ * hold grows to a cap of 60 s, so a document whose save fails every time (a
+ * 413 or a 500 for this document) is not sent every 1.5 s or 10 s for ever. Any
+ * answer to a save, accepted or refused, starts the count again. The hold is
+ * measured on the clock the 15 s expiries use, and a send happens on the first
+ * poll tick at or after it (a tick is at most one poll interval late).
+ */
+export const SAVE_RETRY_DELAYS_MS = [0, 5000, 10000, 20000, 40000, 60000];
+
 /** How long the fetch for a merge is waited for before the conflict notice (section 5.7). */
 export const MERGE_FETCH_EXPIRY_MS = SAVE_EXPIRY_MS;
 
@@ -544,6 +556,16 @@ export function createSyncHost(view, env) {
             return Promise.resolve();
         }
 
+        // The last send's request failed and its hold has not passed: the text is owed, not sent. Keep mine
+        // (`force`) is a choice the writer has just made and is not held. The word stays Not saved and the draft
+        // keeps the text; the poll tick after the hold sends the newest text.
+        if (!force && view.saveRetryAt > env.now()) {
+            view.resave = true;
+            env.report('danger', 'Not saved');
+
+            return Promise.resolve();
+        }
+
         env.report('idle', 'Saving');
 
         // What is being SENT, captured now: the draft is cleared only if
@@ -577,6 +599,9 @@ export function createSyncHost(view, env) {
         // answered a second time.
         return env.save(json, view.baseVersion, overwrite).then(
             (result) => {
+                // Any answer, accepted or refused, shows that saves reach the application: the hold is over.
+                view.saveFailures = 0;
+                view.saveRetryAt = 0;
                 if (givenUpOn()) {
                     const knownNow = view.known;
                     const knownMoved =
@@ -628,6 +653,10 @@ export function createSyncHost(view, env) {
                 // Not saved in a browser that keeps no drafts lost it. Only
                 // a request that FAILED: a refusal (ok false) is an answer.
                 view.resave = true;
+                // Held for longer after each failure in a row (SAVE_RETRY_DELAYS_MS), counted on the page's own
+                // fields because this module holds no state.
+                view.saveFailures += 1;
+                view.saveRetryAt = env.now() + SAVE_RETRY_DELAYS_MS[Math.min(view.saveFailures, SAVE_RETRY_DELAYS_MS.length) - 1];
                 env.report('danger', 'Not saved');
                 env.engine()?.retry();
             }

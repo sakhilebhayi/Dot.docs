@@ -14,6 +14,7 @@ import {
     PUT_BACK_QUESTION,
     PUT_BACK_UNSAVED_WARNING,
     SAVE_EXPIRY_MS,
+    SAVE_RETRY_DELAYS_MS,
     createSyncHost,
     createTabId,
     unloadSaveBody,
@@ -2134,6 +2135,144 @@ test('a save whose request fails outright reports Not saved, keeps the draft and
     assert.equal(A.view.unsaved, true);
     assert.equal(A.draft(), 'A1');
     assert.equal(A.host().syncState(), 'dirty');
+});
+
+// ───────────────────────────────────────────────────────── a save whose request keeps failing: back-off
+
+const failOldest = async (tab) => {
+    tab.saves.shift().reject(new Error('network'));
+    await settle();
+};
+
+test('a save whose request keeps failing is resent after 0, 5, 10, 20, 40, then 60 s, the word stays Not saved and the draft keeps the text', async () => {
+    const { clock, A } = await pair();
+    A.type('A1');
+    await A.debounce(); // the first send
+    const t0 = clock.now;
+    const times = [t0];
+    let at = t0;
+
+    for (const hold of [...SAVE_RETRY_DELAYS_MS, 60000]) { // the last hold is the cap again
+        await failOldest(A);
+        assert.equal(A.word(), 'Not saved');
+        assert.equal(A.draft(), 'A1', 'the draft holds the text throughout');
+        assert.equal(A.view.resave, true, 'and the save is owed');
+        if (hold > 0) {
+            clock.now = at + hold - 1;
+            await A.cycle(); // a tick a millisecond early
+            assert.equal(A.sent.length, times.length, `held for ${hold} ms`);
+            assert.equal(A.word(), 'Not saved');
+        }
+        clock.now = at + hold;
+        await A.cycle();
+        assert.equal(A.sent.length, times.length + 1, `sent after ${hold} ms`);
+        at = clock.now;
+        times.push(at);
+    }
+
+    assert.deepEqual(
+        times.map((time) => time - t0),
+        [0, 0, 5000, 15000, 35000, 75000, 135000, 195000],
+        'the second send is immediate (as before); then the holds grow to the 60 s cap and stay there'
+    );
+    assert.equal(SAVE_RETRY_DELAYS_MS.at(-1), 60000);
+});
+
+test('the hold is bounded: after any number of failures no hold is longer than the cap', async () => {
+    const { clock, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    for (let n = 0; n < 12; n += 1) {
+        await failOldest(A);
+        clock.now += 60000; // the cap, never more
+        await A.cycle();
+        assert.equal(A.sent.length, n + 2, `failure ${n + 1} is resent within the cap`);
+    }
+});
+
+test('a save that is answered resets the count: the next failure is resent at once', async () => {
+    const { clock, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    await failOldest(A);
+    await A.cycle(); // immediate resend (the 1st failure has no hold)
+    await failOldest(A); // the 2nd: held 5 s
+    clock.now += 5000;
+    await A.cycle();
+    await A.land(); // the server answers ok
+    assert.equal(A.view.saveFailures, 0);
+
+    A.type('A1 more');
+    await A.debounce();
+    await failOldest(A);
+    const sent = A.sent.length;
+    await A.cycle();
+    assert.equal(A.sent.length, sent + 1, 'no hold: the count started again');
+});
+
+test('a refusal is an answer as well and resets the count', async () => {
+    const { server, clock, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    await failOldest(A);
+    await A.cycle();
+    await failOldest(A);
+    clock.now += 5000;
+    await A.cycle();
+    server.rejectNext = true;
+    A.saveArrives();
+    await A.saveReturns(); // refused by the server: an answer
+    assert.equal(A.view.saveFailures, 0);
+    assert.equal(A.view.saveRetryAt, 0);
+});
+
+test('a new edit while a send is held is sent no later than the hold ends, with the newer text', async () => {
+    const { clock, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    await failOldest(A);
+    await A.cycle();
+    await failOldest(A); // held 5 s from now
+    const held = A.sent.length;
+
+    A.type('A1 more');
+    await A.debounce(); // the bundle hands it over: held, not sent
+    assert.equal(A.sent.length, held);
+    assert.equal(A.word(), 'Not saved');
+    assert.equal(A.view.resave, true);
+    assert.equal(A.draft(), 'A1 more');
+
+    clock.now += 5000;
+    await A.cycle();
+    assert.equal(A.sent.length, held + 1);
+    assert.equal(A.sent.at(-1).text, 'A1 more');
+});
+
+test('a tab that is held does not hold another tab, and Keep mine is not held', async () => {
+    const { clock, A, B } = await pair();
+    A.type('A1');
+    await A.debounce();
+    await failOldest(A);
+    await A.cycle();
+    await failOldest(A); // A is held 5 s
+
+    B.type('B1');
+    await B.debounce();
+    assert.equal(B.sent.length, 1, 'B is not held');
+    assert.equal(B.view.saveRetryAt, 0);
+    void clock;
+});
+
+test('Keep mine is a choice the writer has just made: a hold left by earlier failures does not delay it', async () => {
+    const { clock, B } = await conflicted();
+    B.view.saveFailures = 4;
+    B.view.saveRetryAt = clock.now + 60000;
+    const sent = B.sent.length;
+
+    B.host().keepMine();
+
+    assert.equal(B.sent.length, sent + 1);
+    assert.equal(B.sent.at(-1).overwrite, true);
 });
 
 test('a save whose request failed is sent again on the next poll tick, with no further keystroke, and its answer ends in Saved', async () => {
