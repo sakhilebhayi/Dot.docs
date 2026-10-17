@@ -901,13 +901,8 @@ test('a tab closed after its save was given up on (no answer in fifteen seconds,
     await A.debounce();
     A.saveNeverAnswers();
 
-    // Inside the first fifteen seconds the save may still answer: nothing is sent behind it.
-    clock.now += SAVE_EXPIRY_MS - 1;
-    A.leave();
-    assert.deepEqual(A.beacons, []);
-
     // Given up on: the request got no answer, the text is owed, and nothing has been confirmed since.
-    clock.now += 1;
+    clock.now += SAVE_EXPIRY_MS;
     assert.equal(A.view.unanswered, null, 'no poll tick has noticed that the save was given up on');
     assert.equal(A.view.saveFailures, 0, 'Livewire never rejected: the page cannot count it as a failure');
     A.leave();
@@ -951,7 +946,7 @@ test('the same unsent text is never beaconed twice (pagehide, then destroy)', as
     assert.deepEqual(A.beacons.map((beacon) => beacon.text), ['A1', 'A1 and more'], 'new content is a new beacon');
 });
 
-test('nothing is beaconed for text that is saved, in the air without a failure, or typed on a read only page', async () => {
+test('nothing is beaconed for text that is saved or typed on a read only page; a save in the air is beaconed once', async () => {
     const saved = await pair();
     saved.A.type('A1');
     await saved.A.debounce();
@@ -959,11 +954,18 @@ test('nothing is beaconed for text that is saved, in the air without a failure, 
     saved.A.leave();
     assert.deepEqual(saved.A.beacons, [], 'saved: nothing is owed');
 
+    // A save still in the air is beaconed (CHANGED from "not beaconed": the closing page aborts the request, and the page cannot
+    // tell a dead request from a slow one). Both state the same base: one write is stored, the other is refused as stale,
+    // and an overwrite flag cuts no second history version.
     const inTheAir = await pair();
     inTheAir.A.type('A1');
     await inTheAir.A.debounce();
     inTheAir.A.leave();
-    assert.deepEqual(inTheAir.A.beacons, [], 'a save in the air has not failed: it is not beaconed a second time');
+    assert.deepEqual(inTheAir.A.beacons.map((beacon) => [beacon.text, beacon.body.base_version, beacon.answer.status]), [['A1', 1, 200]]);
+    inTheAir.A.saveArrives();
+    assert.equal(inTheAir.A.saves[0].result.conflict, true, 'the request that was in the air is refused as stale');
+    assert.equal(inTheAir.server.version, 2, 'one write');
+    assert.deepEqual(inTheAir.server.history, []);
 
     const readOnly = await pair();
     readOnly.A.type('A1');
@@ -1006,6 +1008,12 @@ test('unsentAtUnload: unsaved text after a failure or a hold, never on a read on
     assert.equal(unsent(), true, 'a save was given up on or failed and nothing has been confirmed since');
 
     A.view.unanswered = null;
+    A.view.saveFailures = 0;
+    A.view.saving = 1;
+    A.view.savingSince = clock.now;
+    assert.equal(unsent(), true, 'a save in the air, however young: the closing page aborts its request');
+    A.view.saving = 0;
+
     A.view.saveFailures = 2;
     A.view.unsaved = false;
     assert.equal(unsent(), false, 'what the editor holds is what the server confirmed');
@@ -1305,7 +1313,7 @@ test('Keep mine fails, the writer types on, the page dies: reopened, the draft i
     assert.deepEqual(server.history, []);
 });
 
-test('an overwrite owed from a merge is still owed after Keep mine and a reopen: the draft is set aside, not merged, and the other writer\'s words are kept', async () => {
+test('an overwrite owed from a merge, then Keep mine with its save still in the air when the tab closes: the beacon carries it as an overwrite and the other writer\'s words are kept in the history', async () => {
     const holdsT31 = (json) => JSON.stringify(json).includes('t31');
     const w = world();
     const { server } = w;
@@ -1342,7 +1350,12 @@ test('an overwrite owed from a merge is still owed after Keep mine and a reopen:
     A.insertAfter('p1', 'n9', 'a1');
     await A.debounce(); // owed behind the save in the air; the draft is rewritten
     assert.equal(A.drafts.get(UUID).baseVersion, 2, 'stamped below the base the owed overwrite began on, not below the moved-up base');
-    A.leave(); // nothing is waiting in the debounce: no beacon
+    // The Keep mine save is still in the air when the tab closes: the unload beacon carries the text as well (the same
+    // base and overwrite flag the Keep mine save states), so the choice the writer made is not lost with the request.
+    A.leave();
+    assert.deepEqual(A.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]), [[4, true, 200]]);
+    assert.ok(!holdsT31(server.json), 'A\'s version replaced the head, as Keep mine said');
+    assert.ok(server.kept.some((row) => holdsT31(row.json)), 'and C\'s words are kept in the history first');
     A.saves.length = 0;
     A.polls.length = 0;
     A.engine.stop();
@@ -1350,21 +1363,15 @@ test('an overwrite owed from a merge is still owed after Keep mine and a reopen:
 
     const again = w.tab('A2', { drafts: A.drafts });
     await again.open();
-    assert.deepEqual(again.questions, [], 'not offered as an ordinary draft merge');
-    assert.equal(again.view.setAsideFrom, 'draft');
-    await again.poll();
-    await C.cycle();
-    assert.ok(holdsT31(server.json), 'C\'s words are still in the document');
-    assert.ok(holdsT31(C.handle.editor.getJSON()));
-
-    again.host().putBack();
-    await again.debounce();
-    assert.equal(again.sent.at(-1).overwrite, true, 'putting the text back replaces the version on purpose');
-    await again.land();
-    assert.ok(server.kept.some((row) => holdsT31(row.json)), 'C\'s words are kept in the history');
+    assert.deepEqual(again.questions, [], 'the draft is what the document holds now: nothing to merge, nothing to ask');
+    assert.equal(again.view.setAside, null);
+    assert.deepEqual(again.blocks(), [
+        ['p1', 'start'],
+        ['n9', 'a1'],
+    ]);
 });
 
-test('an overwrite owed from Put it back is still owed after Keep mine and a reopen: the draft is set aside, not merged over the version it was to replace', async () => {
+test('an overwrite owed from Put it back, then Keep mine with its save still in the air when the tab closes: the beacon carries it as an overwrite and the replaced version is kept in the history', async () => {
     const { server, clock, A, B } = await conflicted();
     await B.host().loadTheirs(); // B shows v2 (A1); B1 is set aside
     B.host().putBack(); // B1 is to replace v2 on purpose: an overwrite is owed from base 2
@@ -1389,7 +1396,11 @@ test('an overwrite owed from Put it back is still owed after Keep mine and a reo
     B.type('B1 and more');
     await B.debounce(); // owed behind the save in the air; the draft is rewritten
     assert.equal(B.drafts.get(UUID).baseVersion, 1, 'stamped below the base the owed overwrite began on, not below the moved-up base');
+    // The Keep mine save is still in the air when the tab closes: the beacon carries the text, as an overwrite on the moved-up base.
     B.leave();
+    assert.deepEqual(B.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]), [[3, true, 200]]);
+    assert.deepEqual(blocksOf(server.json), [['p1', 'B1 and more']]);
+    assert.deepEqual(server.history, [{ version: 3, text: 'A1' }], 'the version it replaced, with A1 in it, is kept first');
     B.saves.length = 0;
     B.polls.length = 0;
     B.engine.stop();
@@ -1397,19 +1408,9 @@ test('an overwrite owed from Put it back is still owed after Keep mine and a reo
 
     const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
     await again.open();
-    assert.deepEqual(again.questions, [], 'not offered as an ordinary draft merge');
-    assert.equal(again.view.setAsideFrom, 'draft');
-    await again.poll();
-    assert.deepEqual(blocksOf(server.json), [
-        ['p1', 'A1'],
-        ['n1', 'a2'],
-    ]);
-
-    again.host().putBack();
-    await again.debounce();
-    assert.equal(again.sent.at(-1).overwrite, true, 'putting the text back replaces the version on purpose');
-    await again.land();
-    assert.deepEqual(server.history, [{ version: 3, text: 'A1' }], 'the version it replaced, with A1 in it, is kept');
+    assert.deepEqual(again.questions, [], 'the draft is what the document holds now: nothing to ask');
+    assert.equal(again.view.setAside, null);
+    assert.deepEqual(again.blocks(), [['p1', 'B1 and more']]);
 });
 
 test('once the overwrite has been accepted, the draft of what is typed next states the true base again', async () => {
@@ -3461,15 +3462,17 @@ test('the beacon stored the last words and others saved since: the draft is offe
     assert.equal(B.text(), 'A last words, then B one and B two');
 });
 
-test('a save in the air when the tab closed landed, and others saved since: putting the draft back asks first', async () => {
+test('a save in the air when the tab closed is beaconed too; it lands once, and when others build on it putting the draft back still asks first', async () => {
     const { server, clock, A, B } = await pair();
     A.type('A last words');
     await A.debounce();
-    // The tab is closed with the save in the air. The server stores it;
-    // the answer reaches nobody, so the draft is never cleared.
+    // The tab is closed with the save in the air. The unload beacon carries the text as well (it used to be left to the
+    // request alone): the server stores it once, and the request, if it arrives, is refused as stale and writes nothing.
     A.leave();
-    assert.equal(A.beacons.length, 0, 'nothing was left for a beacon to send');
+    assert.deepEqual(A.beacons.map((beacon) => [beacon.body.base_version, beacon.body.overwrite, beacon.answer.status]), [[1, false, 200]]);
     A.saveArrives();
+    assert.equal(A.saves[0].result.conflict, true, 'the request is refused as stale: one write, not two');
+    assert.equal(server.version, 2);
     assert.equal(server.text(), 'A last words');
     assert.equal(A.draft(), 'A last words');
 
@@ -3484,7 +3487,7 @@ test('a save in the air when the tab closed landed, and others saved since: putt
     assert.equal(again.view.setAsideFrom, 'draft');
 
     again.host().putBack();
-    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION, PUT_BACK_QUESTION]);
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION, PUT_BACK_QUESTION], 'B built on the same paragraph: the page still asks first');
     assert.equal(again.text(), 'A last words, then B');
     await again.debounce();
     assert.equal(again.sent.length, 0);

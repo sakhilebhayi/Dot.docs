@@ -470,27 +470,24 @@ export function createSyncHost(view, env) {
 
     /**
      * Whether the text this page holds is unsent and unanswered, for the
-     * unload beacon: it is unsaved and the last request that carried it got
-     * no answer. That is the case when it FAILED (`saveFailures`, reset by
+     * unload beacon: it is unsaved and no answer has settled the request that
+     * carried it. That is the case while a save is still in the air
+     * (`saving`, whatever its age), when it FAILED (`saveFailures`, reset by
      * any answer), when its next send is HELD by the back-off (`saveRetryAt`
      * in the future), and when it was given up on, or failed, and nothing
-     * has been confirmed since (`unanswered`, which saveInTheAir() sets when
-     * a save has not answered in SAVE_EXPIRY_MS, and which this also works out for
-     * itself, since no poll tick may have run since).
+     * has been confirmed since (`unanswered`).
      *
-     * The last case is what a failed request looks like in a real browser:
-     * Livewire never rejects the promise of a call whose fetch failed, so the
-     * page only learns it by the expiry, and `saveFailures` stays 0. A save
-     * still inside its first SAVE_EXPIRY_MS is NOT asked about: it is in the
-     * air, may be about to answer, and the page cannot tell it from one
-     * that is dead (`.ai/rules/editor.md`).
+     * Livewire never rejects the promise of a call whose fetch failed, so in
+     * a real browser the page cannot tell a dead request from a slow one: it
+     * only gives the save up after SAVE_EXPIRY_MS, and `saveFailures` stays 0.
+     * A request in the air is aborted by the closing page, so its text is
+     * beaconed too. That is safe whatever became of the request: both state
+     * the same base (and overwrite flag), so the server stores the text once,
+     * refuses the other as stale and cuts no second history version.
      *
      * The bundle counts a document it handed to Livewire as sent, so it asks.
-     * Sending is safe whatever became of the earlier request: both state the
-     * same base, so the server stores the text once and refuses the second
-     * as stale. Never for a page that cannot write (read only, fail-closed):
-     * a beacon is a write. No side effects: it is called while the page is
-     * going away.
+     * Never for a page that cannot write (read only, fail-closed): a beacon
+     * is a write. No side effects: it is called while the page is going away.
      *
      * @returns {boolean}
      */
@@ -504,8 +501,9 @@ export function createSyncHost(view, env) {
             (view.unanswered !== null ||
                 view.saveFailures > 0 ||
                 view.saveRetryAt > env.now() ||
-                // Given up on, though nothing has noticed yet (saveInTheAir() does, on the next poll tick).
-                (view.saving > 0 && env.now() - view.savingSince >= SAVE_EXPIRY_MS))
+                // A save still in the air, whatever its age (past SAVE_EXPIRY_MS it is given up on, though nothing
+                // has noticed yet: saveInTheAir() does, on the next poll tick).
+                view.saving > 0)
         );
     }
 
