@@ -31,13 +31,29 @@ import { diffRange } from './narrow.js';
  *      otherwise a re-stamped contents list at the top stretches the replaced
  *      range from there to the real change, and a caret inside that stretch
  *      is moved to its end.
- *   4. The one range that still differs (see ./narrow.js) is replaced with a
- *      ReplaceStep, NOT tr.replace(): tr.replace() runs ProseMirror's fitter,
- *      which re-shapes an open slice around isolating nodes (table cells,
- *      figures, columns) and hands back a DIFFERENT document without
- *      throwing. The result is checked against the target; if the step
- *      throws or the result differs, everything is replaced instead:
- *      correct, just not gentle.
+ *   4. What still differs is changed BLOCK BY BLOCK (blockSteps(), below):
+ *      a block absent from the arriving document is deleted, a changed
+ *      textblock is replaced inside the block only (the characters that
+ *      differ), any other changed block (a list, a table, columns, a
+ *      callout, a figure, an atom, an attribute change) is replaced whole,
+ *      and an inserted block is put in after its predecessor. A deletion
+ *      and an insertion at one point are one replace, so the document
+ *      never passes through an empty `doc`. The steps are probed on a copy
+ *      first: a narrowed step that fails is retried whole, and if any step
+ *      fails, the result is not the target, or there are more than
+ *      MAX_BLOCK_STEPS steps (a restore or an import that shares few ids with
+ *      the document: every step is applied twice and mapped through every
+ *      plugin, which costs more than the one range), the one range that differs
+ *      (see ./narrow.js) is replaced instead, as a ReplaceStep, NOT
+ *      tr.replace(): tr.replace() runs ProseMirror's fitter, which
+ *      re-shapes an open slice around isolating nodes and hands back a
+ *      DIFFERENT document without throwing. If that too throws or differs,
+ *      everything is replaced: correct, just not gentle. The caret survives
+ *      because Transaction.addStep maps the selection through every step: a
+ *      caret in a block no step touches maps straight through, a caret
+ *      inside a narrowed replace moves only when it sits inside the changed
+ *      characters, and a caret in a block replaced whole lands at the end
+ *      of the replacement.
  *   5. Document-level attrs (schema, style, vars) are not content, so the
  *      range never carries them. They are set with their own steps.
  *
@@ -136,10 +152,14 @@ export function remoteTransaction(state, json, ReplaceStep) {
         }
     });
 
-    // 4. Replace the one range that still differs.
+    // 4. Change what still differs: block by block (4a); failing that, the
+    //    one range that differs (4b); failing that, everything (4c).
+    //    applyBlockSteps() adds steps only when every one of them applies
+    //    and the probe reproduces the target, so on false tr.doc is as it
+    //    was and `range` still holds.
     const range = diffRange(tr.doc, next);
 
-    if (range !== null) {
+    if (range !== null && !applyBlockSteps(tr, next, ReplaceStep)) {
         try {
             tr.step(new ReplaceStep(range.from, range.toA, next.slice(range.from, range.toB)));
             if (!tr.doc.content.eq(next.content)) {
@@ -171,6 +191,193 @@ export function remoteTransaction(state, json, ReplaceStep) {
     });
 
     return tr;
+}
+
+/**
+ * More block steps than this are not worth taking: a document-sized change
+ * (a restore, an import) is applied as the one range of Phase 1 instead.
+ */
+export const MAX_BLOCK_STEPS = 500;
+
+/**
+ * The edits that turn `current` into `next`, one top-level block at a time,
+ * in CURRENT coordinates, sorted so they apply from the end of the document
+ * backwards (so no step shifts the positions of the steps still to come).
+ *
+ *   1. The top-level children of both, with their ids. A block without an
+ *      id, or two blocks sharing one in one document: null (the caller
+ *      falls back to the one-range apply).
+ *   2. The common blocks in a different relative order (a move): null.
+ *   3. In current coordinates: a block absent from `next` is deleted; a
+ *      block whose content differs is replaced inside the block when both
+ *      versions are textblocks with the same markup (the characters that
+ *      differ, found by diffRange(); the whole block is kept as `whole`, the
+ *      fallback should the narrowed step fail), and whole otherwise; a block
+ *      absent from `current` is inserted after the current counterpart of
+ *      the nearest preceding `next` block that has one, consecutive
+ *      insertions at one point as one slice.
+ *   4. A deletion that starts where an insertion starts, and that insertion,
+ *      are one replace: `[A] -> [B]` is one step and the document never
+ *      passes through an empty `doc`.
+ *   5. Sorted by `from` descending; when two edits start at one position
+ *      the wider goes first (the replace of the block that starts there,
+ *      then the insertion in front of it).
+ *
+ * Every slice is cut from `next` at top-level boundaries (closed), or from
+ * inside one textblock (inline content): neither needs the fitter.
+ *
+ * @param {import('prosemirror-model').Node} current the document the editor holds
+ * @param {import('prosemirror-model').Node} next    the document it should hold
+ * @param {typeof import('prosemirror-transform').ReplaceStep} ReplaceStep
+ * @returns {{step: object, whole: object|null, used: object|null}[]|null}
+ */
+export function blockSteps(current, next, ReplaceStep) {
+    const list = (docNode) => {
+        const blocks = [];
+        const seen = new Set();
+        let ok = true;
+        docNode.forEach((node, offset) => {
+            const id = node.attrs.id;
+            if (id === null || id === undefined || seen.has(id)) {
+                ok = false;
+            }
+            seen.add(id);
+            blocks.push({ id, node, from: offset, to: offset + node.nodeSize });
+        });
+
+        return ok ? blocks : null;
+    };
+    const a = list(current);
+    const b = list(next);
+    if (a === null || b === null) {
+        return null;
+    }
+    const aById = new Map(a.map((block) => [block.id, block]));
+    const bById = new Map(b.map((block) => [block.id, block]));
+
+    // 2. A move is not a per-block edit.
+    const commonA = a.filter((block) => bById.has(block.id)).map((block) => block.id);
+    const commonB = b.filter((block) => aById.has(block.id)).map((block) => block.id);
+    if (commonA.some((id, index) => id !== commonB[index])) {
+        return null;
+    }
+
+    // 3. Deletions and replacements, in current coordinates.
+    const edits = [];
+    a.forEach((block) => {
+        const other = bById.get(block.id);
+        if (!other) {
+            edits.push({ kind: 'delete', from: block.from, to: block.to, slice: next.slice(0, 0), whole: null });
+
+            return;
+        }
+        if (block.node.eq(other.node)) {
+            return;
+        }
+        const whole = { from: block.from, to: block.to, slice: next.slice(other.from, other.to) };
+        if (block.node.isTextblock && other.node.isTextblock && block.node.sameMarkup(other.node)) {
+            const range = diffRange(block.node, other.node);
+            if (range !== null) {
+                edits.push({
+                    kind: 'replace',
+                    from: block.from + 1 + range.from,
+                    to: block.from + 1 + range.toA,
+                    slice: other.node.slice(range.from, range.toB),
+                    whole,
+                });
+
+                return;
+            }
+        }
+        edits.push({ kind: 'replace', from: whole.from, to: whole.to, slice: whole.slice, whole: null });
+    });
+
+    // Insertions: after the current counterpart of the nearest preceding
+    // `next` block that has one; a run of them at one point is one slice.
+    let at = 0;
+    let run = null;
+    b.forEach((block) => {
+        const counterpart = aById.get(block.id);
+        if (counterpart) {
+            at = counterpart.to;
+            run = null;
+
+            return;
+        }
+        if (run === null) {
+            run = { kind: 'insert', from: at, to: at, first: block.from, last: block.to, slice: null, whole: null };
+            edits.push(run);
+        }
+        run.last = block.to;
+    });
+    edits.forEach((edit) => {
+        if (edit.kind === 'insert') {
+            edit.slice = next.slice(edit.first, edit.last);
+        }
+    });
+
+    // 4. Coalesce.
+    edits
+        .filter((edit) => edit.kind === 'insert')
+        .forEach((insert) => {
+            const deletion = edits.find((edit) => edit.kind === 'delete' && edit.from === insert.from);
+            if (deletion) {
+                deletion.kind = 'replace';
+                deletion.slice = insert.slice;
+                edits.splice(edits.indexOf(insert), 1);
+            }
+        });
+
+    // 5. From the end backwards; the wider edit first at one position.
+    edits.sort((x, y) => y.from - x.from || y.to - x.to);
+
+    return edits.map((edit) => ({
+        step: new ReplaceStep(edit.from, edit.to, edit.slice),
+        whole: edit.whole ? new ReplaceStep(edit.whole.from, edit.whole.to, edit.whole.slice) : null,
+        used: null,
+    }));
+}
+
+/**
+ * Step 4a of remoteTransaction(): the block steps, probed on a copy of the
+ * document before any of them is added to the transaction. A narrowed step
+ * that fails is retried whole; a step that still fails, or a probe that
+ * does not reproduce the target, leaves the transaction untouched, and so
+ * does a list of more than MAX_BLOCK_STEPS edits, which is not probed at all.
+ *
+ * @returns {boolean} whether the steps were added
+ */
+function applyBlockSteps(tr, next, ReplaceStep) {
+    let edits = null;
+    try {
+        edits = blockSteps(tr.doc, next, ReplaceStep);
+    } catch (_) {
+        return false;
+    }
+    if (edits === null || edits.length > MAX_BLOCK_STEPS) {
+        return false;
+    }
+
+    let probe = tr.doc;
+    for (const edit of edits) {
+        let result = edit.step.apply(probe);
+        edit.used = edit.step;
+        if (result.failed && edit.whole !== null) {
+            result = edit.whole.apply(probe);
+            edit.used = edit.whole;
+        }
+        if (result.failed) {
+            return false;
+        }
+        probe = result.doc;
+    }
+    if (!probe.content.eq(next.content)) {
+        return false;
+    }
+
+    edits.forEach((edit) => tr.step(edit.used));
+
+    return true;
 }
 
 /**

@@ -7,7 +7,7 @@ import { EditorState, Plugin } from 'prosemirror-state';
 import { ReplaceStep } from 'prosemirror-transform';
 
 import { BLOCK_TYPES, blockIdRepairPlugin } from '../../resources/js/editor/extensions/blockId.js';
-import { remoteTransaction } from '../../resources/js/editor/sync/apply.js';
+import { diffRange } from '../../resources/js/editor/sync/narrow.js';
 import { changedRanges, duplicateIds, uniqueIdsTransaction } from '../../resources/js/editor/uniqueIds.js';
 
 /**
@@ -191,7 +191,18 @@ function betaAfterTheUndo(repair) {
         para(ALPHA_SPLIT, 'The first sentence from Alpha.'),
         para(BETA_PARAGRAPH, 'BetaWord')
     );
-    world.apply(remoteTransaction(state, alphas, ReplaceStep).setMeta('addToHistory', false).setMeta('preventUpdate', true));
+    // As ONE replaced range, the way applyRemote() applied a newer document
+    // when this was seen (Phase 1). Phase 2 applies per block and empties
+    // the history after the change, so the editor no longer takes this
+    // path; the repair has to hold for whatever a transaction does.
+    const theirs = node(alphas);
+    const range = diffRange(state.doc, theirs);
+    world.apply(
+        state.tr
+            .step(new ReplaceStep(range.from, range.toA, theirs.slice(range.from, range.toB)))
+            .setMeta('addToHistory', false)
+            .setMeta('preventUpdate', true)
+    );
     assert.ok(state.doc.eq(node(alphas)), 'Beta now shows what Alpha saved');
 
     // 5. Undo.
