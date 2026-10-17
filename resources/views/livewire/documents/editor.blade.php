@@ -962,10 +962,10 @@
                             title="Put every item back on the page, oldest first: each below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put them all back</button>
                     <button type="button" class="tool tool-mono" @click="dismissLost()"
                             aria-describedby="doc-notice-dismiss-lost-does"
-                            title="Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts.">Dismiss all</button>
+                            title="Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts. If this browser cannot keep it, you are asked again before it is dropped.">Dismiss all</button>
                     <span id="doc-notice-put-back-lost-does" hidden>Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.</span>
                     <span id="doc-notice-put-back-all-lost-does" hidden>Put every item back on the page, oldest first: each below the version that is there now, or where it was before it was removed. Nothing else on the page changes.</span>
-                    <span id="doc-notice-dismiss-lost-does" hidden>Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts.</span>
+                    <span id="doc-notice-dismiss-lost-does" hidden>Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts. If this browser cannot keep it, you are asked again before it is dropped.</span>
                 </span>
             </div>
 

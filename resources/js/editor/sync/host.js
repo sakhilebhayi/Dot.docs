@@ -112,6 +112,14 @@ export const DISMISS_LOST_FAILED_NOTICE =
     'Your text could not be kept in this browser, so nothing was dismissed. It is still listed here.';
 
 /**
+ * What Dismiss all asks the press after a browser copy could not be written
+ * (DISMISS_LOST_FAILED_NOTICE still stands): the one way out of a list the
+ * writer wants gone and this browser cannot keep.
+ */
+export const DISMISS_LOST_UNKEPT_QUESTION =
+    'This browser could not keep a copy of this text. Dismiss it anyway? It will be gone for good.';
+
+/**
  * What the notice bar says when the list changed while Dismiss all was
  * writing its browser copy: the new entry was never in that copy, so nothing
  * was dismissed.
@@ -1352,11 +1360,13 @@ export function createSyncHost(view, env) {
      * The question promises a copy kept in this browser for 7 days, so the
      * park is written FIRST, with the list as it is on the page, and the row
      * is emptied only once that write is known to have stored it (a quota or
-     * a blocked database makes parkLost() resolve false). A write that failed
-     * keeps every entry on the page and says so; so does a list that changed
-     * while the write was in flight, because the new entry is not in that
-     * copy. A browser that keeps no drafts at all has no copy to promise and
-     * dismisses as before.
+     * a blocked database makes parkLost() resolve false; a page with no draft
+     * store has nothing to write to). A write that failed keeps every entry
+     * on the page and says so (DISMISS_LOST_FAILED_NOTICE). That notice is
+     * also the memory of the failure: the NEXT press asks
+     * DISMISS_LOST_UNKEPT_QUESTION instead, and a yes drops the text without
+     * a copy, a no changes nothing. A list that changed while the write was in
+     * flight keeps everything too, because the new entry is not in that copy.
      *
      * @returns {Promise<void>}
      */
@@ -1365,39 +1375,50 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        // The last press could not keep a copy: the writer decides, knowing it.
+        if (view.syncNotice === DISMISS_LOST_FAILED_NOTICE) {
+            if (!env.confirm(DISMISS_LOST_UNKEPT_QUESTION)) {
+                return;
+            }
+            view.syncNotice = '';
+            view.lost = [];
+
+            return;
+        }
+
         if (!env.confirm(DISMISS_LOST_QUESTION)) {
             return;
         }
 
         const drafts = env.drafts();
-        if (drafts) {
-            const dismissing = view.lost;
-            let kept = false;
-            try {
-                kept = (await drafts.parkLost(view.docUuid, dismissing, view.baseVersion)) === true;
-            } catch (_) {
-                kept = false;
-            }
-            if (!kept) {
-                view.syncNotice = DISMISS_LOST_FAILED_NOTICE;
+        const dismissing = view.lost;
+        let kept = false;
+        try {
+            kept = drafts ? (await drafts.parkLost(view.docUuid, dismissing, view.baseVersion)) === true : false;
+        } catch (_) {
+            kept = false;
+        }
+        if (!kept) {
+            view.syncNotice = DISMISS_LOST_FAILED_NOTICE;
 
-                return;
-            }
-            // Every change of the list makes a new array (offerLost, putBackLost).
-            if (view.lost !== dismissing) {
-                view.syncNotice = DISMISS_LOST_CHANGED_NOTICE;
+            return;
+        }
+        // Every change of the list makes a new array (offerLost, putBackLost).
+        // An EMPTY list is not a change: it is a press made meanwhile that has
+        // already dismissed these very entries.
+        if (view.lost !== dismissing && view.lost.length > 0) {
+            view.syncNotice = DISMISS_LOST_CHANGED_NOTICE;
 
-                return;
-            }
+            return;
         }
 
         // Our own earlier "nothing was dismissed" is no longer true. (A sync notice has no way off the page
         // but a reload, so it must not be left behind to mislead.)
-        if (view.syncNotice === DISMISS_LOST_FAILED_NOTICE || view.syncNotice === DISMISS_LOST_CHANGED_NOTICE) {
+        if (view.syncNotice === DISMISS_LOST_CHANGED_NOTICE) {
             view.syncNotice = '';
         }
         view.lost = [];
-        drafts?.markLostDismissed(view.docUuid);
+        drafts.markLostDismissed(view.docUuid);
     }
 
     /**
@@ -1996,11 +2017,14 @@ export function createSyncHost(view, env) {
         // Phase 1 replaced it silently.
         const base =
             view.confirmed ?? (view.known !== null && view.known.version === view.baseVersion ? view.known.json : null);
+        // The typing, as it stands, ONCE, before anything can replace it: the
+        // merge below may change the editor and then fail (its apply can throw
+        // after the document changed), and the fall-through must set aside the
+        // typing, not whatever the page shows by then.
+        const mine = view.unsaved ? JSON.stringify(handle.editor.getJSON()) : null;
         if (view.unsaved && base !== null && mergeSuggestion(handle, base, content, version)) {
             return;
         }
-        // The typing, as it stands, before anything can replace it.
-        const mine = view.unsaved ? JSON.stringify(handle.editor.getJSON()) : null;
         if (mine !== null && view.setAside) {
             // One text is set aside at a time (the offer, and the stale- park
             // that backs it). Setting this one aside would replace the offer.
@@ -2008,6 +2032,16 @@ export function createSyncHost(view, env) {
             // it saved it): it is not pending any more, so the writer is not
             // sent back to accept it. The next poll delivers it to this tab,
             // which cannot merge it either, and raises the notice.
+            // The merge above may have changed the editor before its apply
+            // threw: the typing is then in no place but the draft row. Put it
+            // back, so that what the writer typed is what the page shows.
+            if (JSON.stringify(handle.editor.getJSON()) !== mine) {
+                try {
+                    handle.applyRemote(JSON.parse(mine), { force: true });
+                } catch (cause) {
+                    env.log('[Dot.Doc] The typing could not be put back after a failed suggestion merge.', cause);
+                }
+            }
             view.aiError =
                 'The suggestion was saved as a new version, but your unsaved text could not be merged into it while another text is set aside. Put that text back or discard it, then choose in the notice.';
             // The save that was in the air is given up on above; the typing it
@@ -2038,7 +2072,7 @@ export function createSyncHost(view, env) {
                 setAsideTyping(mine, version);
             }
             view.aiError = changed
-                ? 'That suggestion could only be partly applied. If you had unsaved text it is offered back in the notice; reload the page if the document looks wrong.'
+                ? 'That suggestion may not have been applied cleanly. If you had unsaved text it is offered back in the notice; reload the page if the document looks wrong.'
                 : 'That suggestion could not be applied — the document is unchanged.';
             if (retiredSave) {
                 view.resave = true;

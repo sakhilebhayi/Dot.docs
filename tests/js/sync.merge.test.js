@@ -612,17 +612,21 @@ test('there is a fixture for every row of the decision table and every ordering 
     ]);
 });
 
-/** Reads a fixture, naming the file when it cannot be parsed. */
-function loadFixture(name) {
+/** Parses a fixture's text, naming the file when it is not JSON. */
+function parseFixture(name, text) {
     try {
-        return JSON.parse(readFileSync(new URL(name, FIXTURES), 'utf8'));
+        return JSON.parse(text);
     } catch (cause) {
         throw new Error(`fixture ${name} cannot be read: ${cause.message}`, { cause });
     }
 }
 
+/** Reads a fixture, naming the file when it cannot be parsed. */
+const loadFixture = (name) => parseFixture(name, readFileSync(new URL(name, FIXTURES), 'utf8'));
+
 test('a malformed fixture is reported under its own file name', () => {
-    assert.throws(() => loadFixture('no-such-fixture.json'), /fixture no-such-fixture\.json cannot be read/);
+    assert.throws(() => parseFixture('broken.json', '{ "name": '), /fixture broken\.json cannot be read: /);
+    assert.deepEqual(parseFixture('fine.json', '{"a":1}'), { a: 1 });
 });
 
 for (const name of fixtures) {

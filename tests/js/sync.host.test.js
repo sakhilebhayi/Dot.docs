@@ -6,6 +6,7 @@ import {
     DISMISS_LOST_CHANGED_NOTICE,
     DISMISS_LOST_FAILED_NOTICE,
     DISMISS_LOST_QUESTION,
+    DISMISS_LOST_UNKEPT_QUESTION,
     DRAFT_MERGE_QUESTION,
     LOAD_THEIRS_REPLACES_QUESTION,
     MERGE_ATTEMPTS,
@@ -4531,7 +4532,7 @@ test('Dismiss all writes the park first, with the list on the page, and only the
     assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B']);
 });
 
-test('Dismiss all whose park write fails does not claim the 7 days: the entries stay on the page, the writer is told, nothing is stamped', async () => {
+test('Dismiss all whose park write fails does not claim the 7 days: the entries stay on the page and the writer is told', async () => {
     const { B } = await lostOne();
     B.draftCalls.length = 0;
     B.parkLostFails = true;
@@ -4542,13 +4543,66 @@ test('Dismiss all whose park write fails does not claim the 7 days: the entries 
     assert.deepEqual(B.lostTexts(), ['Hello B'], 'still on the page');
     assert.deepEqual(B.draftCalls, ['parkLost'], 'markLostDismissed never ran');
     assert.equal(B.view.syncNotice, DISMISS_LOST_FAILED_NOTICE);
+});
 
-    // The store works again: the same press now dismisses, and the notice is not left behind to mislead.
-    B.parkLostFails = false;
+test('after a failed copy the next Dismiss all asks whether to dismiss anyway; yes drops the text without a copy, no changes nothing', async () => {
+    const { B } = await lostOne();
+    B.parkLostFails = true;
+    await B.host().dismissLost(); // fails: the notice stands
+    B.questions.length = 0;
+    B.draftCalls.length = 0;
+
+    // No: nothing changes, and the question can be asked again.
+    B.confirmAnswer = false;
     await B.host().dismissLost();
+    assert.deepEqual(B.questions, [DISMISS_LOST_UNKEPT_QUESTION]);
+    assert.deepEqual(B.lostTexts(), ['Hello B']);
+    assert.equal(B.view.syncNotice, DISMISS_LOST_FAILED_NOTICE, 'the notice still says what is true');
+    assert.deepEqual(B.draftCalls, [], 'nothing was written');
+
+    // Yes: dismissed without parking and without stamping the park.
+    B.confirmAnswer = true;
+    await B.host().dismissLost();
+    assert.deepEqual(B.questions, [DISMISS_LOST_UNKEPT_QUESTION, DISMISS_LOST_UNKEPT_QUESTION]);
     assert.deepEqual(B.view.lost, []);
-    assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B']);
-    assert.equal(B.view.syncNotice, '', 'the earlier notice does not outlive the success');
+    assert.equal(B.view.syncNotice, '', 'the notice is not left behind');
+    assert.deepEqual(B.draftCalls, [], 'no park write and no markLostDismissed');
+});
+
+test('the unkept Dismiss all question says the text will be gone for good', () => {
+    assert.equal(
+        DISMISS_LOST_UNKEPT_QUESTION,
+        'This browser could not keep a copy of this text. Dismiss it anyway? It will be gone for good.'
+    );
+});
+
+test('a browser with no draft store cannot keep a copy either: the same two steps', async () => {
+    const w = world();
+    const R = w.tab('R', { draftStore: false });
+    await R.open();
+    R.view.lost = [
+        { key: 'p1:2:0', id: 'p1', type: 'paragraph', reason: 'both', source: 'merge', json: para('p1', 'x'), anchors: ['p1'], version: 2, sentence: 'S', excerpt: 'x' },
+    ];
+
+    await R.host().dismissLost();
+    assert.equal(R.view.lost.length, 1);
+    assert.equal(R.view.syncNotice, DISMISS_LOST_FAILED_NOTICE);
+
+    await R.host().dismissLost();
+    assert.deepEqual(R.questions, [DISMISS_LOST_QUESTION, DISMISS_LOST_UNKEPT_QUESTION]);
+    assert.deepEqual(R.view.lost, []);
+});
+
+test('Dismiss all pressed again while the first write is in flight leaves no false "list changed" notice', async () => {
+    const { B } = await lostOne();
+
+    const first = B.host().dismissLost();
+    const second = B.host().dismissLost();
+    await Promise.all([first, second]);
+
+    assert.deepEqual(B.view.lost, []);
+    assert.equal(B.view.syncNotice, '');
+    assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B'], 'dismissed once, not twice');
 });
 
 test('Dismiss all whose park write THROWS is a failed write too', async () => {
@@ -5298,6 +5352,32 @@ test('an accepted suggestion whose merge fails does not replace a text that is a
     );
 });
 
+test('an accepted suggestion whose merge apply throws after the change, with a text already set aside: the typing is put back in the editor, not left merged away', async () => {
+    const { server, B } = await conflicted();
+    await B.host().loadTheirs(); // B1 is set aside, offered back
+    B.type('B2 typed after');
+    B.mergeFails = false;
+    const real = B.handle.applyRemote;
+    let calls = 0;
+    B.handle.applyRemote = (json, options) => {
+        calls += 1;
+        const out = real(json, options);
+        if (calls === 1) {
+            throw new Error('a plugin failed inside the dispatch');
+        }
+
+        return out;
+    };
+    const suggestion = doc('suggestion');
+    const version = server.replace(suggestion);
+
+    B.host().applySuggestion(suggestion, version);
+
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'the offer stands');
+    assert.equal(B.text(), 'B2 typed after', 'the typing is back in the editor: the throw did not lose it');
+    assert.match(B.view.aiError, /while another text is set aside/);
+});
+
 test('an accepted suggestion that leaves nothing of mine to save drops an owed overwrite: no save is left to carry it', async () => {
     const { server, B } = await conflicted();
     await B.host().loadTheirs();
@@ -5410,6 +5490,53 @@ test('an accepted suggestion that could not be applied sets nothing aside: the t
     assert.equal(A.draftCalls.filter((call) => call === 'parkStaleDraft').length, 0);
 });
 
+test('an accepted suggestion whose MERGE apply throws after the change: the typing, not the merged page, is set aside and parked, and the suggestion goes in whole', async () => {
+    const { server, A } = await pair();
+    A.type('A unsaved');
+    const real = A.handle.applyRemote;
+    let calls = 0;
+    A.handle.applyRemote = (json, options) => {
+        calls += 1;
+        const out = real(json, options);
+        if (calls === 1) {
+            throw new Error('a plugin failed inside the dispatch');
+        }
+
+        return out;
+    };
+    const suggestion = doc('the accepted suggestion');
+    const version = server.replace(suggestion);
+
+    assert.doesNotThrow(() => A.host().applySuggestion(suggestion, version));
+
+    assert.equal(calls, 2, 'the merge apply, then the forced apply');
+    assert.equal(A.text(), 'the accepted suggestion');
+    assert.equal(A.view.setAside, JSON.stringify(doc('A unsaved')), 'what is set aside is the typing');
+    assert.equal(A.view.setAsideFrom, 'conflict');
+    assert.equal(A.stale(), 'A unsaved', 'and it is parked, not only in the draft row');
+    assert.equal(A.draftCalls.filter((call) => call === 'parkStaleDraft').length, 1);
+    assert.equal(A.view.unsaved, false);
+    assert.equal(A.view.aiError, '');
+});
+
+test('an accepted suggestion whose merge apply AND forced apply both throw after the change still sets the typing aside', async () => {
+    const { server, A } = await pair();
+    A.type('A unsaved');
+    const real = A.handle.applyRemote;
+    A.handle.applyRemote = (json, options) => {
+        real(json, options);
+        throw new Error('a plugin failed inside the dispatch');
+    };
+    const suggestion = doc('the accepted suggestion');
+    const version = server.replace(suggestion);
+
+    assert.doesNotThrow(() => A.host().applySuggestion(suggestion, version));
+
+    assert.equal(A.view.setAside, JSON.stringify(doc('A unsaved')), 'the typing, never the merged or suggested page');
+    assert.equal(A.stale(), 'A unsaved');
+    assert.match(A.view.aiError, /may not have been applied cleanly/);
+});
+
 test('an accepted suggestion whose forced apply THROWS before the document changed sets nothing aside and reports it unchanged', async () => {
     const { server, A } = await pair();
     A.type('A unsaved');
@@ -5450,7 +5577,7 @@ test('an accepted suggestion whose forced apply THROWS after the document change
     assert.equal(A.view.setAsideBase, version);
     assert.equal(A.stale(), 'A unsaved', 'and parked');
     assert.equal(A.draftCalls.filter((call) => call === 'parkStaleDraft').length, 1);
-    assert.match(A.view.aiError, /could only be partly applied/, 'the document is not reported unchanged: it changed');
+    assert.match(A.view.aiError, /may not have been applied cleanly/, 'the document is not reported unchanged: it changed');
     assert.match(String(A.errors.at(-1)[0]), /accepted suggestion threw/, 'and the cause is logged');
 });
 
