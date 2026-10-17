@@ -1,0 +1,23 @@
+{
+    "documents": 3,
+    "fixedPoint": 1,
+    "attributeOnlyChange": 0,
+    "textOrStructureChange": 2,
+    "invalidAfterNormalise": 1,
+    "examples": [
+        {
+            "seed": 1,
+            "structural": true
+        },
+        {
+            "seed": 2,
+            "structural": true
+        },
+        {
+            "seed": 3,
+            "errors": [
+                "Duplicate block id head0001"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,42 @@
+{
+    "php": "8.5.9",
+    "opcache": false,
+    "results": [
+        {
+            "paragraphs": 50,
+            "words": 2134,
+            "jsonBytes": 21477,
+            "htmlBytes": 15774,
+            "normaliseValidateMsMedian": 0.1,
+            "fillMsMedian": 0.3,
+            "fillMsMax": 1.3
+        },
+        {
+            "paragraphs": 250,
+            "words": 10686,
+            "jsonBytes": 108512,
+            "htmlBytes": 78919,
+            "normaliseValidateMsMedian": 0.8,
+            "fillMsMedian": 1.4,
+            "fillMsMax": 1.4
+        },
+        {
+            "paragraphs": 1000,
+            "words": 42768,
+            "jsonBytes": 435739,
+            "htmlBytes": 316541,
+            "normaliseValidateMsMedian": 3.3,
+            "fillMsMedian": 5.7,
+            "fillMsMax": 5.8
+        },
+        {
+            "paragraphs": 2500,
+            "words": 106906,
+            "jsonBytes": 1088139,
+            "htmlBytes": 791005,
+            "normaliseValidateMsMedian": 10.5,
+            "fillMsMedian": 15.7,
+            "fillMsMax": 16.5
+        }
+    ]
+}

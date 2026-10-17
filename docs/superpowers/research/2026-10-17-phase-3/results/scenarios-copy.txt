@@ -1,0 +1,11 @@
+PASS S1 same sentence: both keep their words :: A="We will meet everyone on Monday at nine." B="We will meet everyone on Monday at nine." (B's first send rejected)
+PASS S1 caret: A stays after its own word :: A head 22 -> 22
+PASS S1 caret: B moves with its own text :: B head 31 -> 40
+PASS S2 undo: A undoes only A :: A="We will meet on Monday at nine." B="We will meet on Monday at nine."
+PASS S2 undo: B undoes only B :: A="We will meet on Monday." B="We will meet on Monday."
+PASS S3 undo across somebody else's typing keeps their words :: after A's undo: "AboveWell, Hello"
+PASS S4 typing inside a range deleted elsewhere: deletion wins, both converge :: doc="Keep this. Keep that."
+PASS S4 the dropped words are reported (copy only) :: dropped text reported: " XYZZY"
+PASS S5 a split elsewhere does not move B's caret off its word :: doc="First half| second (B) half"
+PASS S5 the split gives the new block its own id on every side :: ids=pppp0001,5qtU04Q2
+{"collab":"copy","passed":10,"total":10}
