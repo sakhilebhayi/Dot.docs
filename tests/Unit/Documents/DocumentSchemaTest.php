@@ -160,6 +160,47 @@ class DocumentSchemaTest extends TestCase
         $this->assertSame(json_encode($fixed), json_encode($schema->ensureIds($fixed)), 'a repaired document is stable');
     }
 
+    public function test_the_replacement_id_of_a_duplicate_is_the_same_every_time_the_same_document_arrives(): void
+    {
+        $schema = new DocumentSchema;
+        $doc = ['type' => 'doc', 'content' => [
+            $this->para('aaaaaaaa', 'one'), $this->para('aaaaaaaa', 'two'), $this->para('aaaaaaaa', 'three'),
+            ['type' => 'bulletList', 'attrs' => ['id' => 'bbbbbbbb'], 'content' => [
+                ['type' => 'listItem', 'attrs' => ['id' => 'aaaaaaaa'], 'content' => [$this->para('aaaaaaaa', 'deep')]],
+            ]],
+        ]];
+
+        $first = $schema->ensureIds($doc);
+        $again = $schema->ensureIds($doc);
+
+        // A client that keeps sending its duplicate does not get a new id on every save.
+        $this->assertSame(json_encode($first), json_encode($again));
+        $ids = $this->blockIdsInOrder($schema, $first);
+        $this->assertSame('aaaaaaaa', $ids[0]);
+        $this->assertCount(count($ids), array_unique($ids));
+        foreach ($ids as $id) {
+            $this->assertTrue(BlockId::isValid($id), $id);
+        }
+        // Each repeat of the id gets its own replacement.
+        $this->assertNotSame($ids[1], $ids[2]);
+    }
+
+    public function test_a_replacement_id_never_takes_an_id_another_block_already_has_even_a_later_one(): void
+    {
+        $schema = new DocumentSchema;
+        $replacement = BlockId::derive('aaaaaaaa|1|1');
+        $doc = ['type' => 'doc', 'content' => [
+            $this->para('aaaaaaaa', 'one'), $this->para('aaaaaaaa', 'two'), $this->para($replacement, 'later holder of the derived id'),
+        ]];
+
+        $out = $schema->ensureIds($doc);
+
+        $ids = $this->blockIdsInOrder($schema, $out);
+        $this->assertSame($replacement, $ids[2], 'the block that already had that id keeps it');
+        $this->assertNotSame($replacement, $ids[1]);
+        $this->assertCount(3, array_unique($ids));
+    }
+
     public function test_validate_rejects_unknown_nodes_and_duplicate_ids(): void
     {
         $schema = new DocumentSchema;

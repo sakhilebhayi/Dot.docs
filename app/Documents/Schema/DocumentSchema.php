@@ -34,6 +34,15 @@ class DocumentSchema
      * keeps it, so an id that is already unique never changes and running
      * this twice changes nothing the second time.
      *
+     * The replacement for a DUPLICATE is derived, not random: a hash of the
+     * duplicated id, how many holders of it came before, and the block's
+     * path in the document (retried with a counter when the result is taken
+     * by any block anywhere, a later one included). A client that keeps
+     * sending the same duplicate therefore gets the same replacement on
+     * every save instead of a new id each time, which would orphan the
+     * comments and cross-references pointed at it. A block with no valid
+     * id at all has nothing to derive from and gets a random one.
+     *
      * `$seen` is shared by reference through a plain loop. It used to be
      * carried through array_map() with arrow functions, which capture their
      * variables BY VALUE: every sibling got its own copy, duplicates between
@@ -42,19 +51,28 @@ class DocumentSchema
     public function ensureIds(array $doc): array
     {
         $seen = [];
-        $content = $doc['content'] ?? [];
-        $doc['content'] = $this->ensureIdsIn(is_array($content) ? $content : [], $seen);
+        $content = is_array($doc['content'] ?? null) ? $doc['content'] : [];
+        $taken = [];
+        $this->walk(['type' => 'doc', 'content' => $content], function (array $node) use (&$taken): void {
+            $id = is_array($node['attrs'] ?? null) ? ($node['attrs']['id'] ?? null) : null;
+            if (in_array($node['type'] ?? '', self::BLOCKS, true) && BlockId::isValid($id)) {
+                $taken[$id] = true;
+            }
+        });
+
+        $doc['content'] = $this->ensureIdsIn($content, $seen, $taken, '');
         $doc['attrs'] = array_merge(['schema' => self::VERSION, 'style' => 'report', 'vars' => []], $doc['attrs'] ?? []);
 
         return $doc;
     }
 
     /**
-     * @param  array<array-key, bool>  $seen  shared by reference, in document order
+     * @param  array<array-key, int>  $seen  how many blocks so far hold each id, shared by reference, in document order
+     * @param  array<string, true>  $taken  every valid id anywhere in the document
      *
-     * @param-out  array<array-key, bool>  $seen
+     * @param-out  array<array-key, int>  $seen
      */
-    private function ensureNodeIds(array $node, array &$seen): array
+    private function ensureNodeIds(array $node, array &$seen, array $taken, string $path): array
     {
         if (in_array($node['type'] ?? '', self::BLOCKS, true)) {
             // `attrs` normally comes straight off the wire; a payload that
@@ -62,16 +80,28 @@ class DocumentSchema
             // below and throw a TypeError instead of failing validation.
             $attrs = is_array($node['attrs'] ?? null) ? $node['attrs'] : [];
             $id = $attrs['id'] ?? null;
-            if (! BlockId::isValid($id) || isset($seen[$id])) {
-                do {
-                    $id = BlockId::generate();
-                } while (isset($seen[$id]));
+            if (BlockId::isValid($id) && ! isset($seen[$id])) {
+                $seen[$id] = 1;
+            } else {
+                if (BlockId::isValid($id)) {
+                    $occurrence = $seen[$id]++;
+                    $try = 0;
+                    do {
+                        $candidate = BlockId::derive($id.'|'.$occurrence.'|'.$path.($try > 0 ? '|'.$try : ''));
+                        $try++;
+                    } while (isset($seen[$candidate]) || isset($taken[$candidate]));
+                } else {
+                    do {
+                        $candidate = BlockId::generate();
+                    } while (isset($seen[$candidate]) || isset($taken[$candidate]));
+                }
+                $id = $candidate;
+                $seen[$id] = 1;
             }
-            $seen[$id] = true;
             $node['attrs'] = array_merge($attrs, ['id' => $id]);
         }
         if (isset($node['content']) && is_array($node['content'])) {
-            $node['content'] = $this->ensureIdsIn($node['content'], $seen);
+            $node['content'] = $this->ensureIdsIn($node['content'], $seen, $taken, $path);
         }
 
         return $node;
@@ -79,16 +109,17 @@ class DocumentSchema
 
     /**
      * @param  array<int|string, mixed>  $nodes
-     * @param  array<array-key, bool>  $seen  shared by reference, in document order
+     * @param  array<array-key, int>  $seen
+     * @param  array<string, true>  $taken
      *
-     * @param-out  array<array-key, bool>  $seen
+     * @param-out  array<array-key, int>  $seen
      *
      * @return array<int|string, mixed>
      */
-    private function ensureIdsIn(array $nodes, array &$seen): array
+    private function ensureIdsIn(array $nodes, array &$seen, array $taken, string $path): array
     {
         foreach ($nodes as $key => $node) {
-            $nodes[$key] = $this->ensureNodeIds($node, $seen);
+            $nodes[$key] = $this->ensureNodeIds($node, $seen, $taken, $path === '' ? (string) $key : $path.'.'.$key);
         }
 
         return $nodes;
