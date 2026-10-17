@@ -4567,13 +4567,41 @@ test('after a failed copy the next Dismiss all asks whether to dismiss anyway; y
     assert.deepEqual(B.questions, [DISMISS_LOST_UNKEPT_QUESTION, DISMISS_LOST_UNKEPT_QUESTION]);
     assert.deepEqual(B.view.lost, []);
     assert.equal(B.view.syncNotice, '', 'the notice is not left behind');
-    assert.deepEqual(B.draftCalls, [], 'no park write and no markLostDismissed');
+    assert.deepEqual(B.draftCalls, ['markLostDismissed'], 'no park write; an earlier stored list is marked dismissed, best effort');
 });
 
-test('the unkept Dismiss all question says the text will be gone for good', () => {
+test('a dismissal without a copy also marks an earlier stored list dismissed, so it does not come back after a reload', async () => {
+    const { server, clock, B } = await lostOne(); // offerLost stored the list in the park
+    assert.deepEqual(B.lostPark().entries.map((entry) => entry.excerpt), ['Hello B']);
+    B.parkLostFails = true;
+    await B.host().dismissLost(); // the copy cannot be rewritten
+    await B.host().dismissLost(); // dismissed anyway
+
+    assert.deepEqual(B.view.lost, []);
+    assert.deepEqual(B.lostPark().entries, []);
+    assert.equal(B.lostPark().dismissedAt, B.env.now());
+    const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
+    await again.open();
+    assert.deepEqual(again.view.lost, [], 'not offered again after a reload');
+});
+
+test('a dismissal without a copy survives a store that throws on the stamp', async () => {
+    const { B } = await lostOne();
+    B.parkLostFails = true;
+    await B.host().dismissLost();
+    B.draftStore.markLostDismissed = async () => {
+        throw new Error('the store refused the stamp');
+    };
+
+    await B.host().dismissLost();
+
+    assert.deepEqual(B.view.lost, []);
+});
+
+test('the unkept Dismiss all question says the text leaves the page and may not be recoverable', () => {
     assert.equal(
         DISMISS_LOST_UNKEPT_QUESTION,
-        'This browser could not keep a copy of this text. Dismiss it anyway? It will be gone for good.'
+        'This browser could not keep a copy of this text. Dismiss it anyway? It is removed from this page and may not be recoverable.'
     );
 });
 
@@ -4604,6 +4632,77 @@ test('Dismiss all pressed again while the first write is in flight leaves no fal
     assert.deepEqual(B.view.lost, []);
     assert.equal(B.view.syncNotice, '');
     assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B'], 'dismissed once, not twice');
+});
+
+test('a Put it back notice goes with the next Put it back that works', async () => {
+    const { B } = await lostOne();
+    B.insertBlockFails = true;
+    assert.equal(B.host().putBackLost(0), false);
+    assert.equal(B.view.syncNotice, 'Your text could not be put back.');
+
+    B.insertBlockFails = false;
+    assert.equal(B.host().putBackLost(0), true);
+    assert.equal(B.view.syncNotice, '', 'the notice does not outlive the success (it hides the Saved word until a reload)');
+});
+
+test('the failed-copy notice goes when the list empties, however it empties', async () => {
+    const { B } = await lostOne();
+    B.parkLostFails = true;
+    await B.host().dismissLost();
+    assert.equal(B.view.syncNotice, DISMISS_LOST_FAILED_NOTICE);
+
+    B.host().putBackAllLost();
+
+    assert.deepEqual(B.view.lost, []);
+    assert.equal(B.view.syncNotice, '');
+});
+
+test('lost-row notices never replace a stop reason, and a successful dismissal leaves it standing', async () => {
+    const stop = 'You have been signed out. Reload the page to keep editing.';
+    const { B } = await lostOne();
+    B.view.syncNotice = stop;
+
+    B.insertBlockFails = true;
+    assert.equal(B.host().putBackLost(0), false);
+    assert.equal(B.view.syncNotice, stop);
+    B.insertBlockFails = false;
+
+    B.parkLostFails = true;
+    await B.host().dismissLost();
+    assert.equal(B.view.syncNotice, stop, 'the failed copy is not announced over a stop reason');
+    assert.deepEqual(B.lostTexts(), ['Hello B']);
+
+    // The failure was not remembered (the notice is the memory), so the next press asks the ordinary question and writes.
+    B.parkLostFails = false;
+    B.questions.length = 0;
+    await B.host().dismissLost();
+    assert.deepEqual(B.questions, [DISMISS_LOST_QUESTION]);
+    assert.deepEqual(B.view.lost, []);
+    assert.equal(B.view.syncNotice, stop);
+});
+
+test('a failed-copy notice from before the list changed does not make Dismiss skip the write for entries never tried', async () => {
+    const { B } = await lostOne();
+    B.parkLostFails = true;
+    await B.host().dismissLost();
+    assert.equal(B.view.syncNotice, DISMISS_LOST_FAILED_NOTICE);
+
+    // A new loss arrives, and the store works again.
+    B.parkLostFails = false;
+    B.host().offerLost(
+        [{ id: 'p7', type: 'paragraph', reason: 'both', json: para('p7', 'Arrived later'), anchors: ['p1'], text: 'Arrived later' }],
+        'merge',
+        3
+    );
+    assert.equal(B.view.syncNotice, '', 'the list changed: the old failure says nothing about it');
+    B.questions.length = 0;
+    B.draftCalls.length = 0;
+
+    await B.host().dismissLost();
+
+    assert.deepEqual(B.questions, [DISMISS_LOST_QUESTION]);
+    assert.deepEqual(B.draftCalls, ['parkLost', 'markLostDismissed']);
+    assert.deepEqual(B.lostPark().dismissed.map((entry) => entry.excerpt), ['Hello B', 'Arrived later']);
 });
 
 test('Dismiss all whose park write THROWS is a failed write too', async () => {
@@ -5444,7 +5543,7 @@ test('an accepted suggestion whose merge fails does not replace a text that is a
     assert.equal(B.text(), 'B2 typed after', 'the suggestion did not go in over the typing');
     assert.equal(
         B.view.aiError,
-        'The suggestion was saved as a new version, but your unsaved text could not be merged into it while another text is set aside. Put that text back or discard it, then choose in the notice.'
+        'Suggestion saved; your typing could not join it. Settle the set-aside text first.'
     );
 });
 
@@ -5471,7 +5570,7 @@ test('an accepted suggestion whose merge apply throws after the change, with a t
 
     assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'the offer stands');
     assert.equal(B.text(), 'B2 typed after', 'the typing is back in the editor: the throw did not lose it');
-    assert.match(B.view.aiError, /while another text is set aside/);
+    assert.match(B.view.aiError, /Settle the set-aside text first/);
 });
 
 test('an accepted suggestion that leaves nothing of mine to save drops an owed overwrite: no save is left to carry it', async () => {
@@ -5533,7 +5632,7 @@ test('an accepted suggestion refused while a text is set aside owes the typing a
 
     B.host().applySuggestion(suggestion, version); // refused: a text is set aside
 
-    assert.match(B.view.aiError, /while another text is set aside/);
+    assert.match(B.view.aiError, /Settle the set-aside text first/);
     assert.equal(B.view.saving, 0);
     assert.equal(B.view.unsaved, true);
     assert.equal(B.view.resave, false, 'no save was given up on, so the refusal makes nothing owed');

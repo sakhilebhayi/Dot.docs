@@ -904,7 +904,11 @@
                  the version that is there now, or where it was before it was
                  removed, as an ordinary edit the autosave sends. Items are
                  appended and never withdrawn; a copy of the whole list is
-                 parked in this browser for 7 days (sync/host.js, offerLost()).
+                 parked in this browser for 7 days WHERE IT KEEPS DRAFTS
+                 (sync/host.js, offerLost(): a write that fails is not
+                 reported, so the header does not promise the copy; the
+                 Dismiss all question and title say it, and ask again when
+                 the copy could not be written).
 
                  Five STATIC item slots switched with hidden, not x-for: the
                  wiring test pins every element, and no Alpine pattern new to
@@ -916,7 +920,7 @@
             <div class="doc-notice" hidden x-bind:hidden="!lost.length">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
-                    <span>Not everything you typed could be kept. Each item below stays here until you put it back or dismiss it; a copy is kept in this browser for 7 days.</span>
+                    <span>Not everything you typed could be kept. Each item below stays here until you put it back or dismiss it.</span>
                 </p>
                 <ul class="doc-notice-list">
                     <li class="doc-notice-item" hidden x-bind:hidden="!lost[0]">
@@ -954,7 +958,7 @@
                                 aria-describedby="doc-notice-put-back-lost-does"
                                 title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
                     </li>
-                    <li class="doc-notice-item" hidden x-bind:hidden="lost.length <= 5">And <span x-text="lost.length - 5"></span> more. Put them all back restores every item, these included.</li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="lost.length <= 5"><span>And <span x-text="lost.length - 5"></span> more. Put them all back restores every item, these included.</span></li>
                 </ul>
                 <span class="doc-notice-actions">
                     <button type="button" class="tool tool-mono" @click="putBackAllLost()"

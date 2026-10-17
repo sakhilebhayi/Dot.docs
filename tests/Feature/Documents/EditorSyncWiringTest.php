@@ -480,7 +480,7 @@ class EditorSyncWiringTest extends TestCase
         $row = $this->notice($bar, 'lost.length');
 
         $this->assertSame(
-            'Not everything you typed could be kept. Each item below stays here until you put it back or dismiss it; a copy is kept in this browser for 7 days.',
+            'Not everything you typed could be kept. Each item below stays here until you put it back or dismiss it.',
             $this->words($row->querySelector('.doc-notice-text')),
         );
 
@@ -499,6 +499,7 @@ class EditorSyncWiringTest extends TestCase
         }
         $overflow = $items->item(5);
         $this->assertTrue($overflow->hasAttribute('hidden'));
+        $this->assertCount(1, $overflow->children, 'the sentence is one flex item, not three');
         $this->assertSame('lost.length <= 5', $overflow->getAttribute('x-bind:hidden'));
         $this->assertSame('lost.length - 5', $overflow->querySelector('span[x-text]')->getAttribute('x-text'));
         $this->assertSame('And more. Put them all back restores every item, these included.', $this->words($overflow), 'the number is written by x-text, so it is empty here');

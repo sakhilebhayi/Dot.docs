@@ -112,13 +112,16 @@ export const DISMISS_LOST_QUESTION =
 export const DISMISS_LOST_FAILED_NOTICE =
     'Your text could not be kept in this browser, so nothing was dismissed. It is still listed here.';
 
+/** What the notice bar says when a block cannot be put back (Put it back, Put them all back, or the set-aside text). */
+export const PUT_BACK_FAILED_NOTICE = 'Your text could not be put back.';
+
 /**
  * What Dismiss all asks the press after a browser copy could not be written
  * (DISMISS_LOST_FAILED_NOTICE still stands): the one way out of a list the
  * writer wants gone and this browser cannot keep.
  */
 export const DISMISS_LOST_UNKEPT_QUESTION =
-    'This browser could not keep a copy of this text. Dismiss it anyway? It will be gone for good.';
+    'This browser could not keep a copy of this text. Dismiss it anyway? It is removed from this page and may not be recoverable.';
 
 /**
  * What the notice bar says when the list changed while Dismiss all was
@@ -1290,6 +1293,7 @@ export function createSyncHost(view, env) {
             lostEntry(loss, { source, version, n, sentence: sentenceFor(loss.reason, source, blockWord(loss.type)) })
         );
         view.lost = appendLost(view.lost, entries);
+        clearLostNotices();
         env.drafts()?.parkLost(view.docUuid, view.lost, view.baseVersion);
         env.info(`[Dot.Doc] ${entries.length} block(s) could not be kept by the ${source} and are offered back in the notice bar.`);
     }
@@ -1304,6 +1308,28 @@ export function createSyncHost(view, env) {
      */
     function sentenceFor(reason, source, word) {
         return LOST_SENTENCES[`${reason}:${source}`](word);
+    }
+
+    /**
+     * The notices the lost row writes to `syncNotice`. That field also carries
+     * the stop reasons (signed out, no access, gone) and the refused-version
+     * notice, which must stand: a lost-row notice is only written when the
+     * field is empty or already holds one of these, and only these are ever
+     * cleared here.
+     */
+    const lostNotices = [PUT_BACK_FAILED_NOTICE, DISMISS_LOST_FAILED_NOTICE, DISMISS_LOST_CHANGED_NOTICE];
+
+    function setLostNotice(text) {
+        if (view.syncNotice === '' || lostNotices.includes(view.syncNotice)) {
+            view.syncNotice = text;
+        }
+    }
+
+    /** The list changed or emptied: what these notices said about the list as it was no longer holds. */
+    function clearLostNotices() {
+        if (lostNotices.includes(view.syncNotice)) {
+            view.syncNotice = '';
+        }
     }
 
     /**
@@ -1336,11 +1362,12 @@ export function createSyncHost(view, env) {
             inserted = false;
         }
         if (!inserted) {
-            view.syncNotice = 'Your text could not be put back.';
+            setLostNotice(PUT_BACK_FAILED_NOTICE);
 
             return false;
         }
 
+        clearLostNotices();
         view.lost = view.lost.filter((_, at) => at !== index);
         env.drafts()?.parkLost(view.docUuid, view.lost, view.baseVersion);
 
@@ -1387,8 +1414,15 @@ export function createSyncHost(view, env) {
             if (!env.confirm(DISMISS_LOST_UNKEPT_QUESTION)) {
                 return;
             }
-            view.syncNotice = '';
+            clearLostNotices();
             view.lost = [];
+            // An earlier write may have stored the list: it is stamped dismissed, best effort, so it does not come
+            // back after a reload (the copy that could not be written is the only thing that is gone).
+            try {
+                Promise.resolve(env.drafts()?.markLostDismissed(view.docUuid)).catch(() => {});
+            } catch (_) {
+                // Nothing more can be done.
+            }
 
             return;
         }
@@ -1406,7 +1440,7 @@ export function createSyncHost(view, env) {
             kept = false;
         }
         if (!kept) {
-            view.syncNotice = DISMISS_LOST_FAILED_NOTICE;
+            setLostNotice(DISMISS_LOST_FAILED_NOTICE);
 
             return;
         }
@@ -1414,16 +1448,14 @@ export function createSyncHost(view, env) {
         // An EMPTY list is not a change: it is a press made meanwhile that has
         // already dismissed these very entries.
         if (view.lost !== dismissing && view.lost.length > 0) {
-            view.syncNotice = DISMISS_LOST_CHANGED_NOTICE;
+            setLostNotice(DISMISS_LOST_CHANGED_NOTICE);
 
             return;
         }
 
         // Our own earlier "nothing was dismissed" is no longer true. (A sync notice has no way off the page
         // but a reload, so it must not be left behind to mislead.)
-        if (view.syncNotice === DISMISS_LOST_CHANGED_NOTICE) {
-            view.syncNotice = '';
-        }
+        clearLostNotices();
         view.lost = [];
         drafts.markLostDismissed(view.docUuid);
     }
@@ -1778,7 +1810,7 @@ export function createSyncHost(view, env) {
             // Nothing was put back, so nothing more is owed than before.
             view.overwriteOwed = owedBefore;
             view.overwriteFloor = floorBefore;
-            view.syncNotice = 'Your text could not be put back.';
+            view.syncNotice = PUT_BACK_FAILED_NOTICE;
         }
     }
 
@@ -2078,8 +2110,7 @@ export function createSyncHost(view, env) {
                     env.log('[Dot.Doc] The typing could not be put back after a failed suggestion merge.', cause);
                 }
             }
-            view.aiError =
-                'The suggestion was saved as a new version, but your unsaved text could not be merged into it while another text is set aside. Put that text back or discard it, then choose in the notice.';
+            view.aiError = 'Suggestion saved; your typing could not join it. Settle the set-aside text first.';
             // The save that was in the air is given up on above; the typing it
             // carried is owed again, not left unsaved with nothing to send it.
             if (retiredSave) {
@@ -2108,7 +2139,7 @@ export function createSyncHost(view, env) {
                 setAsideTyping(mine, version);
             }
             view.aiError = changed
-                ? 'That suggestion may not have been applied cleanly. If you had unsaved text it is offered back in the notice; reload the page if the document looks wrong.'
+                ? 'The suggestion may not have been applied cleanly. Reload the page to check.'
                 : 'That suggestion could not be applied — the document is unchanged.';
             if (retiredSave) {
                 view.resave = true;
