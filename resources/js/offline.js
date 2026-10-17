@@ -156,29 +156,94 @@ export async function loadDraft(docUuid) {
 }
 
 /**
- * Park a draft that is not restorable under `stale-<uuid>`, replacing whatever
- * was parked for that document before.
+ * The key an earlier park is moved to when a newer one takes the plain
+ * `stale-<uuid>` key: `stale-<uuid>@<ms>`, where `<ms>` is the row's own
+ * `parkedAt`, else its `savedAt`, else `now`. If that key is taken too, `-2`,
+ * `-3`, ... is appended until one is free.
  *
- * Two callers: a draft whose baseVersion is behind the document (somebody has
- * saved since, so restoring it would overwrite them), and a draft the writer
- * declined to restore. Neither is this page's to destroy — the sweep on the
- * next boot is what eventually collects it.
+ * Pure, and exported so `npm test` can exercise the rule without IndexedDB.
+ * The result starts with STALE_PREFIX, so the sweep dates it by the row's own
+ * stamp and deletes it seven days after ITS park; it never equals the plain
+ * key.
+ *
+ * @param {string} docUuid
+ * @param {{parkedAt?: number, savedAt?: number}|null} row the park being kept
+ * @param {Iterable<string>} existingKeys the keys already in the store
+ * @param {number} now
+ */
+export function keepKeyFor(docUuid, row, existingKeys, now = Date.now()) {
+    const stamp = [row?.parkedAt, row?.savedAt].map(Number).find((candidate) => Number.isFinite(candidate) && candidate > 0);
+    const taken = new Set(existingKeys);
+    const base = `${STALE_PREFIX}${docUuid}@${stamp ?? now}`;
+
+    let key = base;
+    for (let suffix = 2; taken.has(key); suffix += 1) {
+        key = `${base}-${suffix}`;
+    }
+
+    return key;
+}
+
+/**
+ * Park a draft that is not restorable under `stale-<uuid>`. A park is never
+ * overwritten: in the same readwrite transaction the park that was there is
+ * kept under a second key (keepKeyFor()), and the new one takes the plain
+ * key, which therefore always holds the LATEST park. Older parks stay under
+ * their suffixed keys until the 7-day sweep, each dated by its own parkedAt.
+ *
+ * Callers: a draft whose baseVersion is behind the document (somebody has
+ * saved since, so restoring it would overwrite them), a draft the writer
+ * declined to restore, and the set-aside paths (Load theirs, an accepted
+ * suggestion). None of these is this page's to destroy - least of all the
+ * previous visit's park, which nothing in this visit has offered back.
  */
 export async function parkStaleDraft(docUuid, json, baseVersion = null) {
     try {
         const db = await openDb();
         await new Promise((resolve, reject) => {
             const tx = db.transaction(STORE_NAME, 'readwrite');
-            tx.objectStore(STORE_NAME).put({
-                docUuid: STALE_PREFIX + docUuid,
-                json,
-                html: json,
-                savedAt: Date.now(),
-                parkedAt: Date.now(),
-                baseVersion: Number.isFinite(baseVersion) ? baseVersion : null,
-            });
+            const store = tx.objectStore(STORE_NAME);
+            const plainKey = STALE_PREFIX + docUuid;
+            const now = Date.now();
+            const read = store.get(plainKey);
+            read.onsuccess = () => {
+                const earlier = read.result;
+                const write = () => {
+                    store.put({
+                        docUuid: plainKey,
+                        json,
+                        html: json,
+                        savedAt: now,
+                        parkedAt: now,
+                        baseVersion: Number.isFinite(baseVersion) ? baseVersion : null,
+                    });
+                };
+                if (!earlier) {
+                    write();
+
+                    return;
+                }
+                // The kept key must be free: list the keys of this document's parks.
+                const keys = [];
+                const range = IDBKeyRange.bound(plainKey, plainKey + '\uffff');
+                const cursor = store.openKeyCursor(range);
+                cursor.onsuccess = () => {
+                    const at = cursor.result;
+                    if (at) {
+                        keys.push(at.key);
+                        at.continue();
+
+                        return;
+                    }
+                    store.put({ ...earlier, docUuid: keepKeyFor(docUuid, earlier, keys, now) });
+                    write();
+                };
+                cursor.onerror = () => reject(cursor.error);
+            };
+            read.onerror  = () => reject(read.error);
             tx.oncomplete = resolve;
             tx.onerror    = () => reject(tx.error);
+            tx.onabort    = () => reject(tx.error);
         });
     } catch (_) { /* silent — don't break the editor */ }
 }

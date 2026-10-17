@@ -40,7 +40,10 @@ import { LOST, blocksOf, deletionLedger, world } from './support/syncWorld.js';
  *   STALEBASE  no save states a base lower than the version the tab already
  *              knows (`view.known.version`): a merged save goes out on the
  *              version it was merged onto;
- *   BACK       a tab's `baseVersion` never decreases.
+ *   BACK       a tab's `baseVersion` never decreases;
+ *   PARK-KEPT  a park is never dropped by a later park (parkStaleDraft keeps
+ *              the one it would replace), and every park counts as a place
+ *              where its words are kept.
  *
  * Seeds 1 to 50 by default; `WALK_SEEDS=<n>` runs seeds 1 to n (the dry run
  * ran 2000 once: 4000 tests, about 12 seconds); `WALK_SEED=<n>` replays one.
@@ -212,6 +215,13 @@ async function walkSteps(seed, tabCount, trace) {
     const tabs = [];
     for (let index = 0; index < tabCount; index += 1) {
         const tab = w.tab(String.fromCharCode(65 + index));
+        // Every park the tab writes is logged: parking never overwrites, so none may be gone at the end (PARK-KEPT).
+        tab.parkLog = [];
+        const realPark = tab.draftStore.parkStaleDraft;
+        tab.draftStore.parkStaleDraft = async (uuid, json, baseVersion) => {
+            await realPark(uuid, json, baseVersion);
+            tab.parkLog.push(json);
+        };
         await tab.open();
         tabs.push(tab);
     }
@@ -479,6 +489,8 @@ for (const seed of SEEDS) {
             const kept = new Set(tokensIn(server.json));
             tabs.forEach((tab) => {
                 tab.view.lost.forEach((entry) => tokensIn({ content: [entry.json] }).forEach((token) => kept.add(token)));
+                // Every park the tab ever wrote (the latest, and the earlier ones kept under stale-<uuid>@<ms>).
+                tab.parks().forEach((row) => tokensIn(JSON.parse(row.json)).forEach((token) => kept.add(token)));
                 const park = tab.drafts.get(LOST);
                 if (park) {
                     // What is offered, and what Dismiss all moved aside: both are in the browser.
@@ -511,6 +523,16 @@ for (const seed of SEEDS) {
             // 6. A head that lost a token nobody knowingly deleted was kept
             //    (judged as each save was stored, against who had deleted what by then).
             assert.deepEqual(droppedWithoutSaying, [], because(`a save dropped what nobody deleted: ${droppedWithoutSaying.join('; ')}`));
+
+            // PARK-KEPT: a park is never dropped by a later park.
+            tabs.forEach((tab) => {
+                const held = tab.parks().map((row) => row.json);
+                tab.parkLog.forEach((json) => {
+                    const at = held.indexOf(json);
+                    assert.notEqual(at, -1, because(`PARK-KEPT: ${tab.name} lost a park it wrote (${json.slice(0, 80)})`));
+                    held.splice(at, 1);
+                });
+            });
 
             // HELD, STALEBASE, BACK: the saving itself.
             assert.deepEqual(savingFaults, [], because(`the saving broke its own rules: ${savingFaults.slice(0, 5).join('; ')}`));

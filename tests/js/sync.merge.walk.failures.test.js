@@ -19,6 +19,9 @@ import { LOST, STALE, UUID, blocksOf, deletionLedger, para, world } from './supp
  *   HELD       no save request leaves a tab while its merge fetch is out;
  *   STALEBASE  no save states a base lower than the version the tab knows;
  *   BACK       a tab's base version never decreases;
+ *   PARK-KEPT  a park is never dropped by a later park: every stale- park ever
+ *              written is still in its browser's store (the latest on the
+ *              plain key, the earlier ones under stale-<uuid>@<ms> keys);
  *   EXP        after a poll or a failed poll, no merge fetch is still out 15 s
  *              after it began (the expiry has fired);
  * Checked once everything has landed:
@@ -38,10 +41,11 @@ import { LOST, STALE, UUID, blocksOf, deletionLedger, para, world } from './supp
  *   G. no overwrite is still owed;
  *   H. no duplicate block id.
  *
- * Wider than it should be (open, see the Task 12 report, Fix round 2): a Phase 1
- * stale- park holds one text, and every token of a park that another park
- * replaces is excused for the rest of the run, whichever path replaced it and
- * wherever else the token is.
+ * Parking never overwrites (Task 12b): parkStaleDraft() keeps the park it
+ * would replace under a second key, so every park ever written is a place
+ * where its words are kept, and no excuse is made for a replaced park (none
+ * is replaced). What IS excused is unchanged: the writer's own deletions
+ * (deletionLedger), and a browser that keeps no drafts.
  *
  * What it does NOT cover: characters inside one block, two tabs of one
  * browser sharing a draft, and the server's own failures.
@@ -123,6 +127,7 @@ async function run(seed, tabCount) {
     const everStored = new Set(); // tokens any stored version has ever held
     const excused = new Set(); // tokens the writer, or a browser without drafts, knowingly let go
     const lateAnswers = []; // lost answers that may still arrive
+    const parkLog = []; // per slot (one browser, one draft store): every park its browsers ever wrote
     let tokens = 0;
     let inserted = 0;
     let generation = 0;
@@ -223,6 +228,7 @@ async function run(seed, tabCount) {
 
     const openSlot = async (index, options = {}) => {
         const drafts = slots[index] ? slots[index].drafts : new Map();
+        parkLog[index] ??= [];
         generation += 1;
         const tab = w.tab(`${String.fromCharCode(65 + index)}${generation}`, { drafts, ...options });
         tab.slot = index;
@@ -230,15 +236,12 @@ async function run(seed, tabCount) {
         tab.noDrafts = options.draftStore === false;
         track(tab);
         if (tab.draftStore) {
-            // The Phase 1 stale- park holds one text: parking again replaces the earlier one, knowingly.
+            // PARK-KEPT: log every park written; parking never overwrites, so none may go (parksKept, below).
             const realPark = tab.draftStore.parkStaleDraft;
             tab.draftStore.parkStaleDraft = async (uuid, json, baseVersion) => {
-                const previous = tab.drafts.get(`stale-${uuid}`);
-                if (previous) {
-                    tokensOfString(previous.json).forEach((token) => excused.add(token));
-                }
-
-                return realPark(uuid, json, baseVersion);
+                await realPark(uuid, json, baseVersion);
+                parkLog[index].push({ json, by: tab.name, at: events });
+                parksKept(`${tab.name} parked`);
             };
         }
         slots[index] = tab;
@@ -266,6 +269,28 @@ async function run(seed, tabCount) {
         });
     };
 
+    // PARK-KEPT: every park ever written is still in the store of its browser (as many rows as were written with that text).
+    const reportedParks = new Set(); // one report per lost park, not one per step after it
+    const parksKept = (label) => {
+        parkLog.forEach((written, index) => {
+            if (!slots[index]) {
+                return;
+            }
+            const held = new Map();
+            slots[index].parks().forEach((row) => held.set(row.json, (held.get(row.json) ?? 0) + 1));
+            const wanted = new Map();
+            written.forEach((park) => wanted.set(park.json, (wanted.get(park.json) ?? 0) + 1));
+            for (const [json, count] of wanted) {
+                if ((held.get(json) ?? 0) < count && !reportedParks.has(`${index}|${json}`)) {
+                    reportedParks.add(`${index}|${json}`);
+                    violations.push(
+                        `PARK-KEPT: browser ${index} lost a park holding ${[...tokensOfString(json)].join(',')} (${count} written, ${held.get(json) ?? 0} held; after: ${label})`
+                    );
+                }
+            }
+        });
+    };
+
     // EXP: a poll or a failed poll is when a merge fetch that began 15 s ago must be given up on.
     const checkExpiry = (tab) => {
         if (tab.view.merging && clock.now - tab.view.merging.since >= SAVE_EXPIRY_MS) {
@@ -275,6 +300,7 @@ async function run(seed, tabCount) {
 
     // A. checked after every step
     const afterStep = (label) => {
+        parksKept(label);
         server.trace.forEach((row) => tokensIn(row.to).forEach((token) => everStored.add(token)));
         server.kept.forEach((row) => tokensIn(row.json).forEach((token) => everStored.add(token)));
         for (const tab of slots) {
@@ -312,8 +338,10 @@ async function run(seed, tabCount) {
 
             return;
         }
-        // The earlier offered text is replaced by this one, a choice the writer confirmed or the park holds one text.
-        if (tab.view.setAside) {
+        // The writer confirmed replacing the text on offer. With a draft store it stays parked (parking never
+        // overwrites); a browser that keeps no drafts has no park, so there the confirmed replacement is the
+        // 'browser-without-drafts' excuse, as on the other paths below.
+        if (tab.noDrafts && tab.view.setAside) {
             tokensOfString(tab.view.setAside).forEach((token) => excused.add(token));
         }
         await tab.host().loadTheirs();
@@ -794,7 +822,8 @@ async function run(seed, tabCount) {
         tab.view.lost.forEach((entry) => tokensOfEntry(entry).forEach((token) => kept.add(token)));
         tokensOfString(tab.view.setAside).forEach((token) => kept.add(token));
         for (const [key, row] of tab.drafts.entries()) {
-            if (key === UUID || key === STALE) {
+            if (key === UUID || key === STALE || key.startsWith(`${STALE}@`)) {
+                // The live draft, the latest park, and every earlier park (kept under stale-<uuid>@<ms>).
                 tokensOfString(row.json).forEach((token) => kept.add(token));
             } else if (key === LOST) {
                 [...(row.entries ?? []), ...(row.dismissed ?? [])].forEach((entry) => tokensOfEntry(entry).forEach((token) => kept.add(token)));
@@ -805,6 +834,9 @@ async function run(seed, tabCount) {
     if (silently.length > 0) {
         violations.push(`E: tokens lost without a trace: ${silently.map((token) => `${token} by ${typed.get(token).author} in ${typed.get(token).block}`).join(', ')}`);
     }
+
+    // ── PARK-KEPT, once more at the end.
+    parksKept('the end');
 
     // ── B. a save that dropped content said it overwrites: judged as each version was stored (judgeStoredVersions).
     judgeStoredVersions();

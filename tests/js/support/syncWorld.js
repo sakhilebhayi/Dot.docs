@@ -5,6 +5,7 @@ import { Schema } from 'prosemirror-model';
 import { createSyncEngine } from '../../../resources/js/editor/sync/engine.js';
 import { createSyncHost, unloadSaveBody } from '../../../resources/js/editor/sync/host.js';
 import { mergeDocuments } from '../../../resources/js/editor/sync/merge.js';
+import { keepKeyFor } from '../../../resources/js/offline.js';
 
 /**
  * The fake world the sync host is tested in (sync.host.test.js) and walked
@@ -22,8 +23,10 @@ import { mergeDocuments } from '../../../resources/js/editor/sync/merge.js';
  *     applyRemote() (it refuses over unsaved typing unless forced), merges
  *     with the real mergeDocuments() over the mini schema below, and puts a
  *     lost block back as insertBlock() does;
- *   - a fake draft store (the live draft, the stale- park, the base- row and
- *     the lost- park), an injected clock and a captured timer;
+ *   - a fake draft store (the live draft, the stale- parks, the base- row and
+ *     the lost- park), an injected clock and a captured timer. As offline.js
+ *     does, parking never overwrites: the park that was there is kept under
+ *     `stale-<uuid>@<ms>` (keepKeyFor) and the plain key holds the latest;
  *   - saves and polls that are answered BY HAND, so "a save in the air" is a
  *     state a test can hold for as long as it needs;
  *   - `leave()`, the page going away: the bundle's pagehide flush, which
@@ -454,7 +457,13 @@ export function makeTab({ server, clock }, name, options = {}) {
                   },
                   parkStaleDraft: async (uuid, json, baseVersion) => {
                       t.draftCalls.push('parkStaleDraft');
-                      t.drafts.set(`stale-${uuid}`, { json, baseVersion });
+                      // As offline.js does: the earlier park is kept under a second key, the plain key holds the latest.
+                      const plain = `stale-${uuid}`;
+                      const earlier = t.drafts.get(plain);
+                      if (earlier) {
+                          t.drafts.set(keepKeyFor(uuid, earlier, [...t.drafts.keys()], clock.now), earlier);
+                      }
+                      t.drafts.set(plain, { json, baseVersion, parkedAt: clock.now });
                   },
                   saveBase: async (uuid, json, baseVersion) => {
                       t.draftCalls.push('saveBase');
@@ -691,6 +700,11 @@ export function makeTab({ server, clock }, name, options = {}) {
     t.words = () => t.reports.map((report) => report.word);
     t.draft = () => (t.drafts.has(UUID) ? textOf(JSON.parse(t.drafts.get(UUID).json)) : null);
     t.stale = () => (t.drafts.has(STALE) ? textOf(JSON.parse(t.drafts.get(STALE).json)) : null);
+    /** Every park the store holds for the document: the kept ones (oldest first), then the latest. */
+    t.parks = () => [
+        ...[...t.drafts.entries()].filter(([key]) => key.startsWith(`${STALE}@`)).sort((a, b) => a[1].parkedAt - b[1].parkedAt).map(([, row]) => row),
+        ...(t.drafts.has(STALE) ? [t.drafts.get(STALE)] : []),
+    ];
     t.lostTexts = () => t.view.lost.map((entry) => entry.excerpt);
     t.lostPark = () => t.drafts.get(LOST) ?? null;
 
