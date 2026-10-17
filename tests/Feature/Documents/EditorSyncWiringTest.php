@@ -574,6 +574,11 @@ class EditorSyncWiringTest extends TestCase
         // floor of about one item and an edge shadow that says there is more (checked in a real browser at 360x640: 42%).
         $this->assertStringContainsString('max-height: clamp(5.5rem, calc(40vh - 11rem), 22rem);', $css);
         $this->assertMatchesRegularExpression('/\.doc-notice-list \{[^}]*background:[^}]*no-repeat local/s', $css, 'a scroll shadow, so the list says it scrolls');
+        // At a phone's width one WHOLE item (sentence, excerpt, Put it back) fits in the list: 12px type, tighter gaps and a
+        // 7.5rem floor (measured at 360x640: item 103px, list 120px, head 39%).
+        $this->assertMatchesRegularExpression('/@media \(max-width: 420px\) \{\s*\.doc-notice:has\(\.doc-notice-list\) \{/', $css);
+        $this->assertStringContainsString('max-height: clamp(7.5rem, calc(40vh - 11rem), 22rem);', $css);
+        $this->assertMatchesRegularExpression('/\.doc-notice-sentence,\s*\.doc-notice-excerpt \{\s*font-size: var\(--t-micro\);/', $css);
         // And the top bar no longer pushes the page sideways at a phone width: it tightens, and below 360px it scrolls on its own.
         $this->assertMatchesRegularExpression('/@media \(max-width: 420px\) \{\s*\.topbar \{[^}]*overflow-x: auto;/s', $css);
         $gate = file_get_contents(base_path('scripts/design/contrast-dom.mjs'));

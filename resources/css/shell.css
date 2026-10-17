@@ -1533,6 +1533,37 @@ button.list-row {
 }
 
 /*
+ * A phone's width: the lost row has to show ONE WHOLE item (sentence, excerpt and its Put it back) inside its own scroll
+ * area while the whole sticky head stays under about 45% of a 640px-high screen. Measured at 360x640: the item took 162px
+ * at 15px type and the rest of the head 177px, so no floor satisfied both; at the type size of a hint (12px) and tighter
+ * gaps the item is about 103px and the head 39%. The floor is a little over one item, so the next one shows at the edge
+ * and the list can be seen to scroll.
+ */
+@media (max-width: 420px) {
+    .doc-notice:has(.doc-notice-list) {
+        gap: var(--s1) var(--s3);
+        padding-top: var(--s1);
+        padding-bottom: var(--s1);
+    }
+
+    .doc-notice:has(.doc-notice-list) .doc-notice-text,
+    .doc-notice-sentence,
+    .doc-notice-excerpt {
+        font-size: var(--t-micro);
+        line-height: 1.35;
+    }
+
+    .doc-notice-list {
+        gap: var(--s2);
+        max-height: clamp(7.5rem, calc(40vh - 11rem), 22rem);
+    }
+
+    .doc-notice-item {
+        gap: var(--s1) var(--s2);
+    }
+}
+
+/*
  * A tool on the bar above draws no edge until you go near it. Here the button
  * is the answer the sentence asks for, so it shows itself as one: the edge and
  * the fill of .btn, at the tool's own size.
