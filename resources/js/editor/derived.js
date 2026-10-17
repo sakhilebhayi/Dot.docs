@@ -8,8 +8,12 @@
  * look "different" (and so restorable) on every single page load.
  *
  * Dependency-free: `tests/js` runs it under `node --test`.
+ *
+ * Exported because sync/merge.js, which imports nothing from outside sync/,
+ * carries a copy of this table, and tests/js/derived.test.js asserts the two
+ * are identical.
  */
-const DERIVED = {
+export const DERIVED = {
     toc: ['entries'],
     crossRef: ['label'],
 };

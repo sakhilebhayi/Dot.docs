@@ -1,0 +1,16 @@
+{
+  "name": "order: only they moved blocks, so their order is the spine and my edit lands in it",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"2"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"3"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1 B"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"2"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"3"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"2"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"3"}]},
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]}]},
+  "expected": {"blocks": [["p2","2"],["p3","3"],["p1","1 B"]], "changed": true, "lost": [], "overwrites": false}
+}

@@ -1,0 +1,13 @@
+{
+  "name": "a1: a block nobody changed is theirs, and nothing counts as changed",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"World"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"World"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"World"}]}]},
+  "expected": {"blocks": [["p1","Hello"],["p2","World"]], "changed": false, "lost": [], "overwrites": false}
+}

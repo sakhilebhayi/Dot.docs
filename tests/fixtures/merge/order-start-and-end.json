@@ -1,0 +1,14 @@
+{
+  "name": "order: a typist's new paragraph whose predecessors an import replaced lands at the end, after the imported title",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"old"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"old too"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"old"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"old too"}]},
+    {"type":"paragraph","attrs":{"id":"n1"},"content":[{"type":"text","text":"typed"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"heading","attrs":{"id":"h1","level":1},"content":[{"type":"text","text":"Imported title"}]},
+    {"type":"paragraph","attrs":{"id":"q1"},"content":[{"type":"text","text":"Imported body"}]}]},
+  "expected": {"blocks": [["h1","Imported title"],["q1","Imported body"],["n1","typed"]], "changed": true, "lost": [], "overwrites": false}
+}

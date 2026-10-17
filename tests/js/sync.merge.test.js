@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 
 import { Schema } from 'prosemirror-model';
@@ -526,3 +527,56 @@ test('appendLost appends and never replaces; the only entry skipped is an exact 
     });
     assert.deepEqual(appendLost([], []), []);
 });
+
+// ───────────────────────────────────────────────────────── the fixtures: one per row of 4.3 and per ordering case
+
+const FIXTURES = new URL('../fixtures/merge/', import.meta.url);
+/** The real pair is captured by sync.merge.editor.test.js and MergeFixtureTest, and merged over the editor's own schema there. */
+const REAL_PAIR = ['editor-form.json', 'stored-form.json'];
+const fixtures = readdirSync(FIXTURES)
+    .filter((name) => name.endsWith('.json') && !REAL_PAIR.includes(name))
+    .sort();
+
+test('there is a fixture for every row of the decision table and every ordering case', () => {
+    assert.deepEqual(fixtures, [
+        'a1-unchanged.json',
+        'a2-theirs-changed.json',
+        'a3-mine-changed.json',
+        'a4-same-change.json',
+        'a5-both-changed.json',
+        'b1-they-deleted-untouched.json',
+        'b2-they-deleted-i-typed.json',
+        'c1-i-deleted-untouched.json',
+        'c2-draft-deletions-do-not-win.json',
+        'c2-i-deleted-they-edited.json',
+        'd-after-deleted-predecessor.json',
+        'd-mine-inserted.json',
+        'e-theirs-inserted.json',
+        'f-both-inserted-different.json',
+        'f-both-inserted-equal.json',
+        'g-both-deleted.json',
+        'order-both-reordered.json',
+        'order-chained-insertions.json',
+        'order-only-i-reordered.json',
+        'order-only-they-reordered.json',
+        'order-start-and-end.json',
+    ]);
+});
+
+for (const name of fixtures) {
+    const fixture = JSON.parse(readFileSync(new URL(name, FIXTURES), 'utf8'));
+
+    test(`${name}: ${fixture.name}`, () => {
+        const result = mergeDocuments(
+            schema,
+            { base: fixture.base, mine: fixture.mine, theirs: fixture.theirs, echo: fixture.echo ?? null },
+            fixture.options ?? {}
+        );
+
+        assert.notEqual(result, null, 'the merge is possible');
+        assert.deepEqual(blocksOf(result.merged), fixture.expected.blocks);
+        assert.equal(result.changed, fixture.expected.changed);
+        assert.deepEqual(losses(result), fixture.expected.lost);
+        assert.equal(result.overwrites, fixture.expected.overwrites);
+    });
+}
