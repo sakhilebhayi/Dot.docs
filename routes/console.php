@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\BackupSqliteDatabase;
 use App\Http\Controllers\SchedulerProbeController;
 use App\Jobs\QueueHeartbeat;
 use Illuminate\Foundation\Inspiring;
@@ -41,3 +42,8 @@ Schedule::call(fn () => Cache::forever(SchedulerProbeController::SCHEDULER_KEY, 
     ->everyMinute()
     ->name('scheduler-heartbeat');
 Schedule::job(new QueueHeartbeat)->everyFiveMinutes()->name('queue-heartbeat');
+
+// Nightly copy of the SQLite file (documents, revisions and comments exist nowhere else). The five SQLite-backed Dot apps
+// share one host, so each one backs up at its own minute. No-op on other
+// database drivers. See docs/superpowers or the deploy README for restore.
+Schedule::command(BackupSqliteDatabase::class)->dailyAt('02:35')->onOneServer();
