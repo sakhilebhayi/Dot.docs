@@ -12,17 +12,28 @@ use Illuminate\Support\Facades\DB;
  * Reads only the table (ids, days, kinds, counts), so the report can never
  * hold a name, a title or a word of a document.
  *
- * Two reading rules the numbers depend on:
- *  - A CLASH is a `lost_both_live` offer: two people changed the same block
- *    within one poll of each other and the later saver's version was offered
- *    back. Draft and suggestion merges are not concurrent editing and are
- *    counted apart.
- *  - TIME with company comes from `peers_*_secs`, which every tab counts for
- *    itself. Two people in a document each count the same half hour, so the
- *    time of a document-day is the busiest PERSON's count, not the sum (two
- *    tabs of one person add up, so the figure is an upper bound there). It is
- *    people PRESENT with the document open in the editor, a reader included,
- *    not people typing.
+ * Reading rules the numbers depend on:
+ *  - What is counted is PARAGRAPHS OFFERED BACK (`lost_both_live`): after two
+ *    people changed the same block within the autosave and poll delay of each
+ *    other, the later saver's version of it was offered back. One merge can
+ *    offer several paragraphs back, so a paragraph count is not a count of
+ *    clashes between people; `merge_live_lost` (live merges that left
+ *    something over, of any kind) is the most merges those paragraphs can
+ *    have come from. Draft and suggestion merges are not concurrent editing
+ *    and are counted apart.
+ *  - TIME TOGETHER is approximate. Every tab counts for itself the seconds it
+ *    saw other people present (`peers_*_secs`), by poll, so each arrival or
+ *    departure is off by a few tens of seconds (the presence row lives 30 s
+ *    and a poll is 1.5 to 10 s). Two people each count the same half hour, so
+ *    the time of a document-day is the busiest PERSON's count, not the sum:
+ *    that is too low when two separate pairs shared the document at different
+ *    times of the day, and too high when one person has two tabs open (the two
+ *    tabs add up) or when deleted accounts, whose rows share a null user, are
+ *    merged. It counts PEOPLE IN THE DOCUMENT (a reader, an idle open tab),
+ *    not people typing, and time alone is not collected at all.
+ *  - Days are calendar days in the app timezone (UTC), and today is partial.
+ *  - A rate per hour is given only from MIN_MINUTES_FOR_A_RATE minutes
+ *    together: a few minutes make a rate that means nothing.
  */
 class SyncMetricsReport
 {
@@ -31,6 +42,9 @@ class SyncMetricsReport
     private const THREE_OR_MORE = ['peers_2_secs', 'peers_3plus_secs'];
 
     private const SOURCES = ['live', 'draft', 'suggestion'];
+
+    /** No rate per hour of time together below this many minutes in the window. */
+    public const MIN_MINUTES_FOR_A_RATE = 60;
 
     /**
      * @return array<string, mixed>
@@ -53,7 +67,7 @@ class SyncMetricsReport
         $totals = [];
         $eventDocuments = [];
         $eventUsers = [];
-        $clashDocuments = [];
+        $offeredDocuments = [];
         $deletionDocuments = [];
         // [day][document][user] => seconds with company / with three or more people
         $company = [];
@@ -71,7 +85,7 @@ class SyncMetricsReport
                 $eventUsers[$row->user_id ?? 'gone'] = true;
             }
             if ($kind === 'lost_both_live') {
-                $clashDocuments[$row->document_id] = true;
+                $offeredDocuments[$row->document_id] = true;
             }
             if ($kind === 'lost_deleted_live') {
                 $deletionDocuments[$row->document_id] = true;
@@ -111,21 +125,25 @@ class SyncMetricsReport
         }
 
         $minutes = (int) round($secondsWithCompany / 60);
-        $clashes = $totals['lost_both_live'] ?? 0;
+        $paragraphs = $totals['lost_both_live'] ?? 0;
         $liveMerges = $merges['by_source']['live']['total'];
+        $liveWithLoss = $merges['by_source']['live']['with_lost'];
 
         return [
             'days' => $days,
             'from' => $from->toDateString(),
             'to' => $today->toDateString(),
+            'timezone' => (string) config('app.timezone'),
             'per_day' => $perDay,
             'totals' => $totals,
             'merges' => $merges,
             'events' => ['documents' => count($eventDocuments), 'users' => count($eventUsers)],
-            'clashes' => [
-                'count' => $clashes,
-                'documents' => count($clashDocuments),
-                'per_100_live_merges' => $liveMerges > 0 ? round($clashes / $liveMerges * 100, 1) : null,
+            'offered_back' => [
+                'paragraphs' => $paragraphs,
+                'documents' => count($offeredDocuments),
+                // The most merges those paragraphs can have come from: live merges that left something over.
+                'in_at_most_merges' => $liveWithLoss,
+                'live_merges_with_a_loss_per_100' => $liveMerges > 0 ? round($liveWithLoss / $liveMerges * 100, 1) : null,
             ],
             'deletions' => ['count' => $totals['lost_deleted_live'] ?? 0, 'documents' => count($deletionDocuments)],
             'concurrency' => [
@@ -133,9 +151,12 @@ class SyncMetricsReport
                 'minutes_two_or_more' => $minutes,
                 'minutes_three_or_more' => (int) round($secondsCrowded / 60),
                 'documents' => count($companyDocuments),
-                'clashes_per_hour' => $secondsWithCompany > 0 ? round($clashes / ($secondsWithCompany / 3600), 1) : null,
+                'minutes_needed_for_a_rate' => self::MIN_MINUTES_FOR_A_RATE,
+                'offered_back_per_hour' => $minutes >= self::MIN_MINUTES_FOR_A_RATE
+                    ? round($paragraphs / ($secondsWithCompany / 3600), 1)
+                    : null,
             ],
-            'summary' => $this->summary($days, $clashes, count($clashDocuments), $minutes),
+            'summary' => $this->summary($days, $paragraphs, $liveWithLoss, count($offeredDocuments), $minutes),
         ];
     }
 
@@ -162,15 +183,17 @@ class SyncMetricsReport
     }
 
     /** The one line the owner reads to decide on Phase 3. */
-    private function summary(int $days, int $clashes, int $documents, int $minutes): string
+    private function summary(int $days, int $paragraphs, int $merges, int $documents, int $minutes): string
     {
         $period = $days === 1 ? 'the last day' : "the last {$days} days";
 
         return sprintf(
-            'In %s: %d same-paragraph %s across %d %s; %d %s with two or more editors at once.',
+            'In %s: %d %s (in at most %d live %s) across %d %s; %d %s with two or more people in the document at once (readers and idle open tabs count).',
             $period,
-            $clashes,
-            $clashes === 1 ? 'clash' : 'clashes',
+            $paragraphs,
+            $paragraphs === 1 ? 'paragraph offered back after a same-paragraph clash' : 'paragraphs offered back after same-paragraph clashes',
+            $merges,
+            $merges === 1 ? 'merge' : 'merges',
             $documents,
             $documents === 1 ? 'document' : 'documents',
             $minutes,
@@ -185,7 +208,7 @@ class SyncMetricsReport
     private function inKindOrder(array $counts): array
     {
         $ordered = [];
-        foreach (SyncMetrics::KINDS as $kind) {
+        foreach (SyncMetrics::kinds() as $kind) {
             if (isset($counts[$kind])) {
                 $ordered[$kind] = $counts[$kind];
             }

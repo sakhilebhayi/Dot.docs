@@ -55,7 +55,6 @@ class SyncReportCommandTest extends TestCase
         $this->row($this->d1, $this->ada, '2026-10-15', 'lost_both_live', 1);
         $this->row($this->d1, $this->ben, '2026-10-15', 'merge_live_lost', 1);
         $this->row($this->d1, $this->ben, '2026-10-15', 'lost_deleted_live', 1);
-        $this->row($this->d1, $this->ada, '2026-10-15', 'peers_0_secs', 600);
         $this->row($this->d1, $this->ada, '2026-10-15', 'peers_1_secs', 1800);
         $this->row($this->d1, $this->ben, '2026-10-15', 'peers_1_secs', 1740);
         $this->row($this->d1, $this->ben, '2026-10-15', 'peers_2_secs', 60);
@@ -92,7 +91,7 @@ class SyncReportCommandTest extends TestCase
         $this->assertSame('2026-10-17', $report['to']);
         $this->assertCount(14, $report['per_day'], 'every day of the window is there, quiet ones empty');
         $this->assertSame([], $report['per_day']['2026-10-04']);
-        $this->assertSame(['merge_live_clean' => 4, 'merge_live_lost' => 2, 'lost_both_live' => 1, 'lost_deleted_live' => 1, 'peers_0_secs' => 600, 'peers_1_secs' => 3540, 'peers_2_secs' => 60],
+        $this->assertSame(['merge_live_clean' => 4, 'merge_live_lost' => 2, 'lost_both_live' => 1, 'lost_deleted_live' => 1, 'peers_1_secs' => 3540, 'peers_2_secs' => 60],
             $report['per_day']['2026-10-15']);
         $this->assertSame(1, $report['per_day']['2026-10-16']['conflict_expiry']);
         $this->assertSame(3, $report['per_day']['2026-10-17']['lost_both_live']);
@@ -122,15 +121,16 @@ class SyncReportCommandTest extends TestCase
 
         $this->assertSame(2, $report['events']['documents']);
         $this->assertSame(2, $report['events']['users']);
-        $this->assertSame(4, $report['clashes']['count']);
-        $this->assertSame(2, $report['clashes']['documents']);
+        $this->assertSame(4, $report['offered_back']['paragraphs']);
+        $this->assertSame(2, $report['offered_back']['documents']);
+        $this->assertArrayNotHasKey('clashes', $report, 'a paragraph offered back is not a clash');
         $this->assertSame(1, $report['deletions']['count']);
         $this->assertSame(1, $report['deletions']['documents']);
     }
 
     public function test_a_document_with_only_presence_is_not_an_event(): void
     {
-        $this->row($this->d1, $this->ada, '2026-10-17', 'peers_0_secs', 60);
+        $this->row($this->d1, $this->ada, '2026-10-17', 'peers_1_secs', 60);
         $report = $this->reportJson();
 
         $this->assertSame(0, $report['events']['documents']);
@@ -149,7 +149,48 @@ class SyncReportCommandTest extends TestCase
         $this->assertSame(60, $concurrency['minutes_two_or_more']);
         $this->assertSame(1, $concurrency['minutes_three_or_more']);
         $this->assertSame(2, $concurrency['documents']);
-        $this->assertSame(4.0, $concurrency['clashes_per_hour']);
+        $this->assertSame(4.0, $concurrency['offered_back_per_hour'], 'an hour together is enough for a rate');
+    }
+
+    public function test_the_same_paragraph_figure_counts_merges_with_a_loss_not_paragraphs(): void
+    {
+        $this->fixture();
+        $offered = $this->reportJson()['offered_back'];
+
+        // 4 paragraphs were offered back, in at most the 3 live merges that left something over, of 7 live merges.
+        $this->assertSame(4, $offered['paragraphs']);
+        $this->assertSame(3, $offered['in_at_most_merges']);
+        $this->assertSame(42.9, $offered['live_merges_with_a_loss_per_100']);
+    }
+
+    public function test_no_rate_per_hour_is_given_until_there_is_an_hour_together(): void
+    {
+        $this->fixture();
+
+        $today = $this->reportJson(1)['concurrency'];
+        $this->assertSame(30, $today['minutes_two_or_more']);
+        $this->assertNull($today['offered_back_per_hour']);
+        $this->assertSame(60, $today['minutes_needed_for_a_rate']);
+
+        $this->artisan('sync:report', ['--days' => 1])
+            ->expectsOutputToContain('too little time together to give a rate')
+            ->assertSuccessful();
+        $this->artisan('sync:report', ['--days' => 14])
+            ->doesntExpectOutputToContain('too little time together')
+            ->assertSuccessful();
+    }
+
+    public function test_the_header_says_what_the_figures_are_and_how_exact(): void
+    {
+        $this->fixture();
+
+        $this->artisan('sync:report', ['--days' => 14])
+            ->expectsOutputToContain('UTC calendar days; today is partial')
+            ->expectsOutputToContain('readers and idle open tabs included')
+            ->expectsOutputToContain('approximate')
+            ->expectsOutputToContain('a few tens of seconds')
+            ->assertSuccessful();
+        $this->assertSame('UTC', $this->reportJson()['timezone']);
     }
 
     public function test_the_window_is_the_last_n_days_counting_today(): void
@@ -171,15 +212,20 @@ class SyncReportCommandTest extends TestCase
     {
         $this->fixture();
 
-        $this->artisan('sync:report', ['--days' => 14])
-            ->expectsOutputToContain('In the last 14 days: 4 same-paragraph clashes across 2 documents; 60 minutes with two or more editors at once.')
-            ->assertSuccessful();
+        $line = 'In the last 14 days: 4 paragraphs offered back after same-paragraph clashes (in at most 3 live merges) across 2 documents; 60 minutes with two or more people in the document at once (readers and idle open tabs count).';
+        $this->artisan('sync:report', ['--days' => 14])->expectsOutputToContain($line)->assertSuccessful();
 
+        $this->assertSame($line, $this->reportJson()['summary']);
         $this->assertSame(
-            'In the last 14 days: 4 same-paragraph clashes across 2 documents; 60 minutes with two or more editors at once.',
-            $this->reportJson()['summary']
+            'In the last day: 3 paragraphs offered back after same-paragraph clashes (in at most 1 live merge) across 1 document; 30 minutes with two or more people in the document at once (readers and idle open tabs count).',
+            $this->reportJson(1)['summary']
         );
-        $this->assertSame('In the last day: 3 same-paragraph clashes across 1 document; 30 minutes with two or more editors at once.', $this->reportJson(1)['summary']);
+        $this->row($this->d1, $this->ben, '2026-10-17', 'lost_both_live', 1);
+        $this->row($this->d1, $this->ben, '2026-10-17', 'merge_live_lost', 1);
+        $this->assertSame(
+            'In the last day: 4 paragraphs offered back after same-paragraph clashes (in at most 2 live merges) across 2 documents; 30 minutes with two or more people in the document at once (readers and idle open tabs count).',
+            $this->reportJson(1)['summary']
+        );
     }
 
     public function test_the_text_report_lists_the_days_and_the_share(): void
@@ -187,6 +233,7 @@ class SyncReportCommandTest extends TestCase
         $this->fixture();
         $this->artisan('sync:report', ['--days' => 3])
             ->expectsOutputToContain('Merges: 8, 4 of them left something over (50.0%).')
+            ->expectsOutputToContain('Paragraphs offered back after a same-paragraph clash: 4 in 2 documents, in at most 3 live merges')
             ->expectsOutputToContain('lost_both_live')
             ->expectsOutputToContain('10-15')
             ->assertSuccessful();
@@ -199,8 +246,8 @@ class SyncReportCommandTest extends TestCase
         $this->assertSame([], $report['totals']);
         $this->assertSame(0, $report['merges']['total']);
         $this->assertNull($report['merges']['share_with_lost']);
-        $this->assertNull($report['concurrency']['clashes_per_hour']);
-        $this->assertSame('In the last 14 days: 0 same-paragraph clashes across 0 documents; 0 minutes with two or more editors at once.', $report['summary']);
+        $this->assertNull($report['concurrency']['offered_back_per_hour']);
+        $this->assertSame('In the last 14 days: 0 paragraphs offered back after same-paragraph clashes (in at most 0 live merges) across 0 documents; 0 minutes with two or more people in the document at once (readers and idle open tabs count).', $report['summary']);
 
         $this->artisan('sync:report')->expectsOutputToContain('Nothing recorded yet')->assertSuccessful();
     }
