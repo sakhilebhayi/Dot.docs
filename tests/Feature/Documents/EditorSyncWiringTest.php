@@ -150,13 +150,13 @@ class EditorSyncWiringTest extends TestCase
         $this->assertSame('status', $bar->getAttribute('role'));
         $this->assertSame('polite', $bar->getAttribute('aria-live'));
 
-        // The four notices, in this order. Each is hidden in the markup the
-        // server sends, so it does not show before Alpine runs.
+        // The five notices, in this order (the read only sentence sits before the stop reasons). Each is hidden
+        // in the markup the server sends, so it does not show before Alpine runs.
         $rows = [];
         foreach ($bar->querySelectorAll('.doc-notice') as $row) {
             $rows[] = $row->getAttribute('x-bind:hidden');
         }
-        $this->assertSame(['!conflict', '!lost.length', '!setAside', '!syncNotice'], $rows);
+        $this->assertSame(['!conflict', '!lost.length', '!setAside', 'editable || !!syncNotice', '!syncNotice'], $rows);
         foreach (['conflict', 'lost.length', 'setAside', 'syncNotice'] as $state) {
             $this->assertTrue($this->notice($bar, $state)->hasAttribute('hidden'), "the {$state} notice is hidden until Alpine runs");
             $this->assertNull($strip->querySelector('[x-show="'.$state.'"] button'));
@@ -236,7 +236,7 @@ class EditorSyncWiringTest extends TestCase
         // Not x-show and not x-cloak, anywhere in the bar: the attribute is
         // in the markup from the start and Alpine switches it.
         $this->assertCount(0, $bar->querySelectorAll('[x-show], [x-cloak]'));
-        $this->assertCount(4, $bar->querySelectorAll('.doc-notice'));
+        $this->assertCount(5, $bar->querySelectorAll('.doc-notice'));
         foreach (['conflict', 'lost.length', 'setAside', 'syncNotice'] as $state) {
             $row = $this->notice($bar, $state);
             $this->assertTrue($row->hasAttribute('hidden'));
@@ -567,5 +567,66 @@ class EditorSyncWiringTest extends TestCase
         $this->assertStringNotContainsString('.user.joined', $html);
         $this->assertStringNotContainsString('.user.left', $html);
         $this->assertStringNotContainsString('beforeunload', $html);
+    }
+
+    public function test_the_read_only_sentence_is_static_markup_in_the_notice_bar_bound_to_the_editable_literal(): void
+    {
+        $html = $this->editorHtml();
+        $dom = HTMLDocument::createFromString($html, LIBXML_NOERROR);
+        $bar = $dom->querySelector('.doc-notices');
+        $this->assertNotNull($bar);
+
+        $row = null;
+        foreach ($bar->querySelectorAll('.doc-notice') as $candidate) {
+            if ($candidate->getAttribute('x-bind:hidden') === 'editable || !!syncNotice') {
+                $row = $candidate;
+            }
+        }
+        $this->assertNotNull($row, 'the read only notice is in the bar');
+        $this->assertTrue($row->hasAttribute('hidden'), 'hidden in the markup, so nothing shows before Alpine runs');
+        $this->assertNull($row->querySelector('button'), 'a sentence, not a choice');
+        $this->assertSame(
+            'You can read this document but not change it.',
+            $this->words($row->querySelector('.doc-notice-text > span:nth-of-type(2)')),
+        );
+        // After a refusal that came with unstored typing, the second sentence says where it is kept.
+        $kept = $row->querySelector('[x-bind\\:hidden="!unsentKept"]');
+        $this->assertNotNull($kept);
+        $this->assertTrue($kept->hasAttribute('hidden'));
+        $this->assertStringContainsString('unsent words are not saved', $this->words($kept));
+        $this->assertStringContainsString('7 days', $this->words($kept));
+    }
+
+    public function test_the_page_draws_the_editable_literal_and_hands_a_refused_save_to_the_host(): void
+    {
+        $html = $this->editorHtml();
+
+        $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
+        $component = $alpine[1];
+
+        // A plain boolean literal, the only one the server decides for this page, and the field the host reads.
+        $this->assertMatchesRegularExpression('/\n\s+editable: true,\n/', $component);
+        $this->assertMatchesRegularExpression('/\n\s+unsentKept: false,\n/', $component);
+
+        // The editor is mounted from it, so a reader's editor is never editable, not even for a moment.
+        $this->assertStringContainsString('editable: this.editable,', $component);
+
+        // A save the server refuses reaches the host, which decides; nothing is decided in the attribute.
+        $this->assertStringContainsString("window.Livewire.hook('request'", $component);
+        $this->assertStringContainsString('this.syncHost().isSaveRequest(payload)', $component);
+        $this->assertStringContainsString('this.syncHost().saveRefused(status)', $component);
+        $this->assertStringContainsString('preventDefault()', $component);
+        $this->assertStringContainsString('this.unhookRefusal()', $component);
+
+        // The server is asked before a refusal makes the page read only (a 403 alone is not proof).
+        $this->assertMatchesRegularExpression('/canEdit: \(\) => window\.Livewire\.find\([^)]*\)\.canEdit\(\)/', $component);
+        $this->assertMatchesRegularExpression('/\n\s+accessCheckSince: 0,\n/', $component);
+
+        // A render that draws editable false makes the editor read only too, before the owner check, and the owner is told.
+        $this->assertMatchesRegularExpression(
+            '/if \(this\.editable === false && !handle\.readOnly\) \{\s+handle\.makeReadOnly\(\);.*?\}\s+if \(!this\.owns\) return;/s',
+            $component,
+        );
+        $this->assertStringContainsString('this.syncHost().readOnlyNoticed()', $component);
     }
 }

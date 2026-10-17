@@ -175,6 +175,10 @@ class AiAssistant extends Component
 
     public function applyResult(): void
     {
+        // Accepting a result writes into the document, so it needs the same
+        // right as typing does. Reading what the assistant says does not.
+        $this->authorize('update', $this->document);
+
         $this->dispatch('ai-apply', content: $this->result);
         $this->showResult = false;
     }
