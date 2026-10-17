@@ -7,7 +7,7 @@ use Illuminate\Console\Command;
 
 class LinkTeamToInfoDot extends Command
 {
-    protected $signature = 'infodot:link-team {team : This app\'s team id} {uuid : The InfoDot team uuid}';
+    protected $signature = 'infodot:link-team {team : This app\'s team id} {uuid : The InfoDot team uuid} {--promote : Turn a personal team into a company while linking it}';
 
     protected $description = 'Link an existing team (and the files in it) to a company in InfoDot';
 
@@ -28,8 +28,8 @@ class LinkTeamToInfoDot extends Command
             return self::FAILURE;
         }
 
-        if ($team->personal_team) {
-            $this->error('Personal teams are not companies and cannot be linked.');
+        if ($team->personal_team && ! $this->option('promote')) {
+            $this->error('This is a personal team, not a company. Re-run with --promote to turn it into a company and link it.');
 
             return self::FAILURE;
         }
@@ -46,7 +46,13 @@ class LinkTeamToInfoDot extends Command
             return self::FAILURE;
         }
 
-        $team->forceFill(['infodot_team_uuid' => $uuid])->save();
+        $promoted = $team->personal_team;
+        $team->forceFill(['infodot_team_uuid' => $uuid, 'personal_team' => false])->save();
+
+        if ($promoted) {
+            $this->warn('The personal team was promoted to a company. Anyone InfoDot lists as a member of that company will now be attached to it when they sign in.');
+        }
+
         $this->info("Team #{$team->id} \"{$team->name}\" is now linked to the InfoDot company {$uuid}.");
 
         return self::SUCCESS;
