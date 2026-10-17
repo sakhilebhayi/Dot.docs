@@ -104,8 +104,8 @@
         isOffline: !navigator.onLine,
         docUuid: '{{ $document->uuid }}',
         // Whether the server drew this page for somebody who may change the
-        // document (DocumentPolicy::update()). The ONE server-drawn literal
-        // besides the versions and the uuid, and a plain boolean: it is the
+        // document (DocumentPolicy::update()). The only server-drawn literal
+        // that decides a gate (besides the versions, the uuid and metricsOn), and a plain boolean: it is the
         // page-load truth sync/host.js decides read only by (a person who may
         // not change the document never saves, drafts or sends a beacon, and
         // the editor is mounted not editable). It turns false on this object
@@ -326,7 +326,7 @@
             // stop seeing a face that is no longer here. By beacon, like the
             // unload save: nothing else is delivered from a closing page.
             window.addEventListener('pagehide', () => {
-                // The counters go first and never in the way: a beacon, nothing awaited, nothing thrown.
+                // The counters go after the editor's own pagehide flush (registered when it was mounted, so it runs first and its beacon takes the shared budget first), and never in the way: a beacon, nothing awaited, nothing thrown.
                 try { this.syncMetrics()?.flush({ beacon: true }); } catch (_) {}
                 if (typeof navigator.sendBeacon !== 'function') return;
                 navigator.sendBeacon(
@@ -390,8 +390,9 @@
                 now: () => Date.now(),
                 info: (...args) => console.info(...args),
                 log: (...args) => console.error(...args),
-                // What happened, as counts (sync/metrics.js). Nothing comes back and nothing waits on it.
-                metric: (kind, detail) => this.syncMetrics()?.record(kind, detail),
+                // What happened, as counts (sync/metrics.js). Nothing comes back and nothing waits on it. Switched
+                // off, there is no env.metric at all, so the host does no extra work for a counter nobody keeps.
+                metric: this.metricsOn ? (kind, detail) => this.syncMetrics()?.record(kind, detail) : undefined,
             });
         },
 
@@ -431,9 +432,10 @@
 
         // The co-editing counters, parked on the element for the same reason
         // (and so every data object reaches the same one). Null when the
-        // server switched counting off. The flush is a POST that may outlive
-        // the page, with the token in the body as the unload beacons do;
-        // whatever goes wrong with it is dropped by the module.
+        // server switched counting off. The once-a-minute flush is an ordinary
+        // POST; only the flush on leaving is a beacon, with the token in the
+        // body as the other unload beacons have it. Whatever goes wrong with
+        // either is dropped by the module.
         syncMetrics() {
             return this.$refs.editorEl?.__dotdocMetrics ?? null;
         },
@@ -448,7 +450,6 @@
                 token: () => document.querySelector('meta[name=csrf-token]').content,
                 send: (body) => fetch(url, {
                     method: 'POST',
-                    keepalive: true,
                     credentials: 'same-origin',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                     body,
@@ -580,9 +581,7 @@
             clearTimeout(this.typingTimeout);
             if (this.unhookRefusal) this.unhookRefusal();
             this.syncEngine()?.stop();
-            try { this.syncMetrics()?.flush({ beacon: true }); } catch (_) {}
             if (this.$refs.editorEl) this.$refs.editorEl.__dotdocSync = null;
-            if (this.$refs.editorEl) this.$refs.editorEl.__dotdocMetrics = null;
             // Echo.join() hands back the CHANNEL, which has no leave() of its
             // own — leaving is done on the Echo instance, by name. Calling
             // this.echo.leave() threw, and Alpine's error report (which
@@ -597,6 +596,10 @@
             if (this.owns) {
                 window.DotDoc?.get(this.$refs.editorEl)?.destroy();
             }
+            // The counters leave by beacon AFTER the editor's own destroy, which flushes the unsaved text by beacon:
+            // the browser shares one 64 KiB budget between a page's beacons, and the document comes first.
+            try { this.syncMetrics()?.flush({ beacon: true }); } catch (_) {}
+            if (this.$refs.editorEl) this.$refs.editorEl.__dotdocMetrics = null;
         },
 
         // Apply an AI result to the editor.

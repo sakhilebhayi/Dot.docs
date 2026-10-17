@@ -118,10 +118,23 @@ class EditorSyncWiringTest extends TestCase
         $this->assertStringContainsString('metricsOn: true,', $attribute);
         $this->assertStringContainsString('createMetrics', $attribute);
         // The host is told what happens through env.metric, and the counters live on the element like the engine.
-        $this->assertStringContainsString('metric: (kind, detail)', $attribute);
+        // Switched off, the host is given no env.metric at all, so it does no extra work for a counter nobody keeps.
+        $this->assertStringContainsString('metric: this.metricsOn ? (kind, detail) =>', $attribute);
+        $this->assertStringContainsString(': undefined,', $attribute);
+        // The once-a-minute POST is an ordinary request: only the beacon on leaving is made to outlive the page.
+        $this->assertStringNotContainsString('keepalive', $attribute);
         $this->assertStringContainsString('__dotdocMetrics', $attribute);
         // On leaving, by the beacon path, before the presence beacon's own early return.
         $this->assertMatchesRegularExpression("/addEventListener\('pagehide', \(\) => \{\s*(?:\/\/[^\n]*\s*)?try \{ this\.syncMetrics\(\)\?\.flush\(\{ beacon: true \}\); \} catch \(_\) \{\}\s*if \(typeof navigator\.sendBeacon/", $attribute);
+        // Real removal: the editor is destroyed FIRST (its flushSave beacon is registered first and gets the
+        // browser's shared 64 KiB beacon budget), then the counters leave by beacon.
+        $destroy = strpos($attribute, 'destroy() {');
+        $this->assertNotFalse($destroy);
+        $editorDestroy = strpos($attribute, '?.destroy();', $destroy);
+        $metricsFlush = strpos($attribute, 'this.syncMetrics()?.flush({ beacon: true })', $destroy);
+        $this->assertNotFalse($editorDestroy);
+        $this->assertNotFalse($metricsFlush);
+        $this->assertGreaterThan($editorDestroy, $metricsFlush, 'the save beacon goes before the counters');
         // The module holds no switch of its own: the decision logic is not in the attribute.
         $this->assertStringNotContainsString('peers_', $attribute);
         $this->assertStringNotContainsString('merge_live', $attribute);

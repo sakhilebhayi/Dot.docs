@@ -577,3 +577,30 @@ test('nothing the host tells the counters is a word of the document', async () =
         assert.ok(kind === 'peers' || metricKey(kind, detail) !== null, `${kind} ${JSON.stringify(detail)}`);
     }
 });
+
+test('with the counters switched off (no env.metric) the host does no extra merge work for the echo check', async () => {
+    const run = async (metrics) => {
+        const { clock, A } = await both({ A: { metrics } });
+        A.type('X');
+        await A.debounce();
+        A.saveArrives();
+        A.saveNeverAnswers();
+        A.type('XY');
+        await A.debounce();
+        clock.now += SAVE_EXPIRY_MS;
+        await A.fireTimer();
+        await A.pollAnswers(503, null);
+        const before = A.mergeCalls;
+        await A.land();
+        await A.poll();
+
+        return { merges: A.mergeCalls - before, text: A.text() };
+    };
+
+    const off = await run(false);
+    const on = await run(true);
+
+    assert.equal(off.merges, 1, 'one merge');
+    assert.equal(on.merges, 2, 'the echo check is the second, and only when somebody is counting');
+    assert.equal(off.text, on.text);
+});
