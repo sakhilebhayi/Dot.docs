@@ -146,3 +146,78 @@ test('other documents\' lost rows are not touched, and the 7-day sweep removes a
         done();
     }
 });
+
+// ───────────────────────────────────────────────────────── parked stale drafts: the queue of texts to offer
+
+import { chooseNextPark, nextParkToOffer, parkStaleDraft, resolveParked } from '../../resources/js/offline.js';
+
+const text = (t) => JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: t }] }] });
+
+test('a park made to be offered keeps its flag when a newer park moves it to a kept key, and nextParkToOffer takes the newest unresolved', async () => {
+    const { rows, done } = fresh();
+    try {
+        await parkStaleDraft(U, text('first'), 2, { offerable: true });
+        await later();
+        await parkStaleDraft(U, text('second'), 3, { offerable: true });
+        await later();
+        await parkStaleDraft(U, text('copy for recovery by hand'), 3); // not offerable
+        await later();
+        await parkStaleDraft(U, text('third'), 4, { offerable: true });
+
+        const keys = [...rows.keys()].sort();
+        assert.equal(keys.length, 4);
+        assert.ok(rows.get(`stale-${U}`).offerable === true);
+        assert.ok([...rows.values()].filter((row) => row.offerable === true).length === 3, 'the flag travelled with the earlier parks');
+
+        const next = await nextParkToOffer(U);
+        assert.equal(next.json, text('third'));
+        assert.equal(next.baseVersion, 4);
+    } finally {
+        done();
+    }
+});
+
+test('resolveParked marks every park holding that text, and the queue moves on, oldest last, until nothing is left', async () => {
+    const { rows, done } = fresh();
+    try {
+        await parkStaleDraft(U, text('A'), 2, { offerable: true });
+        await later();
+        await parkStaleDraft(U, text('B'), 2, { offerable: true });
+        await later();
+        await parkStaleDraft(U, text('C'), 2, { offerable: true });
+        await parkStaleDraft('other-doc', text('X'), 2, { offerable: true });
+
+        assert.equal((await nextParkToOffer(U)).json, text('C'));
+        assert.equal(await resolveParked(U, text('C')), true);
+        assert.equal((await nextParkToOffer(U)).json, text('B'));
+        await resolveParked(U, text('B'));
+        assert.equal((await nextParkToOffer(U)).json, text('A'));
+        await resolveParked(U, text('A'));
+        assert.equal(await nextParkToOffer(U), null);
+
+        assert.equal(rows.size, 4, 'resolving keeps the rows for their 7 days');
+        assert.equal((await nextParkToOffer('other-doc')).json, text('X'), 'another document is untouched');
+    } finally {
+        done();
+    }
+});
+
+test('chooseNextPark ignores a park without the flag, a resolved one and an old build\'s row', () => {
+    assert.equal(chooseNextPark([{ docUuid: 'stale-d', json: '{}', parkedAt: 5 }]), null);
+    assert.equal(chooseNextPark([{ docUuid: 'stale-d', json: '{}', parkedAt: 5, offerable: true, resolved: true }]), null);
+    assert.equal(chooseNextPark([]), null);
+    assert.equal(chooseNextPark([{ docUuid: 'stale-d@1', json: 'a', parkedAt: 1, offerable: true }, { docUuid: 'stale-d', json: 'b', parkedAt: 2, offerable: true }]).json, 'b');
+});
+
+test('a swept park is not offered: the 7-day sweep removes it, flag or not', async () => {
+    const { rows, done } = fresh();
+    try {
+        await parkStaleDraft(U, text('old'), 2, { offerable: true });
+        rows.get(`stale-${U}`).parkedAt = 1;
+
+        assert.equal(await purgeStaleDrafts(Date.now()), 1);
+        assert.equal(await nextParkToOffer(U), null);
+    } finally {
+        done();
+    }
+});

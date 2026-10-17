@@ -196,8 +196,13 @@ export function keepKeyFor(docUuid, row, existingKeys, now = Date.now()) {
  * declined to restore, and the set-aside paths (Load theirs, an accepted
  * suggestion). None of these is this page's to destroy - least of all the
  * previous visit's park, which nothing in this visit has offered back.
+ *
+ * `options.offerable` marks a park made because the page SET THE TEXT ASIDE
+ * and offered it back. Such a park is offered again after the writer has dealt
+ * with the one on offer (nextParkToOffer(), resolveParked()); every other
+ * park stays a copy for recovery by hand.
  */
-export async function parkStaleDraft(docUuid, json, baseVersion = null) {
+export async function parkStaleDraft(docUuid, json, baseVersion = null, options = {}) {
     try {
         const db = await openDb();
         await new Promise((resolve, reject) => {
@@ -216,6 +221,9 @@ export async function parkStaleDraft(docUuid, json, baseVersion = null) {
                         savedAt: now,
                         parkedAt: now,
                         baseVersion: Number.isFinite(baseVersion) ? baseVersion : null,
+                        // A park made to be OFFERED (a text set aside) can be offered again later (nextParkToOffer());
+                        // any other park is a copy for recovery by hand.
+                        offerable: options.offerable === true,
                     });
                 };
                 if (!earlier) {
@@ -246,6 +254,108 @@ export async function parkStaleDraft(docUuid, json, baseVersion = null) {
             tx.onabort    = () => reject(tx.error);
         });
     } catch (_) { /* silent — don't break the editor */ }
+}
+
+/**
+ * The park to offer next: among a document's parks (the plain `stale-<uuid>`
+ * and the kept `stale-<uuid>@...` rows) the newest that was made to be offered
+ * and has not been dealt with. Pure, and exported for `npm test`.
+ *
+ * @param {object[]} rows the document's stale- rows, each with its `docUuid` key
+ * @returns {{json: string, baseVersion: number|null, parkedAt: number}|null}
+ */
+export function chooseNextPark(rows) {
+    const candidates = rows.filter((row) => row && row.offerable === true && row.resolved !== true && typeof row.json === 'string');
+    if (candidates.length === 0) {
+        return null;
+    }
+
+    const newest = [...candidates].sort(
+        // Newest first; the plain key holds the LATEST park, so on a tie it comes before a kept one.
+        (a, b) =>
+            (Number(b.parkedAt) || 0) - (Number(a.parkedAt) || 0) ||
+            Number(String(a.docUuid).includes('@')) - Number(String(b.docUuid).includes('@')) ||
+            String(b.docUuid).localeCompare(String(a.docUuid))
+    )[0];
+    const baseVersion = Number(newest.baseVersion);
+
+    return {
+        json: newest.json,
+        baseVersion: Number.isFinite(baseVersion) && newest.baseVersion !== null ? baseVersion : null,
+        parkedAt: Number(newest.parkedAt) || 0,
+    };
+}
+
+/** Every stale- row of a document, plain and kept, read inside the caller's transaction. */
+function readStaleRows(store, docUuid, done) {
+    const rows = [];
+    const plain = STALE_PREFIX + docUuid;
+    const cursor = store.openCursor(IDBKeyRange.bound(plain, plain + '\uffff'));
+    cursor.onsuccess = () => {
+        const at = cursor.result;
+        if (at) {
+            if (at.key === plain || at.key.startsWith(plain + '@')) {
+                rows.push(at.value);
+            }
+            at.continue();
+
+            return;
+        }
+        done(rows);
+    };
+}
+
+/**
+ * The next text to offer the writer: the newest offerable park of this document
+ * that nobody has dealt with (chooseNextPark()). Read only; null when there is
+ * none or the store cannot be read.
+ *
+ * @returns {Promise<{json: string, baseVersion: number|null, parkedAt: number}|null>}
+ */
+export async function nextParkToOffer(docUuid) {
+    try {
+        const db = await openDb();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            let result = null;
+            readStaleRows(tx.objectStore(STORE_NAME), docUuid, (rows) => {
+                result = chooseNextPark(rows);
+            });
+            tx.oncomplete = () => resolve(result);
+            tx.onerror    = () => reject(tx.error);
+            tx.onabort    = () => reject(tx.error);
+        });
+    } catch (_) {
+        return null;
+    }
+}
+
+/**
+ * The writer has dealt with this text (Put it back, or Discard): every park of
+ * the document that holds exactly it is marked resolved, so it is not offered
+ * again. The rows stay, for their 7 days.
+ *
+ * @returns {Promise<boolean>} whether the write completed
+ */
+export async function resolveParked(docUuid, json) {
+    try {
+        const db = await openDb();
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            readStaleRows(store, docUuid, (rows) => {
+                rows
+                    .filter((row) => row.json === json && row.resolved !== true)
+                    .forEach((row) => store.put({ ...row, resolved: true }));
+            });
+            tx.oncomplete = resolve;
+            tx.onerror    = () => reject(tx.error);
+            tx.onabort    = () => reject(tx.error);
+        });
+        return true;
+    } catch (_) { /* silent — don't break the editor */
+        return false;
+    }
 }
 
 /**

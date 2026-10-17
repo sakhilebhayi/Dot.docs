@@ -5,7 +5,7 @@ import { Schema } from 'prosemirror-model';
 import { createSyncEngine } from '../../../resources/js/editor/sync/engine.js';
 import { createSyncHost, unloadSaveBody } from '../../../resources/js/editor/sync/host.js';
 import { mergeDocuments } from '../../../resources/js/editor/sync/merge.js';
-import { keepKeyFor, unionLostRows } from '../../../resources/js/offline.js';
+import { chooseNextPark, keepKeyFor, unionLostRows } from '../../../resources/js/offline.js';
 
 /**
  * The fake world the sync host is tested in (sync.host.test.js) and walked
@@ -448,6 +448,10 @@ export function makeTab({ server, clock }, name, options = {}) {
         },
     };
 
+    const staleRowsOf = (uuid) =>
+        [...t.drafts.entries()]
+            .filter(([key]) => key === `stale-${uuid}` || key.startsWith(`stale-${uuid}@`))
+            .map(([key, row]) => ({ ...row, docUuid: key }));
     // The lost rows of a document in this browser's store: the plain `lost-<uuid>` and every `lost-<uuid>@<tab>`.
     const lostKeyOf = (uuid, tabId) => `lost-${uuid}${tabId ? `@${tabId}` : ''}`;
     const lostRowsOf = (uuid) =>
@@ -473,7 +477,7 @@ export function makeTab({ server, clock }, name, options = {}) {
                       t.draftCalls.push('clearDraft');
                       t.drafts.delete(uuid);
                   },
-                  parkStaleDraft: async (uuid, json, baseVersion) => {
+                  parkStaleDraft: async (uuid, json, baseVersion, options = {}) => {
                       t.draftCalls.push('parkStaleDraft');
                       // As offline.js does: the earlier park is kept under a second key, the plain key holds the latest.
                       const plain = `stale-${uuid}`;
@@ -481,7 +485,18 @@ export function makeTab({ server, clock }, name, options = {}) {
                       if (earlier) {
                           t.drafts.set(keepKeyFor(uuid, earlier, [...t.drafts.keys()], clock.now), earlier);
                       }
-                      t.drafts.set(plain, { json, baseVersion, parkedAt: clock.now });
+                      t.drafts.set(plain, { json, baseVersion, parkedAt: clock.now, offerable: options.offerable === true });
+                  },
+                  // The queue of texts to offer (not recorded in draftCalls: the open sequence tests pin the calls that matter to them).
+                  nextParkToOffer: async (uuid) => chooseNextPark(staleRowsOf(uuid)),
+                  resolveParked: async (uuid, json) => {
+                      staleRowsOf(uuid).forEach((row) => {
+                          if (row.json === json) {
+                              t.drafts.get(row.docUuid).resolved = true;
+                          }
+                      });
+
+                      return true;
                   },
                   saveBase: async (uuid, json, baseVersion) => {
                       t.draftCalls.push('saveBase');

@@ -91,12 +91,13 @@ export const DISCARD_QUESTION =
 
 /**
  * What Load theirs asks when a text is already set aside and offered back: the
- * new text takes the offer's place, so the earlier one is no longer offered
- * on the page. A browser that keeps drafts still holds it in a kept park for
- * 7 days (parkStaleDraft keeps earlier parks); one that does not has no copy.
+ * new text takes the offer's place. A browser that keeps drafts holds the
+ * earlier one in a kept park (parkStaleDraft keeps earlier parks) and offers it
+ * again once the new one has been put back or discarded (offerNextPark()); one
+ * that does not has no copy, and the earlier text is gone.
  */
 export const LOAD_THEIRS_REPLACES_QUESTION =
-    'A text is already set aside from earlier. Loading theirs sets your text on the page aside instead, and the earlier text will no longer be offered here. Continue?';
+    'A text is already set aside from earlier. Loading theirs sets your text on the page aside instead. Where this browser keeps drafts, the earlier text is offered again once you have dealt with this one. Continue?';
 
 /**
  * What Dismiss all asks before it empties the lost row (section 6.5). Always
@@ -1781,11 +1782,17 @@ export function createSyncHost(view, env) {
             // is what is set aside; parking never overwrites, so the earlier
             // text stays parked too.
             let parked = null;
+            const superseded = [];
             while (parked !== mine) {
+                if (parked !== null) {
+                    superseded.push(parked);
+                }
                 parked = mine;
-                await drafts.parkStaleDraft(view.docUuid, parked, view.baseVersion);
+                await drafts.parkStaleDraft(view.docUuid, parked, view.baseVersion, { offerable: true });
                 mine = JSON.stringify(handle.editor.getJSON());
             }
+            // The earlier states of the same typing are not texts to offer again.
+            superseded.forEach((earlier) => drafts.resolveParked?.(view.docUuid, earlier));
             env.info(
                 '[Dot.Doc] Your unsaved text was kept as stale-' +
                     view.docUuid +
@@ -1866,7 +1873,11 @@ export function createSyncHost(view, env) {
             handle.editor.commands.setContent(JSON.parse(view.setAside), { errorOnInvalidContent: true });
             // The saves sent so far did not carry this text (see persist()).
             view.putBackSeq = view.saveSeq;
+            const putBack = view.setAside;
             forgetSetAside();
+            // Dealt with: not offered again. The next kept park, if any, is offered now.
+            env.drafts()?.resolveParked?.(view.docUuid, putBack);
+            offerNextPark();
         } catch (_) {
             // Nothing was put back, so nothing more is owed than before.
             view.overwriteOwed = owedBefore;
@@ -1896,7 +1907,62 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        const discarded = view.setAside;
         forgetSetAside();
+        // Dealt with: it stays parked for its 7 days but is not offered again. The next kept park, if any, is offered now.
+        if (discarded) {
+            env.drafts()?.resolveParked?.(view.docUuid, discarded);
+            offerNextPark();
+        }
+    }
+
+    /**
+     * The next text to offer. Parks keep earlier set-aside texts (parkStaleDraft
+     * never overwrites), but the page offers one at a time. When nothing is set
+     * aside, the newest park made to be offered and not yet dealt with (Put it
+     * back, Discard) is offered, as a draft from an earlier visit (so Put it back
+     * asks its usual questions); one that the page already shows is dealt with
+     * without being offered. Never replaces a text on offer, never offers the same
+     * text twice (dealing with it marks the rows), and the 7-day sweep removes the
+     * rows it gets to.
+     *
+     * @returns {Promise<void>}
+     */
+    async function offerNextPark() {
+        const drafts = env.drafts();
+        const handle = env.handle();
+        // Fail-closed: the editor holds something that is not the document.
+        if (!drafts || !drafts.nextParkToOffer || !handle || handle.autosaves === false) {
+            return;
+        }
+
+        for (let attempt = 0; attempt < 50 && !view.setAside; attempt += 1) {
+            let park = null;
+            try {
+                park = await drafts.nextParkToOffer(view.docUuid);
+            } catch (_) {
+                park = null;
+            }
+            // Something may have been set aside while the store was read.
+            if (!park || view.setAside) {
+                return;
+            }
+
+            let differs = false;
+            try {
+                differs = env.documentsDiffer(JSON.parse(park.json), handle.editor.getJSON());
+            } catch (_) {
+                differs = false; // not a document: nothing to put back
+            }
+            if (differs) {
+                view.setAside = park.json;
+                view.setAsideFrom = 'draft';
+                view.setAsideBase = view.baseVersion;
+
+                return;
+            }
+            await drafts.resolveParked?.(view.docUuid, park.json);
+        }
     }
 
     /**
@@ -1968,6 +2034,8 @@ export function createSyncHost(view, env) {
         // overwritten and the fresh entries read back as last visit's.
         await reofferLost(drafts);
         await restoreDraftIfRestorable(drafts, handle);
+        // Nothing set aside by the draft logic: an earlier visit's set-aside text that was never dealt with is offered.
+        await offerNextPark();
         // The awaits above can see `confirmed` nulled (a save that failed or
         // expired): then the known document of this very version is the
         // row, and when there is none the row already stored is left alone
@@ -2017,8 +2085,6 @@ export function createSyncHost(view, env) {
                 // Park it under a stale- key so it can be recovered by
                 // hand; parkStaleDraft() stamps parkedAt, and the sweep on
                 // the next app boot collects it after 7 days.
-                await drafts.parkStaleDraft(view.docUuid, draft.json, draft.baseVersion);
-                drafts.clearDraft(view.docUuid);
                 // Offer it in the page as well, through the notice bar and
                 // Put it back. Not when the document already says exactly
                 // this (the unload beacon stored it and nobody has saved
@@ -2026,8 +2092,13 @@ export function createSyncHost(view, env) {
                 // the page cannot tell whether this text was never stored
                 // or was stored and then built on by later saves, so the
                 // source is recorded as a draft and putBack() asks before
-                // it replaces anything.
-                if (env.documentsDiffer(parsed, editor.getJSON())) {
+                // it replaces anything. A park of a text that is offered is
+                // marked so, and is offered again later if the writer does
+                // not deal with it (see offerNextPark()).
+                const offered = env.documentsDiffer(parsed, editor.getJSON());
+                await drafts.parkStaleDraft(view.docUuid, draft.json, draft.baseVersion, { offerable: offered });
+                drafts.clearDraft(view.docUuid);
+                if (offered) {
                     view.setAside = draft.json;
                     view.setAsideFrom = 'draft';
                     view.setAsideBase = view.baseVersion;
@@ -2315,7 +2386,7 @@ export function createSyncHost(view, env) {
      * @param {number} version the version the page will show
      */
     function setAsideTyping(mine, version) {
-        env.drafts()?.parkStaleDraft(view.docUuid, mine, view.baseVersion);
+        env.drafts()?.parkStaleDraft(view.docUuid, mine, view.baseVersion, { offerable: true });
         view.setAside = mine;
         view.setAsideFrom = 'conflict';
         view.setAsideBase = version;

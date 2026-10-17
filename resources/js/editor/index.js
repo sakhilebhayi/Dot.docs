@@ -49,9 +49,11 @@ import {
     adoptLost,
     loadLost,
     markLostDismissed,
+    nextParkToOffer,
     parkLost,
     parkStaleDraft,
     purgeStaleDrafts,
+    resolveParked,
     saveBase,
     saveDraft,
 } from '../offline';
@@ -850,7 +852,9 @@ window.DotDoc = DotDoc;
 // parked rows accumulating in IndexedDB for ever. saveBase()/loadBase() keep
 // the server document a tab's typing is based on, so a stale draft can be
 // merged on the next visit; parkLost()/loadLost()/markLostDismissed() keep
-// the blocks a merge could not keep, for the notice bar's lost row.
+// the blocks a merge could not keep, for the notice bar's lost row (one row
+// per tab, adoptLost() on open); nextParkToOffer()/resolveParked() are the
+// queue of set-aside texts the page offers one after another.
 window.offlineDraft = {
     saveDraft,
     loadDraft,
@@ -863,6 +867,8 @@ window.offlineDraft = {
     loadLost,
     adoptLost,
     markLostDismissed,
+    nextParkToOffer,
+    resolveParked,
 };
 
 export default DotDoc;

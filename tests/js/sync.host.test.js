@@ -5005,6 +5005,192 @@ test('after a reload one tab\'s Put it back and the other tab\'s entries do not 
     assert.ok(shared.get(`lost-${UUID}@X`).entries.map((entry) => entry.excerpt).includes('X again'), 'X\'s row is not rewritten by Y');
 });
 
+// ───────────────────────────────────────────────────────── the queue of set-aside texts: kept parks are offered, one at a time
+
+/** Parks as an earlier visit left them: the newest under the plain key, earlier ones under kept keys. */
+function seedParks(drafts, parks) {
+    parks
+        .slice()
+        .sort((a, b) => b.parkedAt - a.parkedAt)
+        .forEach((park, index) => {
+            const key = index === 0 ? STALE : `${STALE}@${park.parkedAt}`;
+            drafts.set(key, { json: JSON.stringify(doc(park.text)), baseVersion: 1, parkedAt: park.parkedAt, offerable: park.offerable ?? true, ...(park.resolved ? { resolved: true } : {}) });
+        });
+}
+
+test('texts parked and offered earlier come back one after another: the newest first, then each older one once the standing text is dealt with', async () => {
+    const w = world();
+    const drafts = new Map();
+    seedParks(drafts, [
+        { text: 'park C', parkedAt: 3000 },
+        { text: 'park B', parkedAt: 2000 },
+        { text: 'park A', parkedAt: 1000 },
+    ]);
+    const tab = w.tab('T', { drafts });
+    await tab.open();
+    await settle();
+
+    assert.equal(tab.view.setAside, JSON.stringify(doc('park C')), 'the newest park is on offer when nothing else is');
+    assert.equal(tab.view.setAsideFrom, 'draft');
+
+    tab.host().putBack(); // asks, answered yes
+    await settle();
+    assert.equal(tab.text(), 'park C');
+    assert.equal(tab.view.setAside, JSON.stringify(doc('park B')), 'the next park is offered');
+
+    tab.host().discardSetAside();
+    await settle();
+    assert.equal(tab.view.setAside, JSON.stringify(doc('park A')));
+    tab.host().discardSetAside();
+    await settle();
+    assert.equal(tab.view.setAside, null, 'nothing is left');
+    assert.deepEqual([...drafts.values()].filter((row) => row.offerable && !row.resolved), [], 'every park is dealt with and still kept for its 7 days');
+    assert.equal([...drafts.keys()].filter((key) => key.startsWith('stale-')).length, 3);
+});
+
+test('a reload in the middle of the queue offers the next text, not the one that was dealt with', async () => {
+    const w = world();
+    const drafts = new Map();
+    seedParks(drafts, [
+        { text: 'park C', parkedAt: 3000 },
+        { text: 'park B', parkedAt: 2000 },
+    ]);
+    const tab = w.tab('T', { drafts });
+    await tab.open();
+    await settle();
+    tab.host().discardSetAside(); // C is dealt with; B is on offer
+    await settle();
+    assert.equal(tab.view.setAside, JSON.stringify(doc('park B')));
+
+    const again = w.tab('T2', { drafts }); // the page is reloaded
+    await again.open();
+    await settle();
+
+    assert.equal(again.view.setAside, JSON.stringify(doc('park B')));
+});
+
+test('a text the writer discarded stays parked but is not offered again, on this page or after a reload', async () => {
+    const { B, server, clock } = await conflicted();
+    await B.host().loadTheirs(); // B1 is set aside and parked, made to be offered
+    assert.equal(B.drafts.get(STALE).offerable, true);
+
+    B.host().discardSetAside(); // asks, answered yes
+    await settle();
+    assert.equal(B.view.setAside, null);
+    assert.equal(B.drafts.get(STALE).resolved, true);
+
+    const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
+    await again.open();
+    await settle();
+    assert.equal(again.view.setAside, null);
+});
+
+test('the earlier states of typing that was parked more than once are not offered again after the last one is dealt with', async () => {
+    const { B } = await conflicted();
+    const realPark = B.draftStore.parkStaleDraft;
+    let typed = false;
+    B.draftStore.parkStaleDraft = async (...args) => {
+        if (!typed) {
+            typed = true;
+            B.type('B1 more');
+            await settle();
+        }
+
+        return realPark(...args);
+    };
+    await B.host().loadTheirs(); // parked twice: 'B1', then 'B1 more'
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1 more')));
+
+    B.host().discardSetAside();
+    await settle();
+
+    assert.equal(B.view.setAside, null, 'the first state of the same typing is not a second text');
+});
+
+test('a text set aside and never dealt with is offered again on the next visit', async () => {
+    const { B, server, clock } = await conflicted();
+    await B.host().loadTheirs();
+
+    const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
+    await again.open();
+    await settle();
+
+    assert.equal(again.view.setAside, JSON.stringify(doc('B1')));
+});
+
+test('a standing set-aside text is never replaced by a queued one; the queue waits', async () => {
+    const w = world();
+    const drafts = new Map();
+    // The live draft of a visit the document has moved past, with no base row: set aside at open as a draft.
+    drafts.set(UUID, { json: JSON.stringify(doc('draft text')), baseVersion: 0 });
+    seedParks(drafts, [{ text: 'queued earlier', parkedAt: 9_000_000_000_000 }]); // newer than the draft's park: only the guard keeps it off the page
+    const tab = w.tab('T', { drafts });
+    await tab.open();
+    await settle();
+
+    assert.equal(tab.view.setAside, JSON.stringify(doc('draft text')), 'the draft of this visit is on offer');
+
+    tab.host().discardSetAside();
+    await settle();
+    assert.equal(tab.view.setAside, JSON.stringify(doc('queued earlier')), 'then the queued one');
+});
+
+test('the park of a draft set aside at open was made to be offered: reloaded without dealing with it, it is on offer again', async () => {
+    const w = world();
+    const drafts = new Map();
+    drafts.set(UUID, { json: JSON.stringify(doc('draft text')), baseVersion: 0 });
+    const tab = w.tab('T', { drafts });
+    await tab.open();
+    await settle();
+    assert.equal(tab.view.setAside, JSON.stringify(doc('draft text')));
+
+    const again = w.tab('T2', { drafts });
+    await again.open();
+    await settle();
+
+    assert.equal(again.view.setAside, JSON.stringify(doc('draft text')));
+});
+
+test('a text set aside while the store is being read is not replaced by the queued one that was read', async () => {
+    const w = world();
+    const drafts = new Map();
+    seedParks(drafts, [{ text: 'queued', parkedAt: 9_000_000_000_000 }]);
+    const tab = w.tab('T', { drafts });
+    const realNext = tab.draftStore.nextParkToOffer;
+    tab.draftStore.nextParkToOffer = async (...args) => {
+        const park = await realNext(...args);
+        tab.view.setAside = JSON.stringify(doc('set aside meanwhile')); // Load theirs, say, finished during the read
+        tab.view.setAsideFrom = 'conflict';
+
+        return park;
+    };
+    await tab.open();
+    await settle();
+
+    assert.equal(tab.view.setAside, JSON.stringify(doc('set aside meanwhile')));
+});
+
+test('a queued text that equals the page is dealt with without being offered, and a fail-closed tab offers nothing', async () => {
+    const w = world();
+    const drafts = new Map();
+    seedParks(drafts, [
+        { text: 'start', parkedAt: 2000 }, // the page shows exactly this
+        { text: 'older and different', parkedAt: 1000 },
+    ]);
+    const tab = w.tab('T', { drafts });
+    await tab.open();
+    await settle();
+
+    assert.equal(tab.view.setAside, JSON.stringify(doc('older and different')));
+    assert.equal(drafts.get(STALE).resolved, true, 'the identical text is not on offer and is not asked about again');
+
+    const closed = w.tab('R', { drafts: new Map(drafts), failClosed: true });
+    seedParks(closed.drafts, [{ text: 'queued', parkedAt: 5000 }]);
+    await closed.open();
+    await settle();
+    assert.equal(closed.view.setAside, null);
+});
+
 test('Put it back does nothing for an entry that is not there', async () => {
     const { B } = await lostOne();
 
