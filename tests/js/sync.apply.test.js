@@ -463,3 +463,51 @@ test('more than MAX_BLOCK_STEPS block steps fall back to the one-range apply: a 
     assert.deepEqual(stepTypes(beyond), ['replace']);
     assert.ok(beyond.doc.eq(schema.nodeFromJSON(arriving)));
 });
+
+test('an insertion at a block boundary and the replace of the block that starts there are two steps, the replace first', () => {
+    // p2 changes markup (its align), so it is replaced WHOLE, from the boundary where n1 is inserted.
+    const held = doc([para('p1', 'One'), para('p2', 'Two')]);
+    const arriving = doc([para('p1', 'One'), para('n1', 'New'), { ...para('p2', 'Two'), attrs: { id: 'p2', align: 'center' } }]);
+    const state = stateOf(held);
+    const boundary = startOf(state.doc, 'p2');
+
+    const tr = remoteTransaction(state, arriving, ReplaceStep);
+
+    assert.deepEqual(stepTypes(tr), ['replace', 'replace']);
+    assert.deepEqual(
+        [tr.steps[0].from, tr.steps[0].to],
+        [boundary, state.doc.content.size],
+        'the replace of the block that starts at the boundary goes first, over the whole block'
+    );
+    assert.deepEqual([tr.steps[1].from, tr.steps[1].to], [boundary, boundary], 'then the insertion at the same boundary');
+    assert.equal(tr.steps[1].slice.content.childCount, 1);
+    assert.ok(tr.doc.eq(schema.nodeFromJSON(arriving)));
+
+    // The same steps, as blockSteps lists them: nothing needed the probe to repair the order.
+    const listed = blockSteps(state.doc, schema.nodeFromJSON(arriving), ReplaceStep);
+    assert.deepEqual(
+        listed.map(({ step }) => [step.from, step.to]),
+        [
+            [boundary, state.doc.content.size],
+            [boundary, boundary],
+        ]
+    );
+});
+
+test('a run of consecutive insertions is one step with one slice; insertions apart are separate steps', () => {
+    const held = doc([para('p1', 'One'), para('p4', 'Four')]);
+    const run = doc([para('p1', 'One'), para('n1', 'a'), para('n2', 'b'), para('n3', 'c'), para('p4', 'Four')]);
+    const state = stateOf(held);
+
+    const tr = remoteTransaction(state, run, ReplaceStep);
+    assert.deepEqual(stepTypes(tr), ['replace']);
+    assert.equal(tr.steps[0].slice.content.childCount, 3, 'the three new blocks travel as one slice');
+    assert.equal(tr.steps[0].from, tr.steps[0].to, 'an insertion');
+    assert.ok(tr.doc.eq(schema.nodeFromJSON(run)));
+
+    const apart = doc([para('n0', 'first'), para('p1', 'One'), para('n1', 'a'), para('n2', 'b'), para('p4', 'Four')]);
+    const separate = remoteTransaction(state, apart, ReplaceStep);
+    assert.deepEqual(stepTypes(separate), ['replace', 'replace']);
+    assert.deepEqual(separate.steps.map((step) => step.slice.content.childCount), [2, 1], 'the later run first (the end of the document backwards), then the one in front');
+    assert.ok(separate.doc.eq(schema.nodeFromJSON(apart)));
+});

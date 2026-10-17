@@ -4639,6 +4639,11 @@ test('Put them all back puts every item back oldest first, each below the winner
         ['fresh1', 'Hello B1'],
     ]);
     assert.deepEqual(B.lostTexts(), ['Hello A1 B2'], 'the one that could not go in stays');
+    assert.deepEqual(
+        B.lostPark().entries.map((entry) => entry.excerpt),
+        ['Hello A1 B2'],
+        'the park was rewritten after the first went in: it holds the one left'
+    );
     assert.equal(B.view.syncNotice, 'Your text could not be put back.');
 
     // Working again: the rest goes in, directly below the winner.
@@ -4651,6 +4656,40 @@ test('Put them all back puts every item back oldest first, each below the winner
     ]);
     assert.deepEqual(B.view.lost, []);
     assert.deepEqual(B.lostPark().entries, []);
+});
+
+test('a single Put it back that fails keeps the entry on the page and in the park, says so and returns false', async () => {
+    const { B } = await lostOne();
+    B.handle.insertBlock = () => false;
+
+    assert.equal(B.host().putBackLost(0), false);
+    assert.deepEqual(B.lostTexts(), ['Hello B'], 'the entry stays');
+    assert.deepEqual(
+        B.lostPark().entries.map((entry) => entry.excerpt),
+        ['Hello B'],
+        'the park still holds it'
+    );
+    assert.equal(B.view.syncNotice, 'Your text could not be put back.');
+    assert.equal(B.text(), 'Hello A');
+    assert.equal(B.view.unsaved, false, 'nothing was written, so nothing is owed');
+});
+
+test('a Put it back whose insertBlock THROWS is a failure too: the entry stays, the notice is set, false comes back', async () => {
+    const { B } = await lostOne();
+    B.handle.insertBlock = () => {
+        throw new Error('the transaction was refused');
+    };
+
+    assert.equal(B.host().putBackLost(0), false);
+    assert.deepEqual(B.lostTexts(), ['Hello B']);
+    assert.deepEqual(B.lostPark().entries.map((entry) => entry.excerpt), ['Hello B']);
+    assert.equal(B.view.syncNotice, 'Your text could not be put back.');
+
+    // Put them all back stops at the throw as well and leaves the entry listed.
+    B.view.syncNotice = '';
+    B.host().putBackAllLost();
+    assert.deepEqual(B.lostTexts(), ['Hello B']);
+    assert.equal(B.view.syncNotice, 'Your text could not be put back.');
 });
 
 test('Put it back does nothing for an entry that is not there', async () => {
@@ -4760,7 +4799,7 @@ test('Load theirs while a text is already set aside asks first: a no changes not
  * A's tab dies inside the debounce with typing based on version 2; B saves
  * version 3 meanwhile; A's browser opens the document again.
  */
-async function deadTabWithDraft(edit, { confirmAnswer = true, version = 3 } = {}) {
+async function deadTabWithDraft(edit, { confirmAnswer = true, version = 3, beforeOpen = () => {} } = {}) {
     const w = await twoParagraphs();
     const { server, clock, A, B } = w;
     await edit(A, B); // may await: a case where B follows a beacon's version first
@@ -4770,6 +4809,7 @@ async function deadTabWithDraft(edit, { confirmAnswer = true, version = 3 } = {}
     await B.land();
     assert.equal(server.version, version, 'somebody saved since the draft was written');
     const again = makeTab({ server, clock }, 'A2', { drafts: A.drafts, confirmAnswer });
+    beforeOpen(again);
     await again.open();
 
     return { ...w, again };
@@ -4883,6 +4923,81 @@ test('a draft deletion alone, of a block changed since, leaves nothing to merge:
     ]);
     assert.equal(again.draft(), null);
     assert.equal(again.view.overwriteOwed, false);
+    // Dealt with by the merge, not by today's fall-through (which would park the draft and set it aside).
+    assert.equal(again.stale(), null, 'nothing parked: there was nothing of the draft to keep');
+    assert.equal(again.view.setAside, null);
+    assert.equal(again.mergeCalls, 1, 'the merge decided it');
+});
+
+test('a draft merge the writer said yes to whose apply fails falls through to the park and the set-aside, after one question', async () => {
+    const { server, again } = await deadTabWithDraft(
+        (A, B) => {
+            A.typeIn('p2', 'World A');
+            B.typeIn('p1', 'start B');
+        },
+        {
+            beforeOpen: (tab) => {
+                tab.handle.applyRemote = () => false;
+            },
+        }
+    );
+
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION], 'asked once; the fall-through asks nothing more');
+    assert.equal(again.mergeCalls, 1);
+    assert.deepEqual(again.blocks(), blocksOf(server.json), 'the page shows the document as it is');
+    assert.equal(again.view.setAside, JSON.stringify(docOf(para('p1', 'start'), para('p2', 'World A'))), 'the whole draft is set aside');
+    assert.equal(again.view.setAsideFrom, 'draft');
+    assert.equal(again.view.setAsideBase, 3);
+    assert.equal(again.stale(), 'start', 'and parked under stale-');
+    assert.equal(again.draft(), null);
+    assert.deepEqual(again.view.lost, []);
+    assert.equal(again.view.unsaved, false);
+});
+
+test('losses of a draft merge are appended to the list re-offered from the last visit: both are on the page and in the park', async () => {
+    const { again } = await deadTabWithDraft(
+        (A, B) => {
+            A.typeIn('p2', 'World A');
+            B.typeIn('p2', 'World B');
+            // An earlier visit parked a loss of its own.
+            A.drafts.set(LOST, {
+                entries: [
+                    {
+                        key: 'p9:2:0',
+                        id: 'p9',
+                        type: 'paragraph',
+                        reason: 'both',
+                        source: 'merge',
+                        json: para('p9', 'Old loss'),
+                        anchors: ['p1'],
+                        version: 2,
+                        sentence: 'S',
+                        excerpt: 'Old loss',
+                    },
+                ],
+                dismissed: [],
+                baseVersion: 2,
+                parkedAt: 1_000_000,
+                dismissedAt: null,
+            });
+        }
+    );
+
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION]);
+    assert.deepEqual(
+        again.view.lost.map((entry) => [entry.source, entry.excerpt]),
+        [
+            ['parked', 'Old loss'],
+            ['draft', 'World A'],
+        ],
+        'the draft merge appends to the re-offered entry; it does not replace it'
+    );
+    assert.equal(again.view.lost[0].sentence, 'From your last visit: S');
+    assert.deepEqual(
+        again.lostPark().entries.map((entry) => entry.excerpt),
+        ['Old loss', 'World A'],
+        'and the park holds the whole list'
+    );
 });
 
 test('a declined draft merge parks the draft and sets it aside, as today', async () => {
@@ -5159,6 +5274,24 @@ test('an accepted suggestion refused while a text is set aside leaves the typing
     await B.land(); // the retired save's late answer is ignored; the new one is refused as stale
     await B.cycle(); // the poll that fetches version 3, which cannot be merged
     assert.deepEqual([B.view.conflict?.version, B.view.conflict?.ready], [3, true]);
+});
+
+test('an accepted suggestion refused while a text is set aside owes the typing again only when a save was retired', async () => {
+    const { server, B } = await conflicted();
+    await B.host().loadTheirs(); // B1 is set aside, offered back
+    B.type('B2 typed after'); // typed, but no save in the air: nothing is retired
+    assert.equal(B.view.saving, 0);
+    assert.equal(B.view.resave, false, 'nothing is owed yet');
+    const suggestion = doc('suggestion');
+    const version = server.replace(suggestion);
+
+    B.host().applySuggestion(suggestion, version); // refused: a text is set aside
+
+    assert.match(B.view.aiError, /while another text is set aside/);
+    assert.equal(B.view.saving, 0);
+    assert.equal(B.view.unsaved, true);
+    assert.equal(B.view.resave, false, 'no save was given up on, so the refusal makes nothing owed');
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'the offer stands');
 });
 
 test('an accepted suggestion that could not be applied leaves the typing owed when a save was retired, and not otherwise', async () => {

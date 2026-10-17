@@ -248,6 +248,10 @@ class EditorSyncWiringTest extends TestCase
         $css = file_get_contents(resource_path('css/shell.css'));
         $this->assertMatchesRegularExpression('/\.doc-notice\[hidden\][^{}]*\{\s*display:\s*none;\s*\}/', $css);
 
+        // The descendant form is what hides the five item slots and the overflow line of the lost row, which are
+        // display:flex as well; without it every slot shows empty (the first rule above does not reach them).
+        $this->assertMatchesRegularExpression('/\.doc-notice \[hidden\][^{}]*\{\s*display:\s*none;/', $css);
+
         // The one sentence in the strip that Alpine writes (a refused AI
         // result or suggestion) was emptied by the same morph. It is
         // skipped by the morph as well.
@@ -497,7 +501,7 @@ class EditorSyncWiringTest extends TestCase
         $this->assertTrue($overflow->hasAttribute('hidden'));
         $this->assertSame('lost.length <= 5', $overflow->getAttribute('x-bind:hidden'));
         $this->assertSame('lost.length - 5', $overflow->querySelector('span[x-text]')->getAttribute('x-text'));
-        $this->assertStringContainsString('more. Put them all back restores every item, these included.', $this->words($overflow));
+        $this->assertSame('And more. Put them all back restores every item, these included.', $this->words($overflow), 'the number is written by x-text, so it is empty here');
 
         $actions = [];
         foreach ($row->querySelectorAll('.doc-notice-actions > button') as $button) {

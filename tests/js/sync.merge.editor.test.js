@@ -291,6 +291,92 @@ test('insertBlock refuses a block this schema cannot hold, and leaves the docume
     editor.destroy();
 });
 
+/** A generator that hands out these ids in turn, then fails loudly. */
+const idsInTurn = (...ids) => {
+    const queue = [...ids];
+
+    return () => {
+        assert.ok(queue.length > 0, 'the generator was asked for more ids than the test expected');
+
+        return queue.shift();
+    };
+};
+const putBack = (editor, json, options) =>
+    insertBlockTransaction(editor.state, json, { anchors: [], keepId: false, Selection, ...options });
+
+test('insertBlockTransaction decides the ids in tr.doc BEFORE dispatch: the editor repair plugins would hide a wrong rule', () => {
+    // The dispatch tests above run TipTap's UniqueID and BlockIdRepair, which re-id a duplicate and so mask a
+    // broken rule in insert.js. The transaction's own document is what insert.js decided.
+    const { editor } = realEditor(docOf(para('paraXX01', 'One'), para('paraXX03', 'Three')));
+
+    // D1 (keepId false): a fresh id, below the winner; the winner keeps its id.
+    const both = putBack(editor, para('paraXX01', 'One B'), { anchors: ['paraXX01'], generateId: idsInTurn('freshAA1') });
+    assert.deepEqual(blocksOf(both.doc), [
+        ['paraXX01', 'One'],
+        ['freshAA1', 'One B'],
+        ['paraXX03', 'Three'],
+    ]);
+
+    // D2 (keepId true) with an id nobody holds: it comes back with its own id.
+    const gone = putBack(editor, para('paraXX02', 'Two, typed'), {
+        anchors: ['paraXX01'],
+        keepId: true,
+        generateId: idsInTurn(),
+    });
+    assert.deepEqual(blocksOf(gone.doc), [
+        ['paraXX01', 'One'],
+        ['paraXX02', 'Two, typed'],
+        ['paraXX03', 'Three'],
+    ]);
+
+    // D2 with an id the page holds again: a fresh one, so no id is shared.
+    const taken = putBack(editor, para('paraXX03', 'Three again'), {
+        anchors: ['paraXX03'],
+        keepId: true,
+        generateId: idsInTurn('freshBB2'),
+    });
+    assert.deepEqual(blocksOf(taken.doc), [
+        ['paraXX01', 'One'],
+        ['paraXX03', 'Three'],
+        ['freshBB2', 'Three again'],
+    ]);
+    assert.ok(allDifferent(idsOf(taken.doc)));
+
+    // Nested ids follow the same rule: the free one stays, the taken one is replaced.
+    const list = {
+        type: 'bulletList',
+        attrs: { id: 'listXX01' },
+        content: [{ type: 'listItem', attrs: { id: 'itemXX01' }, content: [para('paraXX01', 'Nested')] }],
+    };
+    const nested = putBack(editor, list, { anchors: [], keepId: true, generateId: idsInTurn('freshCC3') });
+    assert.deepEqual(idsOf(nested.doc), ['listXX01', 'itemXX01', 'freshCC3', 'paraXX01', 'paraXX03']);
+
+    // A generator that keeps offering a taken id leaves the block without an id (UniqueID fills it in); one that
+    // offers the same new id twice is asked again.
+    const stubborn = putBack(editor, para('paraXX01', 'x'), { anchors: [], generateId: () => 'paraXX03' });
+    assert.equal(stubborn.doc.firstChild.attrs.id, null);
+    const twice = putBack(editor, list, {
+        anchors: [],
+        generateId: idsInTurn('dupXXXX1', 'dupXXXX1', 'dupXXXX2', 'dupXXXX3'),
+    });
+    assert.deepEqual(idsOf(twice.doc).slice(0, 3), ['dupXXXX1', 'dupXXXX2', 'dupXXXX3'], 'the repeated id is asked for again');
+
+    editor.destroy();
+});
+
+test('insertBlockTransaction refuses a block the schema accepts but check() does not, and the document is untouched', () => {
+    const { editor, updates } = realEditor(docOf(para('paraXX01', 'One')));
+
+    // nodeFromJSON() builds a list with no item without a word; only check() knows a list needs one.
+    const empty = { type: 'bulletList', attrs: { id: 'listXX01' }, content: [] };
+    assert.doesNotThrow(() => editor.schema.nodeFromJSON(empty));
+    assert.throws(() => putBack(editor, empty, { anchors: ['paraXX01'], generateId: idsInTurn('freshDD4') }), /Invalid content/);
+    assert.deepEqual(blocksOf(editor.state.doc), [['paraXX01', 'One']]);
+    assert.equal(updates.length, 0);
+
+    editor.destroy();
+});
+
 // ───────────────────────────────────────────────────────── which block conversions keep the id, and which give a new one
 
 test('toggleHeading and toggleCodeBlock keep the block id, so a merge sees one changed block and not a deletion plus an insertion', () => {

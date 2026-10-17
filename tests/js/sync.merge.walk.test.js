@@ -12,7 +12,7 @@ import { LOST, blocksOf, deletionLedger, world } from './support/syncWorld.js';
  * fire, letting saves reach the server and answer, polling, letting the
  * clock move, and now and then putting the lost row back or dismissing it.
  * Then everything that is in flight is let land (quiesce), and six things
- * must hold at the end, and three about the saving itself throughout:
+ * must hold at the end, and four about the saving itself throughout:
  *
  *   1. every tab's document equals the server's (convergence);
  *   2. no token typed by anybody is silently lost: each is in the server

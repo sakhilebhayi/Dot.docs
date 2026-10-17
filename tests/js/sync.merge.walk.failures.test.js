@@ -46,7 +46,10 @@ import { LOST, STALE, UUID, blocksOf, deletionLedger, para, world } from './supp
  * would replace under a second key, so every park ever written is a place
  * where its words are kept, and no excuse is made for a replaced park (none
  * is replaced). What IS excused is unchanged: the writer's own deletions
- * (deletionLedger), and a browser that keeps no drafts.
+ * (deletionLedger); the unsaved typing a writer knowingly replaces by
+ * ACCEPTING Put it back for a set-aside text (a no changes nothing, so a
+ * declined Put it back excuses nothing and a loss there fails E); and a
+ * browser that keeps no drafts.
  *
  * What it does NOT cover: characters inside one block, two tabs of one
  * browser sharing a draft, and the server's own failures.
@@ -269,6 +272,16 @@ async function run(seed, tabCount) {
             }
         });
     };
+    // Put it back over unsaved typing replaces that typing, knowingly, once the writer says yes. The words are
+    // excused ONLY when the offer was taken (it is gone from the page afterwards): a no changes nothing, and
+    // anything lost on that path is a real loss that must fail E.
+    const putBackExcusing = (tab) => {
+        const unsaved = tab.view.unsaved ? [...editorTokens(tab)].filter((token) => !everStored.has(token)) : [];
+        tab.host().putBack();
+        if (!tab.view.setAside) {
+            unsaved.forEach((token) => excused.add(token));
+        }
+    };
 
     // PARK-KEPT: every park ever written is still in the store of its browser (as many rows as were written with that text).
     const reportedParks = new Set(); // one report per lost park, not one per step after it
@@ -349,10 +362,7 @@ async function run(seed, tabCount) {
         await tab.host().loadTheirs();
         trace.push(`${tab.name} loads theirs`);
         if (tab.view.setAside && random() < 0.5) {
-            if (tab.view.unsaved) {
-                excuseUnstored(tab);
-            }
-            tab.host().putBack();
+            putBackExcusing(tab);
             trace.push(`${tab.name} puts it back (setAside)`);
         }
     };
@@ -637,10 +647,7 @@ async function run(seed, tabCount) {
                 if (tab.view.conflict) {
                     await answerNotice(tab, random() < 0.5);
                 } else if (tab.view.setAside && random() < 0.3) {
-                    if (tab.view.unsaved) {
-                        excuseUnstored(tab);
-                    }
-                    tab.host().putBack();
+                    putBackExcusing(tab);
                     trace.push(`${tab.name} puts back set-aside`);
                 }
             },

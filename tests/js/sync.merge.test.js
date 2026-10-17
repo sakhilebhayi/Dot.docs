@@ -369,6 +369,36 @@ test('echo: a block equal to the echo makes mine win, a block absent from both i
     assert.deepEqual(losses(edited), [{ id: 'p1', reason: 'both', anchors: ['p1'] }]);
 });
 
+test('echo: a block in the base and in mine that is missing from both theirs and the echo is kept as my insertion, not read as their deletion', () => {
+    // I sent a document without p2 (the echo), nobody else has it either, and my page shows it again (an undo, a paste).
+    const known = docOf([para('p1', 'one'), para('p2', 'two')]);
+    const echo = docOf([para('p1', 'one')]);
+    const theirs = docOf([para('p1', 'one')]);
+    const untouched = docOf([para('p1', 'one'), para('p2', 'two')]);
+    const typed = docOf([para('p1', 'one'), para('p2', 'two, typed in')]);
+
+    const kept = merge(known, untouched, theirs, { echo });
+    assert.deepEqual(blocksOf(kept.merged), [
+        ['p1', 'one'],
+        ['p2', 'two'],
+    ]);
+    assert.equal(kept.changed, true, 'it is something of mine that the server does not have');
+    assert.deepEqual(kept.lost, [], 'a block they deleted and I did not touch (b1) would be dropped without a word; this one is not');
+
+    const keptTyped = merge(known, typed, theirs, { echo });
+    assert.deepEqual(blocksOf(keptTyped.merged), [
+        ['p1', 'one'],
+        ['p2', 'two, typed in'],
+    ]);
+    assert.deepEqual(keptTyped.lost, [], 'a my-insertion, not a D2 loss');
+
+    // Without the echo the same three documents are a plain deletion by them (b1) / a D2 (b2).
+    const plain = merge(known, untouched, theirs);
+    assert.deepEqual(blocksOf(plain.merged), [['p1', 'one']]);
+    assert.equal(plain.changed, false);
+    assert.deepEqual(losses(merge(known, typed, theirs)), [{ id: 'p2', reason: 'deleted', anchors: ['p1'] }]);
+});
+
 test('spine: only I reordered keeps my order; only they reordered keeps theirs; both reordered is theirs, and nothing is lost', () => {
     const base = docOf([para('p1', '1'), para('p2', '2'), para('p3', '3')]);
     const mineOrder = docOf([para('p3', '3'), para('p1', '1'), para('p2', '2')]);
@@ -545,6 +575,7 @@ test('there is a fixture for every row of the decision table and every ordering 
         'a4-same-change.json',
         'a5-both-changed.json',
         'b1-they-deleted-untouched.json',
+        'b2-empty-block-is-not-offered.json',
         'b2-they-deleted-i-typed.json',
         'c1-i-deleted-untouched.json',
         'c2-draft-deletions-do-not-win.json',
@@ -552,6 +583,7 @@ test('there is a fixture for every row of the decision table and every ordering 
         'd-after-deleted-predecessor.json',
         'd-mine-inserted.json',
         'e-theirs-inserted.json',
+        'echo-own-save-comes-back.json',
         'f-both-inserted-different.json',
         'f-both-inserted-equal.json',
         'g-both-deleted.json',
@@ -563,10 +595,33 @@ test('there is a fixture for every row of the decision table and every ordering 
     ]);
 });
 
-for (const name of fixtures) {
-    const fixture = JSON.parse(readFileSync(new URL(name, FIXTURES), 'utf8'));
+/** Reads a fixture, naming the file when it cannot be parsed. */
+function loadFixture(name) {
+    try {
+        return JSON.parse(readFileSync(new URL(name, FIXTURES), 'utf8'));
+    } catch (cause) {
+        throw new Error(`fixture ${name} cannot be read: ${cause.message}`, { cause });
+    }
+}
 
-    test(`${name}: ${fixture.name}`, () => {
+test('a malformed fixture is reported under its own file name', () => {
+    assert.throws(() => loadFixture('no-such-fixture.json'), /fixture no-such-fixture\.json cannot be read/);
+});
+
+for (const name of fixtures) {
+    // A malformed file fails ONE test, under its own name; the other fixtures still run.
+    let fixture = null;
+    let unreadable = null;
+    try {
+        fixture = loadFixture(name);
+    } catch (error) {
+        unreadable = error;
+    }
+
+    test(`${name}: ${fixture?.name ?? 'unreadable'}`, () => {
+        if (unreadable) {
+            throw unreadable;
+        }
         const result = mergeDocuments(
             schema,
             { base: fixture.base, mine: fixture.mine, theirs: fixture.theirs, echo: fixture.echo ?? null },
