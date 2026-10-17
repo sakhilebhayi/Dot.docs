@@ -158,9 +158,37 @@ class InfoDotTeamSyncTest extends TestCase
 
         $this->artisan('infodot:link-team', ['team' => $existing->id, 'uuid' => self::GLOBEX])->assertFailed();
         $this->artisan('infodot:link-team', ['team' => $owner->currentTeam->id, 'uuid' => self::GLOBEX])->assertFailed();
+        $this->assertNull($owner->currentTeam->fresh()->infodot_team_uuid, 'a personal team is refused without --promote');
         $this->artisan('infodot:link-team', ['team' => $existing->id, 'uuid' => 'not-a-uuid'])->assertFailed();
 
         $other = Team::forceCreate(['user_id' => $owner->id, 'name' => 'Other', 'personal_team' => false]);
         $this->artisan('infodot:link-team', ['team' => $other->id, 'uuid' => self::ACME])->assertFailed();
+    }
+
+    public function test_promote_turns_a_personal_team_into_a_linked_company_and_keeps_its_data(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $personal = $owner->currentTeam;
+        $this->assertTrue($personal->personal_team);
+
+        $this->artisan('infodot:link-team', ['team' => $personal->id, 'uuid' => self::ACME, '--promote' => true])->assertSuccessful();
+
+        $fresh = $personal->fresh();
+        $this->assertFalse($fresh->personal_team);
+        $this->assertSame(self::ACME, $fresh->infodot_team_uuid);
+        $this->assertSame($owner->id, $fresh->user_id);
+        $this->assertTrue($owner->fresh()->belongsToTeam($fresh));
+    }
+
+    public function test_after_promotion_the_next_sign_in_reuses_the_team_instead_of_creating_another(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create(['email' => 'ann@acme.test']);
+        $this->artisan('infodot:link-team', ['team' => $owner->currentTeam->id, 'uuid' => self::ACME, '--promote' => true])->assertSuccessful();
+        $before = Team::count();
+
+        $this->signIn('ann@acme.test', [$this->company(self::ACME, 'Acme Ltd', 'owner')], self::ACME);
+
+        $this->assertSame($before, Team::count());
+        $this->assertSame($owner->currentTeam->id, $owner->fresh()->current_team_id);
     }
 }
