@@ -2785,9 +2785,9 @@ export function createSyncHost(view, env) {
      * `env.canEdit()`:
      *
      *   - false: the same read only page a confirmed canEdit() = false makes
-     *     (lockReadOnly()), words parked. When a refused save has already
-     *     parked them and the question is still out, they are not parked a
-     *     second time.
+     *     (lockReadOnly()), words parked (readOnlyNoticed()). When a refused
+     *     save has already parked words and its question is still out, the
+     *     words typed during the hold are parked now, beside the first copy.
      *   - true: never re-enables a page that is read only (a reload does
      *     that: the server draws the page again). It answers only the
      *     question a refused save left out, the one case where this page
@@ -2803,12 +2803,9 @@ export function createSyncHost(view, env) {
         }
 
         if (canEdit === false) {
-            if (view.accessCheckSince > 0) {
-                // Parked when the save was refused (saveRefused()).
-                lockReadOnly(view.unsaved || view.unsentKept);
-
-                return;
-            }
+            // The same read only page and the same parking as a re-render that draws editable false. When a refused
+            // save's question is still out, words typed during the hold are not in the park made when it was refused,
+            // so they are parked now (the earlier copy stays beside it).
             readOnlyNoticed();
 
             return;

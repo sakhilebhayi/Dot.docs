@@ -7544,11 +7544,16 @@ test('can_edit true answers the question a refused save asked: the hold is lifte
     assert.equal(writer.sent[1].text, 'words in the air');
 });
 
-test('can_edit false answers the question a refused save asked: read only at once, and the text is not parked twice', async () => {
+test('can_edit false answers the question a refused save asked: read only at once, and the words typed during the hold are parked too', async () => {
     const { server, writer } = await refusedWriter({ canEditMode: 'hang' });
     writer.host().saveRefused(403);
     await settle();
     assert.equal(writer.parks().length, 1, 'parked when the save was refused');
+    assert.equal(textOf(JSON.parse(writer.parks()[0].json)), 'words in the air');
+
+    // Typed while the question is out: the hold keeps the text owed, and the first park does not hold it.
+    writer.type('words in the air, and more typed during the hold');
+    await writer.debounce();
 
     server.canEditByTab.set('W', false);
     await writer.cycle();
@@ -7556,7 +7561,9 @@ test('can_edit false answers the question a refused save asked: read only at onc
     assert.equal(writer.view.editable, false);
     assert.equal(writer.view.accessCheckSince, 0);
     assert.equal(writer.view.unsentKept, true);
-    assert.equal(writer.parks().length, 1);
+    const parked = writer.parks().map((park) => textOf(JSON.parse(park.json)));
+    assert.ok(parked.includes('words in the air, and more typed during the hold'), 'the newest words are parked');
+    assert.ok(parked.includes('words in the air'), 'and the earlier copy stays');
 
     // The question that was still out answers late: nothing happens.
     writer.canEditPending.resolve(true);
