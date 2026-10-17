@@ -96,6 +96,55 @@ class EditorSyncWiringTest extends TestCase
     }
 
     /**
+     * The co-editing counters (sync/metrics.js) are page glue: the page builds
+     * them, hands the host its env.metric, flushes on the pagehide it already
+     * listens to, and reads ONE literal - whether the server collects them.
+     * The literal is a plain boolean with no double quote in it, the same on
+     * every render of one deploy (a string that changed per render would make
+     * Alpine re-create the data object each time, .ai/rules/livewire.md).
+     */
+    public function test_the_page_builds_the_counters_and_flushes_them_on_leaving(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Wired');
+
+        $html = $this->actingAs($user)->get(route('documents.edit', $doc->uuid))->assertOk()->getContent();
+
+        $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
+        $attribute = $alpine[1];
+
+        $this->assertStringContainsString(route('documents.sync-metrics', $doc->uuid), $attribute);
+        $this->assertStringContainsString('metricsOn: true,', $attribute);
+        $this->assertStringContainsString('createMetrics', $attribute);
+        // The host is told what happens through env.metric, and the counters live on the element like the engine.
+        $this->assertStringContainsString('metric: (kind, detail)', $attribute);
+        $this->assertStringContainsString('__dotdocMetrics', $attribute);
+        // On leaving, by the beacon path, before the presence beacon's own early return.
+        $this->assertMatchesRegularExpression("/addEventListener\('pagehide', \(\) => \{\s*(?:\/\/[^\n]*\s*)?try \{ this\.syncMetrics\(\)\?\.flush\(\{ beacon: true \}\); \} catch \(_\) \{\}\s*if \(typeof navigator\.sendBeacon/", $attribute);
+        // The module holds no switch of its own: the decision logic is not in the attribute.
+        $this->assertStringNotContainsString('peers_', $attribute);
+        $this->assertStringNotContainsString('merge_live', $attribute);
+    }
+
+    public function test_the_metrics_literal_follows_the_switch_and_is_the_same_on_every_render(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Wired');
+        $literal = fn (string $html) => preg_match('/metricsOn: (true|false),/', $html, $m) ? $m[1] : null;
+
+        $first = $this->actingAs($user)->get(route('documents.edit', $doc->uuid))->assertOk()->getContent();
+        $second = $this->actingAs($user)->get(route('documents.edit', $doc->uuid))->assertOk()->getContent();
+        $this->assertSame('true', $literal($first));
+        $this->assertSame('true', $literal($second));
+
+        config(['docs.sync_metrics' => false]);
+        $off = $this->actingAs($user)->get(route('documents.edit', $doc->uuid))->assertOk()->getContent();
+        $this->assertSame('false', $literal($off));
+    }
+
+    /**
      * Asserted on the buttons' markup, not on their words: the words also
      * appear in the component's own comments, which would pass this before
      * any button existed.

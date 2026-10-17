@@ -33,6 +33,14 @@
  * (beginMerge()); the conflict notice is for a merge that cannot be done.
  * What the merge could not keep is offered back in the notice bar's lost
  * row (offerLost(), putBackLost(), dismissLost()).
+ *
+ * Counters (./metrics.js): `env.metric(kind, detail)` is told what happened
+ * (a merge and whether it left anything over, an offer, a conflict notice, a
+ * failed save, a downgrade, who was present). It is OPTIONAL and strictly
+ * one-way: nothing here reads an answer from it, nothing waits on it, a
+ * throw from it is swallowed, and with no `env.metric` the module behaves
+ * exactly as it did before there were counters. What it is told is counts
+ * and closed words, never a piece of the document.
  */
 
 import { appendLost, blockWord, lostEntry } from './merge.js';
@@ -316,6 +324,7 @@ export function unloadSaveBody(json, options = {}) {
  * @property {() => number} now
  * @property {(...args: unknown[]) => void} info `console.info`
  * @property {(...args: unknown[]) => void} log `console.error`
+ * @property {((kind: string, detail?: object) => void)|undefined} metric the page's counters (./metrics.js); optional
  */
 
 /**
@@ -323,6 +332,26 @@ export function unloadSaveBody(json, options = {}) {
  * @param {SyncEnv} env
  */
 export function createSyncHost(view, env) {
+    /**
+     * Tell the page's counters something happened. Counts and closed words
+     * only (see ./metrics.js). Absent in every test but the metrics ones, and
+     * when the page switched counting off; a throw is the counters' own
+     * business and never reaches the editing code.
+     *
+     * @param {string} kind
+     * @param {object} [detail]
+     */
+    const metric = (kind, detail = {}) => {
+        if (typeof env.metric !== 'function') {
+            return;
+        }
+        try {
+            env.metric(kind, detail);
+        } catch (_) {
+            // Counting never breaks editing.
+        }
+    };
+
     /**
      * Whether this page may not change the document: the server rendered it
      * for somebody who may only read (`view.editable` false), or a save was
@@ -623,6 +652,11 @@ export function createSyncHost(view, env) {
 
         env.report('idle', 'Saving');
 
+        // A send after a request that FAILED is a resend (the count of failures in a row is still standing).
+        if (view.saveFailures > 0) {
+            metric('resend');
+        }
+
         // What is being SENT, captured now: the draft is cleared only if
         // the editor still holds exactly this when the answer arrives.
         const snapshot = JSON.stringify(json);
@@ -712,6 +746,7 @@ export function createSyncHost(view, env) {
                 // fields because this module holds no state.
                 view.saveFailures += 1;
                 view.saveRetryAt = env.now() + SAVE_RETRY_DELAYS_MS[Math.min(view.saveFailures, SAVE_RETRY_DELAYS_MS.length) - 1];
+                metric('backoff', { level: view.saveFailures });
                 env.report('danger', 'Not saved');
                 env.engine()?.retry();
             }
@@ -798,7 +833,7 @@ export function createSyncHost(view, env) {
             // the notice too; else the newer document is fetched and merged.
             view.resave = true;
             if (view.conflict || view.mergeAttempts >= MERGE_ATTEMPTS) {
-                enterConflict(result.version);
+                enterConflict(result.version, 'attempts');
             } else {
                 view.mergeAttempts += 1;
                 beginMerge(result.version);
@@ -1161,7 +1196,7 @@ export function createSyncHost(view, env) {
 
         const engine = env.engine();
         if (!engine) {
-            enterConflict(version);
+            enterConflict(version, 'impossible');
 
             return;
         }
@@ -1196,7 +1231,7 @@ export function createSyncHost(view, env) {
         if (view.merging && env.now() - view.merging.since >= MERGE_FETCH_EXPIRY_MS) {
             const version = view.merging.version;
             view.merging = null;
-            enterConflict(version);
+            enterConflict(version, 'expiry');
         }
     }
 
@@ -1292,7 +1327,7 @@ export function createSyncHost(view, env) {
             view.confirmed ?? (view.known && view.known.version === view.baseVersion ? view.known.json : null);
         if (base === null) {
             view.merging = null;
-            enterConflict(remote.version);
+            enterConflict(remote.version, 'impossible');
 
             return;
         }
@@ -1310,9 +1345,21 @@ export function createSyncHost(view, env) {
         }
         if (!result) {
             view.merging = null;
-            enterConflict(remote.version);
+            enterConflict(remote.version, 'impossible');
 
             return;
+        }
+
+        // Only for the counters, and only when the tab holds an echo: the same merge without it (a pure function;
+        // nothing is applied). Whatever it offers more than the real one is what the echo rule kept.
+        let echoKept = false;
+        if (typeof env.metric === 'function' && view.unanswered) {
+            try {
+                const bare = handle.merge(JSON.parse(base), remote.json, { echo: null });
+                echoKept = !!bare && bare.lost.length > result.lost.length;
+            } catch (_) {
+                echoKept = false;
+            }
         }
 
         // 6. The merged document goes in, over the typing it holds.
@@ -1324,9 +1371,16 @@ export function createSyncHost(view, env) {
         }
         if (!applied) {
             view.merging = null;
-            enterConflict(remote.version);
+            enterConflict(remote.version, 'impossible');
 
             return;
+        }
+
+        // The counters (before the bookkeeping, which forgets the echo): a live merge was performed, and the echo
+        // rule decided it when, without the echo, the same merge would have offered more back.
+        metric('merge', { source: 'merge', lost: result.lost.length > 0 });
+        if (echoKept) {
+            metric('echo');
         }
 
         // 7. The bookkeeping. `confirmed` is theirs as this editor serialises
@@ -1411,6 +1465,7 @@ export function createSyncHost(view, env) {
             lostEntry(loss, { source, version, n, sentence: sentenceFor(loss.reason, source, blockWord(loss.type)) })
         );
         view.lost = appendLost(view.lost, entries);
+        entries.forEach((entry) => metric('lost', { reason: entry.reason, source }));
         clearLostNotices();
         env.drafts()?.parkLost(view.docUuid, view.lost, view.baseVersion, view.tabId);
         env.info(`[Dot.Doc] ${entries.length} block(s) could not be kept by the ${source} and are offered back in the notice bar.`);
@@ -1488,6 +1543,7 @@ export function createSyncHost(view, env) {
         clearLostNotices();
         view.lost = view.lost.filter((_, at) => at !== index);
         env.drafts()?.parkLost(view.docUuid, view.lost, view.baseVersion, view.tabId);
+        metric('lost-action', { action: 'put_back' });
 
         return true;
     }
@@ -1515,6 +1571,7 @@ export function createSyncHost(view, env) {
         clearLostNotices();
         const listed = view.lost;
         view.lost = [];
+        metric('lost-action', { action: 'dismiss', n: listed.length });
         try {
             Promise.resolve(env.drafts()?.markLostDismissed(view.docUuid, view.tabId, listed)).catch(() => {});
         } catch (_) {
@@ -1590,6 +1647,7 @@ export function createSyncHost(view, env) {
         // but a reload, so it must not be left behind to mislead.)
         clearLostNotices();
         view.lost = [];
+        metric('lost-action', { action: 'dismiss', n: dismissing.length });
         drafts.markLostDismissed(view.docUuid, view.tabId, dismissing);
     }
 
@@ -1705,6 +1763,7 @@ export function createSyncHost(view, env) {
         if (!applied) {
             return false;
         }
+        metric('merge', { source: 'draft', lost: result.lost.length > 0 });
 
         // `confirmed` stays: opened() set it to the page document, which is
         // theirs. What survived of the draft is unsaved on the current base
@@ -1750,12 +1809,18 @@ export function createSyncHost(view, env) {
      * the document itself.
      *
      * @param {number} version
+     * @param {'impossible'|'attempts'|'expiry'} [reason] why the notice is raised, for the counters; only a notice
+     *        that was not already standing is counted
      */
-    function enterConflict(version) {
+    function enterConflict(version, reason) {
         // The notice stands: no merge is tried behind the writer's back, and
         // the count of merges after refusals starts over after it.
+        const raised = !view.conflict;
         view.merging = null;
         view.mergeAttempts = 0;
+        if (raised && reason) {
+            metric('conflict', { reason });
+        }
 
         const engine = env.engine();
         let waiting = engine ? engine.pending : null;
@@ -2477,6 +2542,7 @@ export function createSyncHost(view, env) {
         if (!applied) {
             return false;
         }
+        metric('merge', { source: 'suggestion', lost: result.lost.length > 0 });
 
         const overwrites = owesOverwrite(result, view.baseVersion, version, content);
         view.merging = null;
@@ -2622,6 +2688,7 @@ export function createSyncHost(view, env) {
      * @param {boolean} kept whether words typed here were left unsent
      */
     function lockReadOnly(kept) {
+        metric('readonly', { stage: 'confirmed' });
         const handle = env.handle();
         const offered = view.lost.length > 0 || view.setAside !== null;
 
@@ -2689,6 +2756,7 @@ export function createSyncHost(view, env) {
             return true;
         }
 
+        metric('readonly', { stage: 'provisional' });
         const handle = env.handle();
         const kept = parkUnsent(handle);
 
@@ -2764,6 +2832,9 @@ export function createSyncHost(view, env) {
             // Every answered poll is also the moment to send a save that
             // never answered.
             onMembers: (members) => {
+                // Who else is here, for the counters: the people other than this one (the list holds every
+                // distinct person with the document open, this one included).
+                metric('peers', { others: Math.max(0, members.length - 1) });
                 membersChanged(members);
                 resendIfOwed();
             },

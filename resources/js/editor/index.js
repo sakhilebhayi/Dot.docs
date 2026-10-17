@@ -42,6 +42,7 @@ import { createSyncEngine } from './sync/engine';
 import { insertBlockTransaction } from './sync/insert';
 import { mergeDocuments } from './sync/merge';
 import { createSyncHost, createTabId, unloadSaveBody } from './sync/host';
+import { createMetrics } from './sync/metrics';
 import { createSyncRequest } from './sync/request';
 import {
     clearDraft,
@@ -874,7 +875,7 @@ export const DotDoc = {
     // engine per editor page (sync/engine.js) and hands every decision about
     // a save, a newer document or a draft to createSyncHost() (sync/host.js),
     // which it builds from its own state for each call.
-    sync: { createSyncEngine, createSyncRequest, createSyncHost, createTabId },
+    sync: { createSyncEngine, createSyncRequest, createSyncHost, createTabId, createMetrics },
     /** The single active editor's pagination controller, or a safe no-op stand-in before mount(). */
     get pagination() {
         const el = document.querySelector('[wire\\:ignore].canvas, #doc-paper');
