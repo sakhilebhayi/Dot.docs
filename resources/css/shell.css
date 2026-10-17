@@ -1487,6 +1487,12 @@ button.list-row {
     gap: var(--s2);
 }
 
+/* The item's own sentence: --ink, named so the contrast gate measures it. */
+.doc-notice-sentence {
+    color: var(--ink);
+    overflow-wrap: anywhere;
+}
+
 .doc-notice-excerpt {
     color: var(--ink-soft);
     overflow-wrap: anywhere;

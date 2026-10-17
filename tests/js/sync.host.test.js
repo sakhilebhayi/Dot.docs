@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { blockWord } from '../../resources/js/editor/sync/merge.js';
 import {
     DISCARD_QUESTION,
     DISMISS_LOST_CHANGED_NOTICE,
@@ -7315,6 +7316,26 @@ test('a re-render that draws editable false makes the page say so: the same read
     const reports = writer.reports.length;
     writer.host().readOnlyNoticed();
     assert.equal(writer.reports.length, reports, 'said once');
+});
+
+test('a column layout reads right in every lost-row sentence', async () => {
+    const { A } = await pair();
+    const word = blockWord('columns');
+    const sentences = ['both', 'deleted'].flatMap((reason) =>
+        ['merge', 'draft', 'suggestion'].map((source) => A.host().sentenceFor(reason, source, word))
+    );
+
+    assert.deepEqual(sentences, [
+        'This column layout was changed elsewhere at the same moment. The other version is on the page; this is yours.',
+        'This column layout was changed in the document after your draft was written. The document\'s version is on the page; this is the draft\'s.',
+        'This column layout was rewritten by the accepted suggestion. The suggestion\'s version is on the page; this is yours.',
+        'This column layout was removed elsewhere while you were typing in it.',
+        'This column layout was removed from the document after your draft was written.',
+        'The accepted suggestion removed this column layout while you were typing in it.',
+    ]);
+    for (const sentence of sentences) {
+        assert.ok(!/columns/.test(sentence), sentence);
+    }
 });
 
 // ───────────────────────────────────────────────────────── the role arrives with the poll

@@ -453,9 +453,15 @@ class EditorSyncWiringTest extends TestCase
 
         $described = 0;
         foreach ($bar->querySelectorAll('button') as $button) {
-            $id = (string) $button->getAttribute('aria-describedby');
-            $this->assertNotSame('', $id, $this->words($button).' is described');
+            $ids = preg_split('/\s+/', trim((string) $button->getAttribute('aria-describedby')));
+            $this->assertNotSame([''], $ids, $this->words($button).' is described');
+            // The description that says what the button does is the LAST id: a lost-row button names its own item first.
+            $id = (string) array_pop($ids);
             $this->assertCount(1, $dom->querySelectorAll('[id="'.$id.'"]'));
+            foreach ($ids as $own) {
+                $this->assertCount(1, $dom->querySelectorAll('[id="'.$own.'"]'), "{$own} names the item the button acts on");
+                $this->assertNotNull($bar->querySelector('[id="'.$own.'"]'), 'inside the bar');
+            }
             $description = $bar->querySelector('[id="'.$id.'"]');
             $this->assertNotNull($description, 'the description is inside the bar');
             $this->assertTrue($description->hasAttribute('hidden'), 'it is read with the button, not shown');
@@ -498,12 +504,21 @@ class EditorSyncWiringTest extends TestCase
             $item = $items->item($i);
             $this->assertTrue($item->hasAttribute('hidden'));
             $this->assertSame("!lost[{$i}]", $item->getAttribute('x-bind:hidden'));
-            $this->assertSame("lost[{$i}] ? lost[{$i}].sentence : ''", $item->querySelector('span[x-text]')->getAttribute('x-text'));
             $this->assertSame("lost[{$i}] ? lost[{$i}].excerpt : ''", $item->querySelector('q.doc-notice-excerpt')->getAttribute('x-text'));
             $button = $item->querySelector('button');
             $this->assertSame("putBackLost({$i}, \$event.detail === 0)", $button->getAttribute('@click'));
             $this->assertSame('Put it back', $this->words($button));
-            $this->assertSame('doc-notice-put-back-lost-does', $button->getAttribute('aria-describedby'));
+            // Six buttons named Put it back: each says which item it is for, by the ids of its own sentence and excerpt,
+            // before the description of what the button does (the one id the six share).
+            $this->assertSame(
+                "doc-notice-lost-{$i}-sentence doc-notice-lost-{$i}-excerpt doc-notice-put-back-lost-does",
+                $button->getAttribute('aria-describedby'),
+            );
+            $sentence = $item->querySelector("#doc-notice-lost-{$i}-sentence");
+            $this->assertNotNull($sentence);
+            $this->assertSame('doc-notice-sentence', $sentence->getAttribute('class'));
+            $this->assertSame("lost[{$i}] ? lost[{$i}].sentence : ''", $sentence->getAttribute('x-text'));
+            $this->assertSame("doc-notice-lost-{$i}-excerpt", $item->querySelector('q.doc-notice-excerpt')->getAttribute('id'));
         }
         $overflow = $items->item(5);
         $this->assertTrue($overflow->hasAttribute('hidden'));
@@ -533,11 +548,13 @@ class EditorSyncWiringTest extends TestCase
 
         // The row's own styles, beside the bar's, and the excerpt's ink in the contrast gate.
         $css = file_get_contents(resource_path('css/shell.css'));
-        foreach (['.doc-notice-list', '.doc-notice-item', '.doc-notice-excerpt'] as $selector) {
+        foreach (['.doc-notice-list', '.doc-notice-item', '.doc-notice-sentence', '.doc-notice-excerpt'] as $selector) {
             $this->assertStringContainsString($selector.' {', $css, "{$selector} is styled");
         }
         $this->assertMatchesRegularExpression('/\.doc-notice-list \{[^}]*max-height:/', $css, 'the list is bounded so the sticky bar cannot outgrow the viewport');
-        $this->assertStringContainsString("'.doc-notice-excerpt',", file_get_contents(base_path('scripts/design/contrast-dom.mjs')));
+        $gate = file_get_contents(base_path('scripts/design/contrast-dom.mjs'));
+        $this->assertStringContainsString("'.doc-notice-excerpt',", $gate);
+        $this->assertStringContainsString("'.doc-notice-sentence',", $gate, 'the item sentence is measured by the contrast gate');
     }
 
     /**
