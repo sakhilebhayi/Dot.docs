@@ -2375,13 +2375,12 @@ test('adoptVersion: a merge above the adopted version stands, and its notice whe
 
 // ───────────────────────────────────────────────────────── an accepted suggestion
 
-test('an accepted suggestion is put into the editor over unsaved typing and its version adopted', async () => {
+test('an accepted suggestion over unsaved typing in the same paragraph: the suggestion wins, the typing is listed, the version is adopted', async () => {
     const { server, A, B } = await pair();
     B.type('B wrote this');
     await B.debounce();
     await B.land();
     A.type('A unsaved');
-    A.view.overwriteOwed = true;
     A.view.aiError = 'an earlier problem';
     // Stored on purpose with no base: version 3, and A has not polled version 2.
     const version = server.replace(doc('the accepted suggestion'));
@@ -2389,14 +2388,19 @@ test('an accepted suggestion is put into the editor over unsaved typing and its 
     A.host().applySuggestion(doc('the accepted suggestion'), version);
     assert.equal(A.text(), 'the accepted suggestion');
     assert.equal(A.view.baseVersion, 3);
-    assert.equal(A.view.unsaved, false);
-    assert.equal(A.view.overwriteOwed, false);
+    assert.equal(A.view.unsaved, false, 'nothing of the typing survived: a follow in disguise');
     assert.equal(A.view.confirmed, JSON.stringify(doc('the accepted suggestion')));
+    assert.deepEqual(
+        A.view.lost.map((entry) => [entry.reason, entry.source, entry.excerpt, entry.sentence]),
+        [['both', 'suggestion', 'A unsaved', "This paragraph was rewritten by the accepted suggestion. The suggestion's version is on the page; this is yours."]]
+    );
     assert.equal(A.view.aiError, '');
     assert.equal(A.view.tick, 1);
     assert.equal(A.outlineRefreshes, 1);
+    assert.equal(A.sent.length, 0);
     assert.equal(A.host().syncState(), 'clean');
-    assert.equal(A.word(), 'Saved', 'the typing that said Editing is gone, and no save will answer for it');
+    assert.equal(A.word(), 'Saved', 'the typing that said Editing is offered back, and no save will answer for it');
+    assert.equal(A.engine.pending, null, 'the engine was told');
 });
 
 test('an accepted suggestion on a tab with nothing unsaved says nothing', async () => {
@@ -4818,4 +4822,175 @@ test('a draft merge that leaves text to save does not leave the word at Saved: i
     await again.land();
     assert.equal(again.view.unsaved, false);
     assert.equal(again.word(), 'Saved');
+});
+
+// ───────────────────────────────────────────────────────── an accepted suggestion over unsaved typing (section 8)
+
+test('an accepted suggestion over unsaved typing: blocks it did not touch survive and are saved, the block it rewrote is listed', async () => {
+    const { server, A } = await twoParagraphs();
+    A.typeIn('p2', 'World A');
+    A.insertAfter('p2', 'p3', 'Third by A');
+    const suggestion = docOf(para('p1', 'Suggested start'), para('p2', 'Suggested world'));
+    const version = server.replace(suggestion); // stored with no base: version 3
+
+    A.host().applySuggestion(suggestion, version);
+
+    assert.deepEqual(A.blocks(), [
+        ['p1', 'Suggested start'],
+        ['p2', 'Suggested world'],
+        ['p3', 'Third by A'],
+    ]);
+    assert.equal(A.view.baseVersion, 3);
+    assert.deepEqual(
+        A.view.lost.map((entry) => [entry.id, entry.reason, entry.source, entry.excerpt]),
+        [['p2', 'both', 'suggestion', 'World A']]
+    );
+    assert.equal(A.view.unsaved, true);
+    assert.deepEqual([A.sent.at(-1).base, A.sent.at(-1).overwrite], [3, false]);
+    assert.equal(A.view.aiError, '');
+    assert.equal(A.view.setAside, null);
+    assert.equal(A.view.conflict, null);
+
+    await A.land();
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'Suggested start'],
+        ['p2', 'Suggested world'],
+        ['p3', 'Third by A'],
+    ]);
+    assert.equal(server.version, 4);
+    assert.equal(A.word(), 'Saved');
+});
+
+test('an accepted suggestion over unsaved typing whose merge is impossible: the typing is set aside first, then the suggestion goes in whole', async () => {
+    const { server, A } = await pair();
+    A.type('A unsaved');
+    A.mergeFails = true;
+    const version = server.replace(doc('the accepted suggestion'));
+
+    A.host().applySuggestion(doc('the accepted suggestion'), version);
+
+    assert.equal(A.text(), 'the accepted suggestion');
+    assert.equal(A.view.setAside, JSON.stringify(doc('A unsaved')));
+    assert.equal(A.view.setAsideFrom, 'conflict');
+    assert.equal(A.view.setAsideBase, 2);
+    assert.equal(A.stale(), 'A unsaved', 'parked, as after Load theirs');
+    assert.equal(A.view.unsaved, false);
+    assert.equal(A.view.baseVersion, 2);
+    assert.deepEqual(A.view.lost, []);
+    assert.equal(A.view.aiError, '');
+    assert.equal(A.word(), 'Saved');
+});
+
+test('an accepted suggestion over unsaved typing with no base known (after Keep mine): the typing is set aside first', async () => {
+    const { server, clock, B } = await conflicted();
+    B.host().keepMine();
+    B.saveNeverAnswers();
+    clock.now += SAVE_EXPIRY_MS;
+    assert.equal(B.host().syncState(), 'dirty');
+    assert.equal(B.view.confirmed, null);
+    B.mergeFails = false;
+    const version = server.replace(doc('the accepted suggestion'));
+
+    B.host().applySuggestion(doc('the accepted suggestion'), version);
+
+    assert.equal(B.mergeCalls, 1, 'the merge from conflicted() only: no base for the moved-up version');
+    assert.equal(B.text(), 'the accepted suggestion');
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')));
+    assert.equal(B.view.setAsideFrom, 'conflict');
+    assert.equal(B.view.setAsideBase, 3);
+    assert.equal(B.view.baseVersion, 3);
+    assert.equal(B.view.conflict, null, 'the notice was about a version the suggestion replaced');
+    assert.equal(B.view.unsaved, false);
+});
+
+test('a save given up on is ended inside the suggestion merge: its document does not become the echo of a later merge', async () => {
+    const { server, clock, A, B } = await twoParagraphs();
+    // A's save is in the air for good: p1 'X'. It never reaches the server.
+    A.typeIn('p1', 'X');
+    await A.debounce();
+    A.saveNeverAnswers();
+
+    // A types a new paragraph too; fifteen seconds on, with no keystroke since (so nothing but the
+    // suggestion below has noticed that the save never answered), A accepts a suggestion that rewrites p1 (version 3).
+    A.insertAfter('p2', 'p3', 'Third');
+    clock.now += SAVE_EXPIRY_MS;
+    const suggestion = docOf(para('p1', 'Suggested'), para('p2', 'World'));
+    const version = server.replace(suggestion);
+    A.host().applySuggestion(suggestion, version); // merged; the merged save M (base 3) goes out
+    assert.equal(A.sent.at(-1).base, 3);
+
+    // Before M arrives, B (who follows version 3) writes 'X' in p1 and saves: version 4.
+    await B.cycle();
+    B.typeIn('p1', 'X');
+    await B.debounce();
+    await B.land();
+    assert.equal(server.version, 4);
+
+    // M is refused (version 4); A fetches it and merges. B's X is a later edit than the suggestion: it stands.
+    A.saveArrives();
+    await A.saveReturns();
+    await A.poll();
+    await A.land();
+    assert.equal(blocksOf(server.json).find(([id]) => id === 'p1')[1], 'X', "B's X is not replaced by the stale echo");
+    assert.equal(A.view.overwriteOwed, false);
+});
+
+test('the answer of a save that was in the air when a suggestion was accepted does not move the base back or replace what the tab confirmed', async () => {
+    const { server, A } = await pair();
+    A.type('S1');
+    await A.debounce();
+    A.saveArrives(); // stored as version 2, the answer is held back
+    assert.equal(server.version, 2);
+
+    const suggestion = doc('Suggested');
+    const version = server.replace(suggestion); // version 3
+    A.host().applySuggestion(suggestion, version); // merged: S1 is offered back (D1), the tab is at version 3
+    assert.equal(A.view.baseVersion, 3);
+    A.type('Suggested Y');
+
+    await A.saveReturns(); // the held answer: ok, version 2
+    assert.equal(A.view.baseVersion, 3, 'the base does not go back to version 2');
+    assert.equal(A.view.confirmed, JSON.stringify(doc('Suggested')), 'confirmed is still the suggestion');
+
+    // Somebody restores version 2 (the text S1) while A has 'Suggested Y' unsaved.
+    server.replace(doc('S1')); // version 4
+    await A.debounce();
+    await A.land();
+    await A.cycle();
+    await A.land();
+    assert.equal(server.text(), 'S1', "the restore stands: A's later edit of a block they restored is a D1, not a silent overwrite");
+    assert.ok(A.lostTexts().includes('Suggested Y'));
+});
+
+test('an accepted suggestion whose merge fails does not replace a text that is already set aside: it asks to deal with that first', async () => {
+    const { server, B } = await conflicted();
+    await B.host().loadTheirs(); // B1 is set aside, offered back
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')));
+    B.type('B2 typed after'); // unsaved typing on the loaded version
+    B.mergeFails = true;
+    const suggestion = doc('suggestion');
+    const version = server.replace(suggestion);
+
+    B.host().applySuggestion(suggestion, version);
+
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'the offer stands');
+    assert.equal(B.text(), 'B2 typed after', 'the suggestion did not go in over the typing');
+    assert.match(B.view.aiError, /Put back or discard the text set aside first/);
+});
+
+test('an accepted suggestion that leaves nothing of mine to save drops an owed overwrite: no save is left to carry it', async () => {
+    const { server, B } = await conflicted();
+    await B.host().loadTheirs();
+    B.host().putBack(); // B1 is back on the page, the overwrite is owed
+    assert.equal(B.view.overwriteOwed, true);
+    B.mergeFails = false;
+    const suggestion = doc('suggestion');
+    const version = server.replace(suggestion);
+
+    B.host().applySuggestion(suggestion, version); // D1: the suggestion stays, B1 is offered back
+
+    assert.equal(B.text(), 'suggestion');
+    assert.deepEqual(B.lostTexts(), ['B1']);
+    assert.equal(B.view.unsaved, false);
+    assert.equal(B.view.overwriteOwed, false);
 });

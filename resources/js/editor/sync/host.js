@@ -1860,6 +1860,44 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        // Whatever save is in the air was written against a base this tab is
+        // about to leave. It is given up on HERE, before the merge decides its
+        // base and before markConfirmed(): its answer, whenever it comes, is a
+        // late one and is ignored once the suggestion is confirmed (see
+        // persist()). Left to expire on its own later, it would null
+        // `confirmed` again and install its older document as the echo of
+        // the NEXT merge, which would read a later change of somebody else
+        // that happens to equal it (a restore of that version) as this tab's
+        // own; and answering ok it would move the base back to its version.
+        if (view.saving > 0) {
+            view.saving = 0;
+            view.expiredSaveSeq = view.saveSeq;
+        }
+
+        // Phase 2 (section 8): over unsaved typing the suggestion is MERGED
+        // like any other remote document when a base is known, so the typing
+        // survives wherever the suggestion did not rewrite it, and what it
+        // did rewrite is offered back. When no base is known (after Keep
+        // mine), or the merge or its apply fails, the typing is set aside
+        // first, as after Load theirs, and the suggestion goes in whole.
+        // Phase 1 replaced it silently.
+        const base =
+            view.confirmed ?? (view.known !== null && view.known.version === view.baseVersion ? view.known.json : null);
+        if (view.unsaved && base !== null && mergeSuggestion(handle, base, content, version)) {
+            return;
+        }
+        if (view.unsaved) {
+            // One text is set aside at a time (the offer, and the stale- park
+            // that backs it). Setting this one aside would replace the offer.
+            if (view.setAside) {
+                view.aiError =
+                    'Put back or discard the text set aside first, then accept the suggestion again.';
+
+                return;
+            }
+            setAsideTyping(handle, version);
+        }
+
         if (!handle.applyRemote(content, { force: true })) {
             view.aiError = 'That suggestion could not be applied — the document is unchanged.';
 
@@ -1867,9 +1905,9 @@ export function createSyncHost(view, env) {
         }
 
         // The editor now holds exactly the version the server stored. Text
-        // this tab had marked unsaved is no longer in it, and no save will
-        // answer for it: the word that still says Editing goes back to
-        // Saved. Only on that change.
+        // this tab had marked unsaved is no longer in it (it is set aside
+        // above), and no save will answer for it: the word that still says
+        // Editing goes back to Saved. Only on that change.
         if (view.unsaved) {
             env.report('good', 'Saved');
         }
@@ -1880,6 +1918,87 @@ export function createSyncHost(view, env) {
         view.aiError = '';
         view.tick++;
         refreshOutline();
+    }
+
+    /**
+     * The suggestion merge: section 5.5's steps 6 to 9 with the suggestion
+     * as theirs, `source: 'suggestion'` and the suggestion's version as the
+     * new base.
+     *
+     * @returns {boolean} whether the suggestion was merged and applied
+     */
+    function mergeSuggestion(handle, base, content, version) {
+        let result = null;
+        try {
+            result = handle.merge(JSON.parse(base), content);
+        } catch (_) {
+            result = null;
+        }
+        if (!result) {
+            return false;
+        }
+
+        let applied = false;
+        try {
+            applied = handle.applyRemote(result.merged, { force: true }) === true;
+        } catch (_) {
+            applied = false;
+        }
+        if (!applied) {
+            return false;
+        }
+
+        view.merging = null;
+        view.mergeAttempts = 0;
+        view.baseVersion = version;
+        view.conflict = null;
+        markConfirmed(result.changed ? result.theirs : JSON.stringify(handle.editor.getJSON()), version);
+        view.overwriteOwed = result.changed ? view.overwriteOwed || result.overwrites : false;
+        view.unsaved = result.changed;
+        if (result.lost.length > 0) {
+            offerLost(result.lost, 'suggestion', version);
+        }
+        env.engine()?.saved(version);
+        view.aiError = '';
+        view.tick++;
+
+        const drafts = env.drafts();
+        if (drafts) {
+            if (result.changed) {
+                drafts.saveDraft(
+                    view.docUuid,
+                    JSON.stringify(handle.editor.getJSON()),
+                    view.overwriteOwed ? view.baseVersion - 1 : view.baseVersion
+                );
+            } else {
+                drafts.clearDraft(view.docUuid);
+            }
+        }
+
+        if (result.changed) {
+            view.resave = true;
+            persist(handle.editor.getJSON());
+        } else {
+            env.report('good', 'Saved');
+        }
+        refreshOutline();
+
+        return true;
+    }
+
+    /**
+     * The editor's unsaved text is parked and set aside before a document
+     * replaces it, as Load theirs does: the writer can put it back.
+     *
+     * @param {object} handle
+     * @param {number} version the version the page will show
+     */
+    function setAsideTyping(handle, version) {
+        const mine = JSON.stringify(handle.editor.getJSON());
+        env.drafts()?.parkStaleDraft(view.docUuid, mine, view.baseVersion);
+        view.setAside = mine;
+        view.setAsideFrom = 'conflict';
+        view.setAsideBase = version;
     }
 
     /**
