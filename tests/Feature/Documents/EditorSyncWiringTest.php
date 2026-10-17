@@ -570,6 +570,12 @@ class EditorSyncWiringTest extends TestCase
             $this->assertStringContainsString($selector.' {', $css, "{$selector} is styled");
         }
         $this->assertMatchesRegularExpression('/\.doc-notice-list \{[^}]*max-height:/', $css, 'the list is bounded so the sticky bar cannot outgrow the viewport');
+        // About 40% of the viewport for the whole sticky head (the list gets what is left after the 11rem the rest takes), with a
+        // floor of about one item and an edge shadow that says there is more (checked in a real browser at 360x640: 42%).
+        $this->assertStringContainsString('max-height: clamp(5.5rem, calc(40vh - 11rem), 22rem);', $css);
+        $this->assertMatchesRegularExpression('/\.doc-notice-list \{[^}]*background:[^}]*no-repeat local/s', $css, 'a scroll shadow, so the list says it scrolls');
+        // And the top bar no longer pushes the page sideways at a phone width: it tightens, and below 360px it scrolls on its own.
+        $this->assertMatchesRegularExpression('/@media \(max-width: 420px\) \{\s*\.topbar \{[^}]*overflow-x: auto;/s', $css);
         $gate = file_get_contents(base_path('scripts/design/contrast-dom.mjs'));
         $this->assertStringContainsString("'.doc-notice-excerpt',", $gate);
         $this->assertStringContainsString("'.doc-notice-sentence',", $gate, 'the item sentence is measured by the contrast gate');
