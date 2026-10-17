@@ -7,13 +7,15 @@ use App\Services\SyncMetrics;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 /**
  * Where the editor page flushes its co-editing counters.
  *
  * `{"counts": {"merge_live_clean": 2, "peers_1_secs": 41}}`, nothing else is
- * read: the kinds are a closed list (SyncMetrics::KINDS), each count a whole
+ * read: the kinds are a closed list (SyncMetrics::kinds(); unknown ones are
+ * dropped, the known ones in the same body kept), each count a whole
  * number from 1 to SyncMetrics::MAX_COUNT, and a body over MAX_BODY_BYTES is
  * refused before it is parsed. A plain controller like DocumentSyncController
  * and for the same reason as DocumentAutosaveController: the page leaves by
@@ -45,17 +47,23 @@ class DocumentSyncMetricsController extends Controller
         $document = Document::query()->select(['id', 'uuid', 'owner_id', 'team_id', 'is_public'])->where('uuid', $uuid)->firstOrFail();
         Gate::authorize('view', $document);
 
+        // The shape first: an object of kind => count. A list, a string or nothing is not what the page sends.
         $counts = $request->input('counts');
-        $data = $request->validate([
-            'counts' => ['required', 'array', 'min:1', 'max:'.count(SyncMetrics::KINDS)],
-            'counts.*' => ['required', 'integer:strict', 'min:1', 'max:'.SyncMetrics::MAX_COUNT],
-        ]);
-
-        // The kind is the array KEY, which a rule on `counts.*` does not see.
-        $unknown = is_array($counts) ? array_diff(array_map('strval', array_keys($counts)), SyncMetrics::KINDS) : [];
-        if ($unknown !== []) {
-            throw ValidationException::withMessages(['counts' => 'Unknown kind.']);
+        if (! is_array($counts) || $counts === [] || array_is_list($counts)) {
+            throw ValidationException::withMessages(['counts' => 'Counts must be an object of kind and number.']);
         }
+
+        // An unknown kind is DROPPED, whatever its value: a page a deploy ahead may send a kind this server does not
+        // know yet, and that must not cost the known ones sent with it. Nothing outside the closed list is stored.
+        $known = array_intersect_key($counts, array_flip(SyncMetrics::kinds()));
+        if ($known === []) {
+            return response()->noContent();
+        }
+
+        // A known kind with a bad count is a bad request, as before.
+        $data = Validator::make(['counts' => $known], [
+            'counts.*' => ['required', 'integer:strict', 'min:1', 'max:'.SyncMetrics::MAX_COUNT],
+        ])->validate();
 
         $metrics->record($document->id, (int) $request->user()->getAuthIdentifier(), $data['counts']);
 

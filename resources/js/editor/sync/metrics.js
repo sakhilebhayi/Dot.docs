@@ -9,8 +9,8 @@
  * name or an address: `record()` takes a kind and a small detail (a source, a
  * reason, a number of other people), maps it to one of the names in
  * METRIC_KINDS and adds one, and anything it does not recognise is ignored.
- * METRIC_KINDS is the closed list the server accepts
- * (App\Services\SyncMetrics::KINDS; a PHP test holds the two equal).
+ * METRIC_KINDS is the closed list the server accepts, read from the one file
+ * (metricKinds.json) both sides load.
  *
  * It must NEVER affect editing, so:
  *  - it is a counter map and a clock, no timers: `record()` flushes when a
@@ -23,26 +23,19 @@
  *    (sync/host.js) works unchanged when `env.metric` is not there.
  *
  * Like the rest of sync/ it takes nothing from outside it and has no DOM,
- * no `window`, no `fetch`: the page hands in `send` (a POST that may outlive
- * the page), `beacon`, the CSRF token and the clock.
+ * no `window`, no `fetch`: the page hands in `send` (an ordinary POST), `beacon` (the
+ * one that outlives the page), the CSRF token and the clock.
  */
 
-/** The names the server accepts, in the order the report lists them. */
-export const METRIC_KINDS = [
-    'merge_live_clean', 'merge_live_lost',
-    'merge_draft_clean', 'merge_draft_lost',
-    'merge_suggestion_clean', 'merge_suggestion_lost',
-    'lost_both_live', 'lost_deleted_live',
-    'lost_both_draft', 'lost_deleted_draft',
-    'lost_both_suggestion', 'lost_deleted_suggestion',
-    'lost_put_back', 'lost_dismissed',
-    'conflict_impossible', 'conflict_attempts', 'conflict_expiry',
-    'echo_resolved',
-    'save_resent',
-    'backoff_1', 'backoff_2', 'backoff_3', 'backoff_4', 'backoff_5', 'backoff_6',
-    'readonly_provisional', 'readonly_confirmed',
-    'peers_0_secs', 'peers_1_secs', 'peers_2_secs', 'peers_3plus_secs',
-];
+import kinds from './metricKinds.json' with { type: 'json' };
+
+/**
+ * The names the server accepts, in the order the report lists them. ONE list
+ * for both sides: resources/js/editor/sync/metricKinds.json is read here and by
+ * App\Services\SyncMetrics. Time alone (nobody else present) is deliberately
+ * not a kind: nothing uses it, so it is neither sent nor stored.
+ */
+export const METRIC_KINDS = kinds;
 
 /** At most one flush a minute (the unload flush apart). */
 export const FLUSH_EVERY_MS = 60000;
@@ -103,8 +96,8 @@ export function metricKey(kind, detail = {}) {
     return key !== null && KINDS.has(key) ? key : null;
 }
 
-/** peers_<n>_secs for n other people (3 stands for 3 or more). */
-const peersKey = (others) => (others >= 3 ? 'peers_3plus_secs' : `peers_${others}_secs`);
+/** peers_<n>_secs for n other people (3 stands for 3 or more). Nobody else here (0) has no kind: that time is not kept. */
+const peersKey = (others) => (others <= 0 ? null : others >= 3 ? 'peers_3plus_secs' : `peers_${others}_secs`);
 
 /**
  * @param {{
@@ -176,7 +169,9 @@ export function createMetrics({ send, beacon, token, now, enabled = true, flushE
                 if (others !== null) {
                     const at = now();
                     const key = peersKey(others);
-                    if (lastPeersAt !== null) {
+                    // The clock moves for every poll, alone or not, so the first poll with company is credited only
+                    // its own interval; time alone is simply not added to anything.
+                    if (key !== null && lastPeersAt !== null) {
                         partial[key] = (partial[key] ?? 0) + Math.min(Math.max(0, at - lastPeersAt), PEERS_GAP_MS);
                     }
                     lastPeersAt = at;

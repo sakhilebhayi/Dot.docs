@@ -14,10 +14,10 @@ use Illuminate\Support\Facades\DB;
  *
  * Counts and kinds ONLY. A row is (document id, user id, day, kind, count);
  * nothing a person wrote, no title, no name, no address, no tab id. The kinds
- * are a CLOSED list that resources/js/editor/sync/metrics.js sends from
- * (METRIC_KINDS there; a test holds the two equal): an unknown kind is
- * refused whole, so the table can never carry anything the list does not
- * name. Query builder, not a model, like PresenceService: bookkeeping that
+ * are a CLOSED list in ONE file, resources/js/editor/sync/metricKinds.json,
+ * which the editor bundle imports and this class reads: an unknown kind is
+ * dropped (the known ones sent with it are kept), so the table can never
+ * carry anything the list does not name. Query builder, not a model, like PresenceService: bookkeeping that
  * nothing else loads.
  *
  * The audit log is NOT used for this on purpose: it is an access log with a
@@ -25,37 +25,6 @@ use Illuminate\Support\Facades\DB;
  */
 class SyncMetrics
 {
-    /**
-     * Every kind the page may send, with its meaning. `peers_*_secs` are
-     * seconds this tab saw that many OTHER people (distinct users) present
-     * in the document; every other kind counts events.
-     *
-     * @var list<string>
-     */
-    public const KINDS = [
-        // (a) merges the page performed, and whether anything was left over.
-        'merge_live_clean', 'merge_live_lost',
-        'merge_draft_clean', 'merge_draft_lost',
-        'merge_suggestion_clean', 'merge_suggestion_lost',
-        // (b) lost-row offers: both = same-paragraph clash (D1), deleted = deletion against typing (D2).
-        'lost_both_live', 'lost_deleted_live',
-        'lost_both_draft', 'lost_deleted_draft',
-        'lost_both_suggestion', 'lost_deleted_suggestion',
-        // ...and what the writer did with them.
-        'lost_put_back', 'lost_dismissed',
-        // (c) the conflict notice, by why it was raised.
-        'conflict_impossible', 'conflict_attempts', 'conflict_expiry',
-        // (d) a merge in which the echo rule kept the tab's own stored words.
-        'echo_resolved',
-        // (e) a save sent again after a failed request, and the back-off level each failure reached (6 = the 60 s cap).
-        'save_resent',
-        'backoff_1', 'backoff_2', 'backoff_3', 'backoff_4', 'backoff_5', 'backoff_6',
-        // (f) read only downgrades: a 403 (provisional), then the server's confirmation.
-        'readonly_provisional', 'readonly_confirmed',
-        // (g) seconds with 0, 1, 2 or 3+ other people present.
-        'peers_0_secs', 'peers_1_secs', 'peers_2_secs', 'peers_3plus_secs',
-    ];
-
     /** The most one flush may add to one kind: an hour of seconds. Nothing real comes near it. */
     public const MAX_COUNT = 3600;
 
@@ -67,16 +36,37 @@ class SyncMetrics
 
     private const TABLE = 'sync_metrics';
 
+    /** The one file the editor bundle reads as well (METRIC_KINDS in sync/metrics.js). */
+    public const KINDS_FILE = 'js/editor/sync/metricKinds.json';
+
+    /**
+     * Every kind the page may send, from the ONE file both sides read. `peers_*_secs` are seconds this tab saw that
+     * many OTHER people (distinct users) present in the document; every other kind counts events. Time alone is
+     * deliberately not a kind. See the file's neighbours in resources/js/editor/sync/ for what each name means.
+     *
+     * @return list<string>
+     */
+    public static function kinds(): array
+    {
+        static $kinds = null;
+
+        return $kinds ??= json_decode(file_get_contents(resource_path(self::KINDS_FILE)), true, 512, JSON_THROW_ON_ERROR);
+    }
+
     /**
      * Add `$counts` (kind => whole number) to today's rows for this person
      * and document. ONE statement: the unique key turns a second flush into
      * an addition, and two flushes arriving together cannot collide.
      *
-     * @param  array<string, int>  $counts  already validated against KINDS
+     * @param  array<string, int>  $counts  known kinds only, already validated
      */
     public function record(int $documentId, int $userId, array $counts, ?CarbonInterface $at = null): void
     {
         $day = ($at ?? now())->toDateString();
+
+        // Always in the same order, so two flushes that arrive together lock their rows in the same order and
+        // cannot deadlock each other on PostgreSQL.
+        ksort($counts);
 
         $rows = [];
         foreach ($counts as $kind => $count) {

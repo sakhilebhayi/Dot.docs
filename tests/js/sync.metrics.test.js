@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -63,6 +64,30 @@ function rig(options = {}) {
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test('the closed list is the one JSON file, with no second copy in the bundle', () => {
+    const file = JSON.parse(readFileSync(new URL('../../resources/js/editor/sync/metricKinds.json', import.meta.url), 'utf8'));
+    assert.deepEqual(METRIC_KINDS, file);
+    const source = readFileSync(new URL('../../resources/js/editor/sync/metrics.js', import.meta.url), 'utf8');
+    assert.ok(source.includes("from './metricKinds.json'"));
+    assert.doesNotMatch(source, /METRIC_KINDS\s*=\s*\[/);
+});
+
+test('every event the host reports is one metricKey() knows, and every name in the list can be reached', () => {
+    const host = readFileSync(new URL('../../resources/js/editor/sync/host.js', import.meta.url), 'utf8');
+    const events = new Set([...host.matchAll(/\bmetric\('([a-z-]+)'/g)].map((match) => match[1]));
+    assert.deepEqual(
+        [...events].sort(),
+        ['backoff', 'conflict', 'echo', 'lost', 'lost-action', 'merge', 'peers', 'readonly', 'resend'],
+        'a new event in host.js needs a mapping in metricKey() and a test'
+    );
+    // Reachability is asserted by the payload test at the end (every name in the list is produced by a public event).
+});
+
+test('time alone is not a kind at all', () => {
+    assert.ok(!METRIC_KINDS.includes('peers_0_secs'));
+    assert.deepEqual(METRIC_KINDS.filter((kind) => kind.startsWith('peers_')), ['peers_1_secs', 'peers_2_secs', 'peers_3plus_secs']);
+});
 
 test('the closed list is unique, short and made of plain names', () => {
     assert.equal(new Set(METRIC_KINDS).size, METRIC_KINDS.length);
@@ -222,7 +247,7 @@ test('a flush that is still out is not followed by a second one', async () => {
     assert.deepEqual(r.sent[1].counts, { echo_resolved: 2 });
 });
 
-test('people present are counted in seconds, by how many OTHERS were there', async () => {
+test('people present are counted in seconds, by how many OTHERS were there, and time alone is not counted', async () => {
     const r = rig();
     r.metrics.record('peers', { others: 0 }); // the first poll has no earlier one to measure from
     r.tick(1500);
@@ -237,8 +262,21 @@ test('people present are counted in seconds, by how many OTHERS were there', asy
     r.metrics.record('peers', { others: 3 });
     await r.metrics.flush();
 
-    // 0 others: 1.5 s (the second poll) stays below a whole second twice over; 1.5 s is 1 s with 0.5 left.
-    assert.deepEqual(r.sent[0].counts, { peers_0_secs: 1, peers_1_secs: 10, peers_2_secs: 1, peers_3plus_secs: 3 });
+    // The 1.5 s alone are not counted; 10 s with one other, 1.5 s with two (1 s and 0.5 left), 3 s with three or more.
+    assert.deepEqual(r.sent[0].counts, { peers_1_secs: 10, peers_2_secs: 1, peers_3plus_secs: 3 });
+    assert.ok(!JSON.stringify(r.sent).includes('peers_0'));
+});
+
+test('time alone still moves the clock: the first poll with company is credited only its own interval', async () => {
+    const r = rig();
+    r.metrics.record('peers', { others: 0 });
+    r.tick(60_000);
+    r.metrics.record('peers', { others: 0 });
+    r.tick(3000);
+    r.metrics.record('peers', { others: 1 });
+    await r.metrics.flush();
+
+    assert.deepEqual(r.sent[0].counts, { peers_1_secs: 3 });
 });
 
 test('half seconds are kept until they make a whole one', async () => {

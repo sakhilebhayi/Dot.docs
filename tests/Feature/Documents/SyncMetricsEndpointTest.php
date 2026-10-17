@@ -126,16 +126,63 @@ class SyncMetricsEndpointTest extends TestCase
             ->assertNotFound();
     }
 
-    public function test_an_unknown_kind_is_refused_and_nothing_at_all_is_stored(): void
+    public function test_an_unknown_kind_is_dropped_and_the_known_ones_in_the_same_batch_are_stored(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = $this->documentOf($owner);
+
+        // A newer page may send a kind this server does not know yet (a deploy in between): that must not cost the rest.
+        $this->actingAs($owner)
+            ->postJson(route('documents.sync-metrics', $doc->uuid), ['counts' => [
+                'merge_live_clean' => 1,
+                'my_document_text' => 1,
+                'another_junk' => 'not even a number',
+                'peers_0_secs' => 40,
+            ]])
+            ->assertNoContent();
+
+        $this->assertSame(['merge_live_clean'], DB::table('sync_metrics')->pluck('kind')->all());
+    }
+
+    public function test_a_batch_of_only_unknown_kinds_stores_nothing_and_answers_204(): void
     {
         $owner = User::factory()->withPersonalTeam()->create();
         $doc = $this->documentOf($owner);
 
         $this->actingAs($owner)
-            ->postJson(route('documents.sync-metrics', $doc->uuid), ['counts' => ['merge_live_clean' => 1, 'my_document_text' => 1]])
-            ->assertUnprocessable();
+            ->postJson(route('documents.sync-metrics', $doc->uuid), ['counts' => ['my_document_text' => 1, 'x' => 2]])
+            ->assertNoContent();
 
         $this->assertSame(0, DB::table('sync_metrics')->count());
+    }
+
+    public function test_the_rows_are_written_in_one_fixed_order_so_two_flushes_cannot_deadlock(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = $this->documentOf($owner);
+        $statements = [];
+        DB::listen(function ($query) use (&$statements) {
+            if (str_contains($query->sql, 'sync_metrics') && str_starts_with($query->sql, 'insert')) {
+                $statements[] = $query->bindings;
+            }
+        });
+
+        $this->actingAs($owner)
+            ->postJson(route('documents.sync-metrics', $doc->uuid), ['counts' => ['peers_2_secs' => 1, 'merge_live_lost' => 1, 'backoff_1' => 1]])
+            ->assertNoContent();
+
+        $this->assertCount(1, $statements);
+        $kinds = array_values(array_filter($statements[0], fn ($binding) => in_array($binding, SyncMetrics::kinds(), true)));
+        $this->assertSame(['backoff_1', 'merge_live_lost', 'peers_2_secs'], $kinds);
+    }
+
+    public function test_time_alone_is_not_collected_at_all(): void
+    {
+        $this->assertNotContains('peers_0_secs', SyncMetrics::kinds());
+        $this->assertSame(
+            ['peers_1_secs', 'peers_2_secs', 'peers_3plus_secs'],
+            array_values(array_filter(SyncMetrics::kinds(), fn ($kind) => str_starts_with($kind, 'peers_')))
+        );
     }
 
     public function test_counts_must_be_whole_numbers_inside_the_cap(): void
@@ -163,6 +210,8 @@ class SyncMetricsEndpointTest extends TestCase
         $this->actingAs($owner)->postJson($url, ['counts' => []])->assertUnprocessable();
         $this->actingAs($owner)->postJson($url, ['counts' => 'merge_live_clean'])->assertUnprocessable();
         $this->actingAs($owner)->postJson($url, ['counts' => ['merge_live_clean']])->assertUnprocessable();
+        $this->actingAs($owner)->postJson($url, ['counts' => [1, 2]])->assertUnprocessable();
+        $this->actingAs($owner)->postJson($url, ['counts' => null])->assertUnprocessable();
         $this->assertSame(0, DB::table('sync_metrics')->count());
     }
 
@@ -171,7 +220,7 @@ class SyncMetricsEndpointTest extends TestCase
         $owner = User::factory()->withPersonalTeam()->create();
         $doc = $this->documentOf($owner);
 
-        $counts = array_fill_keys(SyncMetrics::KINDS, SyncMetrics::MAX_COUNT);
+        $counts = array_fill_keys(SyncMetrics::kinds(), SyncMetrics::MAX_COUNT);
         $this->assertLessThan(SyncMetrics::MAX_BODY_BYTES, strlen(json_encode(['counts' => $counts])), 'a payload that names every kind fits');
 
         $this->actingAs($owner)->postJson(route('documents.sync-metrics', $doc->uuid), ['counts' => $counts])->assertNoContent();
@@ -179,7 +228,7 @@ class SyncMetricsEndpointTest extends TestCase
         $this->actingAs($owner)
             ->postJson(route('documents.sync-metrics', $doc->uuid), ['counts' => ['merge_live_clean' => 1], 'note' => str_repeat('x', SyncMetrics::MAX_BODY_BYTES)])
             ->assertStatus(413);
-        $this->assertSame(count(SyncMetrics::KINDS), DB::table('sync_metrics')->count());
+        $this->assertSame(count(SyncMetrics::kinds()), DB::table('sync_metrics')->count());
     }
 
     public function test_extra_keys_in_the_body_are_never_stored(): void
@@ -272,13 +321,17 @@ class SyncMetricsEndpointTest extends TestCase
         $this->assertSame(1, DB::table('sync_metrics')->count());
     }
 
-    public function test_the_kinds_are_the_ones_the_editor_bundle_sends(): void
+    public function test_the_closed_list_lives_in_one_file_that_the_server_and_the_bundle_both_read(): void
     {
-        $js = file_get_contents(resource_path('js/editor/sync/metrics.js'));
-        $this->assertSame(1, preg_match('/export const METRIC_KINDS = \[(.*?)\];/s', $js, $match));
-        preg_match_all("/'([a-z0-9_]+)'/", $match[1], $names);
+        $file = resource_path('js/editor/sync/metricKinds.json');
+        $kinds = json_decode(file_get_contents($file), true, 512, JSON_THROW_ON_ERROR);
 
-        $this->assertEqualsCanonicalizing(SyncMetrics::KINDS, $names[1]);
-        $this->assertSame(array_values(array_unique(SyncMetrics::KINDS)), SyncMetrics::KINDS);
+        $this->assertSame($kinds, SyncMetrics::kinds());
+        $this->assertSame(array_values(array_unique($kinds)), $kinds);
+
+        $js = file_get_contents(resource_path('js/editor/sync/metrics.js'));
+        $this->assertStringContainsString("from './metricKinds.json'", $js);
+        $this->assertDoesNotMatchRegularExpression('/METRIC_KINDS\s*=\s*\[/', $js, 'no second copy of the list in the bundle');
+        $this->assertStringNotContainsString("'merge_live_clean'", file_get_contents(app_path('Services/SyncMetrics.php')), 'and none on the server');
     }
 }
