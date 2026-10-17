@@ -239,6 +239,10 @@ export const makeView = (version) => ({
     parkOfferPending: false,
     saveFailures: 0,
     saveRetryAt: 0,
+    // Whether the server rendered this page for somebody who may change the document, and whether text typed
+    // here was left unsent because the server refused the save.
+    editable: true,
+    unsentKept: false,
 });
 
 export function world(text = 'start') {
@@ -253,12 +257,12 @@ export function world(text = 'start') {
  *
  * @param {{server: FakeServer, clock: {now: number}}} world
  * @param {string} name
- * @param {{failClosed?: boolean, drafts?: Map, draftStore?: boolean, confirmAnswer?: boolean, mergeFails?: boolean}} options
+ * @param {{failClosed?: boolean, readOnly?: boolean, drafts?: Map, draftStore?: boolean, confirmAnswer?: boolean, mergeFails?: boolean}} options
  */
 export function makeTab({ server, clock }, name, options = {}) {
     const t = {
         name,
-        view: { ...makeView(server.version), tabId: name },
+        view: { ...makeView(server.version), tabId: name, editable: !options.readOnly },
         /** Saves in the air, oldest first. */
         saves: [],
         /** Every save this tab has sent. */
@@ -309,10 +313,12 @@ export function makeTab({ server, clock }, name, options = {}) {
     let saveTimer = null;
     let lastSaved = JSON.stringify(content);
     const autosave = !options.failClosed;
+    // Read only as the bundle holds it: the editor is not editable, onUpdate arms nothing, and followers still apply.
+    let readOnly = options.readOnly === true;
     let onUpdate = () => {};
 
     const emitUpdate = () => {
-        if (autosave) {
+        if (autosave && !readOnly) {
             dirty = true;
             saveTimer = 'armed';
         }
@@ -386,6 +392,14 @@ export function makeTab({ server, clock }, name, options = {}) {
         },
         get autosaves() {
             return autosave;
+        },
+        get readOnly() {
+            return readOnly;
+        },
+        makeReadOnly() {
+            readOnly = true;
+            dirty = false;
+            saveTimer = null;
         },
         get pending() {
             return dirty || saveTimer !== null;

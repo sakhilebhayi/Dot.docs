@@ -34,7 +34,7 @@ export function openPalette(editor) {
         title: 'Commands',
         placeholder: 'Search commands…',
         empty: 'No command matches',
-        items: paletteCommands().map((command) => ({
+        items: paletteCommands({ readOnly: editor?.isEditable === false }).map((command) => ({
             key: command.name,
             title: command.title,
             hint: prettyShortcut(command.shortcut) || GROUP_LABELS[command.group] || command.group,

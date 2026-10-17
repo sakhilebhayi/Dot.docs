@@ -457,6 +457,13 @@ class Editor extends Component
             // JSON) but a heading number is decoration only, with nothing to
             // fall back to.
             'outline' => $this->outline(),
+            // Whether this person may change the document (DocumentPolicy::update()).
+            // Answered on EVERY render, never remembered: somebody whose role
+            // was lowered while the page was open is shown the read only
+            // page on the next render. It draws the editor's `editable`
+            // literal and the controls that write; it decides nothing
+            // by itself - every write is authorised again where it happens.
+            'canEdit' => Auth::user()->can('update', $this->document),
         ])->title($this->document->title);
     }
 }
