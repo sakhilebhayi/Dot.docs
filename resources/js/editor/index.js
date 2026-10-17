@@ -1,4 +1,5 @@
 import { Editor, generateJSON } from '@tiptap/core';
+import { Selection } from '@tiptap/pm/state';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
@@ -37,6 +38,8 @@ import { closeList } from './ui/list';
 import { isContentValid, isEmptyDocument } from './validation';
 import { clearHistoryTransaction, remoteTransaction } from './sync/apply';
 import { createSyncEngine } from './sync/engine';
+import { insertBlockTransaction } from './sync/insert';
+import { mergeDocuments } from './sync/merge';
 import { createSyncHost, createTabId, unloadSaveBody } from './sync/host';
 import { createSyncRequest } from './sync/request';
 import { clearDraft, loadDraft, parkStaleDraft, purgeStaleDrafts, saveDraft } from '../offline';
@@ -503,6 +506,15 @@ function mount(element, opts = {}) {
             return dirty || saveTimer !== null;
         },
 
+        /**
+         * Whether an IME composition is in progress. The sync host reports
+         * the tab busy while it is: a document applied under a composition
+         * would land in the middle of a character being composed.
+         */
+        get composing() {
+            return editor.view.composing;
+        },
+
         /** Send any pending document immediately. */
         flush: flushSave,
 
@@ -589,8 +601,11 @@ function mount(element, opts = {}) {
          *
          * It never runs over unsaved local typing unless `force` is given:
          * while the debounce is armed or a save is owed, what the editor
-         * holds exists nowhere else. The caller decides what happens to that
-         * text first (the conflict notice in the Blade bridge).
+         * holds exists nowhere else. `force` is for the cases where the
+         * caller has already decided what happens to that text: a MERGED
+         * document (sync/host.js merged the typing into it and offers back
+         * whatever could not be kept) and the writer's own choice (Load
+         * theirs, an accepted suggestion).
          *
          * @param {object} json a Dot.Doc document
          * @param {{force?: boolean}} options
@@ -676,6 +691,72 @@ function mount(element, opts = {}) {
             saveTimer = null;
             dirty = false;
             lastSaved = JSON.stringify(editor.getJSON());
+
+            return true;
+        },
+
+        /**
+         * Merge a newer server document with what this editor holds
+         * (sync/merge.js). `base` is the last server document this tab
+         * held, `theirs` the newer one; `mine` is the editor's own document
+         * unless the caller hands one in (the draft merge hands in the
+         * draft). `echo` is the document of a save whose answer was lost;
+         * `deletionsWin` false is the draft merge's rule. Null when the
+         * merge cannot be done, and when the editor is fail-closed: what a
+         * read-only view holds is not the document, so it merges nothing.
+         *
+         * @param {object} base
+         * @param {object} theirs
+         * @param {{echo?: object|null, mine?: object|null, deletionsWin?: boolean}} options
+         * @returns {object|null} the MergeResult of mergeDocuments()
+         */
+        merge: (base, theirs, { echo = null, mine = null, deletionsWin = true } = {}) => {
+            if (!base || !theirs || editor.isDestroyed || !autosave) {
+                return null;
+            }
+
+            try {
+                return mergeDocuments(editor.schema, { base, mine: mine ?? editor.getJSON(), theirs, echo }, { deletionsWin });
+            } catch (_) {
+                return null;
+            }
+        },
+
+        /**
+         * Put a block a merge could not keep back on the page (the lost
+         * row's Put it back). The transaction is built by
+         * insertBlockTransaction() (sync/insert.js, which says where the
+         * block goes and what happens to its ids) and dispatched as an
+         * ordinary writer's edit: undoable, `update` fires, the autosave
+         * sends it on the current base, and no overwrite is owed, because
+         * it replaces nothing.
+         *
+         * @param {object} json the block, as the lost entry holds it
+         * @param {{anchors?: string[], keepId?: boolean}} options
+         * @returns {boolean} false when the block could not go in (nothing changed)
+         */
+        insertBlock: (json, { anchors = [], keepId = false } = {}) => {
+            if (!json || editor.isDestroyed || !autosave) {
+                return false;
+            }
+
+            try {
+                const tr = insertBlockTransaction(editor.state, json, {
+                    anchors,
+                    keepId,
+                    generateId: () => base62(8),
+                    Selection,
+                });
+                editor.view.dispatch(tr);
+            } catch (_) {
+                return false;
+            }
+
+            try {
+                editor.commands.focus();
+            } catch (_) {
+                // The block is in and the caret is set; focus is a nicety.
+            }
 
             return true;
         },
