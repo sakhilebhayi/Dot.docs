@@ -239,19 +239,19 @@ B refetch answers {changed, json v2} → deliver() → 'dirty' → onConflict �
 7. wasUnsaved = view.unsaved
    view.merging = null; view.baseVersion = remote.version; view.conflict = null;
    markConfirmed(result.changed ? result.theirs : JSON.stringify(handle.editor.getJSON()), remote.version);
-   view.overwriteOwed = view.overwriteOwed || result.overwrites;       // OR, never assign (Judges 2 and 3)
+   view.overwriteOwed = result.changed ? view.overwriteOwed || result.overwrites : false;   // OR while something of mine is left to save; cleared when nothing is
    view.unsaved = result.changed;
    if (result.lost.length) offerLost(result.lost, 'merge', remote.version);
    env.engine()?.saved(remote.version);
    if (remote.outline) env.showOutline(remote.outline); if (remote.css) env.showCss(remote.css);
    view.tick++;
-8. drafts: changed → saveDraft(uuid, JSON.stringify(handle.editor.getJSON()), view.overwriteOwed ? view.baseVersion - 1 : view.baseVersion)
+8. drafts: changed → saveDraft(uuid, JSON.stringify(handle.editor.getJSON()), draftStamp())   // draftStamp() = overwriteOwed ? Math.min(baseVersion, overwriteFloor ?? baseVersion) - 1 : baseVersion (section 17)
            else   → clearDraft(uuid)
 9. changed → { view.resave = true; persist(handle.editor.getJSON()); }
    else    → if (wasUnsaved) env.report('good', 'Saved')
 ```
 
-Why step 7's OR: Judge 2/3's sequence — B presses Load theirs (confirmed = v5), then Put it back (`overwriteOwed = true`, debounce armed); within 1.2 s B's poll brings v6 → merge → `overwrites` is false → an assignment would clear the owed overwrite and the merged save would replace a head in no version row. With OR the save carries `overwrite: true` and v6 is kept. Second sequence: B deletes p5 unsaved, A edits p5 and saves v2, B's merge (c2) sets the flag, the merged save is refused because A saved v3 meanwhile, the second merge sees p5 as c1 → an assignment would clear the flag; OR keeps it until an accepted save carried it (existing rule).
+Why step 7's OR: Judge 2/3's sequence — B presses Load theirs (confirmed = v5), then Put it back (`overwriteOwed = true`, debounce armed); within 1.2 s B's poll brings v6 → merge → `overwrites` is false → an assignment would clear the owed overwrite and the merged save would replace a head in no version row. With OR the save carries `overwrite: true` and v6 is kept. Second sequence: B deletes p5 unsaved, A edits p5 and saves v2, B's merge (c2) sets the flag, the merged save is refused because A saved v3 meanwhile, the second merge sees p5 as c1 → an assignment would clear the flag; OR keeps it until an accepted save carried it (existing rule). Third sequence: the second merge ends with p5 deleted by both sides, so `changed` is false, nothing is sent and no save is left to carry the flag; an OR would leave `overwriteOwed` true at rest, and the next unrelated save would carry `overwrite: true` (a spurious "Before <name> kept their version" row) while `edited()` stamped the drafts one version below the base. A merge that leaves nothing of mine to save clears the flag; the OR holds only while `result.changed`.
 
 `markConfirmed(json, version)`: `view.confirmed = json; view.known = {version, json}; view.unanswered = null; env.drafts()?.saveBase(view.docUuid, json, version)`. Called from `opened()` (version = `baseVersion`, json = editor JSON as today), `saveAnswered()` on `ok` (snapshot, `result.version`), `applyFromSync()`, `applySuggestion()`, `mergeOrConflict()`. Setting `confirmed = null` stays a direct assignment (`saveInTheAir()` expiry, `persist()`'s `onFailed`, `keepMine()`); `known` is never nulled. `adoptVersion()`, when it moves the base after this page's own style change, also sets `view.known.version = version` and rewrites the base row (a restyle changes only stamps, which the levelling absorbs) — Judge 3's `known.version` drift.
 
@@ -378,7 +378,7 @@ Single quotes only inside attribute values; nothing server-rendered; the existin
 
 ### 6.5 Dismiss all
 
-`dismissLost()`: `env.confirm(DISMISS_LOST_QUESTION)` — "Dismiss this text? It is in no saved version. It will be removed from this page and kept only in this browser, for 7 days." Always asked (every entry is text the merge established is on the page nowhere); a no changes nothing. Yes → `view.lost = []`; `drafts.markLostDismissed(uuid)` stamps `dismissedAt` on the `lost-` row (kept for its 7 days, not re-offered). Not fail-closed-gated.
+`dismissLost()`: `env.confirm(DISMISS_LOST_QUESTION)` — "Dismiss this text? It is in no saved version. It will be removed from this page and kept only in this browser, for 7 days." Always asked (every entry is text the merge established is on the page nowhere); a no changes nothing. Yes → the `lost-` park is written FIRST (`parkLost()`), and only when that write is known to have stored the list is `view.lost` emptied and `markLostDismissed(uuid)` called, which stamps `dismissedAt` on the `lost-` row (kept for its 7 days, not re-offered). When the write fails every entry stays on the page and the notice bar says so; a second press then asks `DISMISS_LOST_UNKEPT_QUESTION` and a yes drops the text with no copy. Not fail-closed-gated. See section 17.
 
 ### 6.6 Re-offer after a reload
 
@@ -388,7 +388,7 @@ Single quotes only inside attribute values; nothing server-rendered; the existin
 
 ## 7. Drafts
 
-- **Live draft** (`<uuid>`): unchanged rules (version-keyed recency, stamped one below while `overwriteOwed`, cleared only when a save settled).
+- **Live draft** (`<uuid>`): unchanged rules (version-keyed recency, stamped below the base the overwrite first became owed on while `overwriteOwed` (`draftStamp()`, section 17), cleared only when a save settled).
 - **`base-<uuid>`**: `{docUuid, json: confirmed, baseVersion, savedAt}`, written by `markConfirmed()` only (open, accepted save, applied/merged document, adopted restyle), never per keystroke. `loadBase(uuid) → {json, baseVersion} | null`.
 - **`lost-<uuid>`**: `{docUuid, entries, baseVersion, parkedAt, dismissedAt?}`.
 - **Sweep**: `parkedRowIsExpired(row, now, ttl)` expires `stale-`, `lost-` and `base-` rows older than `STALE_TTL_MS` (by `parkedAt`, else `savedAt`); `staleDraftIsExpired` stays as an alias; a live draft is never swept. A swept base only means the draft falls back to today's set-aside path.
@@ -414,7 +414,7 @@ if (base && base.baseVersion === draft.baseVersion):
 // fall through: today's park + set-aside, unchanged
 ```
 
-`DRAFT_MERGE_QUESTION` is the text in section 2. `deletionsWin: false`: a draft's "theirs" can be days and many versions newer than "mine"; D2 was decided for live co-typing ("while the other types inside it"), so a draft's deletion of a block somebody has since changed does not win and overwrites nothing (Judge 1's Monday-to-Friday sequence); the question says so. A draft written by a Phase 1 page (no base row), an owed-overwrite draft (stamped one below, never matching its base row) and a merge that returns null all follow today's path.
+`DRAFT_MERGE_QUESTION` is the text in section 2. `deletionsWin: false`: a draft's "theirs" can be days and many versions newer than "mine"; D2 was decided for live co-typing ("while the other types inside it"), so a draft's deletion of a block somebody has since changed does not win and overwrites nothing (Judge 1's Monday-to-Friday sequence); the question says so. A draft written by a Phase 1 page (no base row), a draft typed while an overwrite was already owed before Keep mine (stamped below `overwriteFloor`, so it never matches a base row written while the overwrite was owed) and a merge that returns null all follow today's path. A draft typed after a plain Keep mine, with no overwrite owed before it, is stamped one below the moved-up base and IS merged when that is the version of the base row (decided in Task 10). See section 17.
 
 ---
 
@@ -464,9 +464,9 @@ if (base && base.baseVersion === draft.baseVersion):
 | Fetch for a merge never answers | 15 s → notice; owed save sent after the choice |
 | Save refused three times after merges | notice with the merged document as mine |
 | Merged save rejected by the schema (`ok:false, conflict:false`) | "Not saved", draft kept, nothing automatic |
-| Save answer lost / request fails | `confirmed = null`, `unanswered` set; the next merge uses `known` + echo; if `known.version !== baseVersion` (after Keep mine) → notice |
+| Save answer lost / request fails | `confirmed = null`, `unanswered` set; the next merge uses `known` + echo; if `known.version !== baseVersion` (after Keep mine) → notice. A request that FAILED also sets `resave`, so the next poll tick sends it again (section 17) |
 | Put it back fails (`insertContentAt` throws) | entry stays, `syncNotice = 'Your text could not be put back.'` |
-| Browser cannot keep IndexedDB | no base row → stale draft set aside as today; no lost- park → Dismiss loses the copy (the question still says "in this browser", as Phase 1's does) |
+| Browser cannot keep IndexedDB | no base row → stale draft set aside as today; no lost- park → Dismiss all says nothing was dismissed and keeps the entries on the page; a second question (`DISMISS_LOST_UNKEPT_QUESTION`) lets the writer drop the text with no copy |
 | A host callback throws inside `deliver()` | swallowed by the engine as today; `mergeOrConflict()` wraps `handle.merge`/`applyRemote` in try/catch and falls to the notice |
 | Tab closed inside the debounce in a browser without drafts | Phase 1 limit, unchanged |
 
@@ -534,6 +534,10 @@ Different paragraphs (poll-first and refusal-first with one tab throttled); D1 w
 - A merge during a restore/import/suggestion splices the typist's new blocks at the end when every anchor is gone.
 - The Livewire save still carries the document in the snapshot both ways (Phase 5).
 - Drafts from before Phase 2 (no base row) are set aside as today.
+- Two tabs of one document in one browser can overwrite each other's lost list: each rewrites the whole `lost-` park from its own view. The pages are not affected, only the copy that survives a reload.
+- Parks are kept, not overwritten (`stale-<uuid>@<ms>`), but a kept park is recoverable only by hand, for 7 days. Nothing in the page offers it.
+- The echo rule remembers one snapshot. When two sends in a row both go unanswered and the first was stored, the tab's own words come back as a lost-row offer. Nothing is lost.
+- A save whose request keeps failing is resent at the pace of the poll, with no back-off.
 
 ---
 
@@ -576,3 +580,47 @@ The step log (`prosemirror-collab`) replaces `mergeDocuments`, `merging`, `merge
 4. **Whole-document replacements while somebody types** (decision 13): merge them (designed), or show the conflict notice and let the typist choose?
 
 **Answers:** 1 — leave it to Phase 3 (recommended option taken). 2 — reuse the label in Phase 2. 3 — wording accepted as proposed. 4 — merge them (decision 13 stands).
+
+---
+
+## 17. Amendments made while planning (2026-10-17)
+
+First round of dry runs:
+
+- Sections 2, 3.1, 5.1, 5.4, 5.8, 11 and decision 16: `MERGE_ATTEMPTS` is 5, not 3 (at 3 the random walk ended a tab in the notice in 11 of 100 runs with every merge possible).
+- Sections 4.6, 11 (row 1) and 13: two deletions that leave no block merge to one empty paragraph under the id of mine's last block, not to the notice.
+- Section 5.4: `beginMerge()` drops a pending document older than the refused version (`engine.takeRemote()`) before it refetches; section 5.9: `beginMerge()` is fail-closed-gated.
+- Section 3.1: `mergeAttempts` is also reset by a merge that leaves nothing of mine to save.
+- Section 6.6: the lost row's re-offer runs BEFORE the draft logic in `restoreDraft()`.
+- Sections 6.5, 7 and decision 18: the `lost-` row keeps a `dismissed` list beside `entries`.
+- Section 6.3: Put them all back has its own title and description (`doc-notice-put-back-all-lost-does`).
+
+Second round:
+
+- Sections 3.1 and 12 (the wiring test and the harness): the page declares SEVEN merge fields, not six; `putBackSeq` joins `merging`, `mergeAttempts`, `known`, `sentSnapshot`, `unanswered` and `lost`. `putBack()` sets `putBackSeq = saveSeq`, and `persist()` passes `overwrite && putBackSeq < seq` to `saveAnswered()`: a Put it back pressed while a save that carried the overwrite is in the air is settled only by a save sent after it.
+- Section 5.5 step 7 and its "Why step 7's OR" paragraph (also section 8's suggestion merge): the overwrite is ORed only while `result.changed`; a merge that leaves nothing of mine to save clears it.
+- Section 5.4: `saveAnswered()` ends a merge whose version is at or below the answered one (a late OK answer of a save given up on, arriving while the fetch is out).
+- Section 5.8: `enterConflict()` drops an engine document older than the version the notice names, then refetches.
+- Section 8: an accepted suggestion first gives up the save in the air; when it cannot be merged and a text is already set aside, it is not accepted over the typing (`aiError` says to deal with the standing text first).
+- Section 6.4: Load theirs asks (`LOAD_THEIRS_REPLACES_QUESTION`) before it replaces a text that is already set aside.
+- Section 7.1: a draft merge that leaves text to save reports Editing until the first tick sends it.
+- Section 5.10: more than `MAX_BLOCK_STEPS` (500) block steps take the one-range apply.
+- Section 6.1: `excerpt()` cuts by code point.
+- Section 4.4: when mine ends in the empty paragraph the editor added after the last confirmation and theirs ends in a NON-empty paragraph, the empty paragraph is an ordinary insertion and may be saved between two blocks. Intended: it cannot be told from one the writer typed on purpose, nothing is lost, and either writer can delete it.
+- Section 12: the walk runs wider with `WALK_SEEDS`; a second walk, `sync.merge.walk.failures.test.js`, injects the failures of section 11 that the first never does.
+- Section 13 gains: wrapping a paragraph in a bullet list, an ordered list, a task list or a quote gives the wrapper a new top-level id (the paragraph id moves inside it), so a merge sees a deletion plus an insertion; `toggleHeading` and `toggleCodeBlock` keep the id. When both sides changed the same document attribute (`vars`, `style`) the later saver's value wins silently and nothing is offered back (section 4.6).
+
+Third round, made while executing the plan (2026-10-17):
+
+- Section 3.1: the page declares EIGHT merge fields, not six or seven: `overwriteFloor` joins `merging`, `mergeAttempts`, `known`, `sentSnapshot`, `unanswered`, `lost` and `putBackSeq`. It is the base an owed overwrite first became owed on (null while none is owed). Every path that owes an overwrite goes through `oweOverwrite()`, which sets it only when none was owed already; whatever writes the overwrite off clears it; a Put it back that cannot put the text in restores both fields.
+- Sections 5.5 step 8, 7 and 7.1: a draft written while an overwrite is owed is stamped `Math.min(baseVersion, overwriteFloor ?? baseVersion) - 1` (`draftStamp()`), not "one below the base". The last sentence of 7.1 said an owed-overwrite draft is "stamped one below, never matching its base row". That was not true once Keep mine had moved the base up: Keep mine writes no base row, so one below the moved-up base could be the very version of the row an earlier c2 merge or Put it back had written, and the draft was merged as if nothing were owed. Now an owed-overwrite draft is set aside on reopen and never merged against a base row written while the overwrite was owed. The one case that is still merged is the plain Keep mine, with no overwrite owed before it (decided in Task 10, pinned by a test): its draft is stamped one below the moved-up base and is merged when that is the version of the base row the tab holds.
+- Three defects that the seeded random walks found, and that were fixed (each with a test written first):
+  1. Park overwrite. `parkStaleDraft()` replaced whatever was parked under `stale-<uuid>`. Load theirs, an accepted suggestion that could not be merged and the reopen paths could park over the previous visit's park, which nothing in the visit had offered back. The failure walk showed real text loss (29 of 600 runs). Now, in one transaction, the earlier park moves to `stale-<uuid>@<ms>` (its own `parkedAt`) and the new one takes the plain key. All of them are swept after 7 days, each by its own stamp.
+  2. Owed overwrite lost across Keep mine plus reopen (seed 11393 with three tabs, found at 20,000 seeds): the case in the bullet above. Another writer's words were in no version, no park and no offer. Fixed by `overwriteFloor`.
+  3. A failed request was not resent. When the Livewire call itself failed, the tab showed Not saved and stopped, with nothing owed, until the next keystroke or a change from elsewhere; the unload beacon does not carry that document, so in a browser that keeps no drafts, closing the tab lost the text. This was Phase 1 behaviour. A request that failed (not a refusal, which is an answer) now sets `resave`, and the next completed poll tick sends it again.
+- Section 6.4: Put it back builds its own transaction (`insertBlockTransaction()` in `sync/insert.js`) instead of the `insertContentAt` chain. The caret goes to the end of a block with content; after an atom (a rule, a page break, a section break, a contents list) it goes to the start of the next text block, else the end of the one before, and never onto the atom, where the first keystroke would replace it.
+- Section 6.5: Dismiss all is async. It writes the `lost-` park first and empties the row only when the write is known to have stored the list. When the write fails (a full quota, a blocked database, a browser that keeps no drafts), every entry stays on the page with a notice, and a second question (`DISMISS_LOST_UNKEPT_QUESTION`) lets the writer drop the text with no copy. A list that changed while the write was in flight dismisses nothing and says so.
+- Section 8: `applySuggestion()` captures the typing once, before `mergeSuggestion()` runs. The merge's apply can throw after the editor has changed, and the fall-through must set aside the typing and not whatever the page shows by then.
+- Section 11: the row "Save answer lost / request fails" gains the resend of defect 3, and the row on a browser that cannot keep IndexedDB gains the Dismiss all behaviour above.
+- Section 13 gains four limits: two tabs of one document in one browser can overwrite each other's lost list; a kept stale park is recoverable only by hand, for 7 days; the echo rule remembers one snapshot, so two unanswered sends in a row make a tab's own words come back as a lost-row offer (nothing lost; so the "Nothing" that section 2 promises for a lost answer is not met in that case); a save whose request keeps failing is resent at poll pace with no back-off (whether Livewire raises its own error each time was not checked).
+- Not changed, for the owner to decide: `LOAD_THEIRS_REPLACES_QUESTION` (in `sync/host.js`) still says the earlier text "will be gone". Since the park fix, in a browser that keeps drafts that text stays in the browser for 7 days and is recoverable by hand; in a browser that keeps none it is gone. The page does not offer it again either way. The string says so only in part, and what it should say depends on whether a copy could be kept, which the string cannot know. Discard says "kept only in this browser, for 7 days" for the same case.

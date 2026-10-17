@@ -148,8 +148,14 @@ and that text is kept aside with a notice. Phase 2 removes this.
 
 **What you see:** two people working in different paragraphs both keep typing
 and see each other's paragraphs appear 1-3 seconds behind. If both change the
-same paragraph in the same second, both versions are kept one under the other
-with a notice. Nothing is dropped.
+same paragraph in the same second, the version saved first stays on the page
+and the other is offered back in the notice bar, where Put it back puts it
+under the first (owner decision D1: the later save loses that block only).
+If one person deletes a paragraph the other is typing in, the deletion wins
+and the typed words are offered back the same way, returning to where they
+were (D2). Nothing is dropped. Built: spec
+`docs/superpowers/specs/2026-10-16-coediting-phase-2-paragraph-merge-design.md`,
+plan `docs/superpowers/plans/2026-10-16-coediting-phase-2-paragraph-merge.md`.
 
 - A three-way merge of top-level blocks, matched by the block ids the schema
   already assigns, against the last server copy the tab knew. Compares
