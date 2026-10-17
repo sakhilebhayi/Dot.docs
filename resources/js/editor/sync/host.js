@@ -105,6 +105,15 @@ export const DISMISS_LOST_QUESTION =
     'Dismiss this text? It is in no saved version. It will be removed from this page and kept only in this browser, for 7 days.';
 
 /**
+ * What the page asks before it merges a draft the document has moved past
+ * (section 7.1). A draft's deletion does not win there: D2 was decided for
+ * live co-typing, and a days-old draft's deletion of a block somebody has
+ * since changed must not remove their change.
+ */
+export const DRAFT_MERGE_QUESTION =
+    'An unsaved draft from your last visit was found. Add its changes to the document as it is now? Changes saved by others since then are kept, and a paragraph the draft deleted that was changed since stays. Anything that could not be kept is offered back.';
+
+/**
  * This tab's identity for presence and the sync poll. Per page load, not
  * per browser: two tabs of one account are two tabs.
  *
@@ -1307,6 +1316,92 @@ export function createSyncHost(view, env) {
     }
 
     /**
+     * The draft merge (section 7.1): a draft the document has moved past,
+     * merged against the server document it was typed on (the base row of
+     * its version), with the page's document as theirs and the draft as
+     * mine. `deletionsWin: false`: a block the draft deleted that somebody
+     * has changed since stays, and nothing is overwritten.
+     *
+     * @returns {Promise<boolean>} true when the draft was dealt with here
+     *          (merged, or cleared because it is all in the document);
+     *          false to fall through to today's park and set-aside
+     */
+    async function mergeDraft(drafts, handle, draft, parsed) {
+        let base = null;
+        try {
+            base = await drafts.loadBase(view.docUuid);
+        } catch (_) {
+            base = null;
+        }
+        if (!base || typeof base.json !== 'string' || base.baseVersion !== draft.baseVersion) {
+            return false;
+        }
+
+        let result = null;
+        try {
+            result = handle.merge(JSON.parse(base.json), handle.editor.getJSON(), { mine: parsed, deletionsWin: false });
+        } catch (_) {
+            result = null;
+        }
+        if (!result) {
+            return false;
+        }
+
+        // The beacon stored it, or it is all in the document: nothing to ask.
+        if (!result.changed && result.lost.length === 0) {
+            drafts.clearDraft(view.docUuid);
+
+            return true;
+        }
+
+        if (!env.confirm(DRAFT_MERGE_QUESTION)) {
+            return false;
+        }
+
+        // The pre-merge copy stays recoverable, as today.
+        await drafts.parkStaleDraft(view.docUuid, draft.json, draft.baseVersion);
+        drafts.clearDraft(view.docUuid);
+
+        let applied = false;
+        try {
+            applied = handle.applyRemote(result.merged, { force: true }) === true;
+        } catch (_) {
+            applied = false;
+        }
+        if (!applied) {
+            return false;
+        }
+
+        // `confirmed` stays: opened() set it to the page document, which is
+        // theirs. What survived of the draft is unsaved on the current base
+        // and goes out on the first tick once startSync() has run.
+        view.unsaved = result.changed;
+        if (result.changed) {
+            // The page said Saved when it opened; the merged text is not.
+            env.report('idle', 'Editing');
+        }
+        if (result.lost.length > 0) {
+            offerLost(result.lost, 'draft', view.baseVersion);
+        }
+        if (result.changed) {
+            drafts.saveDraft(view.docUuid, JSON.stringify(handle.editor.getJSON()), view.baseVersion);
+            view.resave = true;
+        }
+        view.tick++;
+        env.info(
+            '[Dot.Doc] An unsaved draft based on v' +
+                draft.baseVersion +
+                ' was merged into the document at v' +
+                view.documentVersion +
+                '; the copy before the merge was kept as stale-' +
+                view.docUuid +
+                '.'
+        );
+
+        return true;
+    }
+
+    /**
      * A newer version exists and this tab has unsaved typing. Stop saving
      * and ask; the draft keeps the text in the meantime. `version` is the
      * version that is in the way: Keep mine needs only that number, not
@@ -1648,6 +1743,15 @@ export function createSyncHost(view, env) {
             }
 
             if (draft.baseVersion < view.documentVersion) {
+                // Phase 2: with the base row of the draft's own version, the
+                // draft is merged into the document as it is now (one
+                // question first), or cleared when it is all in the document
+                // already. Without the row, with a merge that cannot be done,
+                // or when the writer declines: today's park and set-aside.
+                if (await mergeDraft(drafts, handle, draft, parsed)) {
+                    return;
+                }
+
                 // Not restorable, but not this page's to destroy either.
                 // Park it under a stale- key so it can be recovered by
                 // hand; parkStaleDraft() stamps parkedAt, and the sweep on

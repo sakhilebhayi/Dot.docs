@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
     DISCARD_QUESTION,
     DISMISS_LOST_QUESTION,
+    DRAFT_MERGE_QUESTION,
     LOAD_THEIRS_REPLACES_QUESTION,
     MERGE_ATTEMPTS,
     MERGE_FETCH_EXPIRY_MS,
@@ -677,12 +678,13 @@ test('Discard declined after Load theirs changes nothing: the offer stays', asyn
 test('Discard of a draft from an earlier visit does not ask: the page took nothing away', async () => {
     const { server, B } = await conflicted();
     // The same browser loads the page again: the text comes back as a draft.
-    const again = makeTab({ server, clock: { now: 2_000_000 } }, 'B2', { drafts: B.drafts });
+    // The draft merge is declined: today's park and set-aside.
+    const again = makeTab({ server, clock: { now: 2_000_000 } }, 'B2', { drafts: B.drafts, confirmAnswer: false });
     await again.open();
     assert.equal(again.view.setAsideFrom, 'draft');
 
     again.host().discardSetAside();
-    assert.deepEqual(again.questions, []);
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION], 'Discard itself asked nothing');
     assert.equal(again.view.setAside, null);
     assert.equal(again.view.setAsideFrom, null);
     assert.equal(again.stale(), 'B1', 'the parked copy stays');
@@ -1088,29 +1090,36 @@ test('Put it back, then the page dies before anything is sent: reopened, the tex
     assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
 });
 
-test('Keep mine fails, the writer types on, the page dies: reopened, the text is set aside and its save overwrites', async () => {
+test('Keep mine fails, the writer types on, the page dies: reopened, the draft is merged against the version it was typed on and the paragraph that lost is offered back', async () => {
     const { server, clock, B } = await conflicted();
     server.rejectNext = true;
     B.host().keepMine();
     await B.land();
     B.type('B1 and more');
-    assert.equal(B.drafts.get(UUID).baseVersion, 1);
+    assert.equal(B.drafts.get(UUID).baseVersion, 1, 'stamped one below the moved-up base');
+    assert.equal(B.drafts.get(BASE).baseVersion, 1, 'nothing was confirmed since the page opened, so the row IS of that version');
 
     const again = makeTab({ server, clock }, 'B2', { drafts: B.drafts });
     await again.open();
     await again.poll();
-    assert.deepEqual(again.questions, []);
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION]);
     assert.equal(again.text(), 'A1');
-    assert.equal(again.view.setAside, JSON.stringify(doc('B1 and more')));
-
-    again.host().putBack();
-    await again.debounce();
+    assert.equal(again.view.setAside, null);
     assert.deepEqual(
-        again.sent.map((save) => [save.text, save.base, save.overwrite]),
-        [['B1 and more', 2, true]]
+        again.view.lost.map((entry) => [entry.reason, entry.source, entry.excerpt]),
+        [['both', 'draft', 'B1 and more']]
     );
+    assert.equal(again.view.overwriteOwed, false, 'nothing is replaced: nothing is owed');
+
+    assert.equal(again.host().putBackLost(0), true);
+    await again.debounce();
+    assert.deepEqual([again.sent.at(-1).base, again.sent.at(-1).overwrite], [2, false]);
     await again.land();
-    assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'A1'],
+        ['fresh1', 'B1 and more'],
+    ]);
+    assert.deepEqual(server.history, []);
 });
 
 test('once the overwrite has been accepted, the draft of what is typed next states the true base again', async () => {
@@ -2896,23 +2905,35 @@ test('with no draft, and in a browser that cannot keep one, the page simply open
     assert.equal(B.polls.length, 1);
 });
 
-test('reloading instead of choosing: the text comes back set aside, and Put it back saves it', async () => {
+test('reloading instead of choosing: the draft is merged on reopen, and the paragraph that lost is offered back with the draft sentence', async () => {
     const { server, B } = await conflicted();
 
-    // The same browser loads the page again: it renders version 2.
+    // The same browser loads the page again: it renders version 2, and
+    // holds the base row of version 1, which the draft was typed on.
     const again = makeTab({ server, clock: { now: 2_000_000 } }, 'B2', { drafts: B.drafts });
     await again.open();
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION]);
     assert.equal(again.text(), 'A1');
-    assert.equal(again.view.setAside, JSON.stringify(doc('B1')));
-    assert.equal(again.view.setAsideFrom, 'draft');
+    assert.equal(again.view.setAside, null);
+    assert.deepEqual(
+        again.view.lost.map((entry) => [entry.reason, entry.source, entry.excerpt]),
+        [['both', 'draft', 'B1']]
+    );
+    assert.equal(again.stale(), 'B1', 'the pre-merge copy is parked, as today');
+    assert.equal(again.draft(), null);
 
     await again.poll();
-    again.host().putBack();
-    assert.deepEqual(again.questions, [PUT_BACK_QUESTION]);
+    assert.equal(again.sent.length, 0, 'nothing of the draft survived: nothing to save');
+
+    // Put it back puts the draft's paragraph below A's, as an ordinary save.
+    assert.equal(again.host().putBackLost(0), true);
     await again.debounce();
     await again.land();
-    assert.equal(server.text(), 'B1');
-    assert.deepEqual(server.history, [{ version: 2, text: 'A1' }]);
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'A1'],
+        ['fresh1', 'B1'],
+    ]);
+    assert.deepEqual(server.history, []);
 });
 
 // ───────────────────────────────────────────────────────── a draft whose text is already in the document
@@ -2964,9 +2985,10 @@ test('the beacon stored the last words and others saved since: the draft is offe
     assert.equal(again.view.setAsideFrom, 'draft', 'the page knows this is a draft from an earlier visit, not text it took away');
     assert.equal(again.view.setAsideBase, 4);
 
-    // One click must not replace two versions of somebody else's work.
+    // The draft merge was declined (it would have offered the paragraph
+    // back); one click must not replace two versions of somebody else's work.
     again.host().putBack();
-    assert.deepEqual(again.questions, [PUT_BACK_QUESTION]);
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION, PUT_BACK_QUESTION]);
     assert.equal(again.text(), 'A last words, then B one and B two');
     assert.equal(again.view.setAside, JSON.stringify(doc('A last words')));
     await again.debounce();
@@ -3005,7 +3027,7 @@ test('a save in the air when the tab closed landed, and others saved since: putt
     assert.equal(again.view.setAsideFrom, 'draft');
 
     again.host().putBack();
-    assert.deepEqual(again.questions, [PUT_BACK_QUESTION]);
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION, PUT_BACK_QUESTION]);
     assert.equal(again.text(), 'A last words, then B');
     await again.debounce();
     assert.equal(again.sent.length, 0);
@@ -4594,4 +4616,206 @@ test('Load theirs while a text is already set aside asks first: a no changes not
     assert.equal(B.view.setAside, JSON.stringify(doc('B2')), 'a yes: the typing now on the page is what is offered back');
     assert.equal(B.stale(), 'B2');
     assert.equal(server.version, 3);
+});
+
+// ───────────────────────────────────────────────────────── the draft merge (section 7.1)
+
+/**
+ * A's tab dies inside the debounce with typing based on version 2; B saves
+ * version 3 meanwhile; A's browser opens the document again.
+ */
+async function deadTabWithDraft(edit, { confirmAnswer = true, version = 3 } = {}) {
+    const w = await twoParagraphs();
+    const { server, clock, A, B } = w;
+    await edit(A, B); // may await: a case where B follows a beacon's version first
+    assert.equal(A.drafts.get(UUID).baseVersion, 2, 'the live draft is of version 2');
+    assert.equal(A.drafts.get(BASE).baseVersion, 2, 'and the base row holds version 2');
+    await B.debounce();
+    await B.land();
+    assert.equal(server.version, version, 'somebody saved since the draft was written');
+    const again = makeTab({ server, clock }, 'A2', { drafts: A.drafts, confirmAnswer });
+    await again.open();
+
+    return { ...w, again };
+}
+
+test('a stale draft with a base row is merged after one question, saved on the first tick, and its losses are listed with the draft sentences', async () => {
+    const { server, again } = await deadTabWithDraft((A, B) => {
+        A.typeIn('p2', 'World A');
+        A.insertAfter('p2', 'p3', 'Third by A');
+        B.typeIn('p2', 'World B');
+        B.typeIn('p1', 'start B');
+    });
+
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION]);
+    assert.deepEqual(again.blocks(), [
+        ['p1', 'start B'],
+        ['p2', 'World B'],
+        ['p3', 'Third by A'],
+    ]);
+    assert.deepEqual(
+        again.view.lost.map((entry) => [entry.id, entry.reason, entry.source, entry.excerpt, entry.sentence]),
+        [
+            [
+                'p2',
+                'both',
+                'draft',
+                'World A',
+                "This paragraph was changed in the document after your draft was written. The document's version is on the page; this is the draft's.",
+            ],
+        ]
+    );
+    assert.equal(again.view.unsaved, true);
+    assert.equal(again.view.resave, true);
+    assert.equal(again.view.setAside, null);
+    assert.equal(again.stale(), 'start', 'the pre-merge copy of the draft is parked, as today');
+    assert.equal(again.drafts.get(UUID).baseVersion, 3, 'the live draft is now of the merged document, on the new base');
+    assert.equal(again.view.confirmed, JSON.stringify(server.json), 'opened() set it to the page document, which is theirs');
+    assert.equal(again.drafts.get(BASE).baseVersion, 3, 'the base row is written after the draft check, of the page document');
+    assert.match(again.infos.at(-1), /merged into the document/);
+
+    // The first tick sends it.
+    await again.poll();
+    assert.deepEqual([again.sent[0].base, again.sent[0].overwrite], [3, false]);
+    await again.land();
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'start B'],
+        ['p2', 'World B'],
+        ['p3', 'Third by A'],
+    ]);
+    assert.equal(again.view.unsaved, false);
+    assert.equal(again.word(), 'Saved');
+});
+
+test('a draft whose text is already in the document is cleared without a question', async () => {
+    const { again } = await deadTabWithDraft(
+        async (A, B) => {
+            A.typeIn('p2', 'World A');
+            A.leave(); // the beacon stores it: version 3 is the draft's text...
+            await B.cycle(); // ...B follows it (a save on base 2 would be refused and merged, not stored)...
+            B.typeIn('p1', 'start B'); // ...and B saves version 4 on top
+        },
+        { version: 4 }
+    );
+
+    assert.deepEqual(again.questions, []);
+    assert.deepEqual(again.blocks(), [
+        ['p1', 'start B'],
+        ['p2', 'World A'],
+    ]);
+    assert.equal(again.draft(), null);
+    assert.equal(again.stale(), null, 'nothing to park: the document has it');
+    assert.equal(again.view.setAside, null);
+    assert.deepEqual(again.view.lost, []);
+    assert.equal(again.view.unsaved, false);
+});
+
+test('a draft deletion of a block changed since does not win and owes no overwrite; the rest of the draft is merged', async () => {
+    const { server, again } = await deadTabWithDraft((A, B) => {
+        A.deleteBlock('p2');
+        A.typeIn('p1', 'start A');
+        B.typeIn('p2', 'World B');
+    });
+
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION]);
+    assert.deepEqual(again.blocks(), [
+        ['p1', 'start A'],
+        ['p2', 'World B'],
+    ]);
+    assert.equal(again.view.overwriteOwed, false);
+    assert.deepEqual(again.view.lost, []);
+    await again.poll();
+    assert.deepEqual([again.sent[0].base, again.sent[0].overwrite], [3, false]);
+    await again.land();
+    assert.deepEqual(server.history, []);
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'start A'],
+        ['p2', 'World B'],
+    ]);
+});
+
+test('a draft deletion alone, of a block changed since, leaves nothing to merge: cleared without a question', async () => {
+    const { again } = await deadTabWithDraft((A, B) => {
+        A.deleteBlock('p2');
+        B.typeIn('p2', 'World B');
+    });
+
+    assert.deepEqual(again.questions, []);
+    assert.deepEqual(again.blocks(), [
+        ['p1', 'start'],
+        ['p2', 'World B'],
+    ]);
+    assert.equal(again.draft(), null);
+    assert.equal(again.view.overwriteOwed, false);
+});
+
+test('a declined draft merge parks the draft and sets it aside, as today', async () => {
+    const { server, again } = await deadTabWithDraft(
+        (A, B) => {
+            A.typeIn('p2', 'World A');
+            B.typeIn('p1', 'start B');
+        },
+        { confirmAnswer: false }
+    );
+
+    assert.deepEqual(again.questions, [DRAFT_MERGE_QUESTION]);
+    assert.deepEqual(again.blocks(), blocksOf(server.json));
+    assert.equal(again.view.setAside, JSON.stringify(docOf(para('p1', 'start'), para('p2', 'World A'))));
+    assert.equal(again.view.setAsideFrom, 'draft');
+    assert.equal(again.view.setAsideBase, 3);
+    assert.equal(again.stale(), 'start');
+    assert.equal(again.draft(), null);
+    assert.deepEqual(again.view.lost, []);
+    assert.equal(again.view.unsaved, false);
+});
+
+test('no base row: today\'s path, the draft is parked and set aside without a question', async () => {
+    const { server, A } = await twoParagraphs();
+    A.typeIn('p2', 'World A');
+    A.drafts.delete(BASE); // an older build, or the row was swept
+
+    server.replace(docOf(para('p1', 'start B'), para('p2', 'World')));
+    const again = makeTab({ server, clock: { now: 2_000_000 } }, 'A2', { drafts: A.drafts });
+    await again.open();
+
+    assert.deepEqual(again.questions, []);
+    assert.equal(again.view.setAside, JSON.stringify(docOf(para('p1', 'start'), para('p2', 'World A'))));
+    assert.equal(again.view.setAsideFrom, 'draft');
+    assert.equal(again.stale(), 'start');
+    assert.equal(again.mergeCalls, 0, 'no row, no merge');
+});
+
+test('a draft merge that is impossible falls back to today\'s path', async () => {
+    const { server, A } = await twoParagraphs();
+    A.typeIn('p2', 'World A');
+    server.replace(docOf(para('p1', 'start B'), para('p2', 'World')));
+    const again = makeTab({ server, clock: { now: 2_000_000 } }, 'A2', { drafts: A.drafts, mergeFails: true });
+    await again.open();
+
+    assert.deepEqual(again.questions, []);
+    assert.equal(again.mergeCalls, 1);
+    assert.equal(again.view.setAside, JSON.stringify(docOf(para('p1', 'start'), para('p2', 'World A'))));
+    assert.equal(again.view.setAsideFrom, 'draft');
+});
+
+test('the draft merge question says what is kept, what stays, and what is offered back', () => {
+    assert.equal(
+        DRAFT_MERGE_QUESTION,
+        'An unsaved draft from your last visit was found. Add its changes to the document as it is now? Changes saved by others since then are kept, and a paragraph the draft deleted that was changed since stays. Anything that could not be kept is offered back.'
+    );
+});
+
+test('a draft merge that leaves text to save does not leave the word at Saved: it says Editing until the first tick sends it', async () => {
+    const { again } = await deadTabWithDraft((A, B) => {
+        A.typeIn('p2', 'World A');
+        B.typeIn('p1', 'start B');
+    });
+
+    assert.equal(again.view.unsaved, true);
+    assert.equal(again.word(), 'Editing', 'the page said Saved when it opened; the merged text is not');
+
+    await again.poll();
+    await again.land();
+    assert.equal(again.view.unsaved, false);
+    assert.equal(again.word(), 'Saved');
 });
