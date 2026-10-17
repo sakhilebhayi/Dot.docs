@@ -62,7 +62,7 @@ class SyncReport extends Command
             $this->line('Documents with an event: '.$report['events']['documents'].'; people: '.$report['events']['users'].'.');
             $offered = $report['offered_back'];
             $share = $offered['live_merges_with_a_loss_per_100'] === null ? 'n/a' : "{$offered['live_merges_with_a_loss_per_100']} per 100 live merges";
-            $this->line("Paragraphs offered back after a same-paragraph clash: {$offered['paragraphs']} in {$this->documents($offered['documents'])}, in at most {$offered['in_at_most_merges']} live merges ({$share} left something over).");
+            $this->line("Paragraphs offered back after a same-paragraph clash: {$offered['paragraphs']} in {$this->documents($offered['documents'])}, in at most {$offered['in_at_most_merges']} live {$this->mergeWord($offered['in_at_most_merges'])} ({$share} left something over).");
             $this->line("Deletions against typing: {$report['deletions']['count']} in {$this->documents($report['deletions']['documents'])}.");
             $concurrency = $report['concurrency'];
             $rate = $concurrency['offered_back_per_hour'] === null
@@ -85,6 +85,11 @@ class SyncReport extends Command
     private function documents(int $count): string
     {
         return $count.($count === 1 ? ' document' : ' documents');
+    }
+
+    private function mergeWord(int $count): string
+    {
+        return $count === 1 ? 'merge' : 'merges';
     }
 
     private function minutes(int $count): string
