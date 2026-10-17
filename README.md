@@ -60,7 +60,7 @@ Dot.Doc is the team document platform in the InfoDot ecosystem. Documents are st
 | Framework | Laravel 13 |
 | Language | PHP 8.3+ |
 | Editor | TipTap 3 on a custom ProseMirror schema — structured JSON (`content_json`) is the canonical document format; HTML is a rendered/legacy view, not the source of truth |
-| Frontend | Livewire 3 · Alpine.js 3 · Tailwind CSS — "Two Inks on a Desk" design system (night/day themes) |
+| Frontend | Livewire 3 · Alpine.js 3 · Tailwind CSS 4 — "Two Inks on a Desk" design system (night/day themes) |
 | Database | PostgreSQL, with a generated `tsvector` column powering full-text search (SQLite in the test suite) |
 | Realtime | Laravel Reverb (presence channels, broadcast events) |
 | Auth | Laravel Sanctum (InfoDot SSO) + Jetstream Teams |
