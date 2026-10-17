@@ -5314,3 +5314,40 @@ test('an accepted suggestion merged over typing ends a standing conflict notice'
     assert.equal(B.view.setAside, null);
     assert.equal(B.view.conflict, null);
 });
+
+test('the floor survives a merge that changes the text without overwriting: a later Keep mine and reopen still sets the draft aside, nothing is lost', async () => {
+    const holdsT31 = (json) => JSON.stringify(json).includes('t31');
+    const w = world();
+    const { server } = w;
+    const A = w.tab('A');
+    const C = w.tab('C');
+    await A.open(); await C.open(); await A.poll(); await C.poll(); await A.cycle(); await C.cycle();
+    C.insertAfter('p1', 'n1', 't5'); await C.debounce(); await C.land(); // v2
+    await A.cycle();
+    A.deleteBlock('n1');
+    C.typeIn('n1', 't5 t31'); await C.debounce(); await C.land(); // v3
+    await A.cycle(); // c2 onto v3, merged save in the air
+    assert.equal(A.view.overwriteOwed, true);
+    const floorAfterC2 = A.view.overwriteFloor;
+    C.typeIn('p1', 'start x'); await C.debounce(); await C.land(); // v4
+    A.saveArrives(); await A.saveReturns(); // refused: merge onto v4 (c1: A's deletion again)
+    if (A.polls.length === 0 && A.timer) { await A.fireTimer(); }
+    await A.poll();
+    assert.equal(A.view.overwriteOwed, true, 'still owed');
+    C.typeIn('p1', 'start x y'); await C.debounce(); await C.land(); // v5
+    A.mergeFails = true;
+    if (A.saves.length) { A.saveArrives(); await A.saveReturns(); }
+    if (A.polls.length === 0 && A.timer) { await A.fireTimer(); }
+    await A.poll();
+    assert.ok(A.view.conflict);
+    A.host().keepMine();
+    A.insertAfter('p1', 'n9', 'a1');
+    await A.debounce();
+    A.leave(); A.saves.length = 0; A.polls.length = 0; A.engine.stop(); A.mounted = false;
+    const again = w.tab('A2', { drafts: A.drafts });
+    await again.open();
+    assert.deepEqual(again.questions, [], 'not offered as an ordinary draft merge');
+    await again.poll();
+    if (again.saves.length) { await again.land(); }
+    assert.ok(holdsT31(server.json) || server.kept.some((r) => holdsT31(r.json)), 't31 kept somewhere');
+});
