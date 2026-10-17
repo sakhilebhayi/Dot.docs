@@ -1,0 +1,10 @@
+{
+  "name": "a3: a block only I changed keeps my version and has to be saved",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello B"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello"}]}]},
+  "expected": {"blocks": [["p1","Hello B"]], "changed": true, "lost": [], "overwrites": false}
+}

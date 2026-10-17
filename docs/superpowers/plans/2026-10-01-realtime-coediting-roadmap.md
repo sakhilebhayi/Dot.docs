@@ -148,8 +148,18 @@ and that text is kept aside with a notice. Phase 2 removes this.
 
 **What you see:** two people working in different paragraphs both keep typing
 and see each other's paragraphs appear 1-3 seconds behind. If both change the
-same paragraph in the same second, both versions are kept one under the other
-with a notice. Nothing is dropped.
+same paragraph in the same second, the version saved first stays on the page
+and the other is offered back in the notice bar, where Put it back puts it
+under the first (owner decision D1: the later save loses that block only).
+If one person deletes a paragraph the other is typing in, the deletion wins
+and the typed words are offered back the same way, returning to where they
+were (D2). Nothing is silently dropped: every paragraph that cannot be kept
+is offered back, with the stated limits (characters inside one paragraph are
+not merged; Enter or Backspace in a paragraph somebody else changes at the
+same moment can duplicate words or leave them only in the lost row; the
+offer is kept in the browser only where it keeps drafts). Built: spec
+`docs/superpowers/specs/2026-10-16-coediting-phase-2-paragraph-merge-design.md`,
+plan `docs/superpowers/plans/2026-10-16-coediting-phase-2-paragraph-merge.md`.
 
 - A three-way merge of top-level blocks, matched by the block ids the schema
   already assigns, against the last server copy the tab knew. Compares
@@ -211,12 +221,13 @@ socket drops. Needs the owner to choose and pay for the outside service.
 1. **Speed bar.** Is "about one second behind while the other person types"
    acceptable, at no extra cost? If it must be keystroke-instant, Phase 6
    (an outside service or small server, paid) becomes required.
-2. **Same paragraph, same second (Phase 2 only):** keep both versions one
-   under the other with a notice (recommended), or keep yours and drop
-   theirs.
+2. **Same paragraph, same second (Phase 2 only):** decided 2026-10-16
+   (D1): the version saved first stays on the page, and the later save loses
+   that paragraph only, which is offered back in the notice bar and put
+   under the first by Put it back. Built in Phase 2.
 3. **Delete beats typing.** If one person deletes a paragraph while another
-   is typing in it, the typing in that paragraph is lost. This is standard
-   for this kind of merging. Accept?
+   is typing in it, the deletion wins and the typed words are offered back
+   to the person who typed them (decided 2026-10-16, built in Phase 2).
 4. **Reloads.** Restoring a version, importing over a document or accepting
    an AI suggestion would reload the editor for everyone who has it open,
    keeping their last unsent seconds as recoverable text. Accept?

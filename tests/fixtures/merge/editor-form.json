@@ -1,0 +1,455 @@
+{
+  "type": "doc",
+  "attrs": {
+    "schema": 1,
+    "style": "report",
+    "vars": {}
+  },
+  "content": [
+    {
+      "type": "heading",
+      "attrs": {
+        "id": "fxHead01",
+        "align": null,
+        "level": 1,
+        "numbered": true
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Introduction"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "attrs": {
+        "id": "fxPara01",
+        "align": null
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "See "
+        },
+        {
+          "type": "crossRef",
+          "attrs": {
+            "targetId": "fxHead01",
+            "kind": "heading",
+            "label": null
+          }
+        },
+        {
+          "type": "text",
+          "text": " and "
+        },
+        {
+          "type": "variable",
+          "attrs": {
+            "key": "client"
+          }
+        },
+        {
+          "type": "text",
+          "text": ", "
+        },
+        {
+          "type": "text",
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "text": "in bold"
+        },
+        {
+          "type": "text",
+          "text": "."
+        }
+      ]
+    },
+    {
+      "type": "toc",
+      "attrs": {
+        "id": "fxTocc01",
+        "depth": 3,
+        "entries": []
+      }
+    },
+    {
+      "type": "bulletList",
+      "attrs": {
+        "id": "fxList01"
+      },
+      "content": [
+        {
+          "type": "listItem",
+          "attrs": {
+            "id": "fxItem01"
+          },
+          "content": [
+            {
+              "type": "paragraph",
+              "attrs": {
+                "id": "fxIpar01",
+                "align": null
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "First"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "listItem",
+          "attrs": {
+            "id": "fxItem02"
+          },
+          "content": [
+            {
+              "type": "paragraph",
+              "attrs": {
+                "id": "fxIpar02",
+                "align": null
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Second"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "orderedList",
+      "attrs": {
+        "id": "fxOlst01",
+        "start": 1,
+        "type": null
+      },
+      "content": [
+        {
+          "type": "listItem",
+          "attrs": {
+            "id": "fxOitm01"
+          },
+          "content": [
+            {
+              "type": "paragraph",
+              "attrs": {
+                "id": "fxOpar01",
+                "align": null
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Step one"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "taskList",
+      "attrs": {
+        "id": "fxTask01"
+      },
+      "content": [
+        {
+          "type": "taskItem",
+          "attrs": {
+            "id": "fxTitm01",
+            "checked": true
+          },
+          "content": [
+            {
+              "type": "paragraph",
+              "attrs": {
+                "id": "fxTpar01",
+                "align": null
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Done"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "blockquote",
+      "attrs": {
+        "id": "fxQuot01"
+      },
+      "content": [
+        {
+          "type": "paragraph",
+          "attrs": {
+            "id": "fxQpar01",
+            "align": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Quoted"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "codeBlock",
+      "attrs": {
+        "id": "fxCode01",
+        "language": null
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "const x = 1;"
+        }
+      ]
+    },
+    {
+      "type": "horizontalRule",
+      "attrs": {
+        "id": "fxRule01"
+      }
+    },
+    {
+      "type": "table",
+      "attrs": {
+        "id": "fxTabl01"
+      },
+      "content": [
+        {
+          "type": "tableRow",
+          "attrs": {
+            "id": "fxTrow01"
+          },
+          "content": [
+            {
+              "type": "tableHeader",
+              "attrs": {
+                "id": "fxThdr01",
+                "colspan": 1,
+                "rowspan": 1,
+                "colwidth": null,
+                "align": null
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "fxHpar01",
+                    "align": null
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Head"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableHeader",
+              "attrs": {
+                "id": "fxThdr02",
+                "colspan": 1,
+                "rowspan": 1,
+                "colwidth": null,
+                "align": null
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "fxHpar02",
+                    "align": null
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Head 2"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "tableRow",
+          "attrs": {
+            "id": "fxTrow02"
+          },
+          "content": [
+            {
+              "type": "tableCell",
+              "attrs": {
+                "id": "fxTcel01",
+                "colspan": 1,
+                "rowspan": 1,
+                "colwidth": null,
+                "align": null
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "fxCpar01",
+                    "align": null
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Cell"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableCell",
+              "attrs": {
+                "id": "fxTcel02",
+                "colspan": 1,
+                "rowspan": 1,
+                "colwidth": null,
+                "align": null
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "fxCpar02",
+                    "align": null
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Cell 2"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "callout",
+      "attrs": {
+        "id": "fxCall01",
+        "tone": "note"
+      },
+      "content": [
+        {
+          "type": "paragraph",
+          "attrs": {
+            "id": "fxCapa01",
+            "align": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Note this"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "columns",
+      "attrs": {
+        "id": "fxCols01",
+        "count": 2
+      },
+      "content": [
+        {
+          "type": "column",
+          "attrs": {
+            "id": "fxColm01"
+          },
+          "content": [
+            {
+              "type": "paragraph",
+              "attrs": {
+                "id": "fxC1pa01",
+                "align": null
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Left"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "column",
+          "attrs": {
+            "id": "fxColm02"
+          },
+          "content": [
+            {
+              "type": "paragraph",
+              "attrs": {
+                "id": "fxC2pa01",
+                "align": null
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Right"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sectionBreak",
+      "attrs": {
+        "id": "fxSect01",
+        "setup": {}
+      }
+    },
+    {
+      "type": "pageBreak",
+      "attrs": {
+        "id": "fxPage01"
+      }
+    },
+    {
+      "type": "paragraph",
+      "attrs": {
+        "id": "fxPara02",
+        "align": "center"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Centred end."
+        }
+      ]
+    }
+  ]
+}

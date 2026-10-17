@@ -150,22 +150,23 @@ class EditorSyncWiringTest extends TestCase
         $this->assertSame('status', $bar->getAttribute('role'));
         $this->assertSame('polite', $bar->getAttribute('aria-live'));
 
-        // The three notices, in this order. Each is hidden in the markup the
+        // The four notices, in this order. Each is hidden in the markup the
         // server sends, so it does not show before Alpine runs.
         $rows = [];
         foreach ($bar->querySelectorAll('.doc-notice') as $row) {
             $rows[] = $row->getAttribute('x-bind:hidden');
         }
-        $this->assertSame(['!conflict', '!setAside', '!syncNotice'], $rows);
-        foreach (['conflict', 'setAside', 'syncNotice'] as $state) {
+        $this->assertSame(['!conflict', '!lost.length', '!setAside', '!syncNotice'], $rows);
+        foreach (['conflict', 'lost.length', 'setAside', 'syncNotice'] as $state) {
             $this->assertTrue($this->notice($bar, $state)->hasAttribute('hidden'), "the {$state} notice is hidden until Alpine runs");
             $this->assertNull($strip->querySelector('[x-show="'.$state.'"] button'));
         }
         // A reload during a conflict no longer loses the text (the page
         // sets it aside as a draft and offers it back), so the sentence
-        // does not forbid one.
+        // does not forbid one. Since Phase 2 the notice appears only when
+        // a merge could not be done, and the sentence says so.
         $this->assertSame(
-            'Not saved — this document was changed elsewhere while you were typing. Choose one.',
+            'Not saved — this document was changed elsewhere while you were typing, and the two could not be combined. Choose one.',
             $this->words($this->notice($bar, 'conflict')->querySelector('.doc-notice-text')),
         );
         $this->assertStringContainsString('Your text was set aside.', $this->notice($bar, 'setAside')->textContent);
@@ -177,7 +178,10 @@ class EditorSyncWiringTest extends TestCase
             $this->assertSame('button', $button->getAttribute('type'));
             $handlers[] = $button->getAttribute('@click');
         }
-        $this->assertSame(['keepMine()', 'loadTheirs()', 'putBack()', 'discardSetAside()'], $handlers);
+        $this->assertSame(
+            ['keepMine()', 'loadTheirs()', 'putBackLost(0)', 'putBackLost(1)', 'putBackLost(2)', 'putBackLost(3)', 'putBackLost(4)', 'putBackAllLost()', 'dismissLost()', 'putBack()', 'discardSetAside()'],
+            $handlers,
+        );
         $this->assertNotNull($this->notice($bar, 'conflict')->querySelector('button[\@click="keepMine()"][title]'));
         $loadTheirs = $this->notice($bar, 'conflict')->querySelector('button[\@click="loadTheirs()"][title]');
         $this->assertNotNull($loadTheirs);
@@ -186,7 +190,7 @@ class EditorSyncWiringTest extends TestCase
         $this->assertNotNull($this->notice($bar, 'setAside')->querySelector('button[\@click="discardSetAside()"][title]'));
 
         // And nowhere else on the page: the strip carries no button at all.
-        foreach (['keepMine()', 'loadTheirs()', 'putBack()', 'discardSetAside()'] as $handler) {
+        foreach (['keepMine()', 'loadTheirs()', 'putBackLost(0)', 'putBackLost(1)', 'putBackLost(2)', 'putBackLost(3)', 'putBackLost(4)', 'putBackAllLost()', 'dismissLost()', 'putBack()', 'discardSetAside()'] as $handler) {
             $this->assertSame(1, substr_count($html, '@click="'.$handler.'"'));
         }
         $this->assertCount(0, $strip->querySelectorAll('button'));
@@ -232,8 +236,8 @@ class EditorSyncWiringTest extends TestCase
         // Not x-show and not x-cloak, anywhere in the bar: the attribute is
         // in the markup from the start and Alpine switches it.
         $this->assertCount(0, $bar->querySelectorAll('[x-show], [x-cloak]'));
-        $this->assertCount(3, $bar->querySelectorAll('.doc-notice'));
-        foreach (['conflict', 'setAside', 'syncNotice'] as $state) {
+        $this->assertCount(4, $bar->querySelectorAll('.doc-notice'));
+        foreach (['conflict', 'lost.length', 'setAside', 'syncNotice'] as $state) {
             $row = $this->notice($bar, $state);
             $this->assertTrue($row->hasAttribute('hidden'));
             $this->assertSame('!'.$state, $row->getAttribute('x-bind:hidden'));
@@ -243,6 +247,10 @@ class EditorSyncWiringTest extends TestCase
         // for [hidden]: without this rule all three notices show for good.
         $css = file_get_contents(resource_path('css/shell.css'));
         $this->assertMatchesRegularExpression('/\.doc-notice\[hidden\][^{}]*\{\s*display:\s*none;\s*\}/', $css);
+
+        // The descendant form is what hides the five item slots and the overflow line of the lost row, which are
+        // display:flex as well; without it every slot shows empty (the first rule above does not reach them).
+        $this->assertMatchesRegularExpression('/\.doc-notice \[hidden\][^{}]*\{\s*display:\s*none;/', $css);
 
         // The one sentence in the strip that Alpine writes (a refused AI
         // result or suggestion) was emptied by the same morph. It is
@@ -291,6 +299,22 @@ class EditorSyncWiringTest extends TestCase
         // And the flag it reads is a field of the page's own state.
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
         $this->assertMatchesRegularExpression('/^\s*unsaved: false,$/m', $alpine[1]);
+    }
+
+    /**
+     * The merge (resources/js/editor/sync/host.js, Phase 2) writes eight more
+     * state fields (overwriteFloor: the base an owed overwrite first became
+     * owed on, which the draft is stamped below). Like every other, each is
+     * declared in the component's own object, never in the module.
+     */
+    public function test_the_page_declares_the_merge_state_fields_the_host_writes(): void
+    {
+        $html = $this->editorHtml();
+
+        $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
+        foreach (['merging: null,', 'mergeAttempts: 0,', 'known: null,', 'sentSnapshot: null,', 'unanswered: null,', 'lost: [],', 'putBackSeq: 0,', 'overwriteFloor: null,', 'parkOfferPending: false,', 'saveFailures: 0,', 'saveRetryAt: 0,'] as $field) {
+            $this->assertMatchesRegularExpression('/^\s*'.preg_quote($field, '/').'$/m', $alpine[1], "{$field} is declared");
+        }
     }
 
     /**
@@ -430,13 +454,82 @@ class EditorSyncWiringTest extends TestCase
             $this->assertSame($button->getAttribute('title'), $this->words($description));
             $described++;
         }
-        $this->assertSame(4, $described);
+        $this->assertSame(11, $described, 'Keep mine, Load theirs, five Put it back, Put them all back, Dismiss all, Put it back, Discard');
 
         // One listener on the bar, after the button's own; the method is
         // page glue in the component.
         $this->assertSame('noticePressed($event)', $bar->getAttribute('@click'));
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
         $this->assertStringContainsString('noticePressed(event) {', $alpine[1]);
+    }
+
+    /**
+     * The lost row (Phase 2, section 6 of the spec): what a merge could not
+     * keep, offered back item by item, each with its reason, its first 80
+     * characters and its own Put it back. Five static item slots switched
+     * with the hidden attribute, never x-for: PHPUnit can pin every element,
+     * and no Alpine pattern new to the bar is introduced. LOST_ROWS in
+     * sync/host.js is the same five.
+     */
+    public function test_the_lost_row_offers_five_items_back_and_a_way_to_take_them_all_or_none(): void
+    {
+        $html = $this->editorHtml();
+        $dom = HTMLDocument::createFromString($html, LIBXML_NOERROR);
+        $bar = $dom->querySelector('.doc-notices');
+        $this->assertNotNull($bar);
+        $row = $this->notice($bar, 'lost.length');
+
+        $this->assertSame(
+            'Not everything you typed could be kept. Each item below stays here until you put it back or dismiss it.',
+            $this->words($row->querySelector('.doc-notice-text')),
+        );
+
+        $items = $row->querySelectorAll('.doc-notice-list > .doc-notice-item');
+        $this->assertCount(6, $items, 'five slots and the overflow line');
+        foreach (range(0, 4) as $i) {
+            $item = $items->item($i);
+            $this->assertTrue($item->hasAttribute('hidden'));
+            $this->assertSame("!lost[{$i}]", $item->getAttribute('x-bind:hidden'));
+            $this->assertSame("lost[{$i}] ? lost[{$i}].sentence : ''", $item->querySelector('span[x-text]')->getAttribute('x-text'));
+            $this->assertSame("lost[{$i}] ? lost[{$i}].excerpt : ''", $item->querySelector('q.doc-notice-excerpt')->getAttribute('x-text'));
+            $button = $item->querySelector('button');
+            $this->assertSame("putBackLost({$i})", $button->getAttribute('@click'));
+            $this->assertSame('Put it back', $this->words($button));
+            $this->assertSame('doc-notice-put-back-lost-does', $button->getAttribute('aria-describedby'));
+        }
+        $overflow = $items->item(5);
+        $this->assertTrue($overflow->hasAttribute('hidden'));
+        $this->assertCount(1, $overflow->children, 'the sentence is one flex item, not three');
+        $this->assertSame('lost.length <= 5', $overflow->getAttribute('x-bind:hidden'));
+        $this->assertSame('lost.length - 5', $overflow->querySelector('span[x-text]')->getAttribute('x-text'));
+        $this->assertSame('And more. Put them all back restores every item, these included.', $this->words($overflow), 'the number is written by x-text, so it is empty here');
+
+        $actions = [];
+        foreach ($row->querySelectorAll('.doc-notice-actions > button') as $button) {
+            $actions[$this->words($button)] = $button->getAttribute('@click');
+        }
+        $this->assertSame(['Put them all back' => 'putBackAllLost()', 'Dismiss all' => 'dismissLost()'], $actions);
+
+        // Static slots, never x-for.
+        $this->assertCount(0, $bar->querySelectorAll('template'));
+        $this->assertStringNotContainsString('x-for', (string) $bar->innerHTML);
+
+        // The five is one number, in the module too.
+        $this->assertMatchesRegularExpression('/^export const LOST_ROWS = 5;$/m', file_get_contents(resource_path('js/editor/sync/host.js')));
+
+        // The three delegates hand over to the module.
+        $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
+        $this->assertStringContainsString('putBackLost(index) { this.syncHost().putBackLost(index); }', $alpine[1]);
+        $this->assertStringContainsString('putBackAllLost() { this.syncHost().putBackAllLost(); }', $alpine[1]);
+        $this->assertStringContainsString('dismissLost() { this.syncHost().dismissLost(); }', $alpine[1]);
+
+        // The row's own styles, beside the bar's, and the excerpt's ink in the contrast gate.
+        $css = file_get_contents(resource_path('css/shell.css'));
+        foreach (['.doc-notice-list', '.doc-notice-item', '.doc-notice-excerpt'] as $selector) {
+            $this->assertStringContainsString($selector.' {', $css, "{$selector} is styled");
+        }
+        $this->assertMatchesRegularExpression('/\.doc-notice-list \{[^}]*max-height:/', $css, 'the list is bounded so the sticky bar cannot outgrow the viewport');
+        $this->assertStringContainsString("'.doc-notice-excerpt',", file_get_contents(base_path('scripts/design/contrast-dom.mjs')));
     }
 
     /**

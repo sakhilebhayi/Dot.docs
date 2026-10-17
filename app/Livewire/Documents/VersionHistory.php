@@ -113,7 +113,9 @@ class VersionHistory extends Component
             'version_number' => $version->version_number,
         ]);
 
-        $this->dispatch('version-restored', content: $this->document->content);
+        // No browser event: nothing listened for one. Open editors follow a
+        // restore through the sync poll (a clean tab) or merge it over their
+        // unsaved typing (resources/js/editor/sync/host.js).
         $this->previewId = null;
         $this->showDiff = false;
         $this->compareIds = [];

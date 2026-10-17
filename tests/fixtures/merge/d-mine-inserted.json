@@ -1,0 +1,11 @@
+{
+  "name": "d: a block I inserted is kept after its predecessor and has to be saved",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]},
+    {"type":"paragraph","attrs":{"id":"n1"},"content":[{"type":"text","text":"new"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]}]},
+  "expected": {"blocks": [["p1","1"],["n1","new"]], "changed": true, "lost": [], "overwrites": false}
+}
