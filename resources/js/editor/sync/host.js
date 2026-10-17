@@ -583,6 +583,14 @@ export function createSyncHost(view, env) {
                 view.confirmed = null;
                 // The server may have stored it all the same (section 5.6).
                 view.unanswered = view.sentSnapshot;
+                // And it is owed again: the next completed poll sends it
+                // (resendIfOwed(), at the engine's back-off). Left unowed,
+                // the text waited for the next keystroke or a change from
+                // elsewhere, and the unload beacon does not carry it (the
+                // bundle counts the document as sent), so a tab closed at
+                // Not saved in a browser that keeps no drafts lost it. Only
+                // a request that FAILED: a refusal (ok false) is an answer.
+                view.resave = true;
                 env.report('danger', 'Not saved');
                 env.engine()?.retry();
             }

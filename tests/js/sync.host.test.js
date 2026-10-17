@@ -2132,6 +2132,31 @@ test('a save whose request fails outright reports Not saved, keeps the draft and
     assert.equal(A.host().syncState(), 'dirty');
 });
 
+test('a save whose request failed is sent again on the next poll tick, with no further keystroke, and its answer ends in Saved', async () => {
+    const { server, A } = await pair();
+    A.type('A1');
+    await A.debounce();
+    A.saves.shift().reject(new Error('network'));
+    await settle();
+    assert.equal(A.word(), 'Not saved');
+    assert.equal(A.view.resave, true, 'the save is owed again');
+    assert.equal(A.sent.length, 1);
+
+    // Nothing else happens: no keystroke, nothing from elsewhere. The next
+    // completed poll is the tick that sends it.
+    await A.cycle();
+    assert.equal(A.sent.length, 2, 'sent again on the next tick');
+    assert.deepEqual([A.sent[1].text, A.sent[1].base, A.sent[1].overwrite], ['A1', 1, false]);
+    assert.equal(A.view.resave, false, 'the owed save is the one that went out');
+
+    await A.land();
+    assert.equal(server.text(), 'A1');
+    assert.equal(server.version, 2);
+    assert.equal(A.view.unsaved, false);
+    assert.equal(A.word(), 'Saved');
+    assert.equal(A.draft(), null);
+});
+
 test('a draft is dropped only when the editor still holds exactly what was stored and nothing is queued', async () => {
     const { A } = await pair();
     A.type('A1');
