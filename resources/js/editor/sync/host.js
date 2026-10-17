@@ -1035,13 +1035,37 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        // 3a. A document older than the one under merge (a poll that was
+        //     already in the air when the refusal started the fetch): the
+        //     queued poll brings the newer one, and merging this one would
+        //     send a save on a base known to be stale and spend an attempt.
+        if (view.merging && remote.version < view.merging.version) {
+            env.engine()?.takeRemote();
+
+            return;
+        }
+
+        // 3b. An IME composition: what is being composed is in the DOM and
+        //     not yet in the editor state, so applying now could garble it
+        //     and it would not be in `lost`. beginMerge() reaches this
+        //     without syncState()'s composing guard when the engine already
+        //     holds the document. Hold the merge: the document stays pending
+        //     in the engine, persist() stays held by `merging`, and the next
+        //     poll's deliver() (the tab is dirty, not busy, once the
+        //     composition ends) merges it.
+        if (handle.composing) {
+            view.merging ??= { version: remote.version, since: env.now() };
+
+            return;
+        }
+
         // 4. The base: the confirmed document, or the last known one when
         //    nothing is confirmed (a lost answer, a failed request) and it
         //    is of the version the typing is based on. After Keep mine the
         //    base names a version the editor never held: no base, so the
         //    notice, until a save is accepted.
         const base =
-            view.confirmed ?? (view.known !== null && view.known.version === view.baseVersion ? view.known.json : null);
+            view.confirmed ?? (view.known && view.known.version === view.baseVersion ? view.known.json : null);
         if (base === null) {
             view.merging = null;
             enterConflict(remote.version);
@@ -1462,7 +1486,15 @@ export function createSyncHost(view, env) {
         }
 
         await restoreDraftIfRestorable(drafts, handle);
-        writeBase(view.confirmed, view.baseVersion);
+        // The awaits above can see `confirmed` nulled (a save that failed or
+        // expired): then the known document of this very version is the
+        // row, and when there is none the row already stored is left alone
+        // rather than overwritten with null.
+        const json =
+            view.confirmed ?? (view.known && view.known.version === view.baseVersion ? view.known.json : null);
+        if (json !== null) {
+            writeBase(json, view.baseVersion);
+        }
     }
 
     /**

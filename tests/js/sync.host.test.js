@@ -1191,7 +1191,9 @@ test('a save that expired answers late while its own conflict is showing: the te
 
     // After 15 seconds the tab sends it again, on the old base. It is
     // refused against the tab's own stored save: the notice shows although
-    // nobody else touched the document (a stated limit of this phase).
+    // nobody else touched the document, but only because mergeFails makes the
+    // merge impossible here; with a merge the echo rule recognises the save
+    // (see the echo cases) and no notice is raised.
     clock.now += SAVE_EXPIRY_MS + 1000;
     await A.cycle();
     assert.deepEqual([A.sent[1].text, A.sent[1].base], ['T1', 1]);
@@ -3987,4 +3989,258 @@ test('Keep mine refused by a still newer version: the notice is not ready on the
     assert.equal(B.text(), 'A2', 'Load theirs shows the version the notice names, not the older one');
     assert.equal(B.view.baseVersion, 3);
     assert.equal(B.view.setAsideBase, 3);
+});
+
+// ───────────────────────────────────────────────────────── fix round 1 (the review of the merge loop)
+
+test('a refusal that lands during an IME composition, with the engine already holding the document, merges nothing until the composition ends; then one merge, one merged save, nothing lost', async () => {
+    const { server, A, B } = await twoParagraphs();
+    B.typeIn('p2', 'World B');
+    await B.debounce(); // B's save (base 2) is in the air
+    A.typeIn('p1', 'Hello A');
+    await A.debounce();
+    await A.land(); // version 3
+    await B.cycle(); // B's poll brings version 3; B is busy, so the engine holds it
+    assert.equal(B.engine.pending.version, 3);
+
+    B.composing = true;
+    const applied = B.applyCalls;
+    B.saveArrives();
+    await B.saveReturns(); // refused: version 3 is in the way, and the engine holds it
+
+    assert.equal(B.applyCalls, applied, 'nothing is applied under a composition');
+    assert.equal(B.mergeCalls, 0);
+    assert.equal(B.sent.length, 1, 'nothing is sent on a base known to be stale');
+    assert.equal(B.view.conflict, null);
+    assert.deepEqual(B.view.merging, { version: 3, since: B.env.now() }, 'held: the merge waits for the composition');
+    assert.equal(B.engine.pending.version, 3, 'the document stays with the engine');
+    assert.deepEqual(B.blocks(), [
+        ['p1', 'start'],
+        ['p2', 'World B'],
+    ]);
+
+    // Polls during the composition leave everything as it is.
+    await B.cycle();
+    assert.equal(B.applyCalls, applied);
+    assert.equal(B.sent.length, 1);
+
+    B.composing = false;
+    await B.cycle();
+    assert.equal(B.applyCalls, applied + 1, 'exactly one apply');
+    assert.equal(B.mergeCalls, 1, 'exactly one merge');
+    assert.equal(B.view.merging, null);
+    assert.equal(B.view.conflict, null);
+    assert.deepEqual(B.blocks(), [
+        ['p1', 'Hello A'],
+        ['p2', 'World B'],
+    ]);
+    assert.equal(B.sent.length, 2, 'one merged save');
+    assert.deepEqual([B.sent[1].base, B.sent[1].overwrite], [3, false]);
+    assert.deepEqual(B.lostTexts(), []);
+
+    await B.land();
+    assert.equal(server.version, 4);
+    assert.deepEqual(blocksOf(server.json), [
+        ['p1', 'Hello A'],
+        ['p2', 'World B'],
+    ]);
+    assert.equal(B.word(), 'Saved');
+});
+
+test('a poll already in the air that answers with a document older than the one under merge is not merged: no save on the stale base, no attempt spent, and the newer document then merges', async () => {
+    const { server, A, B } = await twoParagraphs();
+    B.typeIn('p2', 'World B');
+    await B.debounce(); // B's save (base 2) is in the air
+    A.typeIn('p1', 'A3');
+    await A.debounce();
+    await A.land(); // version 3
+
+    // B's poll goes out now, asked from version 2, and the server answers it
+    // with version 3 (the answer is held back on the road).
+    await B.fireTimer();
+    assert.equal(B.polls.length, 1);
+    const old = B.polls.shift();
+    const answerForThree = server.sync(old.payload);
+    assert.equal(answerForThree.body.version, 3);
+
+    A.typeIn('p1', 'A4');
+    await A.debounce();
+    await A.land(); // version 4
+
+    B.saveArrives();
+    await B.saveReturns(); // refused with version 4: merging for 4; the refetch waits behind the poll in the air
+    assert.deepEqual(B.view.merging, { version: 4, since: B.env.now() });
+    assert.equal(B.view.mergeAttempts, 1);
+
+    old.resolve(answerForThree); // the answer of the poll that was already in the air: version 3
+    await settle();
+    assert.equal(B.mergeCalls, 0, 'version 3 is older than the version under merge: not merged');
+    assert.equal(B.sent.length, 1, 'no save on a base known to be stale');
+    assert.equal(B.view.mergeAttempts, 1, 'no attempt spent');
+    assert.deepEqual(B.view.merging, { version: 4, since: B.env.now() });
+    assert.equal(B.view.conflict, null);
+    assert.equal(B.engine.pending, null);
+
+    await B.poll(); // the queued poll brings version 4
+    assert.equal(B.view.merging, null);
+    assert.equal(B.mergeCalls, 1);
+    assert.deepEqual(B.blocks(), [
+        ['p1', 'A4'],
+        ['p2', 'World B'],
+    ]);
+    assert.equal(B.sent.length, 2);
+    assert.equal(B.sent[1].base, 4);
+    await B.land();
+    assert.equal(server.version, 5);
+    assert.equal(B.view.mergeAttempts, 0);
+    assert.equal(B.view.conflict, null);
+});
+
+test('the base row is never overwritten with null: confirmed nulled while the draft check awaits, the row takes the known document of this version', async () => {
+    const w = world();
+    const A = w.tab('A');
+    A.mount();
+    A.drafts.set(BASE, { json: JSON.stringify(doc('an older row')), baseVersion: 1 });
+    let release = null;
+    const gate = new Promise((resolve) => {
+        release = resolve;
+    });
+    const loadDraft = A.draftStore.loadDraft;
+    A.draftStore.loadDraft = async (uuid) => {
+        await gate;
+
+        return loadDraft(uuid);
+    };
+
+    const restoring = A.host().restoreDraft();
+    // A save failure or an expiry nulls confirmed while the draft check awaits.
+    A.view.confirmed = null;
+    release();
+    await restoring;
+
+    assert.deepEqual(A.drafts.get(BASE), { json: JSON.stringify(doc('start')), baseVersion: 1 });
+});
+
+test('the base row is not written at all when nothing is known of the version the base names: the row already stored stays', async () => {
+    const w = world();
+    const A = w.tab('A');
+    A.mount();
+    const row = { json: JSON.stringify(doc('an older row')), baseVersion: 1 };
+    A.drafts.set(BASE, row);
+    let release = null;
+    const gate = new Promise((resolve) => {
+        release = resolve;
+    });
+    const loadDraft = A.draftStore.loadDraft;
+    A.draftStore.loadDraft = async (uuid) => {
+        await gate;
+
+        return loadDraft(uuid);
+    };
+
+    const restoring = A.host().restoreDraft();
+    // Keep mine moved the base up past the document this tab held, and the save then failed.
+    A.view.confirmed = null;
+    A.view.baseVersion = 3;
+    release();
+    await restoring;
+
+    assert.deepEqual(A.drafts.get(BASE), row);
+    assert.equal(A.draftCalls.includes('saveBase'), false);
+});
+
+test('a merge that leaves nothing of mine to save ends the row of refusals: the full MERGE_ATTEMPTS refusals follow before the notice', async () => {
+    const { server, A, B } = await twoParagraphs();
+    // B and A type in the same paragraph; A saves first.
+    B.typeIn('p1', 'B0');
+    await B.debounce(); // B's save (base 2) is in the air
+    A.typeIn('p1', 'A0');
+    await A.debounce();
+    await A.land(); // version 3
+    B.saveArrives();
+    await B.saveReturns(); // refused: the first of a row
+    assert.equal(B.view.mergeAttempts, 1);
+    await B.poll(); // D1: theirs stays, mine is listed, nothing of mine is left to save
+    assert.equal(B.view.unsaved, false);
+    assert.deepEqual(B.lostTexts(), ['B0']);
+    assert.equal(B.view.mergeAttempts, 0, 'the row of refusals is over');
+
+    // MERGE_ATTEMPTS refusals in a row now still merge; the next one is the notice.
+    B.typeIn('p2', 'World B');
+    await B.debounce();
+    for (let round = 1; round <= MERGE_ATTEMPTS; round += 1) {
+        A.typeIn('p1', `A${round}`);
+        await A.debounce();
+        await A.land();
+        B.saveArrives();
+        await B.saveReturns();
+        assert.equal(B.view.mergeAttempts, round);
+        assert.equal(B.view.conflict, null, `refusal ${round} still merges`);
+        await B.poll();
+        assert.equal(B.view.merging, null);
+    }
+
+    A.typeIn('p1', 'Last');
+    await A.debounce();
+    await A.land();
+    B.saveArrives();
+    await B.saveReturns();
+    assert.deepEqual(B.view.conflict, { version: server.version, ready: false });
+    assert.equal(B.view.merging, null);
+});
+
+/** A and B both type in p1; A's save lands; B's poll then brings it to a tab with unsaved typing. */
+async function pollBringsTheirsOverTyping() {
+    const w = await pair();
+    const { A, B } = w;
+    A.type('A1');
+    B.type('B1');
+    await A.debounce();
+    await A.land();
+
+    return w;
+}
+
+test('handle.merge throwing ends in the notice: merging cleared, nothing applied, nothing sent', async () => {
+    const { B } = await pollBringsTheirsOverTyping();
+    B.handle.merge = () => {
+        throw new Error('the merge broke');
+    };
+    await B.cycle();
+
+    assert.deepEqual(B.view.conflict, { version: 2, ready: true });
+    assert.equal(B.view.merging, null);
+    assert.equal(B.applyCalls, 0);
+    assert.equal(B.text(), 'B1');
+    assert.equal(B.sent.length, 0);
+    assert.deepEqual(B.view.lost, []);
+});
+
+test('handle.applyRemote throwing during a merge ends in the notice: merging cleared, nothing applied, nothing sent', async () => {
+    const { A, B } = await pollBringsTheirsOverTyping();
+    B.handle.applyRemote = () => {
+        throw new Error('a plugin failed inside the dispatch');
+    };
+    await B.cycle();
+
+    assert.equal(B.mergeCalls, 1);
+    assert.deepEqual(B.view.conflict, { version: 2, ready: true });
+    assert.equal(B.view.merging, null);
+    assert.equal(B.text(), 'B1');
+    assert.equal(B.sent.length, 0);
+    assert.deepEqual(B.view.lost, []);
+    assert.equal(A.view.conflict, null);
+});
+
+test('handle.applyRemote returning false during a merge ends in the notice: merging cleared, nothing applied, nothing sent', async () => {
+    const { B } = await pollBringsTheirsOverTyping();
+    B.handle.applyRemote = () => false;
+    await B.cycle();
+
+    assert.equal(B.mergeCalls, 1);
+    assert.deepEqual(B.view.conflict, { version: 2, ready: true });
+    assert.equal(B.view.merging, null);
+    assert.equal(B.text(), 'B1');
+    assert.equal(B.sent.length, 0);
+    assert.deepEqual(B.view.lost, []);
 });
