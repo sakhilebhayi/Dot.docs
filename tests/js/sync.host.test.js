@@ -4975,7 +4975,10 @@ test('an accepted suggestion whose merge fails does not replace a text that is a
 
     assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'the offer stands');
     assert.equal(B.text(), 'B2 typed after', 'the suggestion did not go in over the typing');
-    assert.match(B.view.aiError, /Put back or discard the text set aside first/);
+    assert.equal(
+        B.view.aiError,
+        'The suggestion was saved as a new version, but your unsaved text could not be merged into it while another text is set aside. Put that text back or discard it, then choose in the notice.'
+    );
 });
 
 test('an accepted suggestion that leaves nothing of mine to save drops an owed overwrite: no save is left to carry it', async () => {
@@ -4993,4 +4996,189 @@ test('an accepted suggestion that leaves nothing of mine to save drops an owed o
     assert.deepEqual(B.lostTexts(), ['B1']);
     assert.equal(B.view.unsaved, false);
     assert.equal(B.view.overwriteOwed, false);
+});
+
+// ───────────────────────────────────────────────────────── Task 11, fix round 1
+
+test('an accepted suggestion refused while a text is set aside leaves the typing owed: the next tick sends it and the notice follows', async () => {
+    const { server, B } = await conflicted();
+    await B.host().loadTheirs(); // B1 is set aside, offered back
+    B.type('B2 typed after');
+    await B.debounce(); // the save of B2 is in the air (base 2)
+    assert.equal(B.view.saving, 1);
+    const suggestion = doc('suggestion');
+    const version = server.replace(suggestion); // version 3
+
+    B.host().applySuggestion(suggestion, version); // refused: a text is set aside
+
+    assert.equal(B.view.saving, 0, 'the save in the air was given up on');
+    assert.equal(B.view.unsaved, true);
+    assert.equal(B.view.resave, true, 'the typing is owed: nothing else would send it while polls fail');
+
+    // Polls fail: the tick still sends what is owed.
+    const sentBefore = B.sent.length;
+    await B.fireTimer();
+    await B.pollFails();
+    assert.equal(B.sent.length, sentBefore + 1, 'the owed save went out');
+    assert.equal(B.sent.at(-1).text, 'B2 typed after');
+    assert.equal(B.word(), 'Saving');
+
+    // It is refused as stale; the merge is impossible, so the notice follows.
+    await B.land(); // the retired save's late answer is ignored; the new one is refused as stale
+    await B.cycle(); // the poll that fetches version 3, which cannot be merged
+    assert.deepEqual([B.view.conflict?.version, B.view.conflict?.ready], [3, true]);
+});
+
+test('an accepted suggestion that could not be applied leaves the typing owed when a save was retired, and not otherwise', async () => {
+    const { server, A } = await pair();
+    A.type('A unsaved');
+    await A.debounce(); // in the air
+    A.mergeFails = true;
+    A.refuses = true;
+    const suggestion = doc('the accepted suggestion');
+    const version = server.replace(suggestion);
+
+    A.host().applySuggestion(suggestion, version);
+
+    assert.equal(A.view.aiError, 'That suggestion could not be applied — the document is unchanged.');
+    assert.equal(A.view.saving, 0);
+    assert.equal(A.view.unsaved, true);
+    assert.equal(A.view.resave, true);
+
+    // No save in the air: nothing was retired, nothing becomes owed by this.
+    const { server: server2, A: A2 } = await pair();
+    A2.type('A2 unsaved');
+    A2.mergeFails = true;
+    A2.refuses = true;
+    A2.host().applySuggestion(doc('x'), server2.replace(doc('x')));
+    assert.equal(A2.view.saving, 0);
+    assert.equal(A2.view.resave, false);
+});
+
+test('an accepted suggestion that could not be applied sets nothing aside: the typing is still in the editor and is not offered as set aside', async () => {
+    const { server, A } = await pair();
+    A.type('A unsaved');
+    A.mergeFails = true;
+    A.refuses = true;
+    const suggestion = doc('the accepted suggestion');
+    const version = server.replace(suggestion);
+
+    A.host().applySuggestion(suggestion, version);
+
+    assert.equal(A.view.aiError, 'That suggestion could not be applied — the document is unchanged.');
+    assert.equal(A.text(), 'A unsaved');
+    assert.equal(A.view.unsaved, true);
+    assert.equal(A.view.setAside, null);
+    assert.equal(A.view.setAsideFrom, null);
+    assert.equal(A.view.setAsideBase, null);
+    assert.equal(A.stale(), null, 'nothing is parked');
+    assert.equal(A.draftCalls.filter((call) => call === 'parkStaleDraft').length, 0);
+});
+
+test('an accepted suggestion that goes in whole over the typing sets it aside and parks it exactly once', async () => {
+    const { server, A } = await pair();
+    A.type('A unsaved');
+    A.mergeFails = true;
+    const suggestion = doc('the accepted suggestion');
+    const version = server.replace(suggestion);
+
+    A.host().applySuggestion(suggestion, version);
+
+    assert.equal(A.text(), 'the accepted suggestion');
+    assert.equal(A.view.setAside, JSON.stringify(doc('A unsaved')));
+    assert.equal(A.view.setAsideBase, 2);
+    assert.equal(A.stale(), 'A unsaved');
+    assert.equal(A.draftCalls.filter((call) => call === 'parkStaleDraft').length, 1);
+});
+
+test('an accepted suggestion merged over an owed overwrite keeps the overwrite owed: the merged save says it overwrites', async () => {
+    const { server, A, B } = await twoParagraphs();
+    B.mergeFails = true;
+    A.typeIn('p1', 'A1');
+    B.typeIn('p1', 'B1');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    await B.debounce();
+    await B.host().loadTheirs(); // B1 is set aside
+    B.host().putBack(); // B1 is back, the overwrite is owed
+    assert.equal(B.view.overwriteOwed, true);
+    B.mergeFails = false;
+    B.typeIn('p2', 'World B');
+    const suggestion = docOf(para('p1', 'A1'), para('p2', 'World'), para('p3', 'Suggested third'));
+    const version = server.replace(suggestion);
+
+    B.host().applySuggestion(suggestion, version);
+
+    assert.equal(B.view.unsaved, true);
+    assert.deepEqual([B.sent.at(-1).base, B.sent.at(-1).overwrite], [version, true]);
+    assert.equal(B.view.overwriteOwed, true);
+});
+
+test('an accepted suggestion merged over typing whose save then fails does not write the merged text off as saved', async () => {
+    const { server, A } = await twoParagraphs();
+    A.typeIn('p2', 'World A');
+    const suggestion = docOf(para('p1', 'Suggested start'), para('p2', 'World'));
+    const version = server.replace(suggestion);
+    server.rejectNext = true; // the merged save is rejected, as a bad document is
+
+    A.host().applySuggestion(suggestion, version);
+    await A.land();
+
+    assert.equal(A.view.confirmed, JSON.stringify(suggestion), 'confirmed is the suggestion, not the merged document');
+    await A.cycle(); // a tick runs the settle check
+    assert.equal(A.view.unsaved, true, 'the merged text is still unsaved');
+    assert.equal(A.word(), 'Not saved');
+    assert.deepEqual(A.blocks(), [
+        ['p1', 'Suggested start'],
+        ['p2', 'World A'],
+    ]);
+});
+
+test('an accepted suggestion tells the engine its version is this tab own: the next poll states it', async () => {
+    const { server, A } = await twoParagraphs();
+    A.typeIn('p2', 'World A');
+    const suggestion = docOf(para('p1', 'Suggested start'), para('p2', 'World'));
+    const version = server.replace(suggestion); // version 3
+
+    A.host().applySuggestion(suggestion, version);
+    assert.equal(A.engine.pending, null);
+    await A.fireTimer();
+
+    assert.equal(A.polled.at(-1).version, version, 'the engine has seen the suggestion version');
+});
+
+test('an accepted suggestion is merged on the version the tab holds when its confirmed document is not known', async () => {
+    const { server, A } = await twoParagraphs();
+    A.typeIn('p2', 'World A');
+    await A.debounce();
+    A.saves.shift().reject(new Error('network')); // the request fails: the server may have stored it, confirmed is unknown
+    await settle();
+    assert.equal(A.view.confirmed, null);
+    assert.equal(A.view.known.version, A.view.baseVersion);
+    const suggestion = docOf(para('p1', 'Suggested start'), para('p2', 'World'));
+    const version = server.replace(suggestion);
+
+    A.host().applySuggestion(suggestion, version);
+
+    assert.deepEqual(A.blocks(), [
+        ['p1', 'Suggested start'],
+        ['p2', 'World A'],
+    ]);
+    assert.equal(A.view.setAside, null);
+    assert.equal(A.mergeCalls, 1);
+});
+
+test('an accepted suggestion merged over typing ends a standing conflict notice', async () => {
+    const { server, B } = await conflicted();
+    assert.notEqual(B.view.conflict, null);
+    B.mergeFails = false;
+    const suggestion = doc('the accepted suggestion');
+    const version = server.replace(suggestion);
+
+    B.host().applySuggestion(suggestion, version);
+
+    assert.equal(B.mergeCalls, 2, 'merged, not set aside');
+    assert.equal(B.view.setAside, null);
+    assert.equal(B.view.conflict, null);
 });

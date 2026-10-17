@@ -1869,9 +1869,11 @@ export function createSyncHost(view, env) {
         // the NEXT merge, which would read a later change of somebody else
         // that happens to equal it (a restore of that version) as this tab's
         // own; and answering ok it would move the base back to its version.
+        let retiredSave = false;
         if (view.saving > 0) {
             view.saving = 0;
             view.expiredSaveSeq = view.saveSeq;
+            retiredSave = true;
         }
 
         // Phase 2 (section 8): over unsaved typing the suggestion is MERGED
@@ -1886,27 +1888,46 @@ export function createSyncHost(view, env) {
         if (view.unsaved && base !== null && mergeSuggestion(handle, base, content, version)) {
             return;
         }
-        if (view.unsaved) {
+        // The typing, as it stands, before anything can replace it.
+        const mine = view.unsaved ? JSON.stringify(handle.editor.getJSON()) : null;
+        if (mine !== null && view.setAside) {
             // One text is set aside at a time (the offer, and the stale- park
             // that backs it). Setting this one aside would replace the offer.
-            if (view.setAside) {
-                view.aiError =
-                    'Put back or discard the text set aside first, then accept the suggestion again.';
-
-                return;
+            // The suggestion is already stored as version `version` (accepting
+            // it saved it): it is not pending any more, so the writer is not
+            // sent back to accept it. The next poll delivers it to this tab,
+            // which cannot merge it either, and raises the notice.
+            view.aiError =
+                'The suggestion was saved as a new version, but your unsaved text could not be merged into it while another text is set aside. Put that text back or discard it, then choose in the notice.';
+            // The save that was in the air is given up on above; the typing it
+            // carried is owed again, not left unsaved with nothing to send it.
+            if (retiredSave) {
+                view.resave = true;
             }
-            setAsideTyping(handle, version);
-        }
-
-        if (!handle.applyRemote(content, { force: true })) {
-            view.aiError = 'That suggestion could not be applied — the document is unchanged.';
 
             return;
         }
 
+        if (!handle.applyRemote(content, { force: true })) {
+            view.aiError = 'That suggestion could not be applied — the document is unchanged.';
+            if (retiredSave) {
+                view.resave = true;
+            }
+
+            return;
+        }
+
+        // The typing was removed from the editor by the apply just made: it is
+        // parked and offered back in this same call, before anything can fail
+        // afterwards. Had the apply failed, it would still be in the editor
+        // and nothing would be set aside.
+        if (mine !== null) {
+            setAsideTyping(mine, version);
+        }
+
         // The editor now holds exactly the version the server stored. Text
         // this tab had marked unsaved is no longer in it (it is set aside
-        // above), and no save will answer for it: the word that still says
+        // just above), and no save will answer for it: the word that still says
         // Editing goes back to Saved. Only on that change.
         if (view.unsaved) {
             env.report('good', 'Saved');
@@ -1987,14 +2008,14 @@ export function createSyncHost(view, env) {
     }
 
     /**
-     * The editor's unsaved text is parked and set aside before a document
-     * replaces it, as Load theirs does: the writer can put it back.
+     * The editor's unsaved text is parked and set aside once a document has
+     * replaced it, as Load theirs does: the writer can put it back. Called
+     * only after the apply that removed it has succeeded.
      *
-     * @param {object} handle
+     * @param {string} mine the typing as a JSON string, captured before the apply
      * @param {number} version the version the page will show
      */
-    function setAsideTyping(handle, version) {
-        const mine = JSON.stringify(handle.editor.getJSON());
+    function setAsideTyping(mine, version) {
         env.drafts()?.parkStaleDraft(view.docUuid, mine, view.baseVersion);
         view.setAside = mine;
         view.setAsideFrom = 'conflict';
