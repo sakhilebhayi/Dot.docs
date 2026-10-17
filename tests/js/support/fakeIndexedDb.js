@@ -6,10 +6,15 @@
  * over a key range, and `IDBKeyRange.bound`. Values are structured-cloned in
  * and out, as the real thing does.
  *
- * It is not a model of IndexedDB's isolation (a transaction here sees every
- * write made before its request runs, which is what a real readwrite
- * transaction on one store gives): enough to test what offline.js does with
- * rows, not how a browser schedules them.
+ * What it does NOT model, so a test here proves what offline.js does with rows
+ * and not how a browser schedules them: transactions are NOT serialised (two
+ * readwrite transactions on the store overlap and interleave request by
+ * request, where a real browser runs them one after the other); there is no
+ * isolation or rollback (a write is applied when its request runs, and
+ * `onabort` never fires, so a transaction that fails halfway leaves its writes
+ * behind); there are no errors, quota or blocked databases (nothing here
+ * fails unless a test replaces a function); keys sort as plain strings; the
+ * `saves` store, key generators, indexes and database versions are not there.
  *
  * @returns {{rows: Map<string, object>, uninstall: () => void}}
  */

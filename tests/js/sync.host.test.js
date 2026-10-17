@@ -3036,7 +3036,7 @@ test('a draft the editor cannot open is kept rather than lost', async () => {
 test('with no draft, and in a browser that cannot keep one, the page simply opens', async () => {
     const w = world();
     const A = await reopened(w, null);
-    assert.deepEqual(A.draftCalls, ['adoptLost', 'loadDraft', 'saveBase']);
+    assert.deepEqual(A.draftCalls, ['adoptLost', 'loadLost', 'loadDraft', 'saveBase']);
     assert.equal(A.polls.length, 1);
 
     const B = w.tab('B', { draftStore: false });
@@ -3210,7 +3210,7 @@ test('an edit undone inside the debounce leaves no draft: after somebody saves, 
     assert.equal(again.view.setAsideFrom, null);
     assert.equal(again.stale(), null);
     assert.deepEqual(again.questions, []);
-    assert.deepEqual(again.draftCalls, ['adoptLost', 'loadDraft', 'saveBase']);
+    assert.deepEqual(again.draftCalls, ['adoptLost', 'loadLost', 'loadDraft', 'saveBase']);
 });
 
 test('an edit undone after a save leaves no draft either: the draft store is cleared, not rewritten', async () => {
@@ -5168,6 +5168,145 @@ test('a text set aside while the store is being read is not replaced by the queu
     await settle();
 
     assert.equal(tab.view.setAside, JSON.stringify(doc('set aside meanwhile')));
+});
+
+test('the earlier text returns with the label it had, is never put back or discarded without a question, and a draft-origin one too', async () => {
+    const { A, B } = await conflicted();
+    await B.host().loadTheirs(); // B1 set aside (from Load theirs)
+    B.type('B2 typing');
+    A.type('A2');
+    await A.debounce();
+    await A.land();
+    await B.cycle();
+    await B.debounce();
+    assert.ok(B.view.conflict, 'a second conflict stands');
+    await B.host().loadTheirs(); // asks LOAD_THEIRS_REPLACES_QUESTION: yes
+    assert.ok(B.questions.includes(LOAD_THEIRS_REPLACES_QUESTION));
+    assert.equal(B.view.setAside, JSON.stringify(doc('B2 typing')));
+
+    B.questions.length = 0;
+    B.host().discardSetAside(); // the newer text: asks
+    await settle();
+    assert.deepEqual(B.questions, [DISCARD_QUESTION]);
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'the earlier text comes back');
+    assert.equal(B.view.setAsideFrom, 'conflict', 'with the label it had: the page took it away');
+    assert.equal(B.view.setAsideBase, null, 'and marked as from the queue, which is never "just loaded"');
+
+    // Discard asks for it as well; a no changes nothing and the offer stays.
+    B.questions.length = 0;
+    B.confirmAnswer = false;
+    B.host().discardSetAside();
+    assert.deepEqual(B.questions, [DISCARD_QUESTION]);
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')));
+
+    // Put it back asks too, even though nothing on the page is unsaved.
+    B.questions.length = 0;
+    B.host().putBack();
+    assert.ok(B.questions.some((question) => question.startsWith(PUT_BACK_QUESTION)));
+});
+
+test('a draft-origin text from the queue is discarded with the question too', async () => {
+    const w = world();
+    const drafts = new Map();
+    seedParks(drafts, [{ text: 'queued draft', parkedAt: 9_000_000_000_000 }]); // no `from`: an old build's park
+    const tab = w.tab('T', { drafts });
+    await tab.open();
+    await settle();
+    assert.equal(tab.view.setAside, JSON.stringify(doc('queued draft')));
+
+    tab.host().discardSetAside();
+
+    assert.deepEqual(tab.questions, [DISCARD_QUESTION]);
+});
+
+test('a second tab of the same browser that retires another tab\'s text is asked first', async () => {
+    const { B, server, clock } = await conflicted();
+    await B.host().loadTheirs(); // B1 is B\'s text, set aside and parked
+    const C = makeTab({ server, clock }, 'C', { drafts: B.drafts }); // another tab, same browser
+    await C.open();
+    await settle();
+    assert.equal(C.view.setAside, JSON.stringify(doc('B1')), 'offered to the second tab as well (stated limit)');
+
+    C.confirmAnswer = false;
+    C.host().discardSetAside();
+    await settle();
+
+    assert.deepEqual(C.questions, [DISCARD_QUESTION], 'it cannot be retired for the other tab without a question');
+    assert.equal(B.drafts.get(STALE).resolved, undefined);
+});
+
+test('Discard while the store cannot write does not offer the same text straight back', async () => {
+    const { B } = await conflicted();
+    await B.host().loadTheirs();
+    B.draftStore.resolveParked = async () => false; // as offline.js on a failed write
+
+    B.host().discardSetAside();
+    await settle();
+
+    assert.equal(B.view.setAside, null);
+});
+
+test('a queued text is not offered while a conflict or a merge stands, and is offered on the tick after they clear', async () => {
+    const { A } = await pair();
+    seedParks(A.drafts, [{ text: 'queued', parkedAt: 9_000_000_000_000 }]);
+
+    A.view.conflict = { version: 9, ready: false };
+    await A.host().offerNextPark();
+    assert.equal(A.view.setAside, null, 'not while the notice stands');
+
+    A.view.conflict = null;
+    A.view.merging = { version: 3, since: A.env.now() };
+    await A.host().offerNextPark();
+    assert.equal(A.view.setAside, null, 'nor while a merge is waiting for its document');
+
+    A.view.merging = null;
+    A.view.syncNotice = 'You have been signed out. Reload the page to keep editing.';
+    await A.host().offerNextPark();
+    assert.equal(A.view.setAside, null, 'nor behind a stop reason');
+    assert.equal(A.view.parkOfferPending, true, 'the offer is held, not forgotten');
+
+    A.view.syncNotice = '';
+    await A.cycle(); // the poll tick
+    await settle();
+    assert.equal(A.view.setAside, JSON.stringify(doc('queued')));
+    assert.equal(A.view.parkOfferPending, false);
+});
+
+test('a page whose adoption of the lost rows returns nothing still reads them', async () => {
+    const w = world();
+    const drafts = new Map();
+    drafts.set(`lost-${UUID}@old`, { docUuid: `lost-${UUID}@old`, entries: [{ key: 'p9:2:0', id: 'p9', type: 'paragraph', reason: 'both', source: 'merge', json: para('p9', 'kept'), anchors: ['p1'], version: 2, sentence: 'S', excerpt: 'kept' }], dismissed: [], parkedAt: 1, baseVersion: 2 });
+    const tab = w.tab('T', { drafts });
+    tab.draftStore.adoptLost = async () => null; // as offline.js when its write fails
+    await tab.open();
+
+    assert.deepEqual(tab.lostTexts(), ['kept']);
+});
+
+test('the merged draft is stamped like any draft written while an overwrite is owed: a crash before the save does not lose the overwrite', async () => {
+    const { server, clock, again } = await deadTabWithDraft(
+        async (A, B) => {
+            A.deleteBlock('p2');
+            A.typeIn('p1', 'start A');
+            B.typeIn('p2', 'World B');
+            await B.debounce();
+            await B.land();
+            B.typeIn('p2', 'World');
+            await B.debounce();
+            await B.land();
+        },
+        { version: 4 }
+    );
+    await settle();
+    assert.equal(again.view.overwriteOwed, true);
+
+    // The page dies before any save leaves; the browser opens the document again.
+    const third = makeTab({ server, clock }, 'A3', { drafts: again.drafts });
+    await third.open();
+    await settle();
+
+    assert.ok(!third.questions.includes(DRAFT_MERGE_QUESTION), 'an owed-overwrite draft is never merged');
+    assert.equal(third.view.setAside, JSON.stringify(docOf(para('p1', 'start A'))), 'it is set aside, to be put back as an overwrite');
 });
 
 test('a queued text that equals the page is dealt with without being offered, and a fail-closed tab offers nothing', async () => {

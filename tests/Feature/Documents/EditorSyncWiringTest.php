@@ -312,7 +312,7 @@ class EditorSyncWiringTest extends TestCase
         $html = $this->editorHtml();
 
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));
-        foreach (['merging: null,', 'mergeAttempts: 0,', 'known: null,', 'sentSnapshot: null,', 'unanswered: null,', 'lost: [],', 'putBackSeq: 0,', 'overwriteFloor: null,'] as $field) {
+        foreach (['merging: null,', 'mergeAttempts: 0,', 'known: null,', 'sentSnapshot: null,', 'unanswered: null,', 'lost: [],', 'putBackSeq: 0,', 'overwriteFloor: null,', 'parkOfferPending: false,'] as $field) {
             $this->assertMatchesRegularExpression('/^\s*'.preg_quote($field, '/').'$/m', $alpine[1], "{$field} is declared");
         }
     }

@@ -87,6 +87,8 @@
         lost: [],
         // The saveSeq at the moment Put it back last replaced the text: a save sent at or before it did not carry that text.
         putBackSeq: 0,
+        // An offer of a kept park was held back (a conflict, a merge or a stop reason stood): the poll tick makes it when they clear.
+        parkOfferPending: false,
         // A reason the page can no longer stay in step (signed out, access
         // removed, document deleted, a version this editor cannot open).
         // Shown in the notice bar.

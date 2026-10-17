@@ -5,7 +5,7 @@ import { Schema } from 'prosemirror-model';
 import { createSyncEngine } from '../../../resources/js/editor/sync/engine.js';
 import { createSyncHost, unloadSaveBody } from '../../../resources/js/editor/sync/host.js';
 import { mergeDocuments } from '../../../resources/js/editor/sync/merge.js';
-import { chooseNextPark, keepKeyFor, unionLostRows } from '../../../resources/js/offline.js';
+import { chooseNextPark, dismissInRows, keepKeyFor, unionLostRows } from '../../../resources/js/offline.js';
 
 /**
  * The fake world the sync host is tested in (sync.host.test.js) and walked
@@ -236,6 +236,7 @@ export const makeView = (version) => ({
     unanswered: null,
     lost: [],
     putBackSeq: 0,
+    parkOfferPending: false,
 });
 
 export function world(text = 'start') {
@@ -485,7 +486,7 @@ export function makeTab({ server, clock }, name, options = {}) {
                       if (earlier) {
                           t.drafts.set(keepKeyFor(uuid, earlier, [...t.drafts.keys()], clock.now), earlier);
                       }
-                      t.drafts.set(plain, { json, baseVersion, parkedAt: clock.now, offerable: options.offerable === true });
+                      t.drafts.set(plain, { json, baseVersion, parkedAt: clock.now, offerable: options.offerable === true, ...(typeof options.from === 'string' ? { from: options.from } : {}) });
                   },
                   // The queue of texts to offer (not recorded in draftCalls: the open sequence tests pin the calls that matter to them).
                   nextParkToOffer: async (uuid) => chooseNextPark(staleRowsOf(uuid)),
@@ -559,14 +560,11 @@ export function makeTab({ server, clock }, name, options = {}) {
 
                       return clone(union);
                   },
-                  markLostDismissed: async (uuid, tabId = '') => {
+                  markLostDismissed: async (uuid, tabId = '', listed = []) => {
                       t.draftCalls.push('markLostDismissed');
-                      const row = t.drafts.get(lostKeyOf(uuid, tabId));
-                      if (row) {
-                          row.dismissed = [...(row.dismissed ?? []), ...row.entries];
-                          row.entries = [];
-                          row.dismissedAt = clock.now;
-                      }
+                      dismissInRows(lostRowsOf(uuid), lostKeyOf(uuid, tabId), clone(listed), clock.now).forEach((row) => {
+                          t.drafts.set(row.docUuid, row);
+                      });
                   },
               };
 

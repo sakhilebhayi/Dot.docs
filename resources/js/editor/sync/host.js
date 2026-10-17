@@ -1427,9 +1427,10 @@ export function createSyncHost(view, env) {
             return;
         }
         clearLostNotices();
+        const listed = view.lost;
         view.lost = [];
         try {
-            Promise.resolve(env.drafts()?.markLostDismissed(view.docUuid, view.tabId)).catch(() => {});
+            Promise.resolve(env.drafts()?.markLostDismissed(view.docUuid, view.tabId, listed)).catch(() => {});
         } catch (_) {
             // Nothing more can be done.
         }
@@ -1503,21 +1504,24 @@ export function createSyncHost(view, env) {
         // but a reload, so it must not be left behind to mislead.)
         clearLostNotices();
         view.lost = [];
-        drafts.markLostDismissed(view.docUuid, view.tabId);
+        drafts.markLostDismissed(view.docUuid, view.tabId, dismissing);
     }
 
     /**
      * The re-offer after a reload (section 6.6): a parked list that was not
      * dismissed comes back into the lost row, each entry marked as from the
-     * last visit. Two tabs of one browser share the row (it is keyed per
-     * document, as drafts are): known, stated.
+     * last visit. Every tab's rows of the document are taken into this tab's
+     * own row (adoptLost()); an entry two tabs both put back can come back once
+     * after a reload (spec section 19).
      */
     async function reofferLost(drafts) {
         let row = null;
         try {
             // Every tab's rows of this document become this tab's own (adoptLost()), so each entry has
             // one owner and Put it back and Dismiss all touch no other tab's row.
-            row = await (drafts.adoptLost ? drafts.adoptLost(view.docUuid, view.tabId) : drafts.loadLost(view.docUuid));
+            row = drafts.adoptLost ? await drafts.adoptLost(view.docUuid, view.tabId) : null;
+            // Nothing adopted: no rows, or the write failed (null either way): read them.
+            row ??= await drafts.loadLost(view.docUuid);
         } catch (_) {
             row = null;
         }
@@ -1634,7 +1638,9 @@ export function createSyncHost(view, env) {
             offerLost(result.lost, 'draft', view.baseVersion);
         }
         if (view.unsaved) {
-            drafts.saveDraft(view.docUuid, JSON.stringify(handle.editor.getJSON()), view.baseVersion);
+            // Stamped like any draft written while an overwrite is owed (draftStamp()): the page may die before
+            // the save leaves, and the reopened page must set this draft aside rather than merge it.
+            drafts.saveDraft(view.docUuid, JSON.stringify(handle.editor.getJSON()), draftStamp());
             view.resave = true;
         }
         view.tick++;
@@ -1759,9 +1765,10 @@ export function createSyncHost(view, env) {
 
         // A text is already set aside and offered. Load theirs sets THIS tab's
         // text aside in its place, and the page offers one set-aside text at a
-        // time (the earlier one stays parked, under a kept key, but nothing in
-        // the page would offer it any more): ask first, before the engine's
-        // document is taken (a no changes nothing).
+        // time (the earlier one stays parked, under a kept key, and is offered
+        // again once this one is dealt with, where the browser keeps drafts;
+        // elsewhere it is gone): ask first, before the engine's document is
+        // taken (a no changes nothing).
         if (view.setAside && engine.pending && !env.confirm(LOAD_THEIRS_REPLACES_QUESTION)) {
             return;
         }
@@ -1788,7 +1795,7 @@ export function createSyncHost(view, env) {
                     superseded.push(parked);
                 }
                 parked = mine;
-                await drafts.parkStaleDraft(view.docUuid, parked, view.baseVersion, { offerable: true });
+                await drafts.parkStaleDraft(view.docUuid, parked, view.baseVersion, { offerable: true, from: 'conflict' });
                 mine = JSON.stringify(handle.editor.getJSON());
             }
             // The earlier states of the same typing are not texts to offer again.
@@ -1875,9 +1882,7 @@ export function createSyncHost(view, env) {
             view.putBackSeq = view.saveSeq;
             const putBack = view.setAside;
             forgetSetAside();
-            // Dealt with: not offered again. The next kept park, if any, is offered now.
-            env.drafts()?.resolveParked?.(view.docUuid, putBack);
-            offerNextPark();
+            dealtWith(putBack);
         } catch (_) {
             // Nothing was put back, so nothing more is owed than before.
             view.overwriteOwed = owedBefore;
@@ -1903,7 +1908,10 @@ export function createSyncHost(view, env) {
      * part of the document.
      */
     function discardSetAside() {
-        if (view.setAsideFrom === 'conflict' && !env.confirm(DISCARD_QUESTION)) {
+        // A text the page took away (Load theirs) is in no saved version, and so is any text that comes back
+        // from the queue of kept parks (it has no base version: setAsideBase is null, offerNextPark()), which may
+        // be another tab's: both ask.
+        if ((view.setAsideFrom === 'conflict' || view.setAsideBase === null) && !env.confirm(DISCARD_QUESTION)) {
             return;
         }
 
@@ -1911,8 +1919,33 @@ export function createSyncHost(view, env) {
         forgetSetAside();
         // Dealt with: it stays parked for its 7 days but is not offered again. The next kept park, if any, is offered now.
         if (discarded) {
-            env.drafts()?.resolveParked?.(view.docUuid, discarded);
-            offerNextPark();
+            dealtWith(discarded);
+        }
+    }
+
+    /**
+     * The writer has dealt with a set-aside text (Put it back, Discard): every
+     * park holding it is marked resolved so it is not offered again, and the
+     * next kept park, if any, is offered. When the store could not write the
+     * mark (resolveParked() resolves false) nothing is offered next: the same
+     * text would be offered straight back, and Discard would loop.
+     *
+     * @param {string} json
+     * @returns {Promise<void>}
+     */
+    async function dealtWith(json) {
+        const drafts = env.drafts();
+        if (!drafts) {
+            return;
+        }
+        let marked = true;
+        try {
+            marked = (await drafts.resolveParked?.(view.docUuid, json)) !== false;
+        } catch (_) {
+            marked = false;
+        }
+        if (marked) {
+            await offerNextPark();
         }
     }
 
@@ -1920,8 +1953,8 @@ export function createSyncHost(view, env) {
      * The next text to offer. Parks keep earlier set-aside texts (parkStaleDraft
      * never overwrites), but the page offers one at a time. When nothing is set
      * aside, the newest park made to be offered and not yet dealt with (Put it
-     * back, Discard) is offered, as a draft from an earlier visit (so Put it back
-     * asks its usual questions); one that the page already shows is dealt with
+     * back, Discard) is offered, with the label it had when it was parked and no
+     * base version (so Put it back and Discard ask their questions); one that the page already shows is dealt with
      * without being offered. Never replaces a text on offer, never offers the same
      * text twice (dealing with it marks the rows), and the 7-day sweep removes the
      * rows it gets to.
@@ -1935,6 +1968,16 @@ export function createSyncHost(view, env) {
         if (!drafts || !drafts.nextParkToOffer || !handle || handle.autosaves === false) {
             return;
         }
+
+        // Not while the writer is choosing, a merge is waiting for its document, or the page can no longer stay
+        // in step: the offer is held and made on the poll tick after those have cleared (`parkOfferPending`).
+        const stopReason = view.syncNotice !== '' && !lostNotices.includes(view.syncNotice);
+        if (view.conflict || view.merging || stopReason) {
+            view.parkOfferPending = true;
+
+            return;
+        }
+        view.parkOfferPending = false;
 
         for (let attempt = 0; attempt < 50 && !view.setAside; attempt += 1) {
             let park = null;
@@ -1956,12 +1999,22 @@ export function createSyncHost(view, env) {
             }
             if (differs) {
                 view.setAside = park.json;
-                view.setAsideFrom = 'draft';
-                view.setAsideBase = view.baseVersion;
+                // The label it had when it was parked. No base version: it comes from the queue, so Put it back
+                // asks its questions and Discard asks (see discardSetAside()).
+                view.setAsideFrom = park.from ?? 'draft';
+                view.setAsideBase = null;
 
                 return;
             }
-            await drafts.resolveParked?.(view.docUuid, park.json);
+            let marked = true;
+            try {
+                marked = (await drafts.resolveParked?.(view.docUuid, park.json)) !== false;
+            } catch (_) {
+                marked = false;
+            }
+            if (!marked) {
+                return; // it would be read again as the next park, for ever
+            }
         }
     }
 
@@ -2096,7 +2149,7 @@ export function createSyncHost(view, env) {
                 // marked so, and is offered again later if the writer does
                 // not deal with it (see offerNextPark()).
                 const offered = env.documentsDiffer(parsed, editor.getJSON());
-                await drafts.parkStaleDraft(view.docUuid, draft.json, draft.baseVersion, { offerable: offered });
+                await drafts.parkStaleDraft(view.docUuid, draft.json, draft.baseVersion, { offerable: offered, from: 'draft' });
                 drafts.clearDraft(view.docUuid);
                 if (offered) {
                     view.setAside = draft.json;
@@ -2386,7 +2439,7 @@ export function createSyncHost(view, env) {
      * @param {number} version the version the page will show
      */
     function setAsideTyping(mine, version) {
-        env.drafts()?.parkStaleDraft(view.docUuid, mine, view.baseVersion, { offerable: true });
+        env.drafts()?.parkStaleDraft(view.docUuid, mine, view.baseVersion, { offerable: true, from: 'conflict' });
         view.setAside = mine;
         view.setAsideFrom = 'conflict';
         view.setAsideBase = version;
@@ -2443,6 +2496,10 @@ export function createSyncHost(view, env) {
             onPolled: () => {
                 expireMerging();
                 resendIfOwed();
+                // An offer of a kept park that was held back by a conflict, a merge or a stop reason.
+                if (view.parkOfferPending) {
+                    offerNextPark();
+                }
             },
             onStopped: (reason) => {
                 view.syncNotice =
@@ -2476,6 +2533,7 @@ export function createSyncHost(view, env) {
         loadTheirs,
         putBack,
         discardSetAside,
+        offerNextPark,
         putBackLost,
         putBackAllLost,
         dismissLost,

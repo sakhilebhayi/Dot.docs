@@ -197,7 +197,7 @@ export function keepKeyFor(docUuid, row, existingKeys, now = Date.now()) {
  * suggestion). None of these is this page's to destroy - least of all the
  * previous visit's park, which nothing in this visit has offered back.
  *
- * `options.offerable` marks a park made because the page SET THE TEXT ASIDE
+ * `options.from` records the source of such a text. `options.offerable` marks a park made because the page SET THE TEXT ASIDE
  * and offered it back. Such a park is offered again after the writer has dealt
  * with the one on offer (nextParkToOffer(), resolveParked()); every other
  * park stays a copy for recovery by hand.
@@ -224,6 +224,9 @@ export async function parkStaleDraft(docUuid, json, baseVersion = null, options 
                         // A park made to be OFFERED (a text set aside) can be offered again later (nextParkToOffer());
                         // any other park is a copy for recovery by hand.
                         offerable: options.offerable === true,
+                        // Where the text came from, so it is offered back with the label it had ('conflict': the page
+                        // took the writer's typing away; 'draft': a draft of an earlier visit).
+                        ...(typeof options.from === 'string' ? { from: options.from } : {}),
                     });
                 };
                 if (!earlier) {
@@ -262,7 +265,7 @@ export async function parkStaleDraft(docUuid, json, baseVersion = null, options 
  * and has not been dealt with. Pure, and exported for `npm test`.
  *
  * @param {object[]} rows the document's stale- rows, each with its `docUuid` key
- * @returns {{json: string, baseVersion: number|null, parkedAt: number}|null}
+ * @returns {{json: string, baseVersion: number|null, parkedAt: number, from: string|null}|null}
  */
 export function chooseNextPark(rows) {
     const candidates = rows.filter((row) => row && row.offerable === true && row.resolved !== true && typeof row.json === 'string');
@@ -283,6 +286,7 @@ export function chooseNextPark(rows) {
         json: newest.json,
         baseVersion: Number.isFinite(baseVersion) && newest.baseVersion !== null ? baseVersion : null,
         parkedAt: Number(newest.parkedAt) || 0,
+        from: typeof newest.from === 'string' ? newest.from : null,
     };
 }
 
@@ -651,35 +655,70 @@ export async function adoptLost(docUuid, tabId = '') {
 }
 
 /**
+ * What Dismiss all does to the rows of a document, as the rows to write. The
+ * dismissing tab's OWN row is emptied into `dismissed` (and stamped); in every
+ * other row of the document the entries that are the ones being dismissed (the
+ * tab's own entries and `listed`, the list its page showed, by identity: the
+ * same id with identical json) move to `dismissed` as well. Without that a tab
+ * whose row was adopted by another page, or whose entries another tab's row
+ * still holds, would dismiss for now and see the text again after a reload.
+ * Pure, and exported for `npm test`.
+ *
+ * @param {object[]} rows the document's lost rows, each with its `docUuid` key
+ * @param {string} ownKey the dismissing tab's row key
+ * @param {object[]} listed the entries the dismissing page showed
+ * @param {number} now
+ * @returns {object[]} the rows to put
+ */
+export function dismissInRows(rows, ownKey, listed = [], now = Date.now()) {
+    const identity = (entry) => `${entry.id}|${JSON.stringify(entry.json)}`;
+    const own = rows.find((row) => row.docUuid === ownKey);
+    const dismissing = new Set([...(Array.isArray(listed) ? listed : []), ...(Array.isArray(own?.entries) ? own.entries : [])].map(identity));
+    const out = [];
+
+    rows.forEach((row) => {
+        const entries = Array.isArray(row.entries) ? row.entries : [];
+        const isOwn = row.docUuid === ownKey;
+        const hit = entries.filter((entry) => isOwn || dismissing.has(identity(entry)));
+        if (hit.length === 0 && !isOwn) {
+            return;
+        }
+        const left = entries.filter((entry) => !hit.includes(entry));
+        out.push({
+            ...row,
+            entries: left,
+            dismissed: [...(Array.isArray(row.dismissed) ? row.dismissed : []), ...hit],
+            ...(isOwn || left.length === 0 ? { dismissedAt: now } : {}),
+        });
+    });
+
+    return out;
+}
+
+/**
  * Dismiss all: the park stays for its 7 days (the button says so), but it is
  * not offered again on the next visit. The entries move aside under
  * `dismissed`, which parkLost() carries over, so a later loss that rewrites
  * `entries` does not take the dismissed text out of the browser. Marks this
- * tab's OWN row; another tab's entries are still on offer.
+ * tab's OWN row and, in the same transaction, the same entries in every other
+ * row of the document (dismissInRows()); another tab's other entries are still
+ * on offer. `listed` is what the page showed: with its own row adopted away
+ * the page still dismisses what it listed.
  *
  * @returns {Promise<boolean>} true once the write has completed; false means
  *   nothing was stored and the caller still holds the only copy. Nothing is
  *   thrown.
  */
-export async function markLostDismissed(docUuid, tabId = '') {
+export async function markLostDismissed(docUuid, tabId = '', listed = []) {
     try {
         const db = await openDb();
+        const plain = JSON.parse(JSON.stringify(Array.isArray(listed) ? listed : []));
         await new Promise((resolve, reject) => {
             const tx = db.transaction(STORE_NAME, 'readwrite');
             const store = tx.objectStore(STORE_NAME);
-            const req = store.get(lostKey(docUuid, tabId));
-            req.onsuccess = () => {
-                if (req.result) {
-                    const row = req.result;
-                    store.put({
-                        ...row,
-                        entries: [],
-                        dismissed: [...(Array.isArray(row.dismissed) ? row.dismissed : []), ...(Array.isArray(row.entries) ? row.entries : [])],
-                        dismissedAt: Date.now(),
-                    });
-                }
-            };
-            req.onerror   = () => reject(req.error);
+            readLostRows(store, docUuid, (rows) => {
+                dismissInRows(rows, lostKey(docUuid, tabId), plain).forEach((row) => store.put(row));
+            });
             tx.oncomplete = resolve;
             tx.onerror    = () => reject(tx.error);
             tx.onabort    = () => reject(tx.error);

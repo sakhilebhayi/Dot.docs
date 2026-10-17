@@ -119,6 +119,39 @@ test('adoptLost keeps the dismissed copies and finds nothing to offer when every
     }
 });
 
+test('Dismiss all marks the matching entries dismissed in EVERY row of the document: a tab whose row was adopted still dismisses for good', async () => {
+    const { rows, done } = fresh();
+    try {
+        await parkLost(U, [entry('a', 'A'), entry('b', 'B')], 2, 'X');
+        await adoptLost(U, 'Y'); // X's row is gone; Y holds both
+        await parkLost(U, [entry('a', 'A'), entry('b', 'B'), entry('c', 'C')], 2, 'X'); // X, still open, writes its row again
+
+        // X dismisses what it shows. It passes the list, because its row may have been taken from under it.
+        assert.equal(await markLostDismissed(U, 'X', [entry('a', 'A'), entry('b', 'B'), entry('c', 'C')]), true);
+
+        const union = await loadLost(U);
+        assert.deepEqual(union.entries, [], 'nothing comes back after a reload');
+        assert.deepEqual([...rows.values()].every((row) => row.entries.length === 0), true);
+        assert.deepEqual(union.dismissed.map((e) => e.id).sort(), ['a', 'b', 'c']);
+    } finally {
+        done();
+    }
+});
+
+test('Dismiss all passes the list it dismissed: with its own row gone, the entries held by another row are still marked', async () => {
+    const { done } = fresh();
+    try {
+        await parkLost(U, [entry('a', 'A')], 2, 'X');
+        await adoptLost(U, 'Y');
+
+        assert.equal(await markLostDismissed(U, 'X', [entry('a', 'A')]), true);
+
+        assert.deepEqual((await loadLost(U)).entries, []);
+    } finally {
+        done();
+    }
+});
+
 test('with no row at all adoptLost and loadLost give null and write nothing', async () => {
     const { rows, done } = fresh();
     try {
