@@ -22,11 +22,51 @@
  * later), which is what keeps Alpine's reactivity working.
  *
  * No DOM, no `window`, no Livewire, no clock and no console of its own:
- * everything outside the state object arrives in `env`.
+ * everything outside the state object arrives in `env`. Its one import is
+ * ./merge.js, inside sync/: the helpers that build the lost row's entries.
+ *
+ * Phase 2 (the paragraph-level merge, docs/superpowers/specs/
+ * 2026-10-16-coediting-phase-2-paragraph-merge-design.md): a newer document
+ * that arrives while this tab holds unsaved typing is MERGED block by block
+ * (mergeOrConflict()), applied over the typing and saved on the new base;
+ * a save refused as stale fetches the newer document to merge it
+ * (beginMerge()); the conflict notice is for a merge that cannot be done.
+ * What the merge could not keep is offered back in the notice bar's lost
+ * row (offerLost(), putBackLost(), dismissLost()).
  */
+
+import { appendLost, blockWord, lostEntry } from './merge.js';
 
 /** How long a save is waited for before it is taken as never answering. */
 export const SAVE_EXPIRY_MS = 15000;
+
+/**
+ * How many merges after refused saves are tried in a row before the
+ * conflict notice (section 5.4 of the Phase 2 spec; the spec's starting
+ * value was 3, raised after the random walk of the dry run showed three
+ * writers reaching it with every merge possible). Reset by an accepted
+ * save, by a merge that leaves nothing of mine to save, by enterConflict()
+ * and by applyFromSync().
+ */
+export const MERGE_ATTEMPTS = 5;
+
+/** How long the fetch for a merge is waited for before the conflict notice (section 5.7). */
+export const MERGE_FETCH_EXPIRY_MS = SAVE_EXPIRY_MS;
+
+/** How many item slots the notice bar's lost row has; the markup in editor.blade.php mirrors it. */
+export const LOST_ROWS = 5;
+
+/** The sentence of each lost-row item, by reason and source (section 6.2). The `parked` source prefixes a stored sentence instead (restoreDraft()). */
+const LOST_SENTENCES = {
+    'both:merge': (word) => `This ${word} was changed elsewhere at the same moment. The other version is on the page; this is yours.`,
+    'deleted:merge': (word) => `This ${word} was removed elsewhere while you were typing in it.`,
+    'both:draft': (word) =>
+        `This ${word} was changed in the document after your draft was written. The document's version is on the page; this is the draft's.`,
+    'deleted:draft': (word) => `This ${word} was removed from the document after your draft was written.`,
+    'both:suggestion': (word) =>
+        `This ${word} was rewritten by the accepted suggestion. The suggestion's version is on the page; this is yours.`,
+    'deleted:suggestion': (word) => `The accepted suggestion removed this ${word} while you were typing in it.`,
+};
 
 /**
  * What Put it back asks before it replaces the page with text that was set
@@ -161,6 +201,23 @@ export function unloadSaveBody(json, options = {}) {
  * @property {number} baseVersion the version this tab's copy is based on
  * @property {string} aiError
  * @property {number} tick
+ * @property {{version: number, since: number}|null} merging set while a
+ *           newer document is being fetched for a merge (beginMerge());
+ *           persist() sends nothing while it is, syncState() reports dirty,
+ *           and resendIfOwed() gives it up after MERGE_FETCH_EXPIRY_MS
+ * @property {number} mergeAttempts merges after refused saves, in a row.
+ *           Reset by an accepted save, by enterConflict() and by applyFromSync()
+ * @property {{version: number, json: string}|null} known the last server
+ *           document this tab held, as the editor serialises it, with its
+ *           version. NEVER nulled: `confirmed` is nulled on purpose (a lost
+ *           answer, a failed request, Keep mine) while the last agreed
+ *           document is still the right merge base, as long as its version
+ *           is the one the typing is based on
+ * @property {string|null} sentSnapshot the JSON string of the save now in the air
+ * @property {string|null} unanswered the JSON string of the last save given
+ *           up on or whose request failed; the merge's echo (section 4.2).
+ *           Null once anything is confirmed
+ * @property {object[]} lost the lost row's entries (section 6.1), oldest first
  */
 
 /**
@@ -225,6 +282,9 @@ export function createSyncHost(view, env) {
             view.saving = 0;
             view.resave = true;
             view.confirmed = null;
+            // The save may have been stored. If the next merge finds its
+            // document on the server, that change is this tab's own.
+            view.unanswered = view.sentSnapshot;
             view.expiredSaveSeq = view.saveSeq;
         }
 
@@ -238,7 +298,11 @@ export function createSyncHost(view, env) {
     function opened() {
         const handle = env.handle();
 
-        view.confirmed = JSON.stringify(handle.editor.getJSON());
+        // Confirmed and known; the base row is written at the END of
+        // restoreDraft(): a draft of an earlier version is merged against
+        // the row of ITS version, which this page must read before it
+        // writes its own.
+        markConfirmed(JSON.stringify(handle.editor.getJSON()), view.baseVersion, { writeRow: false });
         env.report(
             handle.autosaves === false ? 'danger' : 'good',
             handle.autosaves === false ? 'Read only' : 'Saved'
@@ -371,6 +435,16 @@ export function createSyncHost(view, env) {
             return Promise.resolve();
         }
 
+        // A newer document is being fetched to merge: the base this save
+        // would state is known to be stale, so nothing goes out until the
+        // merge has run (it sends the merged document itself). Owed, so
+        // nothing typed meanwhile is dropped.
+        if (view.merging && !force) {
+            view.resave = true;
+
+            return Promise.resolve();
+        }
+
         // An unresolved conflict: every save would be refused. The draft
         // keeps the text; the notice asks the question.
         if (view.conflict && !force) {
@@ -387,6 +461,8 @@ export function createSyncHost(view, env) {
 
         // The owed save is this one.
         view.resave = false;
+        // What is in the air, for the echo rule should its answer be lost.
+        view.sentSnapshot = snapshot;
         view.saving++;
         view.savingSince = env.now();
         const seq = ++view.saveSeq;
@@ -418,7 +494,10 @@ export function createSyncHost(view, env) {
                 }
 
                 try {
-                    saveAnswered(result, snapshot, overwrite);
+                    // A Put it back pressed after this save left replaced the
+                    // text it carried: its answer must not write off the
+                    // overwrite that text still owes.
+                    saveAnswered(result, snapshot, overwrite && view.putBackSeq < seq);
                 } catch (error) {
                     // Not the save's failure: the save has been answered.
                     env.log('[Dot.Doc] Something failed after a save was answered.', error);
@@ -438,6 +517,8 @@ export function createSyncHost(view, env) {
                 // counts as confirmed any more (see saveInTheAir()).
                 view.saving = Math.max(0, view.saving - 1);
                 view.confirmed = null;
+                // The server may have stored it all the same (section 5.6).
+                view.unanswered = view.sentSnapshot;
                 env.report('danger', 'Not saved');
                 env.engine()?.retry();
             }
@@ -473,7 +554,18 @@ export function createSyncHost(view, env) {
         if (result && result.ok) {
             view.baseVersion = result.version;
             view.conflict = null;
-            view.confirmed = snapshot;
+            view.mergeAttempts = 0;
+            markConfirmed(snapshot, result.version);
+            // A merge under way for this version or an older one is over: the
+            // fetch it started would bring the very version this answer
+            // names, which engine.saved() below marks as seen, so it would
+            // never be delivered and `merging` would hold every save until
+            // the 15 s expiry raised a notice nobody caused (a late answer of
+            // a save given up on, arriving while the fetch is out).
+            if (view.merging && view.merging.version <= result.version) {
+                view.merging = null;
+                view.resave = true;
+            }
             // The overwrite is settled only by a save that said so. An
             // ordinary save that left before Put it back was pressed did
             // not, and the put-back save still has to.
@@ -506,7 +598,17 @@ export function createSyncHost(view, env) {
             // send again on the new base.
             view.resave = true;
         } else if (result && result.conflict) {
-            enterConflict(result.version);
+            // Refused as stale (section 5.4): the text is still owed. The
+            // writer choosing in the notice is never merged behind their
+            // back; the refusal after MERGE_ATTEMPTS merges in a row ends in
+            // the notice too; else the newer document is fetched and merged.
+            view.resave = true;
+            if (view.conflict || view.mergeAttempts >= MERGE_ATTEMPTS) {
+                enterConflict(result.version);
+            } else {
+                view.mergeAttempts += 1;
+                beginMerge(result.version);
+            }
         } else {
             env.report('danger', 'Not saved');
         }
@@ -528,6 +630,10 @@ export function createSyncHost(view, env) {
      * what the server last confirmed.
      */
     function resendIfOwed() {
+        // A fetch for a merge that has not answered in fifteen seconds ends
+        // in the notice; the owed save goes out after the writer's choice.
+        expireMerging();
+
         const handle = env.handle();
         // Fail-closed: nothing is written back.
         if (!handle || handle.autosaves === false) {
@@ -665,6 +771,13 @@ export function createSyncHost(view, env) {
             return 'busy';
         }
 
+        // Never apply a document under an IME composition: it would land in
+        // the middle of a character being composed. The next poll or
+        // retry() delivers.
+        if (handle.composing) {
+            return 'busy';
+        }
+
         // After the save-in-the-air check, never before it.
         settleIfBackAtConfirmed(handle);
 
@@ -706,10 +819,32 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        // A restyle changes only stamps, which the merge's levelling
+        // absorbs: the last known document is still the right merge base,
+        // and it is now of this version. Only when `known` was current:
+        // after Keep mine the base has moved past it, and it must not be
+        // given the version the editor never held. applySuggestion() loads
+        // the content itself and confirms it itself.
+        const knownIsCurrent = !contentLoaded && view.known !== null && view.known.version === view.baseVersion;
+
         view.baseVersion = version;
         env.engine()?.saved(version);
+
+        if (knownIsCurrent) {
+            view.known = { version, json: view.known.json };
+            writeBase(view.known.json, version);
+        }
+
         // An autosave that travelled with that action may have been
-        // refused against the version the action itself produced.
+        // refused against the version the action itself produced: the
+        // merge it started, or the notice it raised, is over, and the owed
+        // text goes out on the adopted base.
+        if (view.merging && view.merging.version <= version) {
+            view.merging = null;
+            view.mergeAttempts = 0;
+            view.resave = true;
+            resendIfOwed();
+        }
         if (view.conflict && view.conflict.version <= version) {
             view.conflict = null;
             view.resave = true;
@@ -747,7 +882,11 @@ export function createSyncHost(view, env) {
 
         view.baseVersion = remote.version;
         view.unsaved = false;
-        view.confirmed = JSON.stringify(handle.editor.getJSON());
+        // A merge under way is over: the tab was clean after all (it undid
+        // everything while the fetch was out), so it follows instead.
+        view.merging = null;
+        view.mergeAttempts = 0;
+        markConfirmed(JSON.stringify(handle.editor.getJSON()), remote.version);
         // Whatever this tab had put back is no longer in the editor.
         view.overwriteOwed = false;
         // The server now holds newer content than any draft.
@@ -773,6 +912,267 @@ export function createSyncHost(view, env) {
     }
 
     /**
+     * The server document this tab now holds is confirmed: `confirmed` and
+     * `known` are set to it, the echo is forgotten, and the base row is
+     * written so a draft of this version can be merged on a later visit.
+     *
+     * Called from opened() (the page document), saveAnswered() on ok (the
+     * snapshot that was stored), applyFromSync() and applySuggestion() (the
+     * editor's own serialisation of what was applied) and mergeOrConflict()
+     * (theirs, or the editor's serialisation when nothing of mine survived).
+     * `confirmed = null` stays a direct assignment where it is (a lost
+     * answer, a failed request, Keep mine); `known` is never nulled.
+     *
+     * @param {string} json the document as a JSON string
+     * @param {number} version the version it is
+     * @param {{writeRow?: boolean}} options `writeRow: false` is opened()'s:
+     *        the row is written once the draft check has read the old one
+     */
+    function markConfirmed(json, version, { writeRow = true } = {}) {
+        view.confirmed = json;
+        view.known = { version, json };
+        view.unanswered = null;
+        if (writeRow) {
+            writeBase(json, version);
+        }
+    }
+
+    /** The base row, never in fail-closed mode: what a read-only view holds is not the document. */
+    function writeBase(json, version) {
+        const handle = env.handle();
+        if (!handle || handle.autosaves === false) {
+            return;
+        }
+
+        env.drafts()?.saveBase(view.docUuid, json, version);
+    }
+
+    /**
+     * A save was refused as stale: fetch the newer document and merge the
+     * typing into it (section 5.4). When the engine already holds a document
+     * at least that new, merge it at once.
+     *
+     * refetch(), not poke(): the engine may have SEEN that version already,
+     * and an ordinary poll would be told nothing changed.
+     *
+     * @param {number} version the version the server is at
+     */
+    function beginMerge(version) {
+        const handle = env.handle();
+        // Fail-closed: nothing is fetched to be written into a read-only
+        // view (and expireMerging() would raise "Not saved" on it 15 s on).
+        if (!handle || handle.autosaves === false) {
+            return;
+        }
+
+        const engine = env.engine();
+        if (!engine) {
+            enterConflict(version);
+
+            return;
+        }
+
+        const waiting = engine.pending;
+        if (waiting && waiting.version >= version) {
+            mergeOrConflict(waiting);
+
+            return;
+        }
+
+        // A document OLDER than the refused version (polled while the save
+        // was in the air) is dropped: the fetch below replaces it. Left in
+        // place, the retry() that follows every answered save would hand it
+        // to mergeOrConflict(), which would merge it, end `merging` and send
+        // the merged document on a base known to be stale: a refusal for
+        // nothing, and one of the attempts gone.
+        if (waiting) {
+            engine.takeRemote();
+        }
+
+        view.merging = { version, since: env.now() };
+        engine.refetch(view.baseVersion);
+    }
+
+    /**
+     * A fetch for a merge that has not answered in MERGE_FETCH_EXPIRY_MS is
+     * given up on: the notice stands, the engine's own back-off keeps
+     * polling, and the owed save goes out after the writer's choice.
+     */
+    function expireMerging() {
+        if (view.merging && env.now() - view.merging.since >= MERGE_FETCH_EXPIRY_MS) {
+            const version = view.merging.version;
+            view.merging = null;
+            enterConflict(version);
+        }
+    }
+
+    /**
+     * A newer server document has arrived while this tab holds unsaved
+     * typing: merge it, or raise the notice when that cannot be done
+     * (section 5.5). The engine calls this through onConflict (a poll
+     * brought the document to a dirty tab) and beginMerge() calls it (the
+     * fetch after a refused save answered, or the engine already held it).
+     *
+     * @param {{version: number, json: object, outline: object|null, css: string|null}} remote
+     */
+    function mergeOrConflict(remote) {
+        const handle = env.handle();
+        // 1. Fail-closed: nothing.
+        if (!handle || handle.autosaves === false) {
+            return;
+        }
+
+        // 2. The notice stands: the writer is choosing, and nothing is
+        //    merged behind their back. The notice learns the newer version.
+        if (view.conflict) {
+            enterConflict(remote.version);
+
+            return;
+        }
+
+        // 3. A save in the air: the engine retries after its answer.
+        if (saveInTheAir()) {
+            return;
+        }
+
+        // 4. The base: the confirmed document, or the last known one when
+        //    nothing is confirmed (a lost answer, a failed request) and it
+        //    is of the version the typing is based on. After Keep mine the
+        //    base names a version the editor never held: no base, so the
+        //    notice, until a save is accepted.
+        const base =
+            view.confirmed ?? (view.known !== null && view.known.version === view.baseVersion ? view.known.json : null);
+        if (base === null) {
+            view.merging = null;
+            enterConflict(remote.version);
+
+            return;
+        }
+
+        // 5. The merge. The echo is the document of a save whose answer was
+        //    lost: wherever theirs agrees with it, that change is this tab's
+        //    own and typing on top of it is kept, not offered back.
+        let result = null;
+        try {
+            result = handle.merge(JSON.parse(base), remote.json, {
+                echo: view.unanswered ? JSON.parse(view.unanswered) : null,
+            });
+        } catch (_) {
+            result = null;
+        }
+        if (!result) {
+            view.merging = null;
+            enterConflict(remote.version);
+
+            return;
+        }
+
+        // 6. The merged document goes in, over the typing it holds.
+        let applied = false;
+        try {
+            applied = handle.applyRemote(result.merged, { force: true }) === true;
+        } catch (_) {
+            applied = false;
+        }
+        if (!applied) {
+            view.merging = null;
+            enterConflict(remote.version);
+
+            return;
+        }
+
+        // 7. The bookkeeping. `confirmed` is theirs as this editor serialises
+        //    it (plus the carried trailing paragraph) when something of mine
+        //    survived, which is what the merged save is based on; when
+        //    nothing did, the editor's own serialisation, so the settle check
+        //    can find the editor back at it. The overwrite is ORed, never
+        //    assigned, while something of mine is left to save: one owed from
+        //    Put it back or from an earlier c2 merge survives a merge that owes
+        //    none, until a save that carried it is accepted. A merge that
+        //    leaves nothing of mine to save (changed false) sends nothing, so
+        //    no save is left to carry the flag: it is cleared.
+        const wasUnsaved = view.unsaved;
+        view.merging = null;
+        view.baseVersion = remote.version;
+        view.conflict = null;
+        markConfirmed(result.changed ? result.theirs : JSON.stringify(handle.editor.getJSON()), remote.version);
+        view.overwriteOwed = result.changed ? view.overwriteOwed || result.overwrites : false;
+        view.unsaved = result.changed;
+        if (!result.changed) {
+            view.mergeAttempts = 0; // nothing owed: the row of refusals is over
+        }
+        if (result.lost.length > 0) {
+            offerLost(result.lost, 'merge', remote.version);
+        }
+        env.engine()?.saved(remote.version);
+        if (remote.outline) {
+            env.showOutline(remote.outline);
+        }
+        if (remote.css) {
+            env.showCss(remote.css);
+        }
+        view.tick++;
+
+        // 8. The draft: of the merged document while something of mine is
+        //    unsaved (stamped one below while an overwrite is owed, as
+        //    edited() stamps it), cleared when the server holds everything.
+        const drafts = env.drafts();
+        if (drafts) {
+            if (result.changed) {
+                drafts.saveDraft(
+                    view.docUuid,
+                    JSON.stringify(handle.editor.getJSON()),
+                    view.overwriteOwed ? view.baseVersion - 1 : view.baseVersion
+                );
+            } else {
+                drafts.clearDraft(view.docUuid);
+            }
+        }
+
+        // 9. Something of mine survived: it is saved on the new base, now.
+        //    Nothing did: this was a follow in disguise, and the word goes
+        //    back to Saved once.
+        if (result.changed) {
+            view.resave = true;
+            persist(handle.editor.getJSON());
+        } else if (wasUnsaved) {
+            env.report('good', 'Saved');
+        }
+    }
+
+    /**
+     * What a merge could not keep goes into the lost row (section 6.1).
+     * Append, never replace: a paragraph lost twice in a row keeps both
+     * offered versions. The whole list is parked under lost-<uuid>, its own
+     * key, so a reload re-offers it and Load theirs' stale- park is not
+     * overwritten.
+     *
+     * @param {object[]} lost the merge result's losses
+     * @param {'merge'|'draft'|'suggestion'} source
+     * @param {number} version the version the merge was against
+     */
+    function offerLost(lost, source, version) {
+        const entries = lost.map((loss, n) =>
+            lostEntry(loss, { source, version, n, sentence: sentenceFor(loss.reason, source, blockWord(loss.type)) })
+        );
+        view.lost = appendLost(view.lost, entries);
+        env.drafts()?.parkLost(view.docUuid, view.lost, view.baseVersion);
+        env.info(`[Dot.Doc] ${entries.length} block(s) could not be kept by the ${source} and are offered back in the notice bar.`);
+    }
+
+    /**
+     * The sentence of a lost-row item (section 6.2).
+     *
+     * @param {'both'|'deleted'} reason
+     * @param {'merge'|'draft'|'suggestion'} source
+     * @param {string} word blockWord() of the block's type
+     * @returns {string}
+     */
+    function sentenceFor(reason, source, word) {
+        return LOST_SENTENCES[`${reason}:${source}`](word);
+    }
+
+    /**
      * A newer version exists and this tab has unsaved typing. Stop saving
      * and ask; the draft keeps the text in the meantime. `version` is the
      * version that is in the way: Keep mine needs only that number, not
@@ -781,15 +1181,27 @@ export function createSyncHost(view, env) {
      * @param {number} version
      */
     function enterConflict(version) {
+        // The notice stands: no merge is tried behind the writer's back, and
+        // the count of merges after refusals starts over after it.
+        view.merging = null;
+        view.mergeAttempts = 0;
+
         const engine = env.engine();
-        const waiting = engine ? engine.pending : null;
+        let waiting = engine ? engine.pending : null;
+        const named = Math.max(Number.isFinite(version) ? version : 0, view.conflict ? view.conflict.version : 0);
+
+        // A document the engine holds that is OLDER than the version the
+        // notice names is not "theirs": Load theirs would show a version the
+        // head has moved past (a Keep mine save refused by a still newer
+        // version leaves exactly that). It is dropped, and the refetch below
+        // brings the newest.
+        if (waiting && waiting.version < named) {
+            engine.takeRemote();
+            waiting = null;
+        }
 
         view.conflict = {
-            version: Math.max(
-                Number.isFinite(version) ? version : 0,
-                view.conflict ? view.conflict.version : 0,
-                waiting ? waiting.version : 0
-            ),
+            version: Math.max(named, waiting ? waiting.version : 0),
             ready: !!waiting,
         };
         env.report('danger', 'Not saved');
@@ -1029,6 +1441,11 @@ export function createSyncHost(view, env) {
      * the version has moved on, somebody else has saved since and restoring
      * the draft would overwrite them.
      *
+     * The base row (the document this tab's typing is based on, for the
+     * draft merge of a later visit) is written here, AFTER the draft logic:
+     * a draft of an earlier version is merged against the row of its own
+     * version, which must be read before this page writes its own.
+     *
      * @returns {Promise<void>}
      */
     async function restoreDraft() {
@@ -1044,6 +1461,19 @@ export function createSyncHost(view, env) {
             return;
         }
 
+        await restoreDraftIfRestorable(drafts, handle);
+        writeBase(view.confirmed, view.baseVersion);
+    }
+
+    /**
+     * The draft logic of restoreDraft(): what is done with the live draft
+     * found for this document, if any.
+     *
+     * @param {object} drafts `window.offlineDraft`
+     * @param {object} handle the editor handle, mounted and not fail-closed
+     * @returns {Promise<void>}
+     */
+    async function restoreDraftIfRestorable(drafts, handle) {
         const editor = handle.editor;
 
         try {
@@ -1182,7 +1612,7 @@ export function createSyncHost(view, env) {
             env.report('good', 'Saved');
         }
         view.unsaved = false;
-        view.confirmed = JSON.stringify(handle.editor.getJSON());
+        markConfirmed(JSON.stringify(handle.editor.getJSON()), version);
         view.overwriteOwed = false;
         adoptVersion(version, { contentLoaded: true });
         view.aiError = '';
@@ -1216,7 +1646,9 @@ export function createSyncHost(view, env) {
         return {
             state: () => syncState(),
             applyRemote: (remote) => applyFromSync(remote),
-            onConflict: (remote) => enterConflict(remote.version),
+            // A newer document while this tab holds unsaved typing: merged,
+            // or the notice when that cannot be done.
+            onConflict: (remote) => mergeOrConflict(remote),
             onRefused: () => {
                 view.syncNotice = 'A newer version could not be opened here. Reload the page.';
             },
@@ -1254,6 +1686,12 @@ export function createSyncHost(view, env) {
         adoptVersion,
         applyFromSync,
         enterConflict,
+        beginMerge,
+        mergeOrConflict,
+        expireMerging,
+        markConfirmed,
+        offerLost,
+        sentenceFor,
         keepMine,
         loadTheirs,
         putBack,

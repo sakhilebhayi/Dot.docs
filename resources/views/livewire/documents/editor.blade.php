@@ -62,6 +62,26 @@
         // clears them with it.
         setAsideFrom: null,
         setAsideBase: null,
+        // Phase 2, the paragraph-level merge (sync/host.js writes all seven).
+        // merging: {version, since} while a newer document is being fetched
+        // to merge the typing into; persist() sends nothing meanwhile.
+        merging: null,
+        // Merges after refused saves, in a row: MERGE_ATTEMPTS (5, sync/host.js) end in the notice.
+        mergeAttempts: 0,
+        // The last server document this tab held, {version, json}, as the
+        // editor serialises it. Never nulled: confirmed is nulled on purpose
+        // (a lost save answer, Keep mine) while this is still the merge base.
+        known: null,
+        // The JSON string of the save in the air, and of the last save given
+        // up on or whose request failed: the echo a merge recognises as this
+        // tab's own change (section 5.6 of the Phase 2 spec).
+        sentSnapshot: null,
+        unanswered: null,
+        // What a merge could not keep, oldest first: the lost row offers it
+        // back (section 6 of the Phase 2 spec).
+        lost: [],
+        // The saveSeq at the moment Put it back last replaced the text: a save sent at or before it did not carry that text.
+        putBackSeq: 0,
         // A reason the page can no longer stay in step (signed out, access
         // removed, document deleted, a version this editor cannot open).
         // Shown in the notice bar.
