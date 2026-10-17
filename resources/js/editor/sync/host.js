@@ -1384,6 +1384,26 @@ export function createSyncHost(view, env) {
     }
 
     /**
+     * The way out of a list this browser could not keep a copy of: asked
+     * (DISMISS_LOST_UNKEPT_QUESTION), and on yes the row is emptied without a
+     * copy. An earlier write may have stored the list: it is stamped dismissed,
+     * best effort, so it does not come back after a reload (the copy that could
+     * not be written is the only thing that is gone). A no changes nothing.
+     */
+    function dismissWithoutCopy() {
+        if (!env.confirm(DISMISS_LOST_UNKEPT_QUESTION)) {
+            return;
+        }
+        clearLostNotices();
+        view.lost = [];
+        try {
+            Promise.resolve(env.drafts()?.markLostDismissed(view.docUuid)).catch(() => {});
+        } catch (_) {
+            // Nothing more can be done.
+        }
+    }
+
+    /**
      * Dismiss all (section 6.5): the row is emptied; the park stays for its
      * 7 days and is stamped dismissed, so the next visit does not offer it
      * again (markLostDismissed() moves the entries to the row's `dismissed`
@@ -1411,18 +1431,7 @@ export function createSyncHost(view, env) {
 
         // The last press could not keep a copy: the writer decides, knowing it.
         if (view.syncNotice === DISMISS_LOST_FAILED_NOTICE) {
-            if (!env.confirm(DISMISS_LOST_UNKEPT_QUESTION)) {
-                return;
-            }
-            clearLostNotices();
-            view.lost = [];
-            // An earlier write may have stored the list: it is stamped dismissed, best effort, so it does not come
-            // back after a reload (the copy that could not be written is the only thing that is gone).
-            try {
-                Promise.resolve(env.drafts()?.markLostDismissed(view.docUuid)).catch(() => {});
-            } catch (_) {
-                // Nothing more can be done.
-            }
+            dismissWithoutCopy();
 
             return;
         }
@@ -1441,6 +1450,11 @@ export function createSyncHost(view, env) {
         }
         if (!kept) {
             setLostNotice(DISMISS_LOST_FAILED_NOTICE);
+            // The notice is the memory of the failure. When a stop reason stands it could not be shown, and the next
+            // press would start over with the ordinary question: ask the unkept question now instead.
+            if (view.syncNotice !== DISMISS_LOST_FAILED_NOTICE) {
+                dismissWithoutCopy();
+            }
 
             return;
         }
@@ -1529,6 +1543,13 @@ export function createSyncHost(view, env) {
 
         // The pre-merge copy stays recoverable, as today.
         await drafts.parkStaleDraft(view.docUuid, draft.json, draft.baseVersion);
+
+        // Nothing is applied under an IME composition (as mergeOrConflict()
+        // holds): the draft falls through to today's park and set-aside, and
+        // the composition and the typing stay on the page.
+        if (handle.composing) {
+            return false;
+        }
         drafts.clearDraft(view.docUuid);
 
         // The page is editable while the question is open and the park is
@@ -1811,7 +1832,7 @@ export function createSyncHost(view, env) {
             // Nothing was put back, so nothing more is owed than before.
             view.overwriteOwed = owedBefore;
             view.overwriteFloor = floorBefore;
-            view.syncNotice = PUT_BACK_FAILED_NOTICE;
+            setLostNotice(PUT_BACK_FAILED_NOTICE);
         }
     }
 
@@ -2111,7 +2132,7 @@ export function createSyncHost(view, env) {
                     env.log('[Dot.Doc] The typing could not be put back after a failed suggestion merge.', cause);
                 }
             }
-            view.aiError = 'Suggestion saved; your typing could not join it. Settle the set-aside text first.';
+            view.aiError = 'Suggestion saved, but your unsaved text could not be added to it. Put back or discard the set-aside text first.';
             // The save that was in the air is given up on above; the typing it
             // carried is owed again, not left unsaved with nothing to send it.
             if (retiredSave) {

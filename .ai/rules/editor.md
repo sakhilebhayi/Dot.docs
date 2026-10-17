@@ -141,6 +141,7 @@ The lost row's notices (`PUT_BACK_FAILED_NOTICE`, `DISMISS_LOST_FAILED_NOTICE`, 
 
 Known limits of Phase 2 (stated, not fixed):
 - Pressing Enter in the middle of a paragraph that somebody else changes at the same moment can store the words after the split twice: the new block the split made is kept as mine's insertion, while the paragraph itself is offered back (or lost). Joining two paragraphs (Backspace at the start of one) has the mirror effect: the joined paragraph's words survive only in the lost row. Nothing is lost; the writer sees a duplicate or a lost-row item and deletes or puts back.
+- A restore that brings back exactly the content of a draft's base makes the draft merge see the blocks as unchanged, so the draft's deletions apply and the merged save carries no overwrite flag (failure walk seed 42519 with 2 tabs). Nothing is lost: the replaced version is in the history. The walk excuses it narrowly: at reopen it re-states as the person's own deletion whatever the draft deletes relative to its base row.
 - The echo is not applied to block ORDER. After a stored-but-unanswered save that moved blocks, a later move of the same tab can be undone silently by the order comparison against the base.
 - An accepted suggestion that retires a save in the air sets no echo (`unanswered`), so the tab's own stored words can come back from a later merge as a lost-row offer. Nothing is lost.
 - A block id that comes out twice, nested, in a merged document is not refused (the check is top-level); the editor's repair plugin gives one copy a fresh id on apply.

@@ -4657,7 +4657,25 @@ test('the failed-copy notice goes when the list empties, however it empties', as
     assert.equal(B.view.syncNotice, '');
 });
 
-test('lost-row notices never replace a stop reason, and a successful dismissal leaves it standing', async () => {
+test('the notice of a set-aside text that could not be put back never replaces a stop reason', async () => {
+    const stop = 'You no longer have access to this document.';
+    const { B } = await conflicted();
+    await B.host().loadTheirs(); // B1 is set aside
+    B.view.syncNotice = stop;
+    B.setContentThrows = true;
+
+    B.host().putBack();
+
+    assert.equal(B.view.syncNotice, stop);
+    assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'the offer stands');
+
+    // Without a stop reason the writer is told.
+    B.view.syncNotice = '';
+    B.host().putBack();
+    assert.equal(B.view.syncNotice, 'Your text could not be put back.');
+});
+
+test('lost-row notices never replace a stop reason, and Dismiss all still reaches the unkept question behind one', async () => {
     const stop = 'You have been signed out. Reload the page to keep editing.';
     const { B } = await lostOne();
     B.view.syncNotice = stop;
@@ -4667,16 +4685,36 @@ test('lost-row notices never replace a stop reason, and a successful dismissal l
     assert.equal(B.view.syncNotice, stop);
     B.insertBlockFails = false;
 
+    // The copy cannot be written and the failed-copy notice cannot be shown over the stop reason (so it cannot be
+    // the memory of the failure): the unkept question is asked in the same press. No changes nothing.
     B.parkLostFails = true;
+    const answers = [true, false]; // the ordinary question, then the unkept one
+    B.env.confirm = (question) => {
+        B.questions.push(question);
+
+        return answers.shift() ?? true;
+    };
     await B.host().dismissLost();
-    assert.equal(B.view.syncNotice, stop, 'the failed copy is not announced over a stop reason');
+    assert.deepEqual(B.questions, [DISMISS_LOST_QUESTION, DISMISS_LOST_UNKEPT_QUESTION]);
+    assert.equal(B.view.syncNotice, stop, 'the stop reason stands');
     assert.deepEqual(B.lostTexts(), ['Hello B']);
 
-    // The failure was not remembered (the notice is the memory), so the next press asks the ordinary question and writes.
-    B.parkLostFails = false;
+    // Yes: dismissed without a copy, the stop reason untouched.
     B.questions.length = 0;
+    answers.push(true, true);
     await B.host().dismissLost();
-    assert.deepEqual(B.questions, [DISMISS_LOST_QUESTION]);
+    assert.deepEqual(B.questions, [DISMISS_LOST_QUESTION, DISMISS_LOST_UNKEPT_QUESTION]);
+    assert.deepEqual(B.view.lost, []);
+    assert.equal(B.view.syncNotice, stop);
+});
+
+test('a successful dismissal leaves a stop reason standing', async () => {
+    const stop = 'This document no longer exists.';
+    const { B } = await lostOne();
+    B.view.syncNotice = stop;
+
+    await B.host().dismissLost();
+
     assert.deepEqual(B.view.lost, []);
     assert.equal(B.view.syncNotice, stop);
 });
@@ -5264,6 +5302,36 @@ test('typing while the draft merge parks the pre-merge draft (after the yes) is 
     ]);
 });
 
+test('a draft merge the writer said yes to while an IME composition is under way does not apply over it: the draft is set aside and the typing stays', async () => {
+    const { server, again } = await deadTabWithDraft(
+        (A, B) => {
+            A.typeIn('p2', 'World A');
+            B.typeIn('p1', 'start B');
+        },
+        {
+            beforeOpen: (tab) => {
+                const realPark = tab.draftStore.parkStaleDraft;
+                tab.draftStore.parkStaleDraft = async (...args) => {
+                    tab.typeIn('p1', 'start B COMPOSED');
+                    tab.composing = true; // the composition is still open when the park is done
+                    await settle();
+
+                    return realPark(...args);
+                };
+            },
+        }
+    );
+    await settle();
+    await settle();
+
+    assert.equal(again.applyCalls, 0, 'nothing was applied over the composition');
+    assert.equal(again.text(), 'start B COMPOSED', 'the typing is still on the page');
+    assert.equal(again.view.setAside, JSON.stringify(docOf(para('p1', 'start'), para('p2', 'World A'))), 'the draft is offered back, whole');
+    assert.equal(again.view.setAsideFrom, 'draft');
+    assert.ok(again.parks().some((row) => textOf(JSON.parse(row.json)) === 'start'), 'and parked');
+    assert.equal(blocksOf(server.json)[0][1], 'start B');
+});
+
 test('typing while the draft merge reads the base row, when the draft adds nothing but loses a block: unsaved stays true and the typing is sent', async () => {
     const { server, again } = await deadTabWithDraft(
         (A, B) => {
@@ -5543,7 +5611,7 @@ test('an accepted suggestion whose merge fails does not replace a text that is a
     assert.equal(B.text(), 'B2 typed after', 'the suggestion did not go in over the typing');
     assert.equal(
         B.view.aiError,
-        'Suggestion saved; your typing could not join it. Settle the set-aside text first.'
+        'Suggestion saved, but your unsaved text could not be added to it. Put back or discard the set-aside text first.'
     );
 });
 
@@ -5570,7 +5638,7 @@ test('an accepted suggestion whose merge apply throws after the change, with a t
 
     assert.equal(B.view.setAside, JSON.stringify(doc('B1')), 'the offer stands');
     assert.equal(B.text(), 'B2 typed after', 'the typing is back in the editor: the throw did not lose it');
-    assert.match(B.view.aiError, /Settle the set-aside text first/);
+    assert.match(B.view.aiError, /Put back or discard the set-aside text first/);
 });
 
 test('an accepted suggestion that leaves nothing of mine to save drops an owed overwrite: no save is left to carry it', async () => {
@@ -5632,7 +5700,7 @@ test('an accepted suggestion refused while a text is set aside owes the typing a
 
     B.host().applySuggestion(suggestion, version); // refused: a text is set aside
 
-    assert.match(B.view.aiError, /Settle the set-aside text first/);
+    assert.match(B.view.aiError, /Put back or discard the set-aside text first/);
     assert.equal(B.view.saving, 0);
     assert.equal(B.view.unsaved, true);
     assert.equal(B.view.resave, false, 'no save was given up on, so the refusal makes nothing owed');

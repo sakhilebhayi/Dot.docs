@@ -485,6 +485,7 @@ export function mergeDocuments(schema, { base, mine, theirs, echo = null }, { de
     if (output.length === 0 && schema.nodes.paragraph && M.blocks.length > 0) {
         const offered = new Set(lost.map((loss) => loss.id));
         const standIn = [...M.blocks].reverse().find((block) => !offered.has(block.id));
+        // A null id is safe: result.merged always goes through the editor (applyRemote), which assigns the id, before anything merges or stores it.
         output.push(schema.nodes.paragraph.create({ id: standIn ? standIn.id : null }));
     }
 

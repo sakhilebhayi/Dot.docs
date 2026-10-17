@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { SAVE_EXPIRY_MS } from '../../resources/js/editor/sync/host.js';
-import { LOST, STALE, UUID, blocksOf, deletionLedger, para, world } from './support/syncWorld.js';
+import { BASE, LOST, STALE, UUID, blocksOf, deletionLedger, para, world } from './support/syncWorld.js';
 
 /**
  * The random walk with the failures of section 11 switched on. Same fake world
@@ -686,6 +686,17 @@ async function run(seed, tabCount) {
                     while (tab.saves.some((save) => save.result === undefined)) {
                         tab.saveArrives();
                     }
+                }
+                // What the dead tab's draft still deletes relative to the row it was typed on is still the person's
+                // deletion, even if a restore has since brought those tokens back and shown them to them (seed 42519):
+                // the reopened tab's draft merge applies it again, by design (decision: a draft's deletion of a block
+                // that looks unchanged applies; the replaced version is in the history either way).
+                const draftRow = tab.drafts.get(UUID);
+                const baseRow = tab.drafts.get(BASE);
+                if (draftRow && baseRow && draftRow.baseVersion === baseRow.baseVersion) {
+                    const kept = tokensOfString(draftRow.json);
+                    const deletedByDraft = [...tokensOfString(baseRow.json)].filter((token) => !kept.has(token));
+                    ledger.deleted(tab.slot, new Set(deletedByDraft));
                 }
                 // The old page is gone: nothing answers it any more.
                 tab.saves.length = 0;
