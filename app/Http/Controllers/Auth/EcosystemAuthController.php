@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Actions\Ecosystem\ProvisionUserFromInfoDot;
+use App\Actions\Ecosystem\SyncTeamsFromInfoDot;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\InfoDot\IdentityClient;
@@ -14,7 +15,7 @@ use Laravel\Sanctum\PersonalAccessToken;
 
 class EcosystemAuthController extends Controller
 {
-    public function handle(Request $request, IdentityClient $infoDot, ProvisionUserFromInfoDot $provision): RedirectResponse
+    public function handle(Request $request, IdentityClient $infoDot, ProvisionUserFromInfoDot $provision, SyncTeamsFromInfoDot $syncTeams): RedirectResponse
     {
         $token = $request->query('token');
 
@@ -32,6 +33,10 @@ class EcosystemAuthController extends Controller
             }
 
             $user = $identity ? $provision($identity) : null;
+
+            if ($user && $identity) {
+                $syncTeams($user, $identity);
+            }
         }
 
         abort_if(! $user, 403);
