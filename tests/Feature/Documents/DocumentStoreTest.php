@@ -36,6 +36,68 @@ class DocumentStoreTest extends TestCase
         $this->assertSame(2, $doc->version);
     }
 
+    /** @return array<string,mixed> a document whose second and third blocks reuse the first block's id */
+    private function duplicateIdDocument(): array
+    {
+        $paragraph = fn (string $text) => ['type' => 'paragraph', 'attrs' => ['id' => 'dupdupdu'], 'content' => [['type' => 'text', 'text' => $text]]];
+
+        return ['type' => 'doc', 'attrs' => ['schema' => 1], 'content' => [
+            $paragraph('one'),
+            $paragraph('two'),
+            ['type' => 'bulletList', 'attrs' => ['id' => 'listlist'], 'content' => [
+                ['type' => 'listItem', 'attrs' => ['id' => 'itemitem'], 'content' => [$paragraph('three')]],
+            ]],
+        ]];
+    }
+
+    private function storedBlockIds(Document $doc): array
+    {
+        $ids = [];
+        (new DocumentSchema)->walk($doc->fresh()->content_json, function (array $node) use (&$ids): void {
+            if (in_array($node['type'] ?? '', DocumentSchema::BLOCKS, true)) {
+                $ids[] = $node['attrs']['id'];
+            }
+        });
+
+        return $ids;
+    }
+
+    public function test_save_of_a_document_with_duplicate_block_ids_succeeds_and_stores_unique_ids(): void
+    {
+        $user = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Duplicates');
+
+        $doc = app(DocumentStore::class)->save($doc, $this->duplicateIdDocument(), $user);
+
+        $ids = $this->storedBlockIds($doc);
+        $this->assertCount(count($ids), array_unique($ids), 'every stored id is unique');
+        $this->assertSame('dupdupdu', $ids[0], 'the first in document order keeps its id');
+        $this->assertSame('one two three', preg_replace('/\s+/', ' ', $doc->fresh()->search_text));
+        $this->assertSame(1, substr_count($doc->fresh()->content, 'data-id="dupdupdu"'));
+    }
+
+    public function test_create_with_duplicate_block_ids_stores_unique_ids(): void
+    {
+        $user = User::factory()->create();
+
+        $doc = app(DocumentStore::class)->create($user, 'Duplicates', $this->duplicateIdDocument());
+
+        $ids = $this->storedBlockIds($doc);
+        $this->assertCount(count($ids), array_unique($ids));
+    }
+
+    public function test_a_save_that_changes_nothing_but_the_text_keeps_every_stable_id(): void
+    {
+        $user = User::factory()->create();
+        $store = app(DocumentStore::class);
+        $doc = $store->save($store->create($user, 'Stable'), $this->duplicateIdDocument(), $user);
+        $before = $this->storedBlockIds($doc);
+
+        $doc = $store->save($doc, $doc->fresh()->content_json, $user);
+
+        $this->assertSame($before, $this->storedBlockIds($doc), 'ids that were already unique do not move');
+    }
+
     public function test_auto_versions_coalesce_within_two_minutes_for_same_author(): void
     {
         $user = User::factory()->create();

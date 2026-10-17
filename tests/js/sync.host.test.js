@@ -6643,3 +6643,452 @@ test('the floor survives a merge that changes the text without overwriting: a la
     if (again.saves.length) { await again.land(); }
     assert.ok(holdsT31(server.json) || server.kept.some((r) => holdsT31(r.json)), 't31 kept somewhere');
 });
+
+// ───────────────────────────────────────────────────────── read only (a person who may not change the document)
+
+const SAVE_REQUEST = JSON.stringify({
+    _token: 'x',
+    components: [{ snapshot: '{}', updates: {}, calls: [{ path: '', method: 'saveContent', params: [{}, 1, false] }] }],
+});
+
+/** A page the server rendered for somebody who may read but not change the document, next to a writer. */
+async function readerAndWriter(readerOptions = {}) {
+    const w = world();
+    const writer = w.tab('W');
+    const reader = w.tab('R', { readOnly: true, ...readerOptions });
+    await writer.open();
+    await reader.open();
+    await writer.poll();
+    await reader.poll();
+    await writer.cycle();
+
+    return { ...w, writer, reader };
+}
+
+test('read only: the page opens saying Read only, in a calm tone, and never Saved', async () => {
+    const { reader } = await readerAndWriter();
+
+    assert.deepEqual(reader.reports[0], { tone: 'idle', word: 'Read only' });
+    assert.ok(!reader.words().includes('Saved'));
+});
+
+test('read only: text that gets into the editor all the same is never saved, drafted or reported', async () => {
+    const { reader } = await readerAndWriter();
+    reader.type('sneaked in');
+    await reader.debounce();
+    await reader.cycle();
+
+    assert.equal(reader.sent.length, 0);
+    assert.equal(reader.beacons.length, 0);
+    assert.equal(reader.view.unsaved, false, 'nothing was typed here as far as the page is concerned');
+    assert.equal(reader.draft(), null, 'no offline draft is written for a page that cannot save');
+    assert.deepEqual(reader.words(), ['Read only'], 'no Editing, Saving, Saved or Not saved');
+});
+
+test('read only: persist, resendIfOwed, backOnline and an unload save send nothing', async () => {
+    const { reader } = await readerAndWriter();
+
+    await reader.host().persist(doc('forced'));
+    await reader.host().persist(doc('forced again'), { force: true });
+    reader.view.resave = true;
+    reader.view.unsaved = true;
+    reader.host().resendIfOwed();
+    reader.host().backOnline();
+    await settle();
+
+    assert.equal(reader.sent.length, 0);
+    assert.equal(reader.view.saving, 0);
+    assert.ok(!reader.words().includes('Saving'));
+    assert.ok(!reader.words().includes('Not saved'));
+});
+
+test('read only: the page still follows the people who write, and says nothing about saving', async () => {
+    const { server, writer, reader } = await readerAndWriter();
+    reader.drafts.set(UUID, { json: JSON.stringify(doc('an old draft')), baseVersion: 1 });
+    const before = reader.words().length;
+
+    writer.type('W1');
+    await writer.debounce();
+    await writer.land();
+    assert.equal(server.text(), 'W1');
+
+    await reader.cycle();
+    assert.equal(reader.text(), 'W1', 'their words reach the reader');
+    assert.equal(reader.view.baseVersion, 2);
+    assert.equal(reader.sent.length, 0);
+    assert.equal(reader.words().length, before, 'following says nothing');
+    assert.ok(reader.drafts.has(UUID), 'a draft in this browser is not this page to delete');
+    assert.ok(!reader.draftCalls.includes('saveBase'), 'no base row is written');
+    assert.equal(reader.host().syncState(), 'clean');
+
+    writer.type('W2');
+    await writer.debounce();
+    await writer.land();
+    await reader.cycle();
+    assert.equal(reader.text(), 'W2');
+});
+
+test('read only: a draft of an earlier visit is neither restored nor deleted nor parked', async () => {
+    const w = world();
+    const reader = w.tab('R', { readOnly: true });
+    reader.drafts.set(UUID, { json: JSON.stringify(doc('typed when I could edit')), baseVersion: 1 });
+    await reader.open();
+
+    assert.equal(reader.text(), 'start');
+    assert.equal(reader.drafts.get(UUID).baseVersion, 1);
+    assert.equal(reader.parks().length, 0);
+    assert.deepEqual(reader.draftCalls, [], 'the draft store is not touched at all');
+    assert.notEqual(reader.engine, null, 'the engine still starts: the reader follows');
+    assert.equal(reader.polls.length, 1, 'and polls');
+});
+
+test('read only: nothing the page does for a writer reaches the editor (a suggestion, Keep mine, Load theirs, Put it back)', async () => {
+    const { reader } = await readerAndWriter();
+
+    reader.host().applySuggestion(doc('suggested'), 5);
+    reader.host().keepMine();
+    await reader.host().loadTheirs();
+    reader.host().putBack();
+    await settle();
+
+    assert.equal(reader.text(), 'start');
+    assert.equal(reader.sent.length, 0);
+});
+
+test('read only: when following is stopped the word does not claim a save failed', async () => {
+    const { reader } = await readerAndWriter();
+    await reader.fireTimer();
+    await reader.pollAnswers(403, { message: 'x' });
+
+    assert.equal(reader.view.syncNotice, 'You no longer have access to this document.');
+    assert.notEqual(reader.word(), 'Not saved');
+});
+
+test('a save request is recognised in the Livewire payload, and nothing else is', async () => {
+    const { reader } = await readerAndWriter();
+    const host = reader.host();
+
+    assert.equal(host.isSaveRequest(SAVE_REQUEST), true);
+    assert.equal(host.isSaveRequest(JSON.stringify({ components: [{ calls: [{ method: 'refreshPresence' }] }] })), false);
+    assert.equal(host.isSaveRequest(JSON.stringify({ components: [{ calls: [{ method: 'saveTitle' }] }] })), false);
+    assert.equal(host.isSaveRequest(JSON.stringify({ components: [{ updates: {} }] })), false);
+    assert.equal(host.isSaveRequest('not json'), false);
+    assert.equal(host.isSaveRequest(undefined), false);
+    // A save that travels with another action in one request (a Move beside an autosave) is still a save.
+    assert.equal(
+        host.isSaveRequest(
+            JSON.stringify({ components: [{ calls: [{ method: 'moveTo', params: [3] }, { method: 'saveContent', params: [] }] }] })
+        ),
+        true
+    );
+    // The cheap test comes first: a payload that never says saveContent is not even parsed.
+    let parsed = 0;
+    const real = JSON.parse;
+    JSON.parse = (...args) => {
+        parsed += 1;
+
+        return real(...args);
+    };
+    try {
+        host.isSaveRequest(JSON.stringify({ components: [{ calls: [{ method: 'refreshPresence' }] }] }));
+    } finally {
+        JSON.parse = real;
+    }
+    assert.equal(parsed, 0);
+});
+
+test('a refused save (403) turns an editing page into a read only one, and keeps nothing waiting', async () => {
+    const { writer } = await readerAndWriter();
+    writer.type('W1');
+    await writer.debounce();
+    assert.equal(writer.saves.length, 1);
+
+    const handled = writer.host().saveRefused(403);
+    await settle();
+
+    assert.equal(handled, true, 'the caller keeps Livewire from showing its error page');
+    assert.equal(writer.canEditCalls, 1, 'the server is asked before the page is locked');
+    assert.equal(writer.view.editable, false);
+    assert.equal(writer.handle.readOnly, true);
+    assert.equal(writer.view.saving, 0, 'the save that was refused is no longer awaited');
+    assert.equal(writer.view.resave, false);
+    assert.equal(writer.view.unsaved, false);
+    assert.deepEqual(writer.reports.at(-1), { tone: 'idle', word: 'Read only' });
+    assert.equal(writer.presenceRefreshes > 0, true, 'the page is rendered again, so the server-drawn controls follow');
+
+    // Nothing more is ever sent from here.
+    writer.type('W2');
+    await writer.debounce();
+    await writer.cycle();
+    writer.view.resave = true;
+    writer.host().resendIfOwed();
+    assert.equal(writer.sent.length, 1);
+});
+
+test('a refused save keeps the unsent text: parked in this browser, kept in the draft, and said so', async () => {
+    const { writer } = await readerAndWriter();
+    writer.type('words nobody has stored');
+    await writer.debounce();
+    assert.equal(writer.draft(), 'words nobody has stored');
+
+    writer.host().saveRefused(403);
+    await settle();
+
+    assert.equal(writer.view.unsentKept, true);
+    assert.equal(writer.parks().length, 1);
+    assert.equal(textOf(JSON.parse(writer.parks()[0].json)), 'words nobody has stored');
+    assert.equal(writer.parks()[0].offerable, false, 'a copy for recovery by hand, not an offer');
+    assert.equal(writer.draft(), 'words nobody has stored', 'the draft is not cleared');
+    assert.equal(writer.text(), 'words nobody has stored', 'and the page still shows it');
+});
+
+test('a refused save with nothing unsent claims nothing is kept', async () => {
+    const { writer } = await readerAndWriter();
+
+    writer.host().saveRefused(403);
+    await settle();
+
+    assert.equal(writer.view.unsentKept, false);
+    assert.equal(writer.parks().length, 0);
+});
+
+test('a refused save keeps the reader following, with the typed text safe in the park', async () => {
+    const { server, writer } = await readerAndWriter();
+    const other = server;
+    writer.type('mine, refused');
+    await writer.debounce();
+    writer.host().saveRefused(403);
+    await settle();
+
+    other.version += 1;
+    other.json = docOf(para('p1', 'theirs'));
+    await writer.cycle();
+
+    assert.equal(writer.text(), 'theirs', 'the page now shows what is stored');
+    assert.equal(writer.parks().length, 1, 'and the words that were not stored are still kept');
+});
+
+test('only a 403 on a save makes the page read only', async () => {
+    const { writer } = await readerAndWriter();
+
+    for (const status of [0, 401, 404, 419, 422, 500, 503, undefined]) {
+        assert.equal(writer.host().saveRefused(status), false, String(status));
+    }
+    assert.equal(writer.canEditCalls, 0);
+    assert.equal(writer.view.editable, true);
+    assert.equal(writer.handle.readOnly, false);
+});
+
+test('a refusal on a page that is already read only changes nothing', async () => {
+    const { reader } = await readerAndWriter();
+    const reports = reader.reports.length;
+
+    assert.equal(reader.host().saveRefused(403), true);
+    await settle();
+    assert.equal(reader.canEditCalls, 0, 'nothing is asked of a page that is already read only');
+    assert.equal(reader.reports.length, reports);
+    assert.equal(reader.parks().length, 0);
+});
+
+// ───────────────────────────────────────────── a 403 on a save is provisional
+
+/** A writer whose save has just come back 403, the server not yet asked about it. */
+async function refusedWriter(options = {}) {
+    const w = await readerAndWriter();
+    const { writer } = w;
+    Object.assign(writer, options);
+    writer.type('words in the air');
+    await writer.debounce();
+    assert.equal(writer.saves.length, 1);
+
+    return w;
+}
+
+test('a 403 the server does not stand behind (a firewall, a refused Move beside the save) leaves the editor editable and sends the text again', async () => {
+    const { server, writer } = await refusedWriter({ canEditAnswer: true });
+
+    assert.equal(writer.host().saveRefused(403), true);
+    await settle();
+
+    assert.equal(writer.canEditCalls, 1);
+    assert.equal(writer.view.editable, true);
+    assert.equal(writer.handle.readOnly, false, 'the editor is not made read only');
+    assert.equal(writer.view.unsentKept, false, 'and no sentence says otherwise');
+    assert.ok(!writer.words().includes('Read only'));
+    assert.equal(writer.view.accessCheckSince, 0);
+    assert.equal(writer.sent.length, 2, 'the owed save went out again');
+    assert.equal(writer.sent[1].text, 'words in the air');
+
+    await writer.land();
+    assert.equal(server.text(), 'words in the air');
+    assert.equal(writer.word(), 'Saved');
+    assert.equal(writer.view.unsaved, false);
+});
+
+test('while the server is being asked, nothing is sent, and what is typed meanwhile is owed', async () => {
+    const { writer } = await refusedWriter({ canEditMode: 'hang' });
+
+    writer.host().saveRefused(403);
+    await settle();
+    writer.type('and a little more');
+    await writer.debounce();
+    await writer.cycle();
+
+    assert.equal(writer.sent.length, 1, 'no second save while the question is out');
+    assert.equal(writer.view.resave, true);
+    assert.equal(writer.view.editable, true);
+
+    writer.canEditPending.resolve(true);
+    await settle();
+    await writer.land();
+
+    assert.equal(writer.sent.at(-1).text, 'and a little more', 'the newest text goes out once the server has said yes');
+    assert.equal(writer.view.editable, true);
+});
+
+test('a 403 whose save was STORED after all is settled by the ordinary rules: the text is not saved twice and the word ends on Saved', async () => {
+    const { server, writer } = await refusedWriter({ canEditAnswer: true });
+    writer.saveArrives();
+    writer.saveNeverAnswers(); // the request was refused as a whole: its promise never settles
+    const versionAfterStore = server.version;
+    assert.equal(server.text(), 'words in the air');
+
+    writer.host().saveRefused(403);
+    await settle();
+    await writer.land();
+    await writer.cycle();
+    await writer.land();
+
+    assert.equal(server.text(), 'words in the air');
+    assert.equal(writer.text(), 'words in the air');
+    assert.equal(writer.view.unsaved, false);
+    assert.equal(writer.word(), 'Saved');
+    assert.equal(writer.view.conflict, null);
+    assert.ok(server.version <= versionAfterStore + 1, 'at most one more version, and the words are not duplicated');
+});
+
+test('a 403 beside a Move: the refusal belongs to the Move, the server says yes, the writer is never locked out', async () => {
+    const { writer } = await refusedWriter({ canEditAnswer: true });
+    const bundled = JSON.stringify({ components: [{ calls: [{ method: 'saveContent' }, { method: 'moveTo', params: [3] }] }] });
+
+    assert.equal(writer.host().isSaveRequest(bundled), true);
+    assert.equal(writer.host().saveRefused(403), true);
+    await settle();
+
+    assert.equal(writer.view.editable, true);
+    assert.equal(writer.handle.readOnly, false);
+    assert.equal(writer.sent.length, 2);
+});
+
+test('the words stay safe whichever way the server answers: parked and drafted before the question is asked', async () => {
+    for (const canEditAnswer of [true, false]) {
+        const { writer } = await refusedWriter({ canEditAnswer });
+        writer.host().saveRefused(403);
+        // Before the answer is read: the copy is already in the park, the draft is untouched.
+        assert.equal(writer.parks().length, 1, `answer ${canEditAnswer}`);
+        assert.equal(textOf(JSON.parse(writer.parks()[0].json)), 'words in the air');
+        assert.equal(writer.draft(), 'words in the air');
+        await settle();
+        assert.equal(writer.parks().length, 1);
+        assert.equal(writer.draft() === 'words in the air' || writer.draft() === null, true);
+    }
+});
+
+test('a question the server could not answer is a failed request: Not saved, held back, sent again after the back-off', async () => {
+    const { writer } = await refusedWriter({ canEditMode: 'fail' });
+
+    writer.host().saveRefused(403);
+    await settle();
+
+    assert.equal(writer.view.editable, true, 'not locked out by a question that failed');
+    assert.ok(writer.words().includes('Not saved'), 'said so');
+    assert.equal(writer.view.saveFailures, 1, 'counted as a failed request');
+    // The first failure is held for no time at all (SAVE_RETRY_DELAYS_MS): the text goes again at once.
+    assert.equal(writer.sent.length, 2);
+    assert.equal(writer.sent[1].text, 'words in the air');
+});
+
+test('a question that never answers ends with the save wait: the text is sent again at the next poll', async () => {
+    const { writer, clock } = await refusedWriter({ canEditMode: 'hang' });
+
+    writer.host().saveRefused(403);
+    await settle();
+    assert.equal(writer.sent.length, 1);
+
+    clock.now += SAVE_EXPIRY_MS + 1;
+    await writer.cycle();
+    await settle();
+
+    assert.equal(writer.sent.length, 2, 'the hold is over');
+    assert.equal(writer.view.editable, true);
+});
+
+test('a second 403 while the question is out does not ask again, and a late answer of an old question is ignored', async () => {
+    const { writer, clock } = await refusedWriter({ canEditMode: 'hang' });
+
+    writer.host().saveRefused(403);
+    writer.host().saveRefused(403);
+    await settle();
+    assert.equal(writer.canEditCalls, 1);
+
+    const first = writer.canEditPending;
+    // The first question runs out, a newer save is refused, a second question is asked.
+    clock.now += SAVE_EXPIRY_MS + 1;
+    writer.host().saveRefused(403);
+    await settle();
+    assert.equal(writer.canEditCalls, 2);
+
+    first.resolve(false);
+    await settle();
+    assert.equal(writer.view.editable, true, 'the answer to a question that was replaced does nothing');
+});
+
+test('read only for real: the rows that offer text back are removed, the text stays parked, and the notice says words are kept', async () => {
+    const { writer } = await refusedWriter({ canEditAnswer: false });
+    writer.view.lost = [{ excerpt: 'a lost block', json: {}, anchors: [] }];
+    writer.view.setAside = JSON.stringify(doc('set aside'));
+    writer.view.setAsideFrom = 'conflict';
+    writer.view.setAsideBase = 1;
+    writer.view.parkOfferPending = true;
+
+    writer.host().saveRefused(403);
+    await settle();
+
+    assert.equal(writer.view.editable, false);
+    assert.deepEqual(writer.view.lost, []);
+    assert.equal(writer.view.setAside, null);
+    assert.equal(writer.view.setAsideFrom, null);
+    assert.equal(writer.view.setAsideBase, null);
+    assert.equal(writer.view.parkOfferPending, false);
+    assert.equal(writer.view.unsentKept, true);
+    assert.equal(writer.parks().length, 1);
+});
+
+test('a re-render that draws editable false makes the page say so: the same read only state, the typed words parked', async () => {
+    const { writer } = await readerAndWriter();
+    writer.type('typed before the render');
+    await writer.debounce();
+    writer.handle.makeReadOnly();
+
+    writer.host().readOnlyNoticed();
+
+    assert.equal(writer.view.editable, false);
+    assert.equal(writer.view.unsentKept, true);
+    assert.deepEqual(writer.reports.at(-1), { tone: 'idle', word: 'Read only' });
+    assert.equal(writer.parks().length, 1);
+    assert.equal(writer.canEditCalls, 0, 'the server already drew its answer');
+
+    const reports = writer.reports.length;
+    writer.host().readOnlyNoticed();
+    assert.equal(writer.reports.length, reports, 'said once');
+});
+
+test('read only: a signed-out stop does not tell a reader to keep editing', async () => {
+    const { reader, writer } = await readerAndWriter();
+
+    reader.host().engineHost().onStopped('signed-out');
+    writer.host().engineHost().onStopped('signed-out');
+
+    assert.equal(reader.view.syncNotice, 'You have been signed out. Reload the page to sign in again.');
+    assert.equal(writer.view.syncNotice, 'You have been signed out. Reload the page to keep editing.');
+});

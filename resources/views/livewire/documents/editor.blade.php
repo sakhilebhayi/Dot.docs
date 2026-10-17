@@ -103,6 +103,26 @@
         typingTimeout: null,
         isOffline: !navigator.onLine,
         docUuid: '{{ $document->uuid }}',
+        // Whether the server drew this page for somebody who may change the
+        // document (DocumentPolicy::update()). The ONE server-drawn literal
+        // besides the versions and the uuid, and a plain boolean: it is the
+        // page-load truth sync/host.js decides read only by (a person who may
+        // not change the document never saves, drafts or sends a beacon, and
+        // the editor is mounted not editable). It turns false on this object
+        // when a save is refused with 403 (access lowered while the page was
+        // open): the host sets it, the notice bar reads it.
+        editable: {{ $canEdit ? 'true' : 'false' }},
+        // Text typed on this page was left unsent because that refusal came
+        // before it was stored; a copy is kept in this browser.
+        unsentKept: false,
+        // When the question may I still change this was put to the server
+        // after a save came back 403, and 0 while none is out. The 403
+        // alone is not proof (a firewall, or another action sent with the
+        // save, can cause it), so saves wait for the answer
+        // (sync/host.js, saveRefused()).
+        accessCheckSince: 0,
+        // Takes the refusal hook off Livewire when the page is really removed.
+        unhookRefusal: null,
         // The document version this page was rendered from, and the version
         // the last successful save reported. Draft recency is decided by
         // VERSION, never by a clock: `savedAt` comes off the browser and
@@ -220,16 +240,44 @@
                 // moment: the beacon then says so too, and the server keeps
                 // the version it replaces.
                 getOverwrite: () => this.overwriteOwed,
+                // Mounted not editable for somebody who may only read.
+                editable: this.editable,
                 onChange: (json) => this.persist(json),
                 onSelection: (s) => { this.selection = s; this.tick++; },
                 onCommand: (name, params) => this.hostCommand(name, params),
             });
             const editor = handle.editor;
 
+            // A render drew editable false (this person's role was lowered
+            // since the page opened) but the editor was mounted editable: it
+            // is made read only now, on whichever object runs this, and the
+            // object that owns the page is told so it can say it in the
+            // notice bar (a later object cannot: its fields are not the
+            // ones the bar reads).
+            if (this.editable === false && !handle.readOnly) {
+                handle.makeReadOnly();
+                window.dispatchEvent(new CustomEvent('dotdoc:read-only'));
+            }
+
             if (!this.owns) return;
 
+            window.addEventListener('dotdoc:read-only', () => this.syncHost().readOnlyNoticed());
+
+            // A save the server refuses with 403 means this person may no
+            // longer change the document: the page becomes the read only
+            // page. A refused Livewire request never settles its promise and
+            // Livewire would lay its own error page over the document, so the
+            // refusal is caught here, on the request. Which requests count,
+            // and what the page does, is decided in sync/host.js.
+            this.unhookRefusal = window.Livewire.hook('request', ({ payload, fail }) => {
+                if (!this.syncHost().isSaveRequest(payload)) return;
+                fail(({ status, preventDefault }) => {
+                    if (this.syncHost().saveRefused(status)) preventDefault();
+                });
+            });
+
             // What the editor holds now is what the server last confirmed,
-            // and the status word says Saved (or Read only, fail-closed).
+            // and the status word says Saved (or Read only: fail-closed, or a person who may only read).
             this.syncHost().opened();
 
             // Typing indicator and the offline draft run off every keystroke;
@@ -311,6 +359,8 @@
                 refreshOutline: () => this.refreshOutline(),
                 // The presence strip is rendered by Livewire.
                 refreshPresence: () => @this.refreshPresence(),
+                // Whether this person may still change the document, from the server.
+                canEdit: () => @this.canEdit(),
                 report: (tone, word) => this.report(tone, word),
                 drafts: () => window.offlineDraft,
                 documentsDiffer: (a, b) => window.DotDoc.documentsDiffer(a, b),
@@ -489,6 +539,7 @@
             // that; only a real removal tears them down.
             if (this.$el && this.$el.isConnected) return;
             clearTimeout(this.typingTimeout);
+            if (this.unhookRefusal) this.unhookRefusal();
             this.syncEngine()?.stop();
             if (this.$refs.editorEl) this.$refs.editorEl.__dotdocSync = null;
             // Echo.join() hands back the CHANNEL, which has no leave() of its
@@ -597,10 +648,12 @@
                    wire:change="saveTitle"
                    type="text"
                    class="doc-title-field"
-                   placeholder="Untitled" />
+                   placeholder="Untitled"
+                   @readonly(! $canEdit) />
 
             <label class="sr-only" for="doc-style-picker">Document style</label>
-            <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select">
+            <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select"
+                    @disabled(! $canEdit)>
                 @foreach (\App\Styles\StyleEngine::systemKeys() as $styleKey)
                     <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
                 @endforeach
@@ -635,8 +688,10 @@
                  affordance, and it opens the same .sheet folder picker the
                  documents index uses for rename. --}}
             <span class="micro doc-bar-filed" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
-            <button type="button" class="tool tool-mono" x-ref="moveTrigger"
-                    wire:click="$set('showMoveSheet', true)">Move</button>
+            @if ($canEdit)
+                <button type="button" class="tool tool-mono" x-ref="moveTrigger"
+                        wire:click="$set('showMoveSheet', true)">Move</button>
+            @endif
             @error('location')
                 <span class="field-error">{{ $message }}</span>
             @enderror
@@ -732,10 +787,17 @@
                      clears the flag on the next poll that completes
                      (settleIfBackAtConfirmed() in sync/host.js). --}}
                 <span x-show="!isTyping && !isOffline && !conflict && !syncNotice && !unsaved">
-                    @unless ($errors->has('content'))
-                        <x-shell.status-word tone="good" :word="$saved ? 'Saved' : 'Ready'"
-                                             wire:loading.remove wire:target="saveContent,saveTitle" />
-                    @endunless
+                    @if (! $canEdit)
+                        {{-- Somebody who may read and not change the document
+                             has nothing to save: the word says what they have
+                             instead of Saved. --}}
+                        <x-shell.status-word tone="idle" word="Read only" data-read-only-word />
+                    @else
+                        @unless ($errors->has('content'))
+                            <x-shell.status-word tone="good" :word="$saved ? 'Saved' : 'Ready'" data-saved-word
+                                                 wire:loading.remove wire:target="saveContent,saveTitle" />
+                        @endunless
+                    @endif
                 </span>
 
                 <span class="micro" title="Last edited {{ $document->updated_at->diffForHumans() }}">
@@ -757,10 +819,12 @@
                         <span class="micro">Ctrl+Shift+K</span>
                     </button>
 
-                    <button type="button" wire:click="toggleSuggestionMode"
-                            aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
-                        {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
-                    </button>
+                    @if ($canEdit)
+                        <button type="button" wire:click="toggleSuggestionMode"
+                                aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
+                            {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
+                        </button>
+                    @endif
 
                     {{-- No `data-shell-expand` here, deliberately: comments render
                          in `.editor-side`, beside the paper, NOT in the dock.
@@ -772,24 +836,26 @@
                         {{ $commentSidebarOpen ? 'Hide comments' : 'Show comments' }}
                     </button>
 
-                    <button type="button" @click="ed().chain().focus().undo().run(); open = false">
-                        Undo
-                        <span class="micro">&#8984;Z</span>
-                    </button>
-                    <button type="button" @click="ed().chain().focus().redo().run(); open = false">
-                        Redo
-                        <span class="micro">&#8679;&#8984;Z</span>
-                    </button>
+                    @if ($canEdit)
+                        <button type="button" @click="ed().chain().focus().undo().run(); open = false">
+                            Undo
+                            <span class="micro">&#8984;Z</span>
+                        </button>
+                        <button type="button" @click="ed().chain().focus().redo().run(); open = false">
+                            Redo
+                            <span class="micro">&#8679;&#8984;Z</span>
+                        </button>
 
-                    <button type="button"
-                            :class="ed()?.isActive('code') ? 'is-on' : ''"
-                            @click="ed().chain().focus().toggleCode().run(); open = false">Inline code</button>
+                        <button type="button"
+                                :class="ed()?.isActive('code') ? 'is-on' : ''"
+                                @click="ed().chain().focus().toggleCode().run(); open = false">Inline code</button>
 
-                    <div x-data="voiceTyping" x-init="init()">
-                        <button type="button" x-show="supported" @click="toggle()"
-                                :aria-pressed="listening ? 'true' : 'false'"
-                                x-text="listening ? 'Stop voice typing' : 'Start voice typing'">Start voice typing</button>
-                    </div>
+                        <div x-data="voiceTyping" x-init="init()">
+                            <button type="button" x-show="supported" @click="toggle()"
+                                    :aria-pressed="listening ? 'true' : 'false'"
+                                    x-text="listening ? 'Stop voice typing' : 'Start voice typing'">Start voice typing</button>
+                        </div>
+                    @endif
 
                     <span class="menu-label">Export</span>
                     <a href="{{ route('documents.export', [$document->uuid, 'pdf']) }}">PDF</a>
@@ -811,17 +877,19 @@
                         </form>
                     @endforeach
 
-                    <span class="menu-label">Import</span>
-                    <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
-                          enctype="multipart/form-data" class="menu-form">
-                        @csrf
-                        <label class="field-label" for="doc-import">A .docx or .md file</label>
-                        <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
-                        <button type="submit" class="btn btn-primary">Import it</button>
-                    </form>
+                    @if ($canEdit)
+                        <span class="menu-label">Import</span>
+                        <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
+                              enctype="multipart/form-data" class="menu-form">
+                            @csrf
+                            <label class="field-label" for="doc-import">A .docx or .md file</label>
+                            <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
+                            <button type="submit" class="btn btn-primary">Import it</button>
+                        </form>
 
-                    <button type="button" @click="$dispatch('open-save-as-template'); open = false"
-                            title="Save this document as a reusable template">Save as a template</button>
+                        <button type="button" @click="$dispatch('open-save-as-template'); open = false"
+                                title="Save this document as a reusable template">Save as a template</button>
+                    @endif
                 </div>
             </div>
         </div>
@@ -1023,6 +1091,26 @@
                 </span>
             </div>
 
+            {{-- Somebody who may read this document and not change it. Said
+                 once, in plain words, for as long as the page is open: the
+                 editor is not editable and nothing is ever saved from here,
+                 and what other people write still arrives. Bound to
+                 `editable` (the server-drawn literal at the top of the
+                 x-data object; the host sets it false when a save is refused),
+                 and hidden while a stop reason is up, which says more. The
+                 second sentence shows only after a refusal that left words
+                 unsent, or text that the lost row or the set-aside row was
+                 offering (those rows are taken away then, and the words stay
+                 parked in this browser). Static markup, as everything
+                 in this bar is. --}}
+            <div class="doc-notice" hidden x-bind:hidden="editable || !!syncNotice">
+                <p class="doc-notice-text">
+                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                    <span>You can read this document but not change it.</span>
+                    <span hidden x-bind:hidden="!unsentKept">Your unsent words are not saved. A copy is kept in this browser for 7 days.</span>
+                </p>
+            </div>
+
             {{-- The page can no longer stay in step: signed out, access
                  removed, the document gone, or a version this editor cannot
                  open. Also said here: a newer version or the writer's own
@@ -1058,8 +1146,10 @@
                             {{ $suggestion['excerpt'] }}
                             <span class="list-sub">{{ $suggestion['user'] }} · {{ $suggestion['created_at'] }}</span>
                         </span>
-                        <button type="button" class="btn btn-sm" wire:click="acceptSuggestion({{ $suggestion['id'] }})">Accept</button>
-                        <button type="button" class="btn btn-sm" wire:click="rejectSuggestion({{ $suggestion['id'] }})">Drop</button>
+                        @if ($canEdit)
+                            <button type="button" class="btn btn-sm" wire:click="acceptSuggestion({{ $suggestion['id'] }})">Accept</button>
+                            <button type="button" class="btn btn-sm" wire:click="rejectSuggestion({{ $suggestion['id'] }})">Drop</button>
+                        @endif
                     </li>
                 @endforeach
             </ul>

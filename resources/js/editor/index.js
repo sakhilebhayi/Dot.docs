@@ -29,6 +29,7 @@ import { commands, run as runCommand } from './commands/registry';
 import { documentsDiffer, stripDerived } from './derived';
 import { blockInsert, blockInsertPosition, isInCaption } from './guards';
 import { outline, setOutline } from './outline';
+import { ReadOnlyGuard, allowDocChanges } from './extensions/readOnlyGuard';
 import { PaginationExtension } from './pagination/decorations';
 import { mountPagination } from './pagination/index';
 import { installBubble } from './ui/bubble';
@@ -109,6 +110,11 @@ function buildExtensions(opts) {
         Column,
         Variable.configure({ vars: opts.vars || {} }),
         DocAttrs,
+        // Refuses every transaction that changes the document while the
+        // editor is not editable (a person who may only read, or a document
+        // this editor cannot open): setEditable(false) stops typing, and the
+        // guard stops commands.
+        ReadOnlyGuard,
         SlashMenu,
         PaginationExtension,
         // Keeps block ids unique whatever a transaction did: UniqueID (in
@@ -149,7 +155,7 @@ function selectionInfo(editor) {
  *
  * @param {HTMLElement} element
  * @param {{content?: object, vars?: object, styleCss?: string, uploadUrl?: string, autosaveUrl?: string, csrfToken?: string,
- *          getBaseVersion?: () => number, getOverwrite?: () => boolean,
+ *          getBaseVersion?: () => number, getOverwrite?: () => boolean, editable?: boolean,
  *          onChange?: (json: object) => void, onSelection?: (s: {blockId: string|null, type: string|null}) => void,
  *          onCommand?: (name: string, params: object) => void}} opts
  * @returns {{editor: Editor, run: (name: string, params?: object) => boolean, destroy: () => void}}
@@ -168,6 +174,11 @@ function mount(element, opts = {}) {
     let dirty = false;
     let autosave = true;
     let contentError = null;
+    // A person who may read the document and not change it (the server says
+    // so: `editable: false`), or a page whose save was refused. Different
+    // from `autosave` false (fail-closed): the editor shows the real document
+    // and still takes in what other people save; it only never writes.
+    let readOnly = opts.editable === false;
 
     const editor = new Editor({
         element,
@@ -179,6 +190,7 @@ function mount(element, opts = {}) {
         // content. With it, the parse failure arrives here instead and the
         // editor is put in read-only mode before it can destroy anything.
         enableContentCheck: true,
+        editable: !readOnly,
         onContentError: ({ error }) => {
             // Fires from inside this constructor, before `editor` exists —
             // record it and fail closed once the instance is in hand.
@@ -188,7 +200,7 @@ function mount(element, opts = {}) {
             attributes: { class: 'paper' },
         },
         onUpdate: () => {
-            if (typeof opts.onChange !== 'function' || !autosave) {
+            if (typeof opts.onChange !== 'function' || !autosave || readOnly) {
                 return;
             }
 
@@ -257,7 +269,7 @@ function mount(element, opts = {}) {
         clearTimeout(saveTimer);
         saveTimer = null;
 
-        if (!dirty || !autosave || editor.isDestroyed) {
+        if (!dirty || !autosave || readOnly || editor.isDestroyed) {
             return false;
         }
 
@@ -401,7 +413,7 @@ function mount(element, opts = {}) {
      * re-checked by blockInsertPosition() at the moment of the insert.
      */
     async function uploadImage(file, { figure = false } = {}) {
-        if (!file || !opts.uploadUrl || isInCaption(editor)) {
+        if (!file || !opts.uploadUrl || !editor.isEditable || isInCaption(editor)) {
             return false;
         }
 
@@ -511,6 +523,32 @@ function mount(element, opts = {}) {
         },
 
         /**
+         * Whether this editor belongs to somebody who may not change the
+         * document. It still takes in what other people save (applyRemote());
+         * it never saves, never takes a draft and runs no command that writes.
+         */
+        get readOnly() {
+            return readOnly;
+        },
+
+        /**
+         * The save was refused (403): this person may no longer change the
+         * document. No keystroke, command or timer writes from here. Whatever
+         * was waiting to be sent is let go; the Blade bridge keeps a copy of
+         * it (sync/host.js, saveRefused()).
+         */
+        makeReadOnly: () => {
+            readOnly = true;
+            dirty = false;
+            clearTimeout(saveTimer);
+            saveTimer = null;
+            if (!editor.isDestroyed) {
+                // No `update` event: nothing in the document changed.
+                editor.setEditable(false, false);
+            }
+        },
+
+        /**
          * Whether a save is still owed: either the debounce timer is armed or
          * a flush has not happened yet. The Blade bridge reads this before it
          * clears the offline draft — a draft must never be dropped while
@@ -548,7 +586,7 @@ function mount(element, opts = {}) {
          * @returns {boolean} false leaves the document exactly as it was
          */
         applyHtml: (html, { mode = 'replace' } = {}) => {
-            if (typeof html !== 'string' || !html.trim() || editor.isDestroyed || !autosave) {
+            if (typeof html !== 'string' || !html.trim() || editor.isDestroyed || !autosave || readOnly) {
                 return false;
             }
 
@@ -661,7 +699,9 @@ function mount(element, opts = {}) {
                 // appends the paragraph on the next transaction of any kind
                 // instead, with `update` fired and the autosave armed.
                 tr.setMeta('preventUpdate', true);
-                editor.view.dispatch(tr);
+                // The one write a read only editor accepts: somebody else's
+                // saved document (see extensions/readOnlyGuard.js).
+                allowDocChanges(editor, () => editor.view.dispatch(tr));
 
                 // The local undo history ends here (see the docblock). In a
                 // dispatch of its own, never as a meta on `tr`: plugins
@@ -680,7 +720,7 @@ function mount(element, opts = {}) {
                     const clearing = clearHistoryTransaction(editor.state);
 
                     if (clearing !== null) {
-                        editor.view.dispatch(clearing);
+                        allowDocChanges(editor, () => editor.view.dispatch(clearing));
                     } else {
                         console.error(
                             'Dot.Doc: the undo history was not emptied after a remote change: no history plugin was found under its key. An undo may now delete text that arrived from somebody else.'
@@ -753,7 +793,7 @@ function mount(element, opts = {}) {
          * @returns {boolean} false when the block could not go in (nothing changed)
          */
         insertBlock: (json, { anchors = [], keepId = false } = {}) => {
-            if (!json || editor.isDestroyed || !autosave) {
+            if (!json || editor.isDestroyed || !autosave || readOnly) {
                 return false;
             }
 

@@ -263,6 +263,11 @@ export function unloadSaveBody(json, options = {}) {
  * @property {number|null} setAsideBase the document version the page showed
  *           when the text was set aside. Null while nothing is set aside
  * @property {string} syncNotice
+ * @property {boolean} editable whether the server rendered this page for somebody who may change the document
+ *           (the one server literal in the x-data object; false turns to false here when a save is refused)
+ * @property {number} accessCheckSince when the question "may I still change this?" was asked after a refused save (0: none)
+ * @property {boolean} unsentKept text typed here was left unsent because a save was refused, and a copy is kept in
+ *           this browser
  * @property {string} memberKey
  * @property {string} docUuid
  * @property {number} documentVersion the version this page was rendered from
@@ -299,6 +304,7 @@ export function unloadSaveBody(json, options = {}) {
  *           Editor::saveContent(). `version` is null in one answer only: the
  *           refusal of a save that stated no base
  * @property {() => Promise<void>} refreshOutline pull the server's outline
+ * @property {() => Promise<boolean>} canEdit Editor::canEdit(): whether this person may still change the document
  * @property {() => void} refreshPresence re-render the presence strip
  * @property {(tone: string, word: string) => void} report the status word
  * @property {() => object|null|undefined} drafts `window.offlineDraft`
@@ -317,6 +323,34 @@ export function unloadSaveBody(json, options = {}) {
  * @param {SyncEnv} env
  */
 export function createSyncHost(view, env) {
+    /**
+     * Whether this page may not change the document: the server rendered it
+     * for somebody who may only read (`view.editable` false), or a save was
+     * refused and the editor was made read only (`handle.readOnly`). The
+     * second is the truth once it is set, because Alpine can re-create the
+     * data object and the handle lives on the element.
+     *
+     * Not the same as fail-closed (`handle.autosaves === false`): there the
+     * editor holds something that is NOT the document and nothing may be
+     * written into it, not even what other people save. A read only page
+     * shows the real document and keeps following it; it only never writes.
+     *
+     * @param {object|null|undefined} handle
+     * @returns {boolean}
+     */
+    const readOnly = (handle) => view.editable === false || (!!handle && handle.readOnly === true);
+
+    /**
+     * Whether a path that writes (a save, a draft, a base row, a put-back, a
+     * merge, an accepted suggestion) has to stand down: no editor, a
+     * fail-closed one, or a read only page. Following (applyFromSync(),
+     * syncState()) does not ask this; it asks about fail-closed alone.
+     *
+     * @param {object|null|undefined} handle
+     * @returns {boolean}
+     */
+    const cannotWrite = (handle) => !handle || handle.autosaves === false || readOnly(handle);
+
     /**
      * The version the offline draft is stamped with. The base, unless an
      * overwrite is owed: then one below the base the overwrite FIRST became
@@ -405,10 +439,15 @@ export function createSyncHost(view, env) {
         // the row of ITS version, which this page must read before it
         // writes its own.
         markConfirmed(JSON.stringify(handle.editor.getJSON()), view.baseVersion, { writeRow: false });
-        env.report(
-            handle.autosaves === false ? 'danger' : 'good',
-            handle.autosaves === false ? 'Read only' : 'Saved'
-        );
+        if (handle.autosaves === false) {
+            env.report('danger', 'Read only');
+        } else if (readOnly(handle)) {
+            // Somebody who may read the document and not change it: calm,
+            // not an alarm, and never Saved.
+            env.report('idle', 'Read only');
+        } else {
+            env.report('good', 'Saved');
+        }
     }
 
     /**
@@ -416,6 +455,12 @@ export function createSyncHost(view, env) {
      * itself is debounced inside the bundle.
      */
     function edited() {
+        // A read only page has no writer: whatever changed the editor is not
+        // typing, and nothing here may say Editing or be kept as unsaved.
+        if (readOnly(env.handle())) {
+            return;
+        }
+
         view.unsaved = true;
         env.report('idle', 'Editing');
 
@@ -423,7 +468,7 @@ export function createSyncHost(view, env) {
         const drafts = env.drafts();
         // Never touch a draft in fail-closed mode: what the editor is
         // holding then is not the document.
-        if (!drafts || !handle || handle.autosaves === false) {
+        if (!drafts || cannotWrite(handle)) {
             return;
         }
 
@@ -519,7 +564,7 @@ export function createSyncHost(view, env) {
         const handle = env.handle();
         // Fail-closed (the content check refused the document): the editor
         // is read-only and must not write anything back.
-        if (handle && handle.autosaves === false) {
+        if (handle && cannotWrite(handle)) {
             return Promise.resolve();
         }
 
@@ -551,6 +596,16 @@ export function createSyncHost(view, env) {
         // An unresolved conflict: every save would be refused. The draft
         // keeps the text; the notice asks the question.
         if (view.conflict && !force) {
+            env.report('danger', 'Not saved');
+
+            return Promise.resolve();
+        }
+
+        // A save came back 403 and the server has not yet said whether this
+        // person may still change the document (saveRefused()): nothing goes
+        // out until it has. Owed, so nothing typed meanwhile is dropped.
+        if (accessBeingChecked() && !force) {
+            view.resave = true;
             env.report('danger', 'Not saved');
 
             return Promise.resolve();
@@ -771,7 +826,7 @@ export function createSyncHost(view, env) {
     function resendIfOwed() {
         const handle = env.handle();
         // Fail-closed: nothing is written back.
-        if (!handle || handle.autosaves === false) {
+        if (cannotWrite(handle)) {
             return;
         }
 
@@ -820,7 +875,7 @@ export function createSyncHost(view, env) {
      */
     function clearDraftIfSettled(snapshot) {
         const handle = env.handle();
-        if (!handle || handle.autosaves === false) {
+        if (cannotWrite(handle)) {
             return false;
         }
 
@@ -1026,9 +1081,11 @@ export function createSyncHost(view, env) {
         // Whatever this tab had put back is no longer in the editor.
         view.overwriteOwed = false;
         view.overwriteFloor = null;
-        // The server now holds newer content than any draft.
+        // The server now holds newer content than any draft. A read only
+        // page leaves the drafts alone: one in this browser may be text that
+        // was typed when this person could still change the document.
         const drafts = env.drafts();
-        if (drafts) {
+        if (drafts && !readOnly(handle)) {
             drafts.clearDraft(view.docUuid);
         }
 
@@ -1077,7 +1134,7 @@ export function createSyncHost(view, env) {
     /** The base row, never in fail-closed mode: what a read-only view holds is not the document. */
     function writeBase(json, version) {
         const handle = env.handle();
-        if (!handle || handle.autosaves === false) {
+        if (cannotWrite(handle)) {
             return;
         }
 
@@ -1098,7 +1155,7 @@ export function createSyncHost(view, env) {
         const handle = env.handle();
         // Fail-closed: nothing is fetched to be written into a read-only
         // view (and expireMerging() would raise "Not saved" on it 15 s on).
-        if (!handle || handle.autosaves === false) {
+        if (cannotWrite(handle)) {
             return;
         }
 
@@ -1185,7 +1242,7 @@ export function createSyncHost(view, env) {
     function mergeOrConflict(remote) {
         const handle = env.handle();
         // 1. Fail-closed: nothing.
-        if (!handle || handle.autosaves === false) {
+        if (cannotWrite(handle)) {
             return;
         }
 
@@ -1407,7 +1464,7 @@ export function createSyncHost(view, env) {
     function putBackLost(index) {
         const handle = env.handle();
         // Fail-closed: nothing may be written into the editor.
-        if (!handle || handle.autosaves === false) {
+        if (cannotWrite(handle)) {
             return false;
         }
 
@@ -1742,7 +1799,7 @@ export function createSyncHost(view, env) {
      */
     function keepMine() {
         const handle = env.handle();
-        if (!handle || handle.autosaves === false || !view.conflict) {
+        if (cannotWrite(handle) || !view.conflict) {
             return;
         }
 
@@ -1783,7 +1840,7 @@ export function createSyncHost(view, env) {
     async function loadTheirs() {
         const handle = env.handle();
         const engine = env.engine();
-        if (!handle || handle.autosaves === false || !engine) {
+        if (cannotWrite(handle) || !engine) {
             return;
         }
 
@@ -1880,7 +1937,7 @@ export function createSyncHost(view, env) {
     function putBack() {
         const handle = env.handle();
         // Fail-closed: nothing may be written into the editor.
-        if (!handle || handle.autosaves === false || !view.setAside) {
+        if (cannotWrite(handle) || !view.setAside) {
             return;
         }
 
@@ -1994,7 +2051,7 @@ export function createSyncHost(view, env) {
         const drafts = env.drafts();
         const handle = env.handle();
         // Fail-closed: the editor holds something that is not the document.
-        if (!drafts || !drafts.nextParkToOffer || !handle || handle.autosaves === false) {
+        if (!drafts || !drafts.nextParkToOffer || cannotWrite(handle)) {
             return;
         }
 
@@ -2105,7 +2162,7 @@ export function createSyncHost(view, env) {
         const handle = env.handle();
         // Fail-closed: the editor is read-only and holds something that is
         // not the document, so neither restore a draft nor delete one.
-        if (!handle || handle.autosaves === false) {
+        if (cannotWrite(handle)) {
             return;
         }
 
@@ -2267,6 +2324,12 @@ export function createSyncHost(view, env) {
         // what it is showing is not the document, so merging an accepted
         // suggestion into the view would show the writer a document that
         // exists nowhere.
+        if (readOnly(handle) && handle.autosaves !== false) {
+            view.aiError = 'You can read this document but not change it, so the suggestion was not applied here.';
+
+            return;
+        }
+
         if (handle.autosaves === false) {
             view.aiError =
                 'This document is open read-only, so the accepted suggestion was not applied here. Reload the page once the content problem is fixed.';
@@ -2492,6 +2555,198 @@ export function createSyncHost(view, env) {
     }
 
     /**
+     * Whether a Livewire request is a save: its payload (the JSON string
+     * Livewire sends, `{components: [{calls: [{method}]}]}`) calls
+     * saveContent(). The page asks this of every Livewire request so that
+     * only a refused SAVE is looked into. The cheap test on the string comes
+     * first: every other request answers at once, without being parsed.
+     *
+     * @param {unknown} payload
+     * @returns {boolean}
+     */
+    function isSaveRequest(payload) {
+        if (typeof payload !== 'string' || !payload.includes('saveContent')) {
+            return false;
+        }
+
+        try {
+            const components = JSON.parse(payload)?.components;
+
+            return (
+                Array.isArray(components) &&
+                components.some(
+                    (component) =>
+                        Array.isArray(component?.calls) && component.calls.some((call) => call?.method === 'saveContent')
+                )
+            );
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether the question "may I still change this?" is out and unanswered
+     * (and not older than a save is waited for).
+     */
+    const accessBeingChecked = () => view.accessCheckSince > 0 && env.now() - view.accessCheckSince < SAVE_EXPIRY_MS;
+
+    /**
+     * Park the words typed since the last stored save, when there are any.
+     * A copy for recovery by hand (7 days, not offered back: nothing here
+     * could write it in); the draft itself is left as it is.
+     *
+     * @returns {boolean} whether there were such words
+     */
+    function parkUnsent(handle) {
+        if (!handle || handle.autosaves === false) {
+            return false;
+        }
+
+        const mine = JSON.stringify(handle.editor.getJSON());
+        const kept = view.unsaved || handle.pending || (view.confirmed !== null && mine !== view.confirmed);
+        if (kept) {
+            env.drafts()?.parkStaleDraft(view.docUuid, mine, view.baseVersion, { offerable: false, from: 'refused' });
+        }
+
+        return kept;
+    }
+
+    /**
+     * This person may not change the document, and the server said so (or
+     * the page was drawn that way after a render): the page becomes the read
+     * only page. Nothing is owed any more, and the two rows that offer text
+     * back (the lost row, the set-aside row) go, because their buttons would
+     * write into an editor that is no longer editable; the text itself stays
+     * parked in this browser.
+     *
+     * @param {boolean} kept whether words typed here were left unsent
+     */
+    function lockReadOnly(kept) {
+        const handle = env.handle();
+        const offered = view.lost.length > 0 || view.setAside !== null;
+
+        view.editable = false;
+        view.unsentKept = kept || offered;
+        handle?.makeReadOnly?.();
+        view.saving = 0;
+        view.resave = false;
+        view.unsaved = false;
+        view.conflict = null;
+        view.merging = null;
+        view.mergeAttempts = 0;
+        view.overwriteOwed = false;
+        view.overwriteFloor = null;
+        view.accessCheckSince = 0;
+        view.lost = [];
+        view.setAside = null;
+        view.setAsideFrom = null;
+        view.setAsideBase = null;
+        view.parkOfferPending = false;
+        env.report('idle', 'Read only');
+        env.refreshPresence();
+    }
+
+    /**
+     * The editor was found read only on a re-render (the server drew
+     * `editable: false` after this person's role was lowered): the page says
+     * so in the same way a refused save does.
+     */
+    function readOnlyNoticed() {
+        if (view.editable === false) {
+            return;
+        }
+
+        lockReadOnly(parkUnsent(env.handle()) || view.unsaved);
+    }
+
+    /**
+     * The server answered a save with `status`. A 403 does not say WHY: this
+     * person's access may have been lowered, but it is also what a request
+     * answers when ANOTHER action sent with it was refused (a Move beside an
+     * autosave: the save may even have been stored), or a firewall in front
+     * of the application. So it is provisional. The page holds its saves,
+     * keeps the words safe (parked, and the draft stays), and asks the
+     * server (`env.canEdit()`): only a no makes the page read only; a yes
+     * undoes the hold and sends the text again, and a save that was stored
+     * after all is dealt with by the ordinary stale-refusal and echo rules;
+     * an answer that does not come (or fails) is a failed request, and the
+     * text goes again after the usual back-off.
+     *
+     * Livewire's promise for a refused request never settles, so the save
+     * the page was waiting for is let go here and is owed again.
+     *
+     * @param {number|undefined} status the HTTP status of the refused request
+     * @returns {boolean} whether this was a 403 on a save: the caller then
+     *          keeps Livewire from showing its own error page over the document
+     */
+    function saveRefused(status) {
+        if (status !== 403) {
+            return false;
+        }
+
+        // Settled already: a read only page, or the question is out.
+        if (view.editable === false || accessBeingChecked()) {
+            return true;
+        }
+
+        const handle = env.handle();
+        const kept = parkUnsent(handle);
+
+        const token = Math.max(1, env.now(), view.accessCheckSince + 1);
+        view.accessCheckSince = token;
+        view.saving = Math.max(0, view.saving - 1);
+        // The save may have been stored: only its answer is known to be lost.
+        view.confirmed = null;
+        view.unanswered = view.sentSnapshot;
+        view.resave = true;
+
+        let asked;
+        try {
+            asked = Promise.resolve(env.canEdit());
+        } catch (error) {
+            asked = Promise.reject(error);
+        }
+        asked.then(
+            (answer) => accessAnswered(token, answer, kept),
+            () => accessAnswered(token, null, kept)
+        );
+
+        return true;
+    }
+
+    /**
+     * The server answered "may I still change this?".
+     *
+     * @param {number} token the check this answers (a newer check replaces it)
+     * @param {boolean|null} answer null when the question could not be answered
+     * @param {boolean} kept whether words were parked when the check began
+     */
+    function accessAnswered(token, answer, kept) {
+        if (view.accessCheckSince !== token || view.editable === false) {
+            return;
+        }
+        view.accessCheckSince = 0;
+
+        if (answer === false) {
+            lockReadOnly(kept);
+
+            return;
+        }
+
+        if (answer !== true) {
+            view.saveFailures += 1;
+            view.saveRetryAt = env.now() + SAVE_RETRY_DELAYS_MS[Math.min(view.saveFailures, SAVE_RETRY_DELAYS_MS.length) - 1];
+            env.report('danger', 'Not saved');
+        } else {
+            view.saveFailures = 0;
+            view.saveRetryAt = 0;
+        }
+
+        env.engine()?.retry();
+        resendIfOwed();
+    }
+
+    /**
      * The callbacks the sync engine is created with (its `host` option).
      * The engine keeps them for as long as it lives, so they stay bound to
      * the data object that started it, as the page's own handlers do.
@@ -2533,11 +2788,15 @@ export function createSyncHost(view, env) {
             onStopped: (reason) => {
                 view.syncNotice =
                     {
-                        'signed-out': 'You have been signed out. Reload the page to keep editing.',
+                        'signed-out': readOnly(env.handle())
+                            ? 'You have been signed out. Reload the page to sign in again.'
+                            : 'You have been signed out. Reload the page to keep editing.',
                         forbidden: 'You no longer have access to this document.',
                         gone: 'This document no longer exists.',
                     }[reason] || 'This page has stopped updating. Reload it.';
-                env.report('danger', 'Not saved');
+                // Nothing is waiting to be saved on a read only page, so it
+                // does not claim a save failed.
+                env.report('danger', readOnly(env.handle()) ? 'Not updating' : 'Not saved');
             },
         };
     }
@@ -2570,6 +2829,9 @@ export function createSyncHost(view, env) {
         restoreDraft,
         applySuggestion,
         backOnline,
+        isSaveRequest,
+        saveRefused,
+        readOnlyNoticed,
         engineHost,
     };
 }

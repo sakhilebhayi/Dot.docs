@@ -52,7 +52,11 @@
                 </div>
                 <div class="sheet-foot">
                     <button type="button" class="btn" wire:click="dismissResult">Drop it</button>
-                    <button type="button" class="btn btn-primary" wire:click="applyResult">Accept it into the document</button>
+                    @can('update', $document)
+                        <button type="button" class="btn btn-primary" wire:click="applyResult">Accept it into the document</button>
+                    @else
+                        <span class="micro">You can read this document but not change it.</span>
+                    @endcan
                 </div>
             </div>
         </div>

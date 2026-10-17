@@ -239,6 +239,11 @@ export const makeView = (version) => ({
     parkOfferPending: false,
     saveFailures: 0,
     saveRetryAt: 0,
+    // Whether the server rendered this page for somebody who may change the document, and whether text typed
+    // here was left unsent because the server refused the save.
+    editable: true,
+    unsentKept: false,
+    accessCheckSince: 0,
 });
 
 export function world(text = 'start') {
@@ -253,12 +258,12 @@ export function world(text = 'start') {
  *
  * @param {{server: FakeServer, clock: {now: number}}} world
  * @param {string} name
- * @param {{failClosed?: boolean, drafts?: Map, draftStore?: boolean, confirmAnswer?: boolean, mergeFails?: boolean}} options
+ * @param {{failClosed?: boolean, readOnly?: boolean, drafts?: Map, draftStore?: boolean, confirmAnswer?: boolean, mergeFails?: boolean}} options
  */
 export function makeTab({ server, clock }, name, options = {}) {
     const t = {
         name,
-        view: { ...makeView(server.version), tabId: name },
+        view: { ...makeView(server.version), tabId: name, editable: !options.readOnly },
         /** Saves in the air, oldest first. */
         saves: [],
         /** Every save this tab has sent. */
@@ -281,6 +286,10 @@ export function makeTab({ server, clock }, name, options = {}) {
         confirmAnswer: options.confirmAnswer ?? true,
         presenceRefreshes: 0,
         outlineRefreshes: 0,
+        canEditAnswer: false,
+        canEditMode: 'answer',
+        canEditCalls: 0,
+        canEditPending: null,
         /** What the page's outline refresh does; a test swaps it to make it fail. */
         refreshOutline: () => Promise.resolve(),
         /** The browser's draft store. Shared between two page loads of one browser. */
@@ -309,10 +318,12 @@ export function makeTab({ server, clock }, name, options = {}) {
     let saveTimer = null;
     let lastSaved = JSON.stringify(content);
     const autosave = !options.failClosed;
+    // Read only as the bundle holds it: the editor is not editable, onUpdate arms nothing, and followers still apply.
+    let readOnly = options.readOnly === true;
     let onUpdate = () => {};
 
     const emitUpdate = () => {
-        if (autosave) {
+        if (autosave && !readOnly) {
             dirty = true;
             saveTimer = 'armed';
         }
@@ -386,6 +397,14 @@ export function makeTab({ server, clock }, name, options = {}) {
         },
         get autosaves() {
             return autosave;
+        },
+        get readOnly() {
+            return readOnly;
+        },
+        makeReadOnly() {
+            readOnly = true;
+            dirty = false;
+            saveTimer = null;
         },
         get pending() {
             return dirty || saveTimer !== null;
@@ -587,6 +606,21 @@ export function makeTab({ server, clock }, name, options = {}) {
         },
         refreshPresence: () => {
             t.presenceRefreshes += 1;
+        },
+        // Editor::canEdit(). `canEditAnswer` is what the server says; `canEditCalls` is how often it was asked.
+        // A test can make the question hang (a Promise it settles by hand) or fail.
+        canEdit: () => {
+            t.canEditCalls += 1;
+            if (t.canEditMode === 'hang') {
+                return new Promise((resolve, reject) => {
+                    t.canEditPending = { resolve, reject };
+                });
+            }
+            if (t.canEditMode === 'fail') {
+                return Promise.reject(new Error('network'));
+            }
+
+            return Promise.resolve(t.canEditAnswer);
         },
         report: (tone, word) => t.reports.push({ tone, word }),
         drafts: () => t.draftStore,

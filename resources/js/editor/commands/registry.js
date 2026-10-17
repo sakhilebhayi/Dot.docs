@@ -370,6 +370,7 @@ export const commands = [
         name: `export.${format}`,
         title: `Export as ${{ pdf: 'PDF', word: 'Word (.docx)', html: 'HTML', markdown: 'Markdown' }[format]}`,
         group: 'system',
+        readOnlySafe: true,
         run: (editor) => host(editor, `export.${format}`),
     })),
     {
@@ -386,12 +387,14 @@ export const commands = [
         name: 'search',
         title: 'Search documents',
         group: 'system',
+        readOnlySafe: true,
         run: (editor) => host(editor, 'search', { term: selectedText(editor) }),
     },
     {
         name: 'recent.open',
         title: 'Open another document',
         group: 'system',
+        readOnlySafe: true,
         run: (editor) => host(editor, 'recent.open'),
     },
     /*
@@ -410,6 +413,9 @@ export const commands = [
         name: `ai.${name}`,
         title,
         group: 'system',
+        // A pass only READS (AiAssistant::runAi() asks view access); accepting its result writes, and that is a
+        // button the assistant draws for people who may update.
+        readOnlySafe: true,
         run: (editor) => host(editor, 'ai', { action, param }),
     })),
     {
@@ -427,6 +433,7 @@ export const commands = [
         name: 'comment',
         title: 'Comment on selection',
         group: 'system',
+        readOnlySafe: true,
         run: (editor) => host(editor, 'comment', { blockId: editor.dotdoc?.selection?.blockId }),
     },
 ];
@@ -454,9 +461,16 @@ export function insertableCommands() {
  * Everything except the `contextual` ones: those need a parameter the palette
  * has no way to collect (image alt text), so listing them would put a row in
  * the palette that cannot do anything when it is chosen.
+ *
+ * For a read only editor (a person who may read the document and not change
+ * it) only the commands marked `readOnlySafe` are listed: the exports,
+ * searching, opening another document and commenting. Everything else
+ * writes, or opens a page (share, style) that refuses them.
  */
-export function paletteCommands() {
-    return commands.filter((command) => command.contextual !== true);
+export function paletteCommands({ readOnly = false } = {}) {
+    return commands.filter(
+        (command) => command.contextual !== true && (!readOnly || command.readOnlySafe === true)
+    );
 }
 
 /**
@@ -468,6 +482,13 @@ export function run(editor, name, params = {}) {
     const command = commandsByName.get(name);
 
     if (!command || !editor || editor.isDestroyed) {
+        return false;
+    }
+
+    // A read only editor (a person who may not change the document, or a
+    // document the editor cannot open) runs nothing that writes: the
+    // palette, the toolbar and a keyboard shortcut all come through here.
+    if (editor.isEditable === false && command.readOnlySafe !== true) {
         return false;
     }
 
