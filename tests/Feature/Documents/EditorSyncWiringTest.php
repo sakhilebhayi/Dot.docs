@@ -157,6 +157,8 @@ class EditorSyncWiringTest extends TestCase
         // It is announced.
         $this->assertSame('status', $bar->getAttribute('role'));
         $this->assertSame('polite', $bar->getAttribute('aria-live'));
+        // role=status is implicitly atomic: without this a change to one lost-row item re-reads every visible row.
+        $this->assertSame('false', $bar->getAttribute('aria-atomic'));
 
         // The five notices, in this order (the read only sentence sits before the stop reasons). Each is hidden
         // in the markup the server sends, so it does not show before Alpine runs.

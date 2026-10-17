@@ -944,7 +944,7 @@
                Do NOT use x-bind:hidden on anything outside a wire:ignore
                element: without the x-show guard a morph writes the newest
                object's answer straight onto the live element. --}}
-        <div class="doc-notices" role="status" aria-live="polite" wire:ignore
+        <div class="doc-notices" role="status" aria-live="polite" aria-atomic="false" wire:ignore
              @click="noticePressed($event)">
             {{-- A newer version was saved elsewhere while this tab held
                  unsaved typing. Saving is suspended until the writer picks
