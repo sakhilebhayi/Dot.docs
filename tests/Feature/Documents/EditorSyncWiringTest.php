@@ -143,9 +143,19 @@ class EditorSyncWiringTest extends TestCase
         $this->assertNotFalse($editorDestroy);
         $this->assertNotFalse($metricsFlush);
         $this->assertGreaterThan($editorDestroy, $metricsFlush, 'the save beacon goes before the counters');
+        // The session is counted ONCE, by the object that built the counters, and the first flush is asked for by the
+        // page's own timer (the module has none): about 5 s after it opened.
+        $this->assertSame(1, substr_count($attribute, "record('open')"));
+        $this->assertStringContainsString("host.__dotdocMetrics.record('open')", $attribute);
+        $this->assertStringContainsString('schedule: (run, ms) => setTimeout(run, ms),', $attribute);
+        $this->assertGreaterThan(strpos($attribute, 'startMetrics() {'), strpos($attribute, "record('open')"));
+        // The beacon says it is JSON: the CSRF check and the controller both read a JSON body only when it is declared.
+        $this->assertStringContainsString("{ type: 'application/json' }", $attribute);
+        $this->assertStringContainsString("'Content-Type': 'application/json'", $attribute);
         // The module holds no switch of its own: the decision logic is not in the attribute.
         $this->assertStringNotContainsString('peers_', $attribute);
         $this->assertStringNotContainsString('merge_live', $attribute);
+        $this->assertStringNotContainsString('editor_open', $attribute);
     }
 
     public function test_the_metrics_literal_follows_the_switch_and_is_the_same_on_every_render(): void

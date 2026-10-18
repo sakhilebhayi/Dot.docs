@@ -196,18 +196,34 @@ only undoes your own typing.
 
 **How to read the metrics (decide Phase 3 on these, not on a feeling).** The
 editor page counts, per document and day, what Phase 2 had to do, and never
-anything somebody wrote: merges and whether they left something over, the
+anything somebody wrote: first of all how many times a document was opened in
+the editor (editor sessions, solo and read only included: the denominator for
+everything below, and the proof the counters reach the server), then merges and whether they left something over, the
 lost-row offers by kind and what the writer did with them, conflict notices,
 saves resent after a failed request, read only downgrades, and, in seconds,
 how many OTHER people were in the document (time alone is not collected).
 Collection is on by default (`DOCS_SYNC_METRICS=false` switches it off); rows
 older than 120 days are deleted nightly. After two to three weeks of real use
 run, on the server, `php artisan sync:report --days=21` (`--json` for a
-machine). Its last line is the one to read, for example "In the last 21 days:
-9 paragraphs offered back after same-paragraph clashes (in at most 6 live
-merges) across 4 documents; 310 minutes with two or more people in the
-document at once (readers and idle open tabs count)." Read it like this (a
-rule of thumb, not a measurement):
+machine; `--check` instead prints one screen of settings and counts to paste
+back when the report is empty and you need to know whether the pipeline is
+broken). Its first line, "Editor sessions opened: N across M documents by K
+people.", is the denominator: read every figure below per session, not as a
+bare number (a handful of clashes in 40 sessions is a different thing from a
+handful in 4000), and if it says no sessions were recorded the page is not
+reaching the server, which no other line can tell you. Its last line is the
+one to read, for example "In the last 21 days: 9 paragraphs offered back after
+same-paragraph clashes (in at most 6 live merges) across 4 documents; 310
+minutes with two or more people in the document at once (readers and idle open
+tabs count); 412 editor sessions opened." Read it like this (a rule of thumb,
+not a measurement):
+
+- *Editor sessions opened* (`editor_open`) are the denominator: one per editor
+  page opened, whoever opened it and however long they stayed, with nothing
+  else attached. Clashes per sessions (and per hour together) is the figure,
+  not clashes. Few sessions with no clashes says little; many sessions, much
+  time together and still no clashes says Phase 3 is not needed. No sessions
+  at all says the counters are not arriving: run `--check`.
 
 - *Paragraphs offered back* (`lost_both_live`) are the only thing Phase 3
   fixes: two people changed the same paragraph within the autosave and poll

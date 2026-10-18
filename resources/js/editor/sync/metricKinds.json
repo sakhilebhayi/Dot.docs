@@ -1,4 +1,5 @@
 [
+    "editor_open",
     "merge_live_clean",
     "merge_live_lost",
     "merge_draft_clean",

@@ -11,6 +11,7 @@ use Database\Seeders\DocumentStyleSeeder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -276,11 +277,11 @@ class SyncMetricsEndpointTest extends TestCase
         $doc = $this->documentOf($owner);
         $url = route('documents.sync-metrics', $doc->uuid);
 
-        for ($i = 0; $i < 12; $i++) {
+        for ($i = 0; $i < SyncMetrics::PER_MINUTE; $i++) {
             $this->actingAs($owner)->postJson($url, ['counts' => ['merge_live_clean' => 1]])->assertNoContent();
         }
         $this->actingAs($owner)->postJson($url, ['counts' => ['merge_live_clean' => 1]])->assertStatus(429);
-        $this->assertSame(12, (int) DB::table('sync_metrics')->value('count'));
+        $this->assertSame(SyncMetrics::PER_MINUTE, (int) DB::table('sync_metrics')->value('count'));
 
         // Somebody else is not held back by this person's budget.
         $other = User::factory()->withPersonalTeam()->create();
@@ -333,5 +334,77 @@ class SyncMetricsEndpointTest extends TestCase
         $this->assertStringContainsString("from './metricKinds.json'", $js);
         $this->assertDoesNotMatchRegularExpression('/METRIC_KINDS\s*=\s*\[/', $js, 'no second copy of the list in the bundle');
         $this->assertStringNotContainsString("'merge_live_clean'", file_get_contents(app_path('Services/SyncMetrics.php')), 'and none on the server');
+    }
+
+    public function test_an_editor_session_is_stored_for_an_owner_alone_a_read_only_viewer_and_nobody_else(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = $this->documentOf($owner);
+        $viewer = User::factory()->create();
+        DocumentCollaborator::create(['document_id' => $doc->id, 'user_id' => $viewer->id, 'role' => 'viewer']);
+        $stranger = User::factory()->withPersonalTeam()->create();
+
+        $this->actingAs($owner)->postJson(route('documents.sync-metrics', $doc->uuid), ['counts' => ['editor_open' => 1]])->assertNoContent();
+        $this->actingAs($viewer)->postJson(route('documents.sync-metrics', $doc->uuid), ['counts' => ['editor_open' => 1]])->assertNoContent();
+        $this->actingAs($stranger)->postJson(route('documents.sync-metrics', $doc->uuid), ['counts' => ['editor_open' => 1]])->assertForbidden();
+
+        $rows = DB::table('sync_metrics')->orderBy('user_id')->get();
+        $this->assertSame(['editor_open', 'editor_open'], $rows->pluck('kind')->all());
+        $this->assertEqualsCanonicalizing([$owner->id, $viewer->id], $rows->pluck('user_id')->map(fn ($n) => (int) $n)->all());
+        $this->assertSame('editor_open', SyncMetrics::kinds()[0], 'the denominator comes first in the list');
+    }
+
+    public function test_a_session_flush_is_just_the_session_and_alone_in_the_body_it_is_stored(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = $this->documentOf($owner);
+
+        // What the page sends ~5 s after it opened, as the beacon would: JSON in the body with the token.
+        $this->actingAs($owner)
+            ->call('POST', route('documents.sync-metrics', $doc->uuid), [], [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+                '_token' => str_repeat('T', 40),
+                'counts' => ['editor_open' => 1],
+            ]))
+            ->assertNoContent();
+
+        $this->assertSame([['kind' => 'editor_open', 'count' => 1]], DB::table('sync_metrics')->get(['kind', 'count'])->map(fn ($r) => (array) $r)->all());
+    }
+
+    public function test_the_early_flush_budget_covers_a_person_with_many_tabs_on_one_document(): void
+    {
+        // Every tab sends one flush ~5 s after it opens, one a minute, and one on leaving. Ten tabs opened together
+        // is ten requests in a few seconds: they all go through, and the limit is above that.
+        $this->assertGreaterThanOrEqual(30, SyncMetrics::PER_MINUTE);
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = $this->documentOf($owner);
+
+        for ($tab = 0; $tab < 10; $tab++) {
+            $this->actingAs($owner)->postJson(route('documents.sync-metrics', $doc->uuid), ['counts' => ['editor_open' => 1]])->assertNoContent();
+        }
+        $this->assertSame(10, (int) DB::table('sync_metrics')->where('kind', 'editor_open')->value('count'));
+    }
+
+    public function test_the_limiter_the_route_names_is_the_one_the_provider_defines(): void
+    {
+        $route = app('router')->getRoutes()->getByName('documents.sync-metrics');
+        $this->assertContains('throttle:sync-metrics', $route->gatherMiddleware());
+        $this->assertNotNull(RateLimiter::limiter('sync-metrics'));
+    }
+
+    public function test_a_beacon_that_arrives_as_text_plain_is_read_as_json_too(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = $this->documentOf($owner);
+        $url = route('documents.sync-metrics', $doc->uuid);
+        $body = json_encode(['_token' => str_repeat('T', 40), 'counts' => ['editor_open' => 1]]);
+
+        // A browser or a proxy that turns the declared type into text/plain must not cost the session: the body is the same JSON.
+        $this->actingAs($owner)->call('POST', $url, [], [], [], ['CONTENT_TYPE' => 'text/plain;charset=UTF-8'], $body)->assertNoContent();
+        $this->assertSame(1, (int) DB::table('sync_metrics')->where('kind', 'editor_open')->value('count'));
+
+        // Anything else in a non-JSON body is still a bad request and stores nothing, with no server error.
+        $this->actingAs($owner)->call('POST', $url, [], [], [], ['CONTENT_TYPE' => 'text/plain'], 'not json at all')->assertRedirect();
+        $this->actingAs($owner)->call('POST', $url, [], [], [], ['CONTENT_TYPE' => 'text/plain', 'HTTP_ACCEPT' => 'application/json'], '[1,2]')->assertUnprocessable();
+        $this->assertSame(1, DB::table('sync_metrics')->count());
     }
 }

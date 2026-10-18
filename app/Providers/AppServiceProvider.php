@@ -9,6 +9,7 @@ use App\Models\Files\Obj;
 use App\Observers\DocumentObserver;
 use App\Observers\InfoDotResourceObserver;
 use App\Policies\ObjPolicy;
+use App\Services\SyncMetrics;
 use App\Support\ShellContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -58,11 +59,12 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // The editor's counter flush (POST /documents/{uuid}/sync-metrics):
-        // once a minute and on leaving the page, so twelve a minute is far
-        // more than a real tab sends. Per person AND document, never per IP:
-        // colleagues behind one office address look like one IP.
+        // about 5 s after a page opens, then once a minute, and on leaving,
+        // so SyncMetrics::PER_MINUTE is far more than a real tab sends.
+        // Per person AND document, never per IP: colleagues behind one
+        // office address look like one IP.
         RateLimiter::for('sync-metrics', function (Request $request) {
-            return Limit::perMinute(12)->by(($request->user()?->getAuthIdentifier() ?? $request->ip()).'|'.$request->route('uuid'));
+            return Limit::perMinute(SyncMetrics::PER_MINUTE)->by(($request->user()?->getAuthIdentifier() ?? $request->ip()).'|'.$request->route('uuid'));
         });
     }
 }
