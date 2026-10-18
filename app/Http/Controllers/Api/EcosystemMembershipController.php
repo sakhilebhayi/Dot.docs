@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Actions\Ecosystem\ApplyMembershipChange;
 use App\Http\Controllers\Controller;
+use App\Services\InfoDot\SignedRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -17,18 +18,10 @@ use Illuminate\Support\Facades\Validator;
  */
 class EcosystemMembershipController extends Controller
 {
-    private const TOLERANCE = 300;
-
     public function __invoke(Request $request, ApplyMembershipChange $apply): JsonResponse
     {
-        $secret = (string) config('ecosystem.infodot.secret');
-        $timestamp = (int) $request->header('X-InfoDot-Timestamp');
-        $signature = (string) $request->header('X-InfoDot-Signature');
-
-        $expected = 'sha256='.hash_hmac('sha256', $timestamp.'.'.$request->getContent(), $secret);
-
-        if ($secret === '' || $timestamp === 0 || abs(time() - $timestamp) > self::TOLERANCE || ! hash_equals($expected, $signature)) {
-            Log::warning('Membership webhook refused.', ['reason' => $secret === '' ? 'not configured' : 'bad or stale signature']);
+        if (! SignedRequest::valid($request)) {
+            Log::warning('Membership webhook refused.', ['reason' => 'not configured, or bad or stale signature']);
 
             return response()->json(['error' => 'invalid_request'], 401);
         }
