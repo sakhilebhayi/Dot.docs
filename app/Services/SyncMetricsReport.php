@@ -13,6 +13,12 @@ use Illuminate\Support\Facades\DB;
  * hold a name, a title or a word of a document.
  *
  * Reading rules the numbers depend on:
+ *  - EDITOR SESSIONS OPENED (`editor_open`) are the denominator: one per editor
+ *    page mount, solo and read only included, and nothing else is sent with it.
+ *    Without them a table with no clashes cannot tell "nobody co-edited" from
+ *    "the page is not reaching the server". `people` is the distinct signed-in
+ *    users plus one for all deleted accounts together (their rows share a null
+ *    user). Clashes are read per session, not per day.
  *  - What is counted is PARAGRAPHS OFFERED BACK (`lost_both_live`): after two
  *    people changed the same block within the autosave and poll delay of each
  *    other, the later saver's version of it was offered back. One merge can
@@ -67,6 +73,8 @@ class SyncMetricsReport
         $totals = [];
         $eventDocuments = [];
         $eventUsers = [];
+        $sessionDocuments = [];
+        $sessionUsers = [];
         $offeredDocuments = [];
         $deletionDocuments = [];
         // [day][document][user] => seconds with company / with three or more people
@@ -80,7 +88,12 @@ class SyncMetricsReport
             $perDay[$day][$kind] = ($perDay[$day][$kind] ?? 0) + $count;
             $totals[$kind] = ($totals[$kind] ?? 0) + $count;
 
-            if (! str_starts_with($kind, 'peers_')) {
+            if ($kind === 'editor_open') {
+                $sessionDocuments[$row->document_id] = true;
+                $sessionUsers[$row->user_id ?? 'gone'] = true;
+            }
+            // Opening a document is not a co-editing event: sessions are reported on their own.
+            if (! str_starts_with($kind, 'peers_') && $kind !== 'editor_open') {
                 $eventDocuments[$row->document_id] = true;
                 $eventUsers[$row->user_id ?? 'gone'] = true;
             }
@@ -125,6 +138,7 @@ class SyncMetricsReport
         }
 
         $minutes = (int) round($secondsWithCompany / 60);
+        $sessions = $totals['editor_open'] ?? 0;
         $paragraphs = $totals['lost_both_live'] ?? 0;
         $liveMerges = $merges['by_source']['live']['total'];
         $liveWithLoss = $merges['by_source']['live']['with_lost'];
@@ -136,6 +150,7 @@ class SyncMetricsReport
             'timezone' => (string) config('app.timezone'),
             'per_day' => $perDay,
             'totals' => $totals,
+            'sessions' => ['total' => $sessions, 'documents' => count($sessionDocuments), 'people' => count($sessionUsers)],
             'merges' => $merges,
             'events' => ['documents' => count($eventDocuments), 'users' => count($eventUsers)],
             'offered_back' => [
@@ -156,7 +171,7 @@ class SyncMetricsReport
                     ? round($paragraphs / ($secondsWithCompany / 3600), 1)
                     : null,
             ],
-            'summary' => $this->summary($days, $paragraphs, $liveWithLoss, count($offeredDocuments), $minutes),
+            'summary' => $this->summary($days, $paragraphs, $liveWithLoss, count($offeredDocuments), $minutes, $sessions),
         ];
     }
 
@@ -183,12 +198,12 @@ class SyncMetricsReport
     }
 
     /** The one line the owner reads to decide on Phase 3. */
-    private function summary(int $days, int $paragraphs, int $merges, int $documents, int $minutes): string
+    private function summary(int $days, int $paragraphs, int $merges, int $documents, int $minutes, int $sessions): string
     {
         $period = $days === 1 ? 'the last day' : "the last {$days} days";
 
         return sprintf(
-            'In %s: %d %s (in at most %d live %s) across %d %s; %d %s with two or more people in the document at once (readers and idle open tabs count).',
+            'In %s: %d %s (in at most %d live %s) across %d %s; %d %s with two or more people in the document at once (readers and idle open tabs count); %d editor %s opened.',
             $period,
             $paragraphs,
             $paragraphs === 1 ? 'paragraph offered back after a same-paragraph clash' : 'paragraphs offered back after same-paragraph clashes',
@@ -198,6 +213,8 @@ class SyncMetricsReport
             $documents === 1 ? 'document' : 'documents',
             $minutes,
             $minutes === 1 ? 'minute' : 'minutes',
+            $sessions,
+            $sessions === 1 ? 'session' : 'sessions',
         );
     }
 

@@ -34,6 +34,14 @@ class SyncMetrics
     /** Rows older than this many days are deleted by sync:prune-metrics. */
     public const KEEP_DAYS = 120;
 
+    /**
+     * Requests a minute per person AND document (the `sync-metrics` limiter in AppServiceProvider). A tab sends one
+     * flush about 5 s after it opens, then at most one a minute, then one on leaving; 12 was fine for that until
+     * the early flush, and ten tabs restored at once would have used most of it. Over the limit the answer is a
+     * 429, which the page drops silently: a limit that is hit loses counts, so it is set well above real use.
+     */
+    public const PER_MINUTE = 30;
+
     private const TABLE = 'sync_metrics';
 
     /** The one file the editor bundle reads as well (METRIC_KINDS in sync/metrics.js). */

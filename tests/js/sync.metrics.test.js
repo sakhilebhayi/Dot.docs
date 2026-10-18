@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+    FIRST_FLUSH_MS,
     FLUSH_EVERY_MS,
     MAX_COUNT,
     METRIC_KINDS,
@@ -28,6 +29,8 @@ function rig(options = {}) {
         beacons: [],
         sendMode: 'ok',
         beaconMode: 'ok',
+        /** What the page asked its timer for: [{ fn, ms }]. Nothing runs until a test calls it. */
+        timers: [],
     };
     r.metrics = createMetrics({
         now: () => r.clock,
@@ -53,6 +56,9 @@ function rig(options = {}) {
             }
 
             return r.beaconMode === 'ok';
+        },
+        schedule: (fn, ms) => {
+            r.timers.push({ fn, ms });
         },
         ...options,
     });
@@ -451,6 +457,7 @@ test('even every kind at the cap is a payload of about a kilobyte, inside the li
     }
     for (const action of ['put_back', 'dismiss']) everything.record('lost-action', { action, n: MAX_COUNT });
     for (const reason of ['impossible', 'attempts', 'expiry']) everything.record('conflict', { reason, n: MAX_COUNT });
+    everything.record('open');
     everything.record('echo', { n: MAX_COUNT });
     everything.record('resend', { n: MAX_COUNT });
     for (let level = 1; level <= 6; level++) everything.record('backoff', { level, n: MAX_COUNT });
@@ -468,4 +475,167 @@ test('even every kind at the cap is a payload of about a kilobyte, inside the li
     const body = JSON.parse(sent.at(-1));
     assert.deepEqual(Object.keys(body.counts).sort(), [...METRIC_KINDS].sort(), 'every name in the list can be reached');
     assert.ok(sent.at(-1).length < 1024, `${sent.at(-1).length} bytes`);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Editor sessions opened: the denominator for every other count, and the one that tells "the pipeline is broken"
+// from "nobody co-edited". One per page mount, with no other data, solo and read only included.
+// ---------------------------------------------------------------------------------------------------------------
+
+test('editor_open is a closed kind and the page event open maps to it, and to nothing else', () => {
+    assert.ok(METRIC_KINDS.includes('editor_open'));
+    assert.equal(metricKey('open', {}), 'editor_open');
+    assert.equal(metricKey('open'), 'editor_open');
+    // A detail on it is never read: a session is a session.
+    assert.equal(metricKey('open', { title: 'Quarterly numbers', source: 'merge' }), 'editor_open');
+});
+
+test('a session carries the token and one count, with no other data', async () => {
+    const r = rig();
+    r.metrics.record('open', { title: 'Quarterly numbers', user: 'Thandi', text: 'The secret paragraph' });
+    await r.metrics.flush();
+
+    assert.deepEqual(r.sent, [{ _token: TOKEN, counts: { editor_open: 1 } }]);
+    assert.ok(!JSON.stringify(r.sent).match(/Quarterly|Thandi|secret/));
+});
+
+test('a page counts its open once, however often it is told', async () => {
+    const r = rig();
+    r.metrics.record('open');
+    r.metrics.record('open');
+    r.metrics.record('open', { n: 5 });
+    await r.metrics.flush();
+
+    assert.deepEqual(r.sent[0].counts, { editor_open: 1 });
+    assert.equal(r.timers.length, 1, 'and asks for one first flush, not three');
+});
+
+test('the first flush of a page is asked for 5 seconds after it opened, not a minute', () => {
+    assert.equal(FIRST_FLUSH_MS, 5000);
+    assert.ok(FIRST_FLUSH_MS < FLUSH_EVERY_MS);
+    const r = rig();
+    r.metrics.record('open');
+
+    assert.equal(r.timers.length, 1);
+    assert.equal(r.timers[0].ms, FIRST_FLUSH_MS);
+    assert.equal(r.sent.length, 0, 'the timer has not run, so nothing has gone yet');
+});
+
+test('when that timer runs, the session is sent by an ordinary request, once', async () => {
+    const r = rig();
+    r.metrics.record('open');
+    r.tick(FIRST_FLUSH_MS);
+    r.timers[0].fn();
+    await settle();
+
+    assert.deepEqual(r.sent, [{ _token: TOKEN, counts: { editor_open: 1 } }]);
+    assert.deepEqual(r.beacons, []);
+    assert.deepEqual(r.metrics.waiting(), { pending: {}, carry: {} });
+
+    // Running it again (or leaving afterwards) sends nothing: the session was already counted.
+    r.timers[0].fn();
+    await r.metrics.flush({ beacon: true });
+    await settle();
+    assert.equal(r.sent.length, 1);
+    assert.deepEqual(r.beacons, []);
+});
+
+test('the first flush also carries what was counted in those 5 seconds', async () => {
+    const r = rig();
+    r.metrics.record('open');
+    r.tick(3000);
+    r.metrics.record('merge', { source: 'merge', lost: false });
+    r.tick(2000);
+    r.timers[0].fn();
+    await settle();
+
+    assert.deepEqual(r.sent.map((body) => body.counts), [{ editor_open: 1, merge_live_clean: 1 }]);
+});
+
+test('after the early flush the minute rule is unchanged: the next regular flush is a minute after it', async () => {
+    const r = rig();
+    r.metrics.record('open');
+    r.tick(FIRST_FLUSH_MS);
+    r.timers[0].fn();
+    await settle();
+    assert.equal(r.sent.length, 1);
+
+    r.tick(FLUSH_EVERY_MS - 1);
+    r.metrics.record('echo');
+    assert.equal(r.sent.length, 1, 'not yet: a minute has not passed since the early flush');
+    r.tick(1);
+    r.metrics.record('echo');
+    await settle();
+    assert.equal(r.sent.length, 2);
+    assert.deepEqual(r.sent[1].counts, { echo_resolved: 2 });
+});
+
+test('a short visit still records: leaving before the timer ran sends the session by beacon, once', async () => {
+    const r = rig();
+    r.metrics.record('open');
+    r.tick(1500);
+    assert.equal(await r.metrics.flush({ beacon: true }), true);
+
+    assert.deepEqual(r.beacons, [{ _token: TOKEN, counts: { editor_open: 1 } }]);
+    // And the timer, which fires later on a page that is going or gone, finds nothing to send.
+    r.timers[0].fn();
+    await settle();
+    assert.deepEqual(r.sent, []);
+});
+
+test('a failed early flush is dropped without a word and its session rides along once more', async () => {
+    const r = rig();
+    r.sendMode = 'reject';
+    r.metrics.record('open');
+    r.timers[0].fn();
+    await settle();
+    assert.equal(r.sent.length, 1);
+    assert.deepEqual(r.metrics.waiting().carry, { editor_open: 1 });
+
+    r.sendMode = 'ok';
+    await r.metrics.flush({ beacon: true });
+    assert.deepEqual(r.beacons, [{ _token: TOKEN, counts: { editor_open: 1 } }], 'once more, by the beacon on leaving');
+    assert.deepEqual(r.metrics.waiting(), { pending: {}, carry: {} });
+});
+
+test('the early flush is one request at most: no storm, however the page behaves', async () => {
+    const r = rig();
+    r.sendMode = 'refused';
+    r.metrics.record('open');
+    for (let i = 0; i < 20; i++) {
+        r.metrics.record('echo');
+    }
+    r.timers[0].fn();
+    r.timers[0].fn();
+    r.timers[0].fn();
+    await settle();
+
+    assert.equal(r.timers.length, 1);
+    assert.equal(r.sent.length, 1, 'one request in the air at a time, and the repeats found it busy or empty');
+});
+
+test('a timer that cannot be set, or throws, never breaks the page and the session still goes on leaving', async () => {
+    for (const schedule of [undefined, () => { throw new Error('no timers'); }]) {
+        const r = rig({ schedule });
+        assert.doesNotThrow(() => r.metrics.record('open'));
+        assert.doesNotThrow(() => r.metrics.record('merge', { source: 'merge', lost: false }));
+        await r.metrics.flush({ beacon: true });
+        assert.deepEqual(r.beacons.map((body) => body.counts), [{ editor_open: 1, merge_live_clean: 1 }]);
+    }
+});
+
+test('a timer callback that throws inside flush is swallowed', async () => {
+    const r = rig({ token: () => { throw new Error('no meta tag'); } });
+    r.metrics.record('open');
+    assert.doesNotThrow(() => r.timers[0].fn());
+    await settle();
+    assert.deepEqual(r.sent, []);
+});
+
+test('switched off, a session is not counted and no timer is asked for', async () => {
+    const r = rig({ enabled: false });
+    r.metrics.record('open');
+    await r.metrics.flush({ beacon: true });
+
+    assert.deepEqual([r.sent, r.beacons, r.timers], [[], [], []]);
 });

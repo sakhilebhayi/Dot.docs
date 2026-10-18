@@ -1,5 +1,7 @@
 /**
- * Counters for the co-editing layer: how often the page merged, what a merge
+ * Counters for the co-editing layer: how many editor pages were opened (the
+ * denominator for everything else, and the one count that is there for a solo
+ * session and a read only reader too), how often the page merged, what a merge
  * could not keep, how often a save failed, how many people were in the
  * document together. They exist so the owner can decide, after a few weeks
  * of real use, whether true same-sentence co-typing (Phase 3 of the roadmap)
@@ -13,9 +15,13 @@
  * (metricKinds.json) both sides load.
  *
  * It must NEVER affect editing, so:
- *  - it is a counter map and a clock, no timers: `record()` flushes when a
- *    minute has passed since the last flush, and the page calls
- *    `flush({beacon: true})` when it is left;
+ *  - it is a counter map and a clock: `record()` flushes when a minute has
+ *    passed since the last flush, and the page calls `flush({beacon: true})`
+ *    when it is left. The ONE timer is the page's own, handed in as `schedule`
+ *    and asked for once, by `record('open')`: it flushes the session about 5 s
+ *    after the page opened, so a short visit is on the server before it ends
+ *    (and a browser that drops the beacon on leaving still has it). The module
+ *    sets no timer of its own and a page without `schedule` simply has none;
  *  - nothing it does throws, and nothing waits on it;
  *  - a flush that fails is dropped without a word, with one retry at the
  *    next flush (the failed counts ride along once more, then go);
@@ -23,8 +29,8 @@
  *    (sync/host.js) works unchanged when `env.metric` is not there.
  *
  * Like the rest of sync/ it takes nothing from outside it and has no DOM,
- * no `window`, no `fetch`: the page hands in `send` (an ordinary POST), `beacon` (the
- * one that outlives the page), the CSRF token and the clock.
+ * no `window`, no `fetch`, no `setTimeout`: the page hands in `send` (an ordinary POST), `beacon` (the
+ * one that outlives the page), `schedule` (its timer), the CSRF token and the clock.
  */
 
 import kinds from './metricKinds.json' with { type: 'json' };
@@ -37,8 +43,14 @@ import kinds from './metricKinds.json' with { type: 'json' };
  */
 export const METRIC_KINDS = kinds;
 
-/** At most one flush a minute (the unload flush apart). */
+/** At most one flush a minute (the unload flush and the first flush apart). */
 export const FLUSH_EVERY_MS = 60000;
+
+/**
+ * The first flush of a page: this long after it opened. One extra request per
+ * page open, ever; the minute rule counts from it.
+ */
+export const FIRST_FLUSH_MS = 5000;
 
 /** The most one flush may carry for one kind; the server refuses more. */
 export const MAX_COUNT = 3600;
@@ -56,7 +68,7 @@ const SOURCES = { merge: 'live', draft: 'draft', suggestion: 'suggestion' };
 /**
  * The name a host event counts under, or null when it is not one of ours.
  *
- * @param {string} kind the host's event: merge, lost, lost-action, conflict, echo, resend, backoff, readonly
+ * @param {string} kind an event: open (the page, once), or the host's merge, lost, lost-action, conflict, echo, resend, backoff, readonly
  * @param {object} [detail]
  * @returns {string|null}
  */
@@ -65,6 +77,10 @@ export function metricKey(kind, detail = {}) {
     let key = null;
 
     switch (kind) {
+        case 'open':
+            // One editor page was opened. Its detail is never read: a session is a session.
+            key = 'editor_open';
+            break;
         case 'merge':
             key = `merge_${SOURCES[d.source] ?? ''}_${d.lost === true ? 'lost' : 'clean'}`;
             break;
@@ -103,16 +119,19 @@ const peersKey = (others) => (others <= 0 ? null : others >= 3 ? 'peers_3plus_se
  * @param {{
  *   send: (body: string) => Promise<unknown>,
  *   beacon?: (body: string) => boolean,
+ *   schedule?: (run: () => void, ms: number) => unknown,
  *   token: () => string,
  *   now: () => number,
  *   enabled?: boolean,
  *   flushEveryMs?: number,
+ *   firstFlushMs?: number,
  * }} options
  *   send    POST the body to the metrics endpoint and resolve with whether it was accepted (false or a throw is a failure)
  *   beacon  navigator.sendBeacon with the same body; used on unload only
+ *   schedule  the page's timer (setTimeout); used once, for the first flush after `record('open')`
  *   token   the CSRF token, read when a body is built (a beacon cannot set headers: it rides in the body)
  */
-export function createMetrics({ send, beacon, token, now, enabled = true, flushEveryMs = FLUSH_EVERY_MS }) {
+export function createMetrics({ send, beacon, schedule, token, now, enabled = true, flushEveryMs = FLUSH_EVERY_MS, firstFlushMs = FIRST_FLUSH_MS }) {
     /** @type {Record<string, number>} */
     let pending = {};
     /** Counts whose flush failed once: they ride along with the next flush, and go if that fails too. */
@@ -122,6 +141,8 @@ export function createMetrics({ send, beacon, token, now, enabled = true, flushE
     let lastPeersAt = null;
     let lastFlushAt = now();
     let inFlight = false;
+    /** This page has been counted as one session; it is never counted twice. */
+    let opened = false;
 
     const add = (key, n = 1) => {
         pending[key] = Math.min(MAX_COUNT, (pending[key] ?? 0) + n);
@@ -164,7 +185,23 @@ export function createMetrics({ send, beacon, token, now, enabled = true, flushE
         }
 
         try {
-            if (kind === 'peers') {
+            if (kind === 'open') {
+                if (!opened) {
+                    opened = true;
+                    add('editor_open');
+                    // The first flush, soon: one request, whatever the page then does. Any failure to set the timer is
+                    // the page's loss of an early flush and nothing more (the beacon on leaving still has the session).
+                    try {
+                        if (typeof schedule === 'function') {
+                            schedule(() => {
+                                flush();
+                            }, firstFlushMs);
+                        }
+                    } catch (_) {
+                        // No timer: the session goes with the next flush or the one on leaving.
+                    }
+                }
+            } else if (kind === 'peers') {
                 const others = Number.isFinite(detail?.others) ? Math.max(0, Math.floor(detail.others)) : null;
                 if (others !== null) {
                     const at = now();

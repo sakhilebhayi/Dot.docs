@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\SyncMetricsCheck;
 use App\Services\SyncMetricsReport;
 use Illuminate\Console\Command;
 
@@ -13,12 +14,16 @@ use Illuminate\Console\Command;
  */
 class SyncReport extends Command
 {
-    protected $signature = 'sync:report {--days=14 : How many days back, today included} {--json : Print the report as JSON}';
+    protected $signature = 'sync:report {--days=14 : How many days back, today included} {--json : Print the report as JSON} {--check : Print the settings and counts that show whether recording is wired (paste it back), instead of the report}';
 
     protected $description = 'Report how often co-editing needed a merge, what it could not keep, and how often people shared a document';
 
-    public function handle(SyncMetricsReport $reports): int
+    public function handle(SyncMetricsReport $reports, SyncMetricsCheck $checks): int
     {
+        if ($this->option('check')) {
+            return $this->printCheck($checks);
+        }
+
         $option = $this->option('days');
         if (! is_numeric($option) || (int) $option != $option || (int) $option < 1 || (int) $option > 366) {
             $this->error('--days must be a whole number from 1 to 366.');
@@ -48,8 +53,16 @@ class SyncReport extends Command
         $this->line('Each arrival or departure is placed to within a few tens of seconds, because presence is sampled by poll.');
         $this->newLine();
 
+        $sessions = $report['sessions'];
+        $this->line("Editor sessions opened: {$sessions['total']} across {$sessions['documents']} documents by {$sessions['people']} people.");
+        if ($sessions['total'] === 0) {
+            $nothing = $report['totals'] === [] ? 'Nothing recorded yet in this window. ' : '';
+            $this->line($nothing.'No editor sessions were recorded: either nobody opened a document in this window or the page is not reaching the server; open a document and run the report again after two minutes.');
+        }
+        $this->newLine();
+
         if ($report['totals'] === []) {
-            $this->line('Nothing recorded yet in this window. The page flushes its counters once a minute and when it is left.');
+            $this->line('The page sends its counters about five seconds after a document opens, then once a minute and when it is left.');
         } else {
             $this->perDayTable($report);
             $this->newLine();
@@ -80,6 +93,18 @@ class SyncReport extends Command
 
         $this->newLine();
         $this->line($report['summary']);
+    }
+
+    /** One screen of facts about the recording pipeline: settings and counts, never a secret. */
+    private function printCheck(SyncMetricsCheck $checks): int
+    {
+        $check = $checks->run();
+        $this->line('Co-editing metrics check (settings and counts only; paste this back)');
+        foreach ($check['lines'] as $line) {
+            $this->line($line);
+        }
+
+        return $check['ok'] ? self::SUCCESS : self::FAILURE;
     }
 
     private function documents(int $count): string

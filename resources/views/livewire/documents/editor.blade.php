@@ -445,10 +445,15 @@
 
         // The co-editing counters, parked on the element for the same reason
         // (and so every data object reaches the same one). Null when the
-        // server switched counting off. The once-a-minute flush is an ordinary
-        // POST; only the flush on leaving is a beacon, with the token in the
-        // body as the other unload beacons have it. Whatever goes wrong with
-        // either is dropped by the module.
+        // server switched counting off. The first flush (about 5 s after the
+        // page opened, so a short visit still records) and the once-a-minute
+        // flush are ordinary POSTs; only the flush on leaving is a beacon, with
+        // the token in the body as the other unload beacons have it, and
+        // declared as JSON, which the CSRF check and the controller both need
+        // to find the token and the counts in it. Whatever goes wrong with any
+        // of them is dropped by the module. Opening the page is counted here,
+        // once, by the object that built the counters: solo and read only
+        // sessions included, with nothing else attached.
         syncMetrics() {
             return this.$refs.editorEl?.__dotdocMetrics ?? null;
         },
@@ -469,7 +474,9 @@
                 }).then((response) => response.ok),
                 beacon: (body) => typeof navigator.sendBeacon === 'function'
                     && navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })),
+                schedule: (run, ms) => setTimeout(run, ms),
             });
+            host.__dotdocMetrics.record('open');
         },
 
         startSync() {

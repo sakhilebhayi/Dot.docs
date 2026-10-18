@@ -74,6 +74,17 @@ class SyncReportCommandTest extends TestCase
         $this->row($this->d1, $this->ada, '2026-09-01', 'lost_both_live', 50);
     }
 
+    /** Editor sessions opened (the denominator): d1 Ada 3 and Ben 2 on 15 Oct, d2 Ada 1 on 16 Oct, d2 Ada 2 today. */
+    private function sessions(): void
+    {
+        $this->row($this->d1, $this->ada, '2026-10-15', 'editor_open', 3);
+        $this->row($this->d1, $this->ben, '2026-10-15', 'editor_open', 2);
+        $this->row($this->d2, $this->ada, '2026-10-16', 'editor_open', 1);
+        $this->row($this->d2, $this->ada, '2026-10-17', 'editor_open', 2);
+        // Too old for a 14 day window.
+        $this->row($this->d1, $this->ada, '2026-09-01', 'editor_open', 40);
+    }
+
     private function reportJson(int $days = 14): array
     {
         $this->assertSame(0, Artisan::call('sync:report', ['--days' => $days, '--json' => true]));
@@ -212,18 +223,18 @@ class SyncReportCommandTest extends TestCase
     {
         $this->fixture();
 
-        $line = 'In the last 14 days: 4 paragraphs offered back after same-paragraph clashes (in at most 3 live merges) across 2 documents; 60 minutes with two or more people in the document at once (readers and idle open tabs count).';
+        $line = 'In the last 14 days: 4 paragraphs offered back after same-paragraph clashes (in at most 3 live merges) across 2 documents; 60 minutes with two or more people in the document at once (readers and idle open tabs count); 0 editor sessions opened.';
         $this->artisan('sync:report', ['--days' => 14])->expectsOutputToContain($line)->assertSuccessful();
 
         $this->assertSame($line, $this->reportJson()['summary']);
         $this->assertSame(
-            'In the last day: 3 paragraphs offered back after same-paragraph clashes (in at most 1 live merge) across 1 document; 30 minutes with two or more people in the document at once (readers and idle open tabs count).',
+            'In the last day: 3 paragraphs offered back after same-paragraph clashes (in at most 1 live merge) across 1 document; 30 minutes with two or more people in the document at once (readers and idle open tabs count); 0 editor sessions opened.',
             $this->reportJson(1)['summary']
         );
         $this->row($this->d1, $this->ben, '2026-10-17', 'lost_both_live', 1);
         $this->row($this->d1, $this->ben, '2026-10-17', 'merge_live_lost', 1);
         $this->assertSame(
-            'In the last day: 4 paragraphs offered back after same-paragraph clashes (in at most 2 live merges) across 2 documents; 30 minutes with two or more people in the document at once (readers and idle open tabs count).',
+            'In the last day: 4 paragraphs offered back after same-paragraph clashes (in at most 2 live merges) across 2 documents; 30 minutes with two or more people in the document at once (readers and idle open tabs count); 0 editor sessions opened.',
             $this->reportJson(1)['summary']
         );
     }
@@ -247,7 +258,7 @@ class SyncReportCommandTest extends TestCase
         $this->assertSame(0, $report['merges']['total']);
         $this->assertNull($report['merges']['share_with_lost']);
         $this->assertNull($report['concurrency']['offered_back_per_hour']);
-        $this->assertSame('In the last 14 days: 0 paragraphs offered back after same-paragraph clashes (in at most 0 live merges) across 0 documents; 0 minutes with two or more people in the document at once (readers and idle open tabs count).', $report['summary']);
+        $this->assertSame('In the last 14 days: 0 paragraphs offered back after same-paragraph clashes (in at most 0 live merges) across 0 documents; 0 minutes with two or more people in the document at once (readers and idle open tabs count); 0 editor sessions opened.', $report['summary']);
 
         $this->artisan('sync:report')->expectsOutputToContain('Nothing recorded yet')->assertSuccessful();
     }
@@ -302,5 +313,116 @@ class SyncReportCommandTest extends TestCase
 
         $this->d1->forceDelete();
         $this->assertSame(0, DB::table('sync_metrics')->where('document_id', $this->d1->id)->count());
+    }
+
+    public function test_the_report_opens_with_the_editor_sessions_opened(): void
+    {
+        $this->fixture();
+        $this->sessions();
+
+        $this->assertSame(['total' => 8, 'documents' => 2, 'people' => 2], $this->reportJson(14)['sessions']);
+        $this->assertSame(['total' => 2, 'documents' => 1, 'people' => 1], $this->reportJson(1)['sessions']);
+
+        // The first line of the report body, ahead of the table, in the fixed wording.
+        $this->artisan('sync:report', ['--days' => 14])
+            ->expectsOutputToContain('Editor sessions opened: 8 across 2 documents by 2 people.')
+            ->assertSuccessful();
+        $this->artisan('sync:report', ['--days' => 1])
+            ->expectsOutputToContain('Editor sessions opened: 2 across 1 documents by 1 people.')
+            ->doesntExpectOutputToContain('No editor sessions were recorded')
+            ->assertSuccessful();
+
+        Artisan::call('sync:report', ['--days' => 14]);
+        $out = Artisan::output();
+        $this->assertLessThan(strpos($out, 'kind'), strpos($out, 'Editor sessions opened:'), 'before the per-day table');
+        $this->assertLessThan(strpos($out, 'Merges:'), strpos($out, 'Editor sessions opened:'));
+    }
+
+    public function test_sessions_are_listed_per_day_like_every_other_kind(): void
+    {
+        $this->fixture();
+        $this->sessions();
+        $report = $this->reportJson(14);
+
+        $this->assertSame(5, $report['per_day']['2026-10-15']['editor_open']);
+        $this->assertSame(1, $report['per_day']['2026-10-16']['editor_open']);
+        $this->assertSame(2, $report['per_day']['2026-10-17']['editor_open']);
+        $this->assertSame(8, $report['totals']['editor_open']);
+        $this->assertSame('editor_open', array_key_first($report['totals']), 'the denominator comes first');
+
+        $this->artisan('sync:report', ['--days' => 3])->expectsOutputToContain('editor_open')->assertSuccessful();
+    }
+
+    public function test_people_are_the_distinct_users_plus_one_for_all_deleted_accounts(): void
+    {
+        $this->row($this->d1, $this->ada, '2026-10-17', 'editor_open', 1);
+        $this->row($this->d2, $this->ada, '2026-10-17', 'editor_open', 1);
+        $this->row($this->d1, $this->ben, '2026-10-17', 'editor_open', 1);
+        $this->assertSame(['total' => 3, 'documents' => 2, 'people' => 2], $this->reportJson()['sessions']);
+
+        // Two deleted accounts have a null user each; together they are one more "person", never two or zero.
+        DB::table('sync_metrics')->insert(['document_id' => $this->d1->id, 'user_id' => null, 'day' => '2026-10-17', 'kind' => 'editor_open', 'count' => 4]);
+        $this->assertSame(['total' => 7, 'documents' => 2, 'people' => 3], $this->reportJson()['sessions']);
+        $this->artisan('sync:report')->expectsOutputToContain('Editor sessions opened: 7 across 2 documents by 3 people.')->assertSuccessful();
+
+        // A deleted person's sessions on their own are one person.
+        DB::table('sync_metrics')->where('user_id', '!=', null)->delete();
+        $this->assertSame(['total' => 4, 'documents' => 1, 'people' => 1], $this->reportJson()['sessions']);
+    }
+
+    public function test_sessions_only_a_solo_day_is_a_report_not_nothing(): void
+    {
+        $this->sessions();
+        $this->row($this->d1, $this->ada, '2026-10-17', 'peers_1_secs', 60);
+
+        $report = $this->reportJson(14);
+        $this->assertSame(0, $report['events']['documents'], 'opening a document is not a co-editing event');
+        $this->assertSame(0, $report['events']['users']);
+        $this->assertSame(8, $report['sessions']['total']);
+
+        $this->artisan('sync:report')
+            ->expectsOutputToContain('Editor sessions opened: 8 across 2 documents by 2 people.')
+            ->doesntExpectOutputToContain('Nothing recorded yet')
+            ->doesntExpectOutputToContain('No editor sessions were recorded')
+            ->assertSuccessful();
+    }
+
+    public function test_the_last_line_gains_the_sessions_count(): void
+    {
+        $this->fixture();
+        $this->sessions();
+
+        $this->assertStringEndsWith('(readers and idle open tabs count); 8 editor sessions opened.', $this->reportJson(14)['summary']);
+        $this->assertStringEndsWith('; 2 editor sessions opened.', $this->reportJson(1)['summary']);
+        $this->artisan('sync:report', ['--days' => 14])
+            ->expectsOutputToContain('(readers and idle open tabs count); 8 editor sessions opened.')
+            ->assertSuccessful();
+
+        DB::table('sync_metrics')->where('kind', 'editor_open')->where('day', '2026-10-17')->update(['count' => 1]);
+        $this->assertStringEndsWith('; 1 editor session opened.', $this->reportJson(1)['summary']);
+    }
+
+    public function test_no_sessions_in_the_window_says_so_plainly_with_and_without_other_rows(): void
+    {
+        $plain = 'No editor sessions were recorded: either nobody opened a document in this window or the page is not reaching the server; open a document and run the report again after two minutes.';
+
+        // Nothing at all.
+        Artisan::call('sync:report');
+        $this->assertStringContainsString('Nothing recorded yet in this window. '.$plain, Artisan::output());
+        $this->assertSame(['total' => 0, 'documents' => 0, 'people' => 0], $this->reportJson()['sessions']);
+
+        // Other kinds but no sessions (an old page that does not count them, or a window before this change).
+        $this->fixture();
+        $this->artisan('sync:report', ['--days' => 14])
+            ->expectsOutputToContain('Editor sessions opened: 0 across 0 documents by 0 people.')
+            ->expectsOutputToContain($plain)
+            ->doesntExpectOutputToContain('Nothing recorded yet')
+            ->assertSuccessful();
+
+        // Sessions outside the window do not count for this one.
+        $this->sessions();
+        $this->artisan('sync:report', ['--days' => 14])->doesntExpectOutputToContain('No editor sessions were recorded')->assertSuccessful();
+        DB::table('sync_metrics')->where('kind', 'editor_open')->where('day', '>=', '2026-10-04')->delete();
+        $this->artisan('sync:report', ['--days' => 14])->expectsOutputToContain($plain)->assertSuccessful();
     }
 }
