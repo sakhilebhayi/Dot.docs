@@ -5,6 +5,7 @@ use App\Http\Controllers\DocumentAutosaveController;
 use App\Http\Controllers\DocumentExportController;
 use App\Http\Controllers\DocumentImageController;
 use App\Http\Controllers\DocumentImportController;
+use App\Http\Controllers\DocumentOpenController;
 use App\Http\Controllers\DocumentSyncController;
 use App\Http\Controllers\DocumentSyncMetricsController;
 use App\Http\Controllers\FileUploadController;
@@ -145,7 +146,7 @@ Route::middleware([
     Route::get('/documents', Index::class)->name('documents.index');
     Route::get('/documents/{uuid}/edit', Editor::class)->name('documents.edit');
     // The destination of an InfoDot deep link: a document, by uuid. Re-authorised by the policy.
-    Route::get('/o/{uuid}', \App\Http\Controllers\DocumentOpenController::class)->name('documents.open');
+    Route::get('/o/{uuid}', DocumentOpenController::class)->name('documents.open');
     Route::get('/documents/{uuid}/settings', DocumentSettings::class)->name('documents.settings');
     Route::get('/documents/{uuid}/share', ShareManager::class)->name('documents.share');
     Route::get('/documents/{uuid}/history', VersionHistory::class)->name('documents.history');
