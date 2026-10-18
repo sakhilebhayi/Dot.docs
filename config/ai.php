@@ -96,4 +96,33 @@ return [
 
     'max_tokens' => 2000,
 
+    /*
+    |--------------------------------------------------------------------------
+    | Spend guard
+    |--------------------------------------------------------------------------
+    |
+    | Limits that apply only to REAL model calls (never the mock provider), so a
+    | leaked key, a runaway loop or one abusive account has a ceiling before the
+    | provider's own limit. Tokens are counted from `ai_model_usage` for the
+    | current UTC day. They are exact token counts, unlike `cost_usd`, which uses
+    | the illustrative prices above. A refused call throws App\Ai\AiUnavailable,
+    | which the AI screens already treat like any other provider failure.
+    |
+    |   enabled                      kill switch: AI_ENABLED=false stops every real call at once
+    |   daily_token_budget           input + output tokens across all users per UTC day (0 = no cap)
+    |   daily_token_budget_per_user  the same, per user (0 = no cap)
+    |
+    | The defaults are deliberately generous guesses (roughly a few dollars to a
+    | few tens of dollars a day at current model prices), not measured usage.
+    | Tune them from `ai_model_usage` once there is real traffic, and ALSO set a
+    | hard monthly limit in each provider's own console: that is the one a
+    | leaked key cannot bypass.
+    */
+
+    'enabled' => (bool) env('AI_ENABLED', true),
+
+    'daily_token_budget' => (int) env('AI_DAILY_TOKEN_BUDGET', 2000000),
+
+    'daily_token_budget_per_user' => (int) env('AI_DAILY_TOKEN_BUDGET_PER_USER', 300000),
+
 ];
