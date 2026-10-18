@@ -81,7 +81,9 @@ class ApplyMembershipChange
     private function unlink(Team $team): void
     {
         foreach ($team->users()->get() as $member) {
-            $this->remove($team, $member);
+            if ($member instanceof User) {
+                $this->remove($team, $member);
+            }
         }
 
         $team->forceFill(['infodot_team_uuid' => null])->save();
