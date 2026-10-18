@@ -70,6 +70,9 @@ return [
 
     'infodot' => [
         'redeem_url' => env('INFODOT_REDEEM_URL', 'https://infodot.co.za/api/ecosystem/redeem'),
+        // Where this app tells InfoDot about the documents it holds (a pointer per document).
+        // Derived from the redeem URL when not set.
+        'resources_url' => env('INFODOT_RESOURCES_URL'),
         'platform' => env('INFODOT_PLATFORM_KEY', 'docs'),
         'secret' => env('INFODOT_SERVICE_SECRET'),
         'timeout' => (int) env('INFODOT_REDEEM_TIMEOUT', 5),
