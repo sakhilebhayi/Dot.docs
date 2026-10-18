@@ -1,0 +1,10 @@
+{
+  "name": "a4: the same change on both sides is theirs, and nothing counts as changed",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello!"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello!"}]}]},
+  "expected": {"blocks": [["p1","Hello!"]], "changed": false, "lost": [], "overwrites": false}
+}

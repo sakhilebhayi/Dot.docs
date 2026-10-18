@@ -183,7 +183,7 @@
                         <a href="{{ route('documents.edit', $doc->uuid) }}" class="list-row">
                             <span class="list-key">
                                 {{ $doc->title ?: 'Untitled' }}
-                                <span class="list-sub">Edited {{ $doc->updated_at->diffForHumans() }}</span>
+                                <span class="list-sub">Edited {{ $doc->updated_at->diffForHumans() }}@if ($doc->infodot_reference) &middot; <span title="InfoDot reference: paste it into InfoDot search to open this document">{{ $doc->infodot_reference }}</span>@endif</span>
                             </span>
                             @if ($doc->is_public)
                                 <x-shell.status-word tone="good" word="Public" />

@@ -1,0 +1,10 @@
+{
+  "name": "a5 (D1): a block both changed is theirs, and mine is offered back anchored to it",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello B"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello A"}]}]},
+  "expected": {"blocks": [["p1","Hello A"]], "changed": false, "lost": [{"id":"p1","reason":"both","anchors":["p1"]}], "overwrites": false}
+}

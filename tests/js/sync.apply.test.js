@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { Schema, Slice } from 'prosemirror-model';
-import { EditorState } from 'prosemirror-state';
-import { ReplaceStep } from 'prosemirror-transform';
+import { EditorState, TextSelection } from 'prosemirror-state';
+import { ReplaceStep, StepResult } from 'prosemirror-transform';
 
-import { remoteTransaction } from '../../resources/js/editor/sync/apply.js';
+import { MAX_BLOCK_STEPS, blockSteps, remoteTransaction } from '../../resources/js/editor/sync/apply.js';
 
 // A stand-in for the editor's schema, with the node types that
 // remoteTransaction() treats specially declared the way the editor declares
@@ -179,16 +179,21 @@ test('document-level attrs that changed are set with their own steps', () => {
     assert.deepEqual(emptied.doc.attrs.vars, {});
 });
 
-test('a change inside an isolating node plus a change after it is one step that reproduces the target', () => {
-    // tr.replace() would fit this slice by nesting a second copy of the box
-    // inside the first, without throwing. A ReplaceStep applies it as is.
+test('a change inside an isolating node plus a deletion after it are two block steps that reproduce the target', () => {
+    // The box is not a textblock, so it is replaced whole: a closed slice at
+    // a top-level boundary, which never needs the fitter. The deleted
+    // paragraph is a second step. tr.replace() would have fitted ONE open
+    // slice by nesting a second copy of the box inside the first.
     const held = doc([box('b1', para('p1', 'In the box')), para('p2', 'Two'), para('p3', 'Three')]);
     const arriving = doc([box('b1', para('p1', 'In the box, edited')), para('p2', 'Two')]);
+    const state = stateOf(held);
 
-    const tr = remoteTransaction(stateOf(held), arriving, ReplaceStep);
+    const tr = remoteTransaction(state, arriving, ReplaceStep);
 
-    assert.deepEqual(stepTypes(tr), ['replace']);
-    assert.ok(tr.steps[0].from > 1, 'the step is the narrowed range, not the whole document');
+    assert.deepEqual(stepTypes(tr), ['replace', 'replace']);
+    assert.equal(tr.steps[0].from, startOf(state.doc, 'p3'), 'the deletion first: steps run from the end of the document backwards');
+    assert.equal(tr.steps[1].from, 0);
+    assert.equal(tr.steps[1].to, state.doc.child(0).nodeSize, 'the box, whole');
     assert.ok(tr.doc.eq(schema.nodeFromJSON(arriving)));
 });
 
@@ -310,4 +315,199 @@ test('a trailing paragraph is not carried over when the document ends in a parag
         ReplaceStep
     );
     assert.ok(typed.doc.eq(schema.nodeFromJSON(withText)));
+});
+
+// ───────────────────────────────────────────────────────── per-block steps (Phase 2)
+
+test('two separate changes are two steps, and a caret between them stays put', () => {
+    const held = doc([para('p1', 'First'), para('p2', 'Second'), para('p3', 'Third')]);
+    const arriving = doc([para('p1', 'First, longer'), para('p2', 'Second'), para('p3', 'Third, longer')]);
+    const state = stateOf(held);
+    // The caret after "Sec" in the middle paragraph.
+    const caret = startOf(state.doc, 'p2') + 1 + 3;
+    const typing = state.apply(state.tr.setSelection(TextSelection.create(state.doc, caret)));
+
+    const tr = remoteTransaction(typing, arriving, ReplaceStep);
+
+    assert.deepEqual(stepTypes(tr), ['replace', 'replace']);
+    assert.ok(tr.steps[0].from > tr.steps[1].to, 'applied from the end of the document backwards');
+    assert.ok(tr.doc.eq(schema.nodeFromJSON(arriving)));
+    assert.equal(tr.doc.textBetween(tr.selection.from - 3, tr.selection.from), 'Sec');
+    assert.equal(tr.doc.textBetween(tr.selection.from, tr.selection.from + 3), 'ond');
+});
+
+test('a change inside a textblock is narrowed to the characters that changed', () => {
+    const held = doc([para('p1', 'First'), para('p2', 'Second'), para('p3', 'Third')]);
+    const arriving = doc([para('p1', 'First'), para('p2', 'Second, edited'), para('p3', 'Third')]);
+    const state = stateOf(held);
+
+    const tr = remoteTransaction(state, arriving, ReplaceStep);
+
+    const p2 = startOf(state.doc, 'p2');
+    assert.deepEqual(stepTypes(tr), ['replace']);
+    assert.equal(tr.steps[0].from, p2 + 1 + 'Second'.length);
+    assert.equal(tr.steps[0].to, p2 + 1 + 'Second'.length);
+    assert.equal(tr.steps[0].slice.content.textBetween(0, tr.steps[0].slice.content.size), ', edited');
+});
+
+test('a changed block that is not a textblock is replaced whole', () => {
+    const held = doc([box('b1', para('p1', 'In the box')), para('p2', 'Two')]);
+    const arriving = doc([box('b1', para('p1', 'In the box, edited')), para('p2', 'Two')]);
+    const state = stateOf(held);
+
+    const tr = remoteTransaction(state, arriving, ReplaceStep);
+
+    assert.deepEqual(stepTypes(tr), ['replace']);
+    assert.equal(tr.steps[0].from, 0);
+    assert.equal(tr.steps[0].to, state.doc.child(0).nodeSize);
+    assert.ok(tr.doc.eq(schema.nodeFromJSON(arriving)));
+});
+
+test('an inserted, a deleted and a changed block are three steps', () => {
+    const held = doc([para('p1', 'One'), para('p2', 'Two'), para('p3', 'Three')]);
+    const arriving = doc([para('p1', 'One!'), para('p3', 'Three'), para('p4', 'Four')]);
+    const state = stateOf(held);
+
+    const tr = remoteTransaction(state, arriving, ReplaceStep);
+
+    assert.deepEqual(stepTypes(tr), ['replace', 'replace', 'replace']);
+    assert.equal(tr.steps[0].from, state.doc.content.size, 'the insertion comes first: it is furthest down');
+    assert.equal(tr.steps[1].from, startOf(state.doc, 'p2'));
+    assert.equal(tr.steps[1].to, startOf(state.doc, 'p3'), 'the deletion, whole');
+    assert.ok(tr.steps[2].from > 0 && tr.steps[2].to < startOf(state.doc, 'p2'), 'the change in p1, narrowed');
+    assert.ok(tr.doc.eq(schema.nodeFromJSON(arriving)));
+});
+
+test('[A] to [B] is one coalesced step, never an empty document', () => {
+    const held = doc([para('p1', 'A')]);
+    const arriving = doc([para('p2', 'B')]);
+    const state = stateOf(held);
+
+    const tr = remoteTransaction(state, arriving, ReplaceStep);
+
+    assert.deepEqual(stepTypes(tr), ['replace']);
+    assert.equal(tr.steps[0].from, 0);
+    assert.equal(tr.steps[0].to, state.doc.content.size);
+    assert.equal(tr.steps[0].slice.content.childCount, 1);
+    assert.ok(tr.doc.eq(schema.nodeFromJSON(arriving)));
+
+    // A block replaced in the middle: the deletion and the insertion at one point are one step too.
+    const replaced = doc([para('p1', 'One'), para('n1', 'New'), para('p3', 'Three')]);
+    const middle = remoteTransaction(stateOf(doc([para('p1', 'One'), para('p2', 'Two'), para('p3', 'Three')])), replaced, ReplaceStep);
+    assert.deepEqual(stepTypes(middle), ['replace']);
+    assert.ok(middle.doc.eq(schema.nodeFromJSON(replaced)));
+});
+
+test('a move falls back to the one-range apply', () => {
+    const held = doc([para('p1', 'One'), para('p2', 'Two'), para('p3', 'Three')]);
+    const arriving = doc([para('p2', 'Two'), para('p1', 'One'), para('p3', 'Three')]);
+    const state = stateOf(held);
+
+    assert.equal(blockSteps(state.doc, schema.nodeFromJSON(arriving), ReplaceStep), null);
+
+    const tr = remoteTransaction(state, arriving, ReplaceStep);
+    assert.deepEqual(stepTypes(tr), ['replace']);
+    assert.equal(tr.steps[0].from, 0);
+    // findDiffEnd stops exactly where the moved pair ends, which is where p3 starts.
+    assert.equal(tr.steps[0].to, startOf(state.doc, 'p3'), 'one range over the two moved blocks, not the whole document');
+    assert.ok(tr.doc.eq(schema.nodeFromJSON(arriving)));
+});
+
+test('a narrowed step that fails is retried whole', () => {
+    // Stands in for a narrowed slice the document refuses: a step that
+    // starts inside a block fails, and the same change as a whole-block
+    // step (which starts at a top-level boundary) applies.
+    class FailsNarrow extends ReplaceStep {
+        apply(docNode) {
+            if (docNode.resolve(this.from).depth > 0) {
+                return StepResult.fail('a narrowed step this document refuses');
+            }
+
+            return super.apply(docNode);
+        }
+    }
+    const held = doc([para('p1', 'First'), para('p2', 'Second')]);
+    const arriving = doc([para('p1', 'First, edited'), para('p2', 'Second')]);
+    const state = stateOf(held);
+
+    const tr = remoteTransaction(state, arriving, FailsNarrow);
+
+    assert.deepEqual(stepTypes(tr), ['replace']);
+    assert.equal(tr.steps[0].from, 0);
+    assert.equal(tr.steps[0].to, state.doc.child(0).nodeSize, 'the whole first paragraph');
+    assert.ok(tr.doc.eq(schema.nodeFromJSON(arriving)));
+});
+
+test('blockSteps gives null for a block without an id or two blocks sharing one, and nothing for identical documents', () => {
+    const okay = schema.nodeFromJSON(doc([para('p1', 'One')]));
+
+    assert.equal(blockSteps(schema.nodeFromJSON(doc([para(null, 'One')])), okay, ReplaceStep), null);
+    assert.equal(blockSteps(okay, schema.nodeFromJSON(doc([para('p1', 'One'), para('p1', 'Again')])), ReplaceStep), null);
+    assert.deepEqual(blockSteps(okay, okay, ReplaceStep), []);
+});
+
+test('more than MAX_BLOCK_STEPS block steps fall back to the one-range apply: a document-sized change is one step', () => {
+    const paragraphs = (count, text) => Array.from({ length: count }, (_, index) => para(`p${index}`, `${text} ${index}`));
+
+    // At the bound: every paragraph changed, one step each.
+    const atBound = remoteTransaction(stateOf(doc(paragraphs(MAX_BLOCK_STEPS, 'old'))), doc(paragraphs(MAX_BLOCK_STEPS, 'new')), ReplaceStep);
+    assert.equal(atBound.steps.length, MAX_BLOCK_STEPS);
+    assert.ok(atBound.doc.eq(schema.nodeFromJSON(doc(paragraphs(MAX_BLOCK_STEPS, 'new')))));
+
+    // One more: the whole range, as Phase 1 applied it.
+    const held = stateOf(doc(paragraphs(MAX_BLOCK_STEPS + 1, 'old')));
+    const arriving = doc(paragraphs(MAX_BLOCK_STEPS + 1, 'new'));
+    assert.equal(blockSteps(held.doc, schema.nodeFromJSON(arriving), ReplaceStep).length, MAX_BLOCK_STEPS + 1, 'blockSteps itself does not cap');
+
+    const beyond = remoteTransaction(held, arriving, ReplaceStep);
+    assert.deepEqual(stepTypes(beyond), ['replace']);
+    assert.ok(beyond.doc.eq(schema.nodeFromJSON(arriving)));
+});
+
+test('an insertion at a block boundary and the replace of the block that starts there are two steps, the replace first', () => {
+    // p2 changes markup (its align), so it is replaced WHOLE, from the boundary where n1 is inserted.
+    const held = doc([para('p1', 'One'), para('p2', 'Two')]);
+    const arriving = doc([para('p1', 'One'), para('n1', 'New'), { ...para('p2', 'Two'), attrs: { id: 'p2', align: 'center' } }]);
+    const state = stateOf(held);
+    const boundary = startOf(state.doc, 'p2');
+
+    const tr = remoteTransaction(state, arriving, ReplaceStep);
+
+    assert.deepEqual(stepTypes(tr), ['replace', 'replace']);
+    assert.deepEqual(
+        [tr.steps[0].from, tr.steps[0].to],
+        [boundary, state.doc.content.size],
+        'the replace of the block that starts at the boundary goes first, over the whole block'
+    );
+    assert.deepEqual([tr.steps[1].from, tr.steps[1].to], [boundary, boundary], 'then the insertion at the same boundary');
+    assert.equal(tr.steps[1].slice.content.childCount, 1);
+    assert.ok(tr.doc.eq(schema.nodeFromJSON(arriving)));
+
+    // The same steps, as blockSteps lists them: nothing needed the probe to repair the order.
+    const listed = blockSteps(state.doc, schema.nodeFromJSON(arriving), ReplaceStep);
+    assert.deepEqual(
+        listed.map(({ step }) => [step.from, step.to]),
+        [
+            [boundary, state.doc.content.size],
+            [boundary, boundary],
+        ]
+    );
+});
+
+test('a run of consecutive insertions is one step with one slice; insertions apart are separate steps', () => {
+    const held = doc([para('p1', 'One'), para('p4', 'Four')]);
+    const run = doc([para('p1', 'One'), para('n1', 'a'), para('n2', 'b'), para('n3', 'c'), para('p4', 'Four')]);
+    const state = stateOf(held);
+
+    const tr = remoteTransaction(state, run, ReplaceStep);
+    assert.deepEqual(stepTypes(tr), ['replace']);
+    assert.equal(tr.steps[0].slice.content.childCount, 3, 'the three new blocks travel as one slice');
+    assert.equal(tr.steps[0].from, tr.steps[0].to, 'an insertion');
+    assert.ok(tr.doc.eq(schema.nodeFromJSON(run)));
+
+    const apart = doc([para('n0', 'first'), para('p1', 'One'), para('n1', 'a'), para('n2', 'b'), para('p4', 'Four')]);
+    const separate = remoteTransaction(state, apart, ReplaceStep);
+    assert.deepEqual(stepTypes(separate), ['replace', 'replace']);
+    assert.deepEqual(separate.steps.map((step) => step.slice.content.childCount), [2, 1], 'the later run first (the end of the document backwards), then the one in front');
+    assert.ok(separate.doc.eq(schema.nodeFromJSON(apart)));
 });

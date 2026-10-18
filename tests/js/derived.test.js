@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { documentsDiffer, stripDerived } from '../../resources/js/editor/derived.js';
+import { DERIVED, documentsDiffer, stripDerived } from '../../resources/js/editor/derived.js';
+import { DERIVED as MERGE_DERIVED } from '../../resources/js/editor/sync/merge.js';
 
 // Outline::apply() stamps toc.entries and crossRef.label into stored JSON.
 // Comparing an offline draft against the server document without stripping
@@ -68,4 +69,11 @@ test('block order is still a difference', () => {
     const b = doc({ type: 'paragraph', attrs: { id: 'b1' } }, { type: 'paragraph', attrs: { id: 'a1' } });
 
     assert.equal(documentsDiffer(a, b), true);
+});
+
+test('the merge module levels exactly the attributes this module strips: the two tables are one', () => {
+    // sync/merge.js imports nothing from outside sync/, so it carries its
+    // own copy of the table. This is what keeps the copy honest.
+    assert.deepEqual(MERGE_DERIVED, DERIVED);
+    assert.deepEqual(DERIVED, { toc: ['entries'], crossRef: ['label'] });
 });

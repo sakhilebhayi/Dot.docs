@@ -1,0 +1,12 @@
+{
+  "name": "f: a block both pasted, identical, is one copy",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]},
+    {"type":"paragraph","attrs":{"id":"q7"},"content":[{"type":"text","text":"pasted"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]},
+    {"type":"paragraph","attrs":{"id":"q7"},"content":[{"type":"text","text":"pasted"}]}]},
+  "expected": {"blocks": [["p1","1"],["q7","pasted"]], "changed": false, "lost": [], "overwrites": false}
+}

@@ -5,7 +5,9 @@ use App\Http\Controllers\DocumentAutosaveController;
 use App\Http\Controllers\DocumentExportController;
 use App\Http\Controllers\DocumentImageController;
 use App\Http\Controllers\DocumentImportController;
+use App\Http\Controllers\DocumentOpenController;
 use App\Http\Controllers\DocumentSyncController;
+use App\Http\Controllers\DocumentSyncMetricsController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\FileViewController;
 use App\Http\Controllers\GuardianHealthController;
@@ -143,6 +145,8 @@ Route::middleware([
     // Documents
     Route::get('/documents', Index::class)->name('documents.index');
     Route::get('/documents/{uuid}/edit', Editor::class)->name('documents.edit');
+    // The destination of an InfoDot deep link: a document, by uuid. Re-authorised by the policy.
+    Route::get('/o/{uuid}', DocumentOpenController::class)->name('documents.open');
     Route::get('/documents/{uuid}/settings', DocumentSettings::class)->name('documents.settings');
     Route::get('/documents/{uuid}/share', ShareManager::class)->name('documents.share');
     Route::get('/documents/{uuid}/history', VersionHistory::class)->name('documents.history');
@@ -167,6 +171,14 @@ Route::middleware([
     // See App\Http\Controllers\DocumentSyncController.
     Route::post('/documents/{uuid}/sync', [DocumentSyncController::class, 'store'])
         ->name('documents.sync');
+
+    // The counters of the sync layer (merges, losses, failed saves, who was
+    // here), flushed by the editor page once a minute and by beacon on
+    // leaving. Counts and kinds only; throttled; any `view` may send. See
+    // App\Http\Controllers\DocumentSyncMetricsController.
+    Route::post('/documents/{uuid}/sync-metrics', DocumentSyncMetricsController::class)
+        ->middleware('throttle:sync-metrics')
+        ->name('documents.sync-metrics');
 
     // Export
     Route::get('/documents/{uuid}/export/{format}', [DocumentExportController::class, 'export'])

@@ -1,0 +1,15 @@
+{
+  "name": "b2 exception: a block they deleted that I had only emptied has nothing to offer back, so it goes without a lost entry",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"y"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"z"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]},
+    {"type":"paragraph","attrs":{"id":"p2"}},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"z"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"z"}]}]},
+  "expected": {"blocks": [["p1","x"],["p3","z"]], "changed": false, "lost": [], "overwrites": false}
+}

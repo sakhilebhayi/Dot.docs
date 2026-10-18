@@ -74,6 +74,12 @@ class DocumentSyncController extends Controller
             'changed' => false,
             'members' => $presence->members($document->id),
             'others' => $presence->others($document->id, $data['tab']),
+            // Whether this person may still change the document, asked of the
+            // same gate as Editor::canEdit() (the update policy, never
+            // cached). It rides on every poll so that a downgrade is noticed
+            // by an open page on its next poll, not only on its next save or
+            // render. Old JavaScript ignores the field.
+            'can_edit' => $user->can('update', $document),
         ];
 
         if ($payload['version'] > (int) $data['version']) {

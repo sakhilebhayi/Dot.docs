@@ -101,8 +101,12 @@ class VersionHistoryTest extends TestCase
         $store->save(Document::findOrFail($doc->id), $para('Last autosave, in no version'), $user);
         $this->assertSame([2, 3], DocumentVersion::where('document_id', $doc->id)->orderBy('id')->pluck('version_number')->all());
 
+        // The `version-restored` browser event had no listener anywhere:
+        // open editors follow a restore through the sync poll, and merge it
+        // over unsaved typing (Phase 2). Nothing is dispatched.
         Livewire::actingAs($user)->test(VersionHistory::class, ['uuid' => $doc->uuid])
-            ->call('restore', $old->id);
+            ->call('restore', $old->id)
+            ->assertNotDispatched('version-restored');
 
         $stored = $doc->fresh();
         $this->assertSame('Old text', $stored->search_text);

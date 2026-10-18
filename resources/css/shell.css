@@ -285,6 +285,25 @@ body {
     transition: background var(--chrome-move) ease, color var(--chrome-move) ease;
 }
 
+/*
+ * At a phone's width the toggle, the status word and the two actions need more room than the bar has (the title is
+ * already squeezed to nothing), and they pushed the PAGE sideways (about 60px at 360px). Tighter padding and gaps
+ * make them fit down to 360px; below that the bar scrolls on its own and the page does not move.
+ */
+@media (max-width: 420px) {
+    .topbar {
+        gap: var(--s1);
+        padding: 0 var(--s2);
+        overflow-x: auto;
+        scrollbar-width: thin;
+    }
+
+    .topbar-action,
+    .topbar-toggle {
+        padding: 0 var(--s2);
+    }
+}
+
 .topbar-action:hover,
 .topbar-toggle:hover {
     background: var(--accent-soft);
@@ -1456,6 +1475,92 @@ button.list-row {
     display: flex;
     flex-wrap: wrap;
     gap: var(--s2);
+}
+
+/*
+ * The lost row's items (editor.blade.php, Phase 2): one block a merge could
+ * not keep per item, oldest first, each with its sentence, its excerpt and
+ * its own Put it back. The list takes a line of its own under the row's
+ * sentence; an item wraps like the row does. An item is switched with the
+ * hidden attribute, which `.doc-notice [hidden]` above covers.
+ */
+.doc-notice-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    flex: 1 1 100%;
+    min-width: 0;
+    /*
+     * Five items of two or three lines each would make the sticky .doc-head taller than a phone's viewport and put
+     * Put them all back and Dismiss all out of reach: the list scrolls inside the row, and the whole head stays near
+     * 40% of the viewport. 11rem is what the rest of the head takes at a phone's width (toolbar, the row's sentence,
+     * its buttons, the gaps); the floor keeps about one item in view on a short screen, and the ceiling is the old
+     * limit for a tall one. Where it does scroll it says so: a shadow at the edge that has more behind it (the
+     * background-attachment: local trick, so it needs no script and works where scrollbars are overlays), and a thin
+     * scrollbar where there is one.
+     */
+    max-height: clamp(5.5rem, calc(40vh - 11rem), 22rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--ink-soft) transparent;
+    background:
+        linear-gradient(var(--surface) 30%, transparent) top / 100% var(--s5) no-repeat local,
+        linear-gradient(transparent, var(--surface) 70%) bottom / 100% var(--s5) no-repeat local,
+        linear-gradient(color-mix(in srgb, var(--ink) 22%, transparent), transparent) top / 100% var(--s2) no-repeat scroll,
+        linear-gradient(transparent, color-mix(in srgb, var(--ink) 22%, transparent)) bottom / 100% var(--s2) no-repeat scroll;
+}
+
+.doc-notice-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2);
+}
+
+/* The item's own sentence: --ink, named so the contrast gate measures it. */
+.doc-notice-sentence {
+    color: var(--ink);
+    overflow-wrap: anywhere;
+}
+
+.doc-notice-excerpt {
+    color: var(--ink-soft);
+    overflow-wrap: anywhere;
+}
+
+/*
+ * A phone's width: the lost row has to show ONE WHOLE item (sentence, excerpt and its Put it back) inside its own scroll
+ * area while the whole sticky head stays under about 45% of a 640px-high screen. Measured at 360x640: the item took 162px
+ * at 15px type and the rest of the head 177px, so no floor satisfied both; at the type size of a hint (12px) and tighter
+ * gaps the item is about 103px and the head 39%. The floor is a little over one item, so the next one shows at the edge
+ * and the list can be seen to scroll.
+ */
+@media (max-width: 420px) {
+    .doc-notice:has(.doc-notice-list) {
+        gap: var(--s1) var(--s3);
+        padding-top: var(--s1);
+        padding-bottom: var(--s1);
+    }
+
+    .doc-notice:has(.doc-notice-list) .doc-notice-text,
+    .doc-notice-sentence,
+    .doc-notice-excerpt {
+        font-size: var(--t-micro);
+        line-height: 1.35;
+    }
+
+    .doc-notice-list {
+        gap: var(--s2);
+        max-height: clamp(7.5rem, calc(40vh - 11rem), 22rem);
+    }
+
+    .doc-notice-item {
+        gap: var(--s1) var(--s2);
+    }
 }
 
 /*

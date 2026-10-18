@@ -205,6 +205,19 @@ class Editor extends Component
      * Suggestion / track-changes mode is rebuilt against the JSON document
      * in Phase 3. This flag is kept as a no-op toggle for the toolbar UI.
      */
+    /**
+     * Whether this person may still change the document, answered from the
+     * database now. The page asks this when a save came back 403, because a
+     * 403 alone does not say why: access lowered, a request that carried
+     * another action which was refused, or a firewall in front of the
+     * application. Only a "no" from here makes the page read only
+     * (sync/host.js, saveRefused()). It writes nothing.
+     */
+    public function canEdit(): bool
+    {
+        return Auth::user()->can('update', $this->document);
+    }
+
     public function toggleSuggestionMode(): void
     {
         $this->suggestionMode = ! $this->suggestionMode;
@@ -457,6 +470,13 @@ class Editor extends Component
             // JSON) but a heading number is decoration only, with nothing to
             // fall back to.
             'outline' => $this->outline(),
+            // Whether this person may change the document (DocumentPolicy::update()).
+            // Answered on EVERY render, never remembered: somebody whose role
+            // was lowered while the page was open is shown the read only
+            // page on the next render. It draws the editor's `editable`
+            // literal and the controls that write; it decides nothing
+            // by itself - every write is authorised again where it happens.
+            'canEdit' => $this->canEdit(),
         ])->title($this->document->title);
     }
 }

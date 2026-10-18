@@ -10,6 +10,7 @@ import { ReplaceStep } from 'prosemirror-transform';
 
 import { BlockId, BlockIdRepair, blockIdRepairPlugin } from '../../resources/js/editor/extensions/blockId.js';
 import { clearHistoryTransaction, remoteTransaction } from '../../resources/js/editor/sync/apply.js';
+import { diffRange } from '../../resources/js/editor/sync/narrow.js';
 
 /**
  * A remote change ends the local undo history.
@@ -65,9 +66,25 @@ const editorOf = (json, plugins = [history()]) => {
     };
 };
 
-/** The first of applyRemote()'s two dispatches: the newer document, outside the undo history. */
-const remote = (state, json) =>
-    remoteTransaction(state, json, ReplaceStep).setMeta('addToHistory', false).setMeta('preventUpdate', true);
+/**
+ * The first of applyRemote()'s two dispatches, as Phase 1 built it: the
+ * newer document as ONE replaced range, outside the undo history. Phase 2
+ * applies per block (remoteTransaction(), which the TipTap cases below
+ * dispatch); the danger shown with this one-range step is the reason the
+ * history is emptied after either kind of apply, because a stored step
+ * mapped through a coarse replacement lands on the text that arrived.
+ */
+const remote = (state, json) => {
+    // The state's own schema: the TipTap cases dispatch this into an editor
+    // whose schema is not the bare one above.
+    const theirs = state.schema.nodeFromJSON(json);
+    const range = diffRange(state.doc, theirs);
+
+    return state.tr
+        .step(new ReplaceStep(range.from, range.toA, theirs.slice(range.from, range.toB)))
+        .setMeta('addToHistory', false)
+        .setMeta('preventUpdate', true);
+};
 
 // ───────────────────────────────────────────────────────── the case that loses text
 
@@ -252,8 +269,8 @@ function tiptapEditor(content) {
  * loaded here, it needs a browser): the newer document, and directly after
  * it the transaction that empties the history.
  */
-function dispatchAsApplyRemoteDoes(editor, json, { clearHistory = true } = {}) {
-    const tr = remoteTransaction(editor.state, json, ReplaceStep);
+function dispatchAsApplyRemoteDoes(editor, json, { clearHistory = true, oneRange = false } = {}) {
+    const tr = oneRange ? remote(editor.state, json) : remoteTransaction(editor.state, json, ReplaceStep);
 
     if (!tr.docChanged) {
         return;
@@ -295,7 +312,11 @@ function tiptapAfterTheirChange(options) {
 }
 
 test('in TipTap own editor, with the history kept, undo deletes the text that arrived', () => {
-    const { editor } = tiptapAfterTheirChange({ clearHistory: false });
+    // The Phase 1 one-range apply, kept as the demonstration. Per-block
+    // steps change what this particular undo does (it joins the two
+    // paragraphs they typed instead of deleting the text), not whether the
+    // history must go.
+    const { editor } = tiptapAfterTheirChange({ clearHistory: false, oneRange: true });
 
     assert.equal(editor.can().undo(), true);
     assert.equal(editor.commands.undo(), true);
@@ -342,8 +363,11 @@ test('in TipTap own editor, plugins append to the remote dispatch and nothing to
         doc(para('ownerXX1', 'Hello!'), para('tailXXX2', 'Tail, edited'), { type: 'horizontalRule', attrs: { id: 'ruleXXX3' } })
     );
 
+    // Two block steps of its own (the edited paragraph, narrowed, and the
+    // rule inserted), then what the plugins appended; the clearing
+    // transaction has no steps and nothing is appended to it.
     assert.deepEqual(dispatches.slice(before.dispatches), [
-        [1, [1, 1]],
+        [2, [1, 1]],
         [0, []],
     ]);
     assert.equal(updates.length, before.updates, 'neither dispatch fired update');

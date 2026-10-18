@@ -1,0 +1,13 @@
+{
+  "name": "c2 with deletionsWin false (the draft merge): their edit stands, nothing is lost, no flag",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"y"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"y A"}]}]},
+  "options": {"deletionsWin": false},
+  "expected": {"blocks": [["p1","x"],["p2","y A"]], "changed": false, "lost": [], "overwrites": false}
+}
