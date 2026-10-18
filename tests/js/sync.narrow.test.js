@@ -5,7 +5,7 @@ import { Schema } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { ReplaceStep } from 'prosemirror-transform';
 
-import { diffRange } from '../../resources/js/editor/sync/narrow.js';
+import { diffRange, insertionPoint } from '../../resources/js/editor/sync/narrow.js';
 
 // A stand-in for the editor's schema: blocks with ids, like every Dot.Doc
 // block. diffRange() only uses Fragment.findDiffStart/findDiffEnd, so the
@@ -129,4 +129,32 @@ test('a change inside an isolating node plus a change after it is reproduced exa
 
     const result = follow(EditorState.create({ doc: before }), after);
     assert.ok(result.doc.eq(after));
+});
+
+// ───────────────────────────────────────────────────────── where a lost block goes back (Phase 2)
+
+test('insertionPoint: the first anchor that is on the page wins, and the block goes after it', () => {
+    const page = doc(para('p1', 'One'), para('p2', 'Two'), para('p3', 'Three'));
+
+    assert.equal(insertionPoint(page, ['p2', 'p1']), page.child(0).nodeSize + page.child(1).nodeSize);
+    assert.equal(insertionPoint(page, ['p1']), page.child(0).nodeSize);
+});
+
+test('insertionPoint: a later anchor is used when the first is gone', () => {
+    const page = doc(para('p1', 'One'), para('p3', 'Three'));
+
+    assert.equal(insertionPoint(page, ['p2', 'p1']), page.child(0).nodeSize);
+    assert.equal(insertionPoint(page, ['p9', 'p3']), page.content.size);
+});
+
+test('insertionPoint: anchors that are all gone put the block at the end', () => {
+    const page = doc(para('p1', 'One'), para('p2', 'Two'));
+
+    assert.equal(insertionPoint(page, ['p7', 'p8']), page.content.size);
+});
+
+test('insertionPoint: no anchors at all put the block at the start', () => {
+    const page = doc(para('p1', 'One'), para('p2', 'Two'));
+
+    assert.equal(insertionPoint(page, []), 0);
 });

@@ -62,3 +62,38 @@ export function diffRange(current, next) {
 
     return { from, toA, toB };
 }
+
+/**
+ * Where a lost block goes back on the page (Put it back, Phase 2).
+ *
+ * `anchors` are block ids, nearest first: for a block that was changed on
+ * both sides (D1) the id of the block that won, so mine goes in directly
+ * below it; for a block that was deleted while I typed in it (D2) up to
+ * five ids that preceded it, so it goes back where it was even if its
+ * nearest neighbour has gone too. The first anchor that is on the page
+ * decides; with anchors but none of them on the page the block goes to
+ * the END (its neighbourhood is gone: after everything, never before the
+ * title); with no anchors at all (it had no predecessor) it goes to the
+ * START.
+ *
+ * Pure: it only reads the document it is given.
+ *
+ * @param {import('prosemirror-model').Node} doc the document the editor holds
+ * @param {string[]} anchors block ids, nearest first
+ * @returns {number} a position between two top-level blocks
+ */
+export function insertionPoint(doc, anchors) {
+    for (const anchor of anchors) {
+        let found = null;
+        doc.forEach((child, offset) => {
+            if (found === null && child.attrs.id === anchor) {
+                found = offset + child.nodeSize;
+            }
+        });
+        if (found !== null) {
+            return found;
+        }
+    }
+
+    return anchors.length > 0 ? doc.content.size : 0;
+}

@@ -1,0 +1,15 @@
+{
+  "name": "b2 (D2): a block they deleted while I typed in it goes, and my words are offered back with their place",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"y"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"z"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"y B"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"z"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"z"}]}]},
+  "expected": {"blocks": [["p1","x"],["p3","z"]], "changed": false, "lost": [{"id":"p2","reason":"deleted","anchors":["p1"]}], "overwrites": false}
+}

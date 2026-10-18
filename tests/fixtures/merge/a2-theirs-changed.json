@@ -1,0 +1,10 @@
+{
+  "name": "a2: a block only they changed takes their version, and nothing counts as changed",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello A"}]}]},
+  "expected": {"blocks": [["p1","Hello A"]], "changed": false, "lost": [], "overwrites": false}
+}

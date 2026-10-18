@@ -1,0 +1,11 @@
+{
+  "name": "g: a block both deleted goes, and nothing counts as changed",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"y"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"x"}]}]},
+  "expected": {"blocks": [["p1","x"]], "changed": false, "lost": [], "overwrites": false}
+}

@@ -1,0 +1,16 @@
+{
+  "name": "echo (4.2): what the server holds is my own last save, so mine wins where I typed on, and nothing is read as their change",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"World"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello X Y"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"World"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello X"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"World"}]}]},
+  "echo": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"Hello X"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"World"}]}]},
+  "expected": {"blocks": [["p1","Hello X Y"],["p2","World"]], "changed": true, "lost": [], "overwrites": false}
+}

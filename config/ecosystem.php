@@ -64,4 +64,26 @@ return [
 
     'handoff_ttl' => env('ECOSYSTEM_HANDOFF_TTL', 5),
 
+    /*
+    |--------------------------------------------------------------------------
+    | InfoDot identity (redeem)
+    |--------------------------------------------------------------------------
+    | This app has its own database, so a handoff token from InfoDot cannot be
+    | found locally. When INFODOT_SERVICE_SECRET is set, the token is sent to
+    | InfoDot's redeem endpoint instead (same value as ECOSYSTEM_SECRET_<KEY> in
+    | InfoDot's .env). Without a secret the app only accepts tokens present in its
+    | own database, which is the old shared-database behaviour.
+    */
+
+    'infodot' => [
+        'redeem_url' => env('INFODOT_REDEEM_URL', 'https://infodot.co.za/api/ecosystem/redeem'),
+        // Where this app tells InfoDot about the documents it holds (a pointer per document).
+        // Derived from the redeem URL when not set.
+        'resources_url' => env('INFODOT_RESOURCES_URL'),
+        'platform' => env('INFODOT_PLATFORM_KEY', 'docs'),
+        'secret' => env('INFODOT_SERVICE_SECRET'),
+        'timeout' => (int) env('INFODOT_REDEEM_TIMEOUT', 5),
+        'provision' => (bool) env('INFODOT_PROVISION_USERS', true),
+    ],
+
 ];

@@ -1,0 +1,16 @@
+{
+  "name": "d: a block I inserted after a predecessor they deleted anchors to the nearest surviving one",
+  "base": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"2"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"3"}]}]},
+  "mine": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]},
+    {"type":"paragraph","attrs":{"id":"p2"},"content":[{"type":"text","text":"2"}]},
+    {"type":"paragraph","attrs":{"id":"n1"},"content":[{"type":"text","text":"new"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"3"}]}]},
+  "theirs": {"type":"doc","content":[
+    {"type":"paragraph","attrs":{"id":"p1"},"content":[{"type":"text","text":"1"}]},
+    {"type":"paragraph","attrs":{"id":"p3"},"content":[{"type":"text","text":"3"}]}]},
+  "expected": {"blocks": [["p1","1"],["n1","new"],["p3","3"]], "changed": true, "lost": [], "overwrites": false}
+}

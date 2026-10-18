@@ -41,6 +41,11 @@
         // replaces the version that was loaded. Every save says so (the
         // unload beacon too) until one that said so is accepted.
         overwriteOwed: false,
+        // The base the owed overwrite first became owed on, null while none
+        // is owed: the offline draft is stamped below it, so a draft typed
+        // after Keep mine is never merged as if nothing were owed (see
+        // draftStamp() in sync/host.js).
+        overwriteFloor: null,
         // Set while a newer version exists on the server AND this tab holds
         // unsaved typing. Saving is suspended until the writer chooses.
         // `version` is the newest version known to be in the way; `ready`
@@ -62,6 +67,33 @@
         // clears them with it.
         setAsideFrom: null,
         setAsideBase: null,
+        // Phase 2, the paragraph-level merge (sync/host.js writes all seven).
+        // merging: {version, since} while a newer document is being fetched
+        // to merge the typing into; persist() sends nothing meanwhile.
+        merging: null,
+        // Merges after refused saves, in a row: MERGE_ATTEMPTS (5, sync/host.js) end in the notice.
+        mergeAttempts: 0,
+        // The last server document this tab held, {version, json}, as the
+        // editor serialises it. Never nulled: confirmed is nulled on purpose
+        // (a lost save answer, Keep mine) while this is still the merge base.
+        known: null,
+        // The JSON string of the save in the air, and of the last save given
+        // up on or whose request failed: the echo a merge recognises as this
+        // tab's own change (section 5.6 of the Phase 2 spec).
+        sentSnapshot: null,
+        unanswered: null,
+        // What a merge could not keep, oldest first: the lost row offers it
+        // back (section 6 of the Phase 2 spec).
+        lost: [],
+        // The saveSeq at the moment Put it back last replaced the text: a save sent at or before it did not carry that text.
+        putBackSeq: 0,
+        // An offer of a kept park was held back (a conflict, a merge or a stop reason stood): the poll tick makes it when they clear.
+        parkOfferPending: false,
+        // Consecutive saves whose request failed, and the time before which the next one is held back (sync/host.js, SAVE_RETRY_DELAYS_MS).
+        saveFailures: 0,
+        // What the notice bar's last pressed action returned (see pressed() and noticePressed() below).
+        lastPress: undefined,
+        saveRetryAt: 0,
         // A reason the page can no longer stay in step (signed out, access
         // removed, document deleted, a version this editor cannot open).
         // Shown in the notice bar.
@@ -73,6 +105,30 @@
         typingTimeout: null,
         isOffline: !navigator.onLine,
         docUuid: '{{ $document->uuid }}',
+        // Whether the server drew this page for somebody who may change the
+        // document (DocumentPolicy::update()). The only server-drawn literal
+        // that decides a gate (besides the versions, the uuid and metricsOn), and a plain boolean: it is the
+        // page-load truth sync/host.js decides read only by (a person who may
+        // not change the document never saves, drafts or sends a beacon, and
+        // the editor is mounted not editable). It turns false on this object
+        // when a save is refused with 403 (access lowered while the page was
+        // open): the host sets it, the notice bar reads it.
+        editable: {{ $canEdit ? 'true' : 'false' }},
+        // Text typed on this page was left unsent because that refusal came
+        // before it was stored; a copy is kept in this browser.
+        unsentKept: false,
+        // When the question may I still change this was put to the server
+        // after a save came back 403, and 0 while none is out. The 403
+        // alone is not proof (a firewall, or another action sent with the
+        // save, can cause it), so saves wait for the answer
+        // (sync/host.js, saveRefused()).
+        accessCheckSince: 0,
+        // Takes the refusal hook off Livewire when the page is really removed.
+        unhookRefusal: null,
+        // Whether the server collects the co-editing counters (config docs.sync_metrics, env DOCS_SYNC_METRICS).
+        // A plain boolean, the same on every render of one deploy, so it never changes this string between
+        // renders. The counters themselves live in sync/metrics.js and on the editor element.
+        metricsOn: {{ config('docs.sync_metrics') ? 'true' : 'false' }},
         // The document version this page was rendered from, and the version
         // the last successful save reported. Draft recency is decided by
         // VERSION, never by a clock: `savedAt` comes off the browser and
@@ -119,9 +175,16 @@
         // document the writer has just asked to look at. No scrolling:
         // nobody asked to go anywhere. This is page glue about focus, not a
         // decision about a save; sync/host.js has no DOM.
+        // An action that was declined or failed (it returned false) leaves the focus where it is: the
+        // row stays, and moving the keyboard to the paper would take it away from the button.
+        pressed(result) { this.lastPress = result; return result; },
         noticePressed(event) {
+            const done = this.lastPress;
+            this.lastPress = undefined;
             if (event.detail !== 0 || !event.target.closest('button')) return;
-            this.ed()?.commands.focus(null, { scrollIntoView: false });
+            Promise.resolve(done).then((completed) => {
+                if (this.syncHost().refocusAfterPress(completed)) this.ed()?.commands.focus(null, { scrollIntoView: false });
+            });
         },
 
         init() {
@@ -190,16 +253,50 @@
                 // moment: the beacon then says so too, and the server keeps
                 // the version it replaces.
                 getOverwrite: () => this.overwriteOwed,
+                // Whether text handed to Livewire is unsent and unanswered (its
+                // request failed, or the back-off holds it): the beacon then
+                // carries it, which the bundle's own bookkeeping would skip.
+                getUnsent: () => this.syncHost().unsentAtUnload(),
+                // Mounted not editable for somebody who may only read.
+                editable: this.editable,
                 onChange: (json) => this.persist(json),
                 onSelection: (s) => { this.selection = s; this.tick++; },
                 onCommand: (name, params) => this.hostCommand(name, params),
             });
             const editor = handle.editor;
 
+            // A render drew editable false (this person's role was lowered
+            // since the page opened) but the editor was mounted editable: it
+            // is made read only now, on whichever object runs this, and the
+            // object that owns the page is told so it can say it in the
+            // notice bar (a later object cannot: its fields are not the
+            // ones the bar reads).
+            if (this.editable === false && !handle.readOnly) {
+                handle.makeReadOnly();
+                window.dispatchEvent(new CustomEvent('dotdoc:read-only'));
+            }
+
             if (!this.owns) return;
 
+            this.startMetrics();
+
+            window.addEventListener('dotdoc:read-only', () => this.syncHost().readOnlyNoticed());
+
+            // A save the server refuses with 403 means this person may no
+            // longer change the document: the page becomes the read only
+            // page. A refused Livewire request never settles its promise and
+            // Livewire would lay its own error page over the document, so the
+            // refusal is caught here, on the request. Which requests count,
+            // and what the page does, is decided in sync/host.js.
+            this.unhookRefusal = window.Livewire.hook('request', ({ payload, fail }) => {
+                if (!this.syncHost().isSaveRequest(payload)) return;
+                fail(({ status, preventDefault }) => {
+                    if (this.syncHost().saveRefused(status)) preventDefault();
+                });
+            });
+
             // What the editor holds now is what the server last confirmed,
-            // and the status word says Saved (or Read only, fail-closed).
+            // and the status word says Saved (or Read only: fail-closed, or a person who may only read).
             this.syncHost().opened();
 
             // Typing indicator and the offline draft run off every keystroke;
@@ -242,6 +339,8 @@
             // stop seeing a face that is no longer here. By beacon, like the
             // unload save: nothing else is delivered from a closing page.
             window.addEventListener('pagehide', () => {
+                // The counters go after the editor's own pagehide flush (registered when it was mounted, so it runs first and its beacon takes the shared budget first), and never in the way: a beacon, nothing awaited, nothing thrown.
+                try { this.syncMetrics()?.flush({ beacon: true }); } catch (_) {}
                 if (typeof navigator.sendBeacon !== 'function') return;
                 navigator.sendBeacon(
                     '{{ route('documents.sync', $document->uuid) }}',
@@ -281,6 +380,8 @@
                 refreshOutline: () => this.refreshOutline(),
                 // The presence strip is rendered by Livewire.
                 refreshPresence: () => @this.refreshPresence(),
+                // Whether this person may still change the document, from the server.
+                canEdit: () => @this.canEdit(),
                 report: (tone, word) => this.report(tone, word),
                 drafts: () => window.offlineDraft,
                 documentsDiffer: (a, b) => window.DotDoc.documentsDiffer(a, b),
@@ -302,6 +403,9 @@
                 now: () => Date.now(),
                 info: (...args) => console.info(...args),
                 log: (...args) => console.error(...args),
+                // What happened, as counts (sync/metrics.js). Nothing comes back and nothing waits on it. Switched
+                // off, there is no env.metric at all, so the host does no extra work for a counter nobody keeps.
+                metric: this.metricsOn ? (kind, detail) => this.syncMetrics()?.record(kind, detail) : undefined,
             });
         },
 
@@ -313,9 +417,12 @@
         applyFromSync(remote, options) { return this.syncHost().applyFromSync(remote, options); },
         enterConflict(version) { this.syncHost().enterConflict(version); },
         keepMine() { this.syncHost().keepMine(); },
-        loadTheirs() { return this.syncHost().loadTheirs(); },
-        putBack() { this.syncHost().putBack(); },
-        discardSetAside() { this.syncHost().discardSetAside(); },
+        loadTheirs() { return this.pressed(this.syncHost().loadTheirs()); },
+        putBack() { return this.pressed(this.syncHost().putBack()); },
+        discardSetAside() { return this.pressed(this.syncHost().discardSetAside()); },
+        putBackLost(index, fromKeyboard) { return this.pressed(this.syncHost().putBackLost(index, { focus: fromKeyboard === true })); },
+        putBackAllLost(fromKeyboard) { return this.pressed(this.syncHost().putBackAllLost({ focus: fromKeyboard === true })); },
+        dismissLost() { return this.pressed(this.syncHost().dismissLost()); },
         membersChanged(members) { this.syncHost().membersChanged(members); },
         restoreDraftIfRestorable() { return this.syncHost().restoreDraft(); },
         applySuggestion(content, version) { this.syncHost().applySuggestion(content, version); },
@@ -334,6 +441,35 @@
         // reactive data, for the same reason the editor handle is.
         syncEngine() {
             return this.$refs.editorEl?.__dotdocSync ?? null;
+        },
+
+        // The co-editing counters, parked on the element for the same reason
+        // (and so every data object reaches the same one). Null when the
+        // server switched counting off. The once-a-minute flush is an ordinary
+        // POST; only the flush on leaving is a beacon, with the token in the
+        // body as the other unload beacons have it. Whatever goes wrong with
+        // either is dropped by the module.
+        syncMetrics() {
+            return this.$refs.editorEl?.__dotdocMetrics ?? null;
+        },
+
+        startMetrics() {
+            const host = this.$refs.editorEl;
+            if (!this.metricsOn || !host || host.__dotdocMetrics || !window.DotDoc?.sync?.createMetrics) return;
+
+            const url = '{{ route('documents.sync-metrics', $document->uuid) }}';
+            host.__dotdocMetrics = window.DotDoc.sync.createMetrics({
+                now: () => Date.now(),
+                token: () => document.querySelector('meta[name=csrf-token]').content,
+                send: (body) => fetch(url, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body,
+                }).then((response) => response.ok),
+                beacon: (body) => typeof navigator.sendBeacon === 'function'
+                    && navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })),
+            });
         },
 
         startSync() {
@@ -456,6 +592,7 @@
             // that; only a real removal tears them down.
             if (this.$el && this.$el.isConnected) return;
             clearTimeout(this.typingTimeout);
+            if (this.unhookRefusal) this.unhookRefusal();
             this.syncEngine()?.stop();
             if (this.$refs.editorEl) this.$refs.editorEl.__dotdocSync = null;
             // Echo.join() hands back the CHANNEL, which has no leave() of its
@@ -472,6 +609,10 @@
             if (this.owns) {
                 window.DotDoc?.get(this.$refs.editorEl)?.destroy();
             }
+            // The counters leave by beacon AFTER the editor's own destroy, which flushes the unsaved text by beacon:
+            // the browser shares one 64 KiB budget between a page's beacons, and the document comes first.
+            try { this.syncMetrics()?.flush({ beacon: true }); } catch (_) {}
+            if (this.$refs.editorEl) this.$refs.editorEl.__dotdocMetrics = null;
         },
 
         // Apply an AI result to the editor.
@@ -564,10 +705,12 @@
                    wire:change="saveTitle"
                    type="text"
                    class="doc-title-field"
-                   placeholder="Untitled" />
+                   placeholder="Untitled"
+                   @readonly(! $canEdit) />
 
             <label class="sr-only" for="doc-style-picker">Document style</label>
-            <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select">
+            <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select"
+                    @disabled(! $canEdit)>
                 @foreach (\App\Styles\StyleEngine::systemKeys() as $styleKey)
                     <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
                 @endforeach
@@ -602,8 +745,10 @@
                  affordance, and it opens the same .sheet folder picker the
                  documents index uses for rename. --}}
             <span class="micro doc-bar-filed" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
-            <button type="button" class="tool tool-mono" x-ref="moveTrigger"
-                    wire:click="$set('showMoveSheet', true)">Move</button>
+            @if ($canEdit)
+                <button type="button" class="tool tool-mono" x-ref="moveTrigger"
+                        wire:click="$set('showMoveSheet', true)">Move</button>
+            @endif
             @error('location')
                 <span class="field-error">{{ $message }}</span>
             @enderror
@@ -699,10 +844,17 @@
                      clears the flag on the next poll that completes
                      (settleIfBackAtConfirmed() in sync/host.js). --}}
                 <span x-show="!isTyping && !isOffline && !conflict && !syncNotice && !unsaved">
-                    @unless ($errors->has('content'))
-                        <x-shell.status-word tone="good" :word="$saved ? 'Saved' : 'Ready'"
-                                             wire:loading.remove wire:target="saveContent,saveTitle" />
-                    @endunless
+                    @if (! $canEdit)
+                        {{-- Somebody who may read and not change the document
+                             has nothing to save: the word says what they have
+                             instead of Saved. --}}
+                        <x-shell.status-word tone="idle" word="Read only" data-read-only-word />
+                    @else
+                        @unless ($errors->has('content'))
+                            <x-shell.status-word tone="good" :word="$saved ? 'Saved' : 'Ready'" data-saved-word
+                                                 wire:loading.remove wire:target="saveContent,saveTitle" />
+                        @endunless
+                    @endif
                 </span>
 
                 <span class="micro" title="Last edited {{ $document->updated_at->diffForHumans() }}">
@@ -724,10 +876,12 @@
                         <span class="micro">Ctrl+Shift+K</span>
                     </button>
 
-                    <button type="button" wire:click="toggleSuggestionMode"
-                            aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
-                        {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
-                    </button>
+                    @if ($canEdit)
+                        <button type="button" wire:click="toggleSuggestionMode"
+                                aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
+                            {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
+                        </button>
+                    @endif
 
                     {{-- No `data-shell-expand` here, deliberately: comments render
                          in `.editor-side`, beside the paper, NOT in the dock.
@@ -739,24 +893,26 @@
                         {{ $commentSidebarOpen ? 'Hide comments' : 'Show comments' }}
                     </button>
 
-                    <button type="button" @click="ed().chain().focus().undo().run(); open = false">
-                        Undo
-                        <span class="micro">&#8984;Z</span>
-                    </button>
-                    <button type="button" @click="ed().chain().focus().redo().run(); open = false">
-                        Redo
-                        <span class="micro">&#8679;&#8984;Z</span>
-                    </button>
+                    @if ($canEdit)
+                        <button type="button" @click="ed().chain().focus().undo().run(); open = false">
+                            Undo
+                            <span class="micro">&#8984;Z</span>
+                        </button>
+                        <button type="button" @click="ed().chain().focus().redo().run(); open = false">
+                            Redo
+                            <span class="micro">&#8679;&#8984;Z</span>
+                        </button>
 
-                    <button type="button"
-                            :class="ed()?.isActive('code') ? 'is-on' : ''"
-                            @click="ed().chain().focus().toggleCode().run(); open = false">Inline code</button>
+                        <button type="button"
+                                :class="ed()?.isActive('code') ? 'is-on' : ''"
+                                @click="ed().chain().focus().toggleCode().run(); open = false">Inline code</button>
 
-                    <div x-data="voiceTyping" x-init="init()">
-                        <button type="button" x-show="supported" @click="toggle()"
-                                :aria-pressed="listening ? 'true' : 'false'"
-                                x-text="listening ? 'Stop voice typing' : 'Start voice typing'">Start voice typing</button>
-                    </div>
+                        <div x-data="voiceTyping" x-init="init()">
+                            <button type="button" x-show="supported" @click="toggle()"
+                                    :aria-pressed="listening ? 'true' : 'false'"
+                                    x-text="listening ? 'Stop voice typing' : 'Start voice typing'">Start voice typing</button>
+                        </div>
+                    @endif
 
                     <span class="menu-label">Export</span>
                     <a href="{{ route('documents.export', [$document->uuid, 'pdf']) }}">PDF</a>
@@ -778,17 +934,19 @@
                         </form>
                     @endforeach
 
-                    <span class="menu-label">Import</span>
-                    <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
-                          enctype="multipart/form-data" class="menu-form">
-                        @csrf
-                        <label class="field-label" for="doc-import">A .docx or .md file</label>
-                        <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
-                        <button type="submit" class="btn btn-primary">Import it</button>
-                    </form>
+                    @if ($canEdit)
+                        <span class="menu-label">Import</span>
+                        <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
+                              enctype="multipart/form-data" class="menu-form">
+                            @csrf
+                            <label class="field-label" for="doc-import">A .docx or .md file</label>
+                            <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
+                            <button type="submit" class="btn btn-primary">Import it</button>
+                        </form>
 
-                    <button type="button" @click="$dispatch('open-save-as-template'); open = false"
-                            title="Save this document as a reusable template">Save as a template</button>
+                        <button type="button" @click="$dispatch('open-save-as-template'); open = false"
+                                title="Save this document as a reusable template">Save as a template</button>
+                    @endif
                 </div>
             </div>
         </div>
@@ -831,7 +989,7 @@
                Do NOT use x-bind:hidden on anything outside a wire:ignore
                element: without the x-show guard a morph writes the newest
                object's answer straight onto the live element. --}}
-        <div class="doc-notices" role="status" aria-live="polite" wire:ignore
+        <div class="doc-notices" role="status" aria-live="polite" aria-atomic="false" wire:ignore
              @click="noticePressed($event)">
             {{-- A newer version was saved elsewhere while this tab held
                  unsaved typing. Saving is suspended until the writer picks
@@ -853,7 +1011,7 @@
             <div class="doc-notice" hidden x-bind:hidden="!conflict">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
-                    <span>Not saved — this document was changed elsewhere while you were typing. Choose one.</span>
+                    <span>Not saved — this document was changed elsewhere while you were typing, and the two could not be combined. Choose one.</span>
                 </p>
                 <span class="doc-notice-actions">
                     <button type="button" class="tool tool-mono" @click="keepMine()"
@@ -865,6 +1023,88 @@
                             title="Show the newer version. You can put your text back afterwards.">Load theirs</button>
                     <span id="doc-notice-keep-mine-does" hidden>Save your version over the newer one. The other version is kept in the history.</span>
                     <span id="doc-notice-load-theirs-does" hidden>Show the newer version. You can put your text back afterwards.</span>
+                </span>
+            </div>
+
+            {{-- ── The lost row (Phase 2) ────────────────────────────────
+                 What a merge could not keep: a paragraph both people changed
+                 at the same moment (theirs stays on the page, this is yours),
+                 or one somebody removed while you were typing in it. Each
+                 item is offered back on its own: Put it back puts it below
+                 the version that is there now, or where it was before it was
+                 removed, as an ordinary edit the autosave sends. Items are
+                 appended and never withdrawn; a copy of the whole list is
+                 parked in this browser for 7 days WHERE IT KEEPS DRAFTS
+                 (sync/host.js, offerLost(): a write that fails is not
+                 reported, so the header does not promise the copy; the
+                 Dismiss all question and title say it, and ask again when
+                 the copy could not be written).
+
+                 Five STATIC item slots switched with hidden, not x-for: the
+                 wiring test pins every element, and no Alpine pattern new to
+                 this bar is introduced (the Phase 1 bar faults were only
+                 visible in a browser). LOST_ROWS in sync/host.js is the same
+                 five; a sixth item and beyond are counted in the last line and
+                 come back with Put them all back. Nothing here is rendered by
+                 the server: Livewire ignores the whole bar. --}}
+            <div class="doc-notice" hidden x-bind:hidden="!lost.length">
+                <p class="doc-notice-text">
+                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                    <span>Not everything you typed could be kept. Each item below stays here until you put it back or dismiss it.</span>
+                </p>
+                <ul class="doc-notice-list">
+                    <li class="doc-notice-item" hidden x-bind:hidden="!lost[0]">
+                        <span class="sr-only" id="doc-notice-lost-0-count" x-text="lost.length > 1 ? 'Item 1 of ' + lost.length + '. ' : ''"></span>
+                        <span class="doc-notice-sentence" id="doc-notice-lost-0-sentence" x-text="lost[0] ? lost[0].sentence : ''"></span>
+                        <q class="doc-notice-excerpt" id="doc-notice-lost-0-excerpt" x-text="lost[0] ? lost[0].excerpt : ''"></q>
+                        <button type="button" class="tool tool-mono" @click="putBackLost(0, $event.detail === 0)"
+                                aria-describedby="doc-notice-lost-0-count doc-notice-lost-0-sentence doc-notice-lost-0-excerpt doc-notice-put-back-lost-does"
+                                title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
+                    </li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="!lost[1]">
+                        <span class="sr-only" id="doc-notice-lost-1-count" x-text="lost.length > 1 ? 'Item 2 of ' + lost.length + '. ' : ''"></span>
+                        <span class="doc-notice-sentence" id="doc-notice-lost-1-sentence" x-text="lost[1] ? lost[1].sentence : ''"></span>
+                        <q class="doc-notice-excerpt" id="doc-notice-lost-1-excerpt" x-text="lost[1] ? lost[1].excerpt : ''"></q>
+                        <button type="button" class="tool tool-mono" @click="putBackLost(1, $event.detail === 0)"
+                                aria-describedby="doc-notice-lost-1-count doc-notice-lost-1-sentence doc-notice-lost-1-excerpt doc-notice-put-back-lost-does"
+                                title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
+                    </li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="!lost[2]">
+                        <span class="sr-only" id="doc-notice-lost-2-count" x-text="lost.length > 1 ? 'Item 3 of ' + lost.length + '. ' : ''"></span>
+                        <span class="doc-notice-sentence" id="doc-notice-lost-2-sentence" x-text="lost[2] ? lost[2].sentence : ''"></span>
+                        <q class="doc-notice-excerpt" id="doc-notice-lost-2-excerpt" x-text="lost[2] ? lost[2].excerpt : ''"></q>
+                        <button type="button" class="tool tool-mono" @click="putBackLost(2, $event.detail === 0)"
+                                aria-describedby="doc-notice-lost-2-count doc-notice-lost-2-sentence doc-notice-lost-2-excerpt doc-notice-put-back-lost-does"
+                                title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
+                    </li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="!lost[3]">
+                        <span class="sr-only" id="doc-notice-lost-3-count" x-text="lost.length > 1 ? 'Item 4 of ' + lost.length + '. ' : ''"></span>
+                        <span class="doc-notice-sentence" id="doc-notice-lost-3-sentence" x-text="lost[3] ? lost[3].sentence : ''"></span>
+                        <q class="doc-notice-excerpt" id="doc-notice-lost-3-excerpt" x-text="lost[3] ? lost[3].excerpt : ''"></q>
+                        <button type="button" class="tool tool-mono" @click="putBackLost(3, $event.detail === 0)"
+                                aria-describedby="doc-notice-lost-3-count doc-notice-lost-3-sentence doc-notice-lost-3-excerpt doc-notice-put-back-lost-does"
+                                title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
+                    </li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="!lost[4]">
+                        <span class="sr-only" id="doc-notice-lost-4-count" x-text="lost.length > 1 ? 'Item 5 of ' + lost.length + '. ' : ''"></span>
+                        <span class="doc-notice-sentence" id="doc-notice-lost-4-sentence" x-text="lost[4] ? lost[4].sentence : ''"></span>
+                        <q class="doc-notice-excerpt" id="doc-notice-lost-4-excerpt" x-text="lost[4] ? lost[4].excerpt : ''"></q>
+                        <button type="button" class="tool tool-mono" @click="putBackLost(4, $event.detail === 0)"
+                                aria-describedby="doc-notice-lost-4-count doc-notice-lost-4-sentence doc-notice-lost-4-excerpt doc-notice-put-back-lost-does"
+                                title="Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put it back</button>
+                    </li>
+                    <li class="doc-notice-item" hidden x-bind:hidden="lost.length <= 5"><span>And <span x-text="lost.length - 5"></span> more. Put them all back restores every item, these included.</span></li>
+                </ul>
+                <span class="doc-notice-actions">
+                    <button type="button" class="tool tool-mono" @click="putBackAllLost($event.detail === 0)"
+                            aria-describedby="doc-notice-put-back-all-lost-does"
+                            title="Put every item back on the page, oldest first: each below the version that is there now, or where it was before it was removed. Nothing else on the page changes.">Put them all back</button>
+                    <button type="button" class="tool tool-mono" @click="dismissLost()"
+                            aria-describedby="doc-notice-dismiss-lost-does"
+                            title="Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts. If this browser cannot keep it, you are asked again before it is dropped.">Dismiss all</button>
+                    <span id="doc-notice-put-back-lost-does" hidden>Put this text back on the page: below the version that is there now, or where it was before it was removed. Nothing else on the page changes.</span>
+                    <span id="doc-notice-put-back-all-lost-does" hidden>Put every item back on the page, oldest first: each below the version that is there now, or where it was before it was removed. Nothing else on the page changes.</span>
+                    <span id="doc-notice-dismiss-lost-does" hidden>Remove these items from this page. The text is in no saved version; it is kept only in this browser, for 7 days, where this browser keeps drafts. If this browser cannot keep it, you are asked again before it is dropped.</span>
                 </span>
             </div>
 
@@ -913,10 +1153,35 @@
                 </span>
             </div>
 
+            {{-- Somebody who may read this document and not change it. Said
+                 once, in plain words, for as long as the page is open: the
+                 editor is not editable and nothing is ever saved from here,
+                 and what other people write still arrives. Bound to
+                 `editable` (the server-drawn literal at the top of the
+                 x-data object; the host sets it false when a save is refused),
+                 and hidden while a stop reason is up, which says more. The
+                 second sentence shows only after a refusal that left words
+                 unsent, or text that the lost row or the set-aside row was
+                 offering (those rows are taken away then, and the words stay
+                 parked in this browser). Static markup, as everything
+                 in this bar is. --}}
+            <div class="doc-notice" hidden x-bind:hidden="editable || !!syncNotice">
+                <p class="doc-notice-text">
+                    <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                    <span>You can read this document but not change it.</span>
+                    <span hidden x-bind:hidden="!unsentKept">Your unsent words are not saved. A copy is kept in this browser for 7 days.</span>
+                </p>
+            </div>
+
             {{-- The page can no longer stay in step: signed out, access
                  removed, the document gone, or a version this editor cannot
                  open. Also said here: a newer version or the writer's own
-                 text that could not be put into the editor. --}}
+                 text that could not be put into the editor, and the lost
+                 row's three notices (a block that could not be put back, a
+                 Dismiss all that could not keep its browser copy or found
+                 the list changed). Those three are never written over one of
+                 the stop reasons and go when the list changes or empties
+                 (sync/host.js, setLostNotice() and clearLostNotices()). --}}
             <div class="doc-notice" hidden x-bind:hidden="!syncNotice">
                 <p class="doc-notice-text">
                     <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
@@ -943,8 +1208,10 @@
                             {{ $suggestion['excerpt'] }}
                             <span class="list-sub">{{ $suggestion['user'] }} · {{ $suggestion['created_at'] }}</span>
                         </span>
-                        <button type="button" class="btn btn-sm" wire:click="acceptSuggestion({{ $suggestion['id'] }})">Accept</button>
-                        <button type="button" class="btn btn-sm" wire:click="rejectSuggestion({{ $suggestion['id'] }})">Drop</button>
+                        @if ($canEdit)
+                            <button type="button" class="btn btn-sm" wire:click="acceptSuggestion({{ $suggestion['id'] }})">Accept</button>
+                            <button type="button" class="btn btn-sm" wire:click="rejectSuggestion({{ $suggestion['id'] }})">Drop</button>
+                        @endif
                     </li>
                 @endforeach
             </ul>

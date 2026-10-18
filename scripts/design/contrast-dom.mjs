@@ -320,6 +320,8 @@ const INKS = [
     '.dotdoc-panel-title',
     '.dotdoc-bubble-btn',
     '.doc-notice-text',
+    '.doc-notice-sentence',
+    '.doc-notice-excerpt',
     '.tool',
     '.doc-notice .tool:disabled',
 ];

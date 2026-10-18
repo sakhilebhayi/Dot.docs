@@ -7,6 +7,7 @@ use App\Models\Files\File;
 use App\Models\Files\Folder;
 use App\Models\Files\Obj;
 use App\Observers\DocumentObserver;
+use App\Observers\InfoDotResourceObserver;
 use App\Policies\ObjPolicy;
 use App\Support\ShellContext;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -28,6 +29,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Document::observe(DocumentObserver::class);
+        Document::observe(InfoDotResourceObserver::class);
 
         // The shared Dot.Files tree stores its polymorphic type as the
         // literal strings `file` / `folder` / `document` - the aliases
@@ -53,6 +55,14 @@ class AppServiceProvider extends ServiceProvider
             $target = $request->route('slug') ?? $request->route('uuid') ?? 'unknown';
 
             return Limit::perMinute(10)->by($request->ip().'|'.$target);
+        });
+
+        // The editor's counter flush (POST /documents/{uuid}/sync-metrics):
+        // once a minute and on leaving the page, so twelve a minute is far
+        // more than a real tab sends. Per person AND document, never per IP:
+        // colleagues behind one office address look like one IP.
+        RateLimiter::for('sync-metrics', function (Request $request) {
+            return Limit::perMinute(12)->by(($request->user()?->getAuthIdentifier() ?? $request->ip()).'|'.$request->route('uuid'));
         });
     }
 }

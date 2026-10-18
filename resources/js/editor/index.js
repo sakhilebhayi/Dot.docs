@@ -1,4 +1,5 @@
 import { Editor, generateJSON } from '@tiptap/core';
+import { Selection } from '@tiptap/pm/state';
 import { ReplaceStep } from '@tiptap/pm/transform';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
@@ -28,6 +29,7 @@ import { commands, run as runCommand } from './commands/registry';
 import { documentsDiffer, stripDerived } from './derived';
 import { blockInsert, blockInsertPosition, isInCaption } from './guards';
 import { outline, setOutline } from './outline';
+import { ReadOnlyGuard, allowDocChanges } from './extensions/readOnlyGuard';
 import { PaginationExtension } from './pagination/decorations';
 import { mountPagination } from './pagination/index';
 import { installBubble } from './ui/bubble';
@@ -37,9 +39,26 @@ import { closeList } from './ui/list';
 import { isContentValid, isEmptyDocument } from './validation';
 import { clearHistoryTransaction, remoteTransaction } from './sync/apply';
 import { createSyncEngine } from './sync/engine';
-import { createSyncHost, createTabId, unloadSaveBody } from './sync/host';
+import { focusAfterInsert, insertBlockTransaction } from './sync/insert';
+import { mergeDocuments } from './sync/merge';
+import { beaconWanted, createSyncHost, createTabId, unloadSaveBody } from './sync/host';
+import { createMetrics } from './sync/metrics';
 import { createSyncRequest } from './sync/request';
-import { clearDraft, loadDraft, parkStaleDraft, purgeStaleDrafts, saveDraft } from '../offline';
+import {
+    clearDraft,
+    loadBase,
+    loadDraft,
+    adoptLost,
+    loadLost,
+    markLostDismissed,
+    nextParkToOffer,
+    parkLost,
+    parkStaleDraft,
+    purgeStaleDrafts,
+    resolveParked,
+    saveBase,
+    saveDraft,
+} from '../offline';
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 
@@ -92,6 +111,11 @@ function buildExtensions(opts) {
         Column,
         Variable.configure({ vars: opts.vars || {} }),
         DocAttrs,
+        // Refuses every transaction that changes the document while the
+        // editor is not editable (a person who may only read, or a document
+        // this editor cannot open): setEditable(false) stops typing, and the
+        // guard stops commands.
+        ReadOnlyGuard,
         SlashMenu,
         PaginationExtension,
         // Keeps block ids unique whatever a transaction did: UniqueID (in
@@ -132,7 +156,7 @@ function selectionInfo(editor) {
  *
  * @param {HTMLElement} element
  * @param {{content?: object, vars?: object, styleCss?: string, uploadUrl?: string, autosaveUrl?: string, csrfToken?: string,
- *          getBaseVersion?: () => number, getOverwrite?: () => boolean,
+ *          getBaseVersion?: () => number, getOverwrite?: () => boolean, getUnsent?: () => boolean, editable?: boolean,
  *          onChange?: (json: object) => void, onSelection?: (s: {blockId: string|null, type: string|null}) => void,
  *          onCommand?: (name: string, params: object) => void}} opts
  * @returns {{editor: Editor, run: (name: string, params?: object) => boolean, destroy: () => void}}
@@ -149,8 +173,15 @@ function mount(element, opts = {}) {
     let saveTimer = null;
     let lastSaved = JSON.stringify(opts.content ?? null);
     let dirty = false;
+    // The content the unload beacon last carried: one beacon per content (pagehide, then destroy()).
+    let lastBeaconed = null;
     let autosave = true;
     let contentError = null;
+    // A person who may read the document and not change it (the server says
+    // so: `editable: false`), or a page whose save was refused. Different
+    // from `autosave` false (fail-closed): the editor shows the real document
+    // and still takes in what other people save; it only never writes.
+    let readOnly = opts.editable === false;
 
     const editor = new Editor({
         element,
@@ -162,6 +193,7 @@ function mount(element, opts = {}) {
         // content. With it, the parse failure arrives here instead and the
         // editor is put in read-only mode before it can destroy anything.
         enableContentCheck: true,
+        editable: !readOnly,
         onContentError: ({ error }) => {
             // Fires from inside this constructor, before `editor` exists —
             // record it and fail closed once the instance is in hand.
@@ -171,7 +203,7 @@ function mount(element, opts = {}) {
             attributes: { class: 'paper' },
         },
         onUpdate: () => {
-            if (typeof opts.onChange !== 'function' || !autosave) {
+            if (typeof opts.onChange !== 'function' || !autosave || readOnly) {
                 return;
             }
 
@@ -240,25 +272,44 @@ function mount(element, opts = {}) {
         clearTimeout(saveTimer);
         saveTimer = null;
 
-        if (!dirty || !autosave || editor.isDestroyed) {
+        if (!autosave || readOnly || editor.isDestroyed) {
+            return false;
+        }
+
+        // On the way out the host may also say that text this bundle already
+        // handed over is unsent and unanswered (its request failed, or the
+        // back-off holds it): `dirty` is false for that text and the beacon
+        // is the only send left. See beaconWanted() in sync/host.js.
+        const unsent = beacon && hostHoldsUnsent();
+        if (!dirty && !unsent) {
             return false;
         }
 
         const json = editor.getJSON();
         const serialised = JSON.stringify(json);
+        const changed = serialised !== lastSaved;
         // Plugin housekeeping (trailing paragraph, id backfill) can fire
         // onUpdate without changing anything a save would store.
-        if (serialised === lastSaved) {
+        if (!changed && !unsent) {
             dirty = false;
 
             return false;
         }
 
-        if (beacon && beaconSave(json)) {
-            dirty = false;
-            lastSaved = serialised;
+        if (beacon) {
+            const wanted = beaconWanted({ dirty, changed, unsent, sentAlready: serialised === lastBeaconed });
+            if (wanted && beaconSave(json)) {
+                dirty = false;
+                lastSaved = serialised;
+                lastBeaconed = serialised;
 
-            return true;
+                return true;
+            }
+            // Unsent text that could not go by beacon, or went already, is not handed to Livewire now: the
+            // page is going away and the offline draft keeps it.
+            if (!(wanted && dirty && changed)) {
+                return false;
+            }
         }
 
         if (typeof opts.onChange !== 'function') {
@@ -270,6 +321,15 @@ function mount(element, opts = {}) {
         opts.onChange(json);
 
         return true;
+    }
+
+    /** Whether the host says the text it was handed is unsent and unanswered (getUnsent, a mount option). */
+    function hostHoldsUnsent() {
+        try {
+            return typeof opts.getUnsent === 'function' && opts.getUnsent() === true;
+        } catch (_) {
+            return false;
+        }
     }
 
     /**
@@ -384,7 +444,7 @@ function mount(element, opts = {}) {
      * re-checked by blockInsertPosition() at the moment of the insert.
      */
     async function uploadImage(file, { figure = false } = {}) {
-        if (!file || !opts.uploadUrl || isInCaption(editor)) {
+        if (!file || !opts.uploadUrl || !editor.isEditable || isInCaption(editor)) {
             return false;
         }
 
@@ -494,6 +554,32 @@ function mount(element, opts = {}) {
         },
 
         /**
+         * Whether this editor belongs to somebody who may not change the
+         * document. It still takes in what other people save (applyRemote());
+         * it never saves, never takes a draft and runs no command that writes.
+         */
+        get readOnly() {
+            return readOnly;
+        },
+
+        /**
+         * The save was refused (403): this person may no longer change the
+         * document. No keystroke, command or timer writes from here. Whatever
+         * was waiting to be sent is let go; the Blade bridge keeps a copy of
+         * it (sync/host.js, saveRefused()).
+         */
+        makeReadOnly: () => {
+            readOnly = true;
+            dirty = false;
+            clearTimeout(saveTimer);
+            saveTimer = null;
+            if (!editor.isDestroyed) {
+                // No `update` event: nothing in the document changed.
+                editor.setEditable(false, false);
+            }
+        },
+
+        /**
          * Whether a save is still owed: either the debounce timer is armed or
          * a flush has not happened yet. The Blade bridge reads this before it
          * clears the offline draft — a draft must never be dropped while
@@ -501,6 +587,15 @@ function mount(element, opts = {}) {
          */
         get pending() {
             return dirty || saveTimer !== null;
+        },
+
+        /**
+         * Whether an IME composition is in progress. The sync host reports
+         * the tab busy while it is: a document applied under a composition
+         * would land in the middle of a character being composed.
+         */
+        get composing() {
+            return editor.view.composing;
         },
 
         /** Send any pending document immediately. */
@@ -522,7 +617,7 @@ function mount(element, opts = {}) {
          * @returns {boolean} false leaves the document exactly as it was
          */
         applyHtml: (html, { mode = 'replace' } = {}) => {
-            if (typeof html !== 'string' || !html.trim() || editor.isDestroyed || !autosave) {
+            if (typeof html !== 'string' || !html.trim() || editor.isDestroyed || !autosave || readOnly) {
                 return false;
             }
 
@@ -589,8 +684,11 @@ function mount(element, opts = {}) {
          *
          * It never runs over unsaved local typing unless `force` is given:
          * while the debounce is armed or a save is owed, what the editor
-         * holds exists nowhere else. The caller decides what happens to that
-         * text first (the conflict notice in the Blade bridge).
+         * holds exists nowhere else. `force` is for the cases where the
+         * caller has already decided what happens to that text: a MERGED
+         * document (sync/host.js merged the typing into it and offers back
+         * whatever could not be kept) and the writer's own choice (Load
+         * theirs, an accepted suggestion).
          *
          * @param {object} json a Dot.Doc document
          * @param {{force?: boolean}} options
@@ -632,7 +730,9 @@ function mount(element, opts = {}) {
                 // appends the paragraph on the next transaction of any kind
                 // instead, with `update` fired and the autosave armed.
                 tr.setMeta('preventUpdate', true);
-                editor.view.dispatch(tr);
+                // The one write a read only editor accepts: somebody else's
+                // saved document (see extensions/readOnlyGuard.js).
+                allowDocChanges(editor, () => editor.view.dispatch(tr));
 
                 // The local undo history ends here (see the docblock). In a
                 // dispatch of its own, never as a meta on `tr`: plugins
@@ -651,7 +751,7 @@ function mount(element, opts = {}) {
                     const clearing = clearHistoryTransaction(editor.state);
 
                     if (clearing !== null) {
-                        editor.view.dispatch(clearing);
+                        allowDocChanges(editor, () => editor.view.dispatch(clearing));
                     } else {
                         console.error(
                             'Dot.Doc: the undo history was not emptied after a remote change: no history plugin was found under its key. An undo may now delete text that arrived from somebody else.'
@@ -676,6 +776,75 @@ function mount(element, opts = {}) {
             saveTimer = null;
             dirty = false;
             lastSaved = JSON.stringify(editor.getJSON());
+
+            return true;
+        },
+
+        /**
+         * Merge a newer server document with what this editor holds
+         * (sync/merge.js). `base` is the last server document this tab
+         * held, `theirs` the newer one; `mine` is the editor's own document
+         * unless the caller hands one in (the draft merge hands in the
+         * draft). `echo` is the document of a save whose answer was lost;
+         * `deletionsWin` false is the draft merge's rule. Null when the
+         * merge cannot be done, and when the editor is fail-closed: what a
+         * read-only view holds is not the document, so it merges nothing.
+         *
+         * @param {object} base
+         * @param {object} theirs
+         * @param {{echo?: object|null, mine?: object|null, deletionsWin?: boolean}} options
+         * @returns {object|null} the MergeResult of mergeDocuments()
+         */
+        merge: (base, theirs, { echo = null, mine = null, deletionsWin = true } = {}) => {
+            if (!base || !theirs || editor.isDestroyed || !autosave) {
+                return null;
+            }
+
+            try {
+                return mergeDocuments(editor.schema, { base, mine: mine ?? editor.getJSON(), theirs, echo }, { deletionsWin });
+            } catch (cause) {
+                // Fail closed, as before (the caller shows the notice), but say why: a merge that throws is a bug to find.
+                console.warn('[Dot.Doc] The merge threw and was treated as impossible.', cause);
+
+                return null;
+            }
+        },
+
+        /**
+         * Put a block a merge could not keep back on the page (the lost
+         * row's Put it back). The transaction is built by
+         * insertBlockTransaction() (sync/insert.js, which says where the
+         * block goes and what happens to its ids) and dispatched as an
+         * ordinary writer's edit: undoable, `update` fires, the autosave
+         * sends it on the current base, and no overwrite is owed, because
+         * it replaces nothing.
+         *
+         * @param {object} json the block, as the lost entry holds it
+         * @param {{anchors?: string[], keepId?: boolean, focus?: boolean}} options `focus`: true only for a press from the keyboard
+         * @returns {boolean} false when the block could not go in (nothing changed)
+         */
+        insertBlock: (json, { anchors = [], keepId = false, focus = false } = {}) => {
+            if (!json || editor.isDestroyed || !autosave || readOnly) {
+                return false;
+            }
+
+            try {
+                const tr = insertBlockTransaction(editor.state, json, {
+                    anchors,
+                    keepId,
+                    generateId: () => base62(8),
+                    Selection,
+                });
+                editor.view.dispatch(tr);
+            } catch (cause) {
+                // Nothing changed, as before; the cause is logged so a block that cannot go in can be diagnosed.
+                console.warn('[Dot.Doc] Put it back could not insert the block.', cause);
+
+                return false;
+            }
+
+            // Focus only for a press from the keyboard: a tap on a phone must not bring the keyboard up.
+            focusAfterInsert(editor.commands, focus);
 
             return true;
         },
@@ -733,7 +902,7 @@ export const DotDoc = {
     // engine per editor page (sync/engine.js) and hands every decision about
     // a save, a newer document or a draft to createSyncHost() (sync/host.js),
     // which it builds from its own state for each call.
-    sync: { createSyncEngine, createSyncRequest, createSyncHost, createTabId },
+    sync: { createSyncEngine, createSyncRequest, createSyncHost, createTabId, createMetrics },
     /** The single active editor's pagination controller, or a safe no-op stand-in before mount(). */
     get pagination() {
         const el = document.querySelector('[wire\\:ignore].canvas, #doc-paper');
@@ -748,7 +917,26 @@ window.DotDoc = DotDoc;
 // Offline draft helpers the Blade bridge calls (kept from the pre-JSON editor).
 // parkStaleDraft() is how a draft that cannot be restored is kept instead of
 // deleted; purgeStaleDrafts() (also run on app boot) is what stops those
-// parked drafts accumulating in IndexedDB for ever.
-window.offlineDraft = { saveDraft, loadDraft, clearDraft, parkStaleDraft, purgeStaleDrafts };
+// parked rows accumulating in IndexedDB for ever. saveBase()/loadBase() keep
+// the server document a tab's typing is based on, so a stale draft can be
+// merged on the next visit; parkLost()/loadLost()/markLostDismissed() keep
+// the blocks a merge could not keep, for the notice bar's lost row (one row
+// per tab, adoptLost() on open); nextParkToOffer()/resolveParked() are the
+// queue of set-aside texts the page offers one after another.
+window.offlineDraft = {
+    saveDraft,
+    loadDraft,
+    clearDraft,
+    parkStaleDraft,
+    purgeStaleDrafts,
+    saveBase,
+    loadBase,
+    parkLost,
+    loadLost,
+    adoptLost,
+    markLostDismissed,
+    nextParkToOffer,
+    resolveParked,
+};
 
 export default DotDoc;

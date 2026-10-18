@@ -148,8 +148,18 @@ and that text is kept aside with a notice. Phase 2 removes this.
 
 **What you see:** two people working in different paragraphs both keep typing
 and see each other's paragraphs appear 1-3 seconds behind. If both change the
-same paragraph in the same second, both versions are kept one under the other
-with a notice. Nothing is dropped.
+same paragraph in the same second, the version saved first stays on the page
+and the other is offered back in the notice bar, where Put it back puts it
+under the first (owner decision D1: the later save loses that block only).
+If one person deletes a paragraph the other is typing in, the deletion wins
+and the typed words are offered back the same way, returning to where they
+were (D2). Nothing is silently dropped: every paragraph that cannot be kept
+is offered back, with the stated limits (characters inside one paragraph are
+not merged; Enter or Backspace in a paragraph somebody else changes at the
+same moment can duplicate words or leave them only in the lost row; the
+offer is kept in the browser only where it keeps drafts). Built: spec
+`docs/superpowers/specs/2026-10-16-coediting-phase-2-paragraph-merge-design.md`,
+plan `docs/superpowers/plans/2026-10-16-coediting-phase-2-paragraph-merge.md`.
 
 - A three-way merge of top-level blocks, matched by the block ids the schema
   already assigns, against the last server copy the tab knew. Compares
@@ -184,6 +194,56 @@ only undoes your own typing.
 - A convergence test with two and three headless editors, run under plain
   `node --test`, exists **before** anything ships.
 
+**How to read the metrics (decide Phase 3 on these, not on a feeling).** The
+editor page counts, per document and day, what Phase 2 had to do, and never
+anything somebody wrote: merges and whether they left something over, the
+lost-row offers by kind and what the writer did with them, conflict notices,
+saves resent after a failed request, read only downgrades, and, in seconds,
+how many OTHER people were in the document (time alone is not collected).
+Collection is on by default (`DOCS_SYNC_METRICS=false` switches it off); rows
+older than 120 days are deleted nightly. After two to three weeks of real use
+run, on the server, `php artisan sync:report --days=21` (`--json` for a
+machine). Its last line is the one to read, for example "In the last 21 days:
+9 paragraphs offered back after same-paragraph clashes (in at most 6 live
+merges) across 4 documents; 310 minutes with two or more people in the
+document at once (readers and idle open tabs count)." Read it like this (a
+rule of thumb, not a measurement):
+
+- *Paragraphs offered back* (`lost_both_live`) are the only thing Phase 3
+  fixes: two people changed the same paragraph within the autosave and poll
+  delay of each other (a few seconds) and the later saver's version was
+  offered back. It counts paragraphs, not clashes between people: one merge
+  can offer several back, so the report also gives the most merges they can
+  have come from (live merges that left something over) and what share of all
+  live merges that is. Deletions against typing (`lost_deleted_live`) are a
+  different case Phase 3 does not remove.
+- *Rare* (a handful in three weeks, mostly one or two documents, and almost
+  every one put back with one click in `lost_put_back`): do not build Phase 3.
+  Phase 2 meets the need; spend the days on Phase 4 or 5.
+- *Every week, on several documents*, or a high share of live merges leaving
+  something over: build it, staged (3a + 3b first). A high `lost_dismissed`
+  against `lost_put_back` means people drop the offered text instead of
+  keeping it, which makes a clash cost more than the numbers suggest.
+- *Little time together*: the report prints no rate per hour below 60 minutes
+  with two or more people in the document in the window, because a few
+  minutes make a rate that means nothing. Keep collecting. Co-writing wanted
+  as a promise is a product decision whatever the numbers say.
+- Read the rest as the health of Phase 1 and 2, not of Phase 3: conflict
+  notices (`conflict_*`) should be rare, `backoff_*` and `save_resent` show a
+  document whose saves keep failing (a 413 or a 500), `echo_resolved` counts
+  merges the echo rule saved from a false clash, and `readonly_*` counts
+  people downgraded while the page was open.
+- *How exact the time together is.* It counts PEOPLE IN THE DOCUMENT with it
+  open in the editor (a reader, an idle open tab), not people typing, so it
+  is a ceiling on "typing at the same moment". Each tab counts for itself,
+  and the report takes the busiest person's count per document and day: that
+  is approximate, too low when two separate pairs shared a document at
+  different times of one day, and too high when one person has two tabs open
+  or deleted accounts (which share a null person) are merged. Arrivals and
+  departures are placed to within a few tens of seconds (presence is sampled
+  by poll and expires after 30 s). Days are UTC calendar days and today is
+  partial.
+
 ### Phase 4 - See each other: named carets and selections (3-4 days)
 
 Remote carets and selections with name labels, reported as block id plus
@@ -211,12 +271,13 @@ socket drops. Needs the owner to choose and pay for the outside service.
 1. **Speed bar.** Is "about one second behind while the other person types"
    acceptable, at no extra cost? If it must be keystroke-instant, Phase 6
    (an outside service or small server, paid) becomes required.
-2. **Same paragraph, same second (Phase 2 only):** keep both versions one
-   under the other with a notice (recommended), or keep yours and drop
-   theirs.
+2. **Same paragraph, same second (Phase 2 only):** decided 2026-10-16
+   (D1): the version saved first stays on the page, and the later save loses
+   that paragraph only, which is offered back in the notice bar and put
+   under the first by Put it back. Built in Phase 2.
 3. **Delete beats typing.** If one person deletes a paragraph while another
-   is typing in it, the typing in that paragraph is lost. This is standard
-   for this kind of merging. Accept?
+   is typing in it, the deletion wins and the typed words are offered back
+   to the person who typed them (decided 2026-10-16, built in Phase 2).
 4. **Reloads.** Restoring a version, importing over a document or accepting
    an AI suggestion would reload the editor for everyone who has it open,
    keeping their last unsent seconds as recoverable text. Accept?
