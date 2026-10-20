@@ -31,7 +31,7 @@ use Illuminate\Support\Str;
 use Laravel\Jetstream\Jetstream;
 
 Route::match(['get', 'post'], '/auth/ecosystem', [EcosystemAuthController::class, 'handle'])
-    ->withoutMiddleware(['Illuminate\Foundation\Http\Middleware\VerifyCsrfToken', 'Illuminate\Foundation\Http\Middleware\ValidateCsrfToken'])->name('auth.ecosystem');
+    ->withoutMiddleware(['Illuminate\Foundation\Http\Middleware\PreventRequestForgery', 'Illuminate\Foundation\Http\Middleware\VerifyCsrfToken', 'Illuminate\Foundation\Http\Middleware\ValidateCsrfToken'])->name('auth.ecosystem');
 
 // Public liveness probe (no auth, no secrets): answers 503 once the cron
 // scheduler or the queue worker has not been heard from. Watched from GitHub by
