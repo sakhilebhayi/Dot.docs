@@ -12,7 +12,7 @@ use Tests\TestCase;
  * The ecosystem handoff's optional `redirect`.
  *
  * Other products link a person straight to the page they were heading for.
- * A query parameter that becomes a redirect is an open redirect unless it
+ * A request parameter that becomes a redirect is an open redirect unless it
  * is pinned to this origin, so the accepted shape is narrow: one leading
  * slash, no second one, no backslash, no scheme.
  */
@@ -25,9 +25,24 @@ class HandoffRedirectTest extends TestCase
         $user = User::factory()->withPersonalTeam()->create();
         $token = $user->createToken('handoff', ['ecosystem:read'])->plainTextToken;
 
-        $query = ['token' => $token] + ($redirect === null ? [] : ['redirect' => $redirect]);
+        $body = ['token' => $token] + ($redirect === null ? [] : ['redirect' => $redirect]);
 
-        return $this->get(route('auth.ecosystem', $query));
+        return $this->post(route('auth.ecosystem'), $body, $this->fromInfodot());
+    }
+
+    /** InfoDot's launch page, as the browser reports it. */
+    private function fromInfodot(): array
+    {
+        $infodot = parse_url((string) config('ecosystem.infodot.redeem_url', ''), PHP_URL_HOST);
+
+        if (is_string($infodot) && $infodot !== '') {
+            return ['Origin' => 'https://'.$infodot];
+        }
+
+        $host = (string) parse_url((string) config('app.url'), PHP_URL_HOST);
+        $parent = str_contains($host, '.') ? substr($host, strpos($host, '.') + 1) : $host;
+
+        return ['Origin' => 'https://'.$parent];
     }
 
     public function test_a_relative_path_is_honoured(): void
