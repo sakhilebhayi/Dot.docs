@@ -342,3 +342,31 @@ jobs:
             exit 1
           fi
           echo "== Smoke check passed: $SITE_URL/ and $SITE_URL/login answered 200, and so did all $(wc -l < "$WORK/unique" | tr -d ' ') build asset(s) they reference (listed above)."
+
+      - name: Probe the application folder from outside
+        # Public requests only (no SSH, nothing is read): the app folder next to the docroot
+        # must answer 403/404 (or a 301/302 to the login), never 200. Found 2026-10-20
+        # serving its database, logs and vendor/ on four platforms. Runs after the site is
+        # live again, so it can only turn the run red. Only status codes are printed.
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -uo pipefail
+          KEY="$(basename "$DEPLOY_PATH")"
+          [ -n "$KEY" ] && [ "$KEY" != "/" ] || { echo "::error::cannot work out the app folder name; the probe did not run"; exit 1; }
+          EXPOSED=0
+          UNREACHED=0
+          for P in .env .env.bak-secrets artisan composer.json composer.lock database/database.sqlite storage/logs/laravel.log vendor/autoload.php phpunit.xml; do
+            CODE=$(curl -s -o /dev/null -m 15 -w '%{http_code}' "$SITE_URL/$KEY/$P" || true)
+            case "$CODE" in
+              200) echo "::error::EXPOSED /$KEY/$P answered 200"; EXPOSED=1 ;;
+              000) echo "000 /$KEY/$P (no answer)"; UNREACHED=$((UNREACHED + 1)) ;;
+              *) echo "$CODE /$KEY/$P" ;;
+            esac
+          done
+          [ "$UNREACHED" -eq 0 ] || echo "::warning::$UNREACHED probe request(s) got no answer; those paths are unverified."
+          if [ "$EXPOSED" -ne 0 ]; then
+            echo "::error::The application folder is readable over HTTP (database, logs or vendor/ may be downloadable). Run the App Folder Guard workflow in InfoDot (mode apply) or add the deny file by hand, then re-run."
+            exit 1
+          fi
+          echo "== App-folder probe: no sensitive path answered 200 ($((9 - UNREACHED)) of 9 paths verified)."
