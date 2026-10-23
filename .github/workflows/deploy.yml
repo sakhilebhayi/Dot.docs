@@ -108,6 +108,40 @@ jobs:
           $PHP artisan route:cache
           $PHP artisan view:cache
           $PHP artisan event:cache
+
+          # ---- public/storage -> ../storage/app/public
+          # User uploads are served from public/storage. A symlink left over from an earlier location (an absolute path
+          # that no longer exists) answers 404 for every upload, and it breaks outright once the document root becomes
+          # <app>/public. This points the link at the relative target `artisan storage:link` creates, repairs a broken or
+          # misdirected link, and leaves a correct one alone. It NEVER removes a real directory or file called storage
+          # (that is warned about and left as it is) and can never fail the deploy: the body is a subshell with `set +e`.
+          ensure_storage_link() (
+            set +e
+            TARGET="../storage/app/public"
+            LINK="public/storage"
+            if ! mkdir -p storage/app/public 2>/dev/null; then echo "::warning::storage link: could not create storage/app/public (deploy continues)"; exit 0; fi
+            if [ ! -d public ]; then echo "== storage link: skipped (no public/ folder)"; exit 0; fi
+            if [ -L "$LINK" ]; then
+              CUR="$(readlink "$LINK")"
+              if [ -d "$LINK" ] && [ "$(cd -P "$LINK" 2>/dev/null && pwd -P)" = "$(cd -P storage/app/public && pwd -P)" ]; then
+                echo "== storage link: ok ($LINK -> $CUR)"
+              elif ln -sfn "$TARGET" "$LINK"; then
+                echo "== storage link: repaired ($LINK pointed at $CUR, now $TARGET)"
+              else
+                echo "::warning::storage link: could not repair $LINK (it points at $CUR); uploads may not be served (deploy continues)"
+              fi
+            elif [ -d "$LINK" ]; then
+              echo "::warning::storage link: skipped (real directory) -- $LINK is a real directory, not a symlink; left as it is. Move its files into storage/app/public and remove it by hand to serve uploads from there."
+            elif [ -e "$LINK" ]; then
+              echo "::warning::storage link: skipped (real file) -- $LINK is a file, not a symlink; left as it is."
+            elif ln -s "$TARGET" "$LINK"; then
+              echo "== storage link: created ($LINK -> $TARGET)"
+            else
+              echo "::warning::storage link: could not create $LINK (deploy continues)"
+            fi
+            exit 0
+          )
+          ensure_storage_link || true
           DEPLOY
 
       - name: Transfer public assets to the real docroot
