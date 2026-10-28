@@ -87,6 +87,22 @@ jobs:
 
           git reset --hard origin/main
 
+          # Document root already moved to <app>/public (the standard layout, S-2e in InfoDot's SECURITY_ASSESSMENT)?
+          # Then the tracked root .htaccess (Require all denied, written for the flattened layout where the app folder
+          # sits INSIDE the web root) would sit in the PARENT of the document root and refuse every request. LiteSpeed
+          # reads .htaccess files of parent folders. `git reset --hard` restores it on every deploy, so it is moved
+          # aside here, while the site is still in maintenance mode. In the flattened layout nothing changes.
+          APP_REAL="$(pwd -P)"
+          CURRENT_DOCROOT="$(uapi --output=json DomainInfo single_domain_data domain=doc.infodot.co.za 2>/dev/null | sed -n 's/.*"documentroot" *: *"\([^"]*\)".*/\1/p' | head -1 || true)"
+          if [ "$CURRENT_DOCROOT" = "$APP_REAL/public" ] || [ -f .docroot-is-public ]; then
+            echo "== document root is $APP_REAL/public (standard layout)"
+            if [ -f .htaccess ]; then
+              mv -f .htaccess .htaccess.docroot-is-public-disabled && echo "== app-folder .htaccess: moved aside (the document root is public/)" || echo "::warning::could not move .htaccess aside"
+            fi
+          else
+            echo "== document root is the app folder's parent (flattened layout): app-folder .htaccess stays"
+          fi
+
           # Production invariant (ecosystem audit 2026-10-17, defect D9): with
           # APP_DEBUG=true any error, even a harmless 405, answers every
           # visitor with a ~840 KB debug page (source, stack frames, server
@@ -171,6 +187,15 @@ jobs:
           # for days; DEPLOY_PATH/public/build was the wrong destination ON
           # ITS OWN. It is still the right SECOND destination (below): @vite
           # reads its manifest, so every build goes to both.
+          APP_REAL=$($SSH "$DEST" "cd '$DEPLOY_PATH' && pwd -P")
+          CURRENT_DOCROOT=$($SSH "$DEST" "uapi --output=json DomainInfo single_domain_data domain=doc.infodot.co.za 2>/dev/null | sed -n 's/.*\"documentroot\" *: *\"\([^\"]*\)\".*/\1/p' | head -1" || true)
+          if [ -n "$APP_REAL" ] && [ "$CURRENT_DOCROOT" = "$APP_REAL/public" ]; then
+            # Standard layout (S-2e): the document root IS DEPLOY_PATH/public, so everything tracked under public/ is
+            # already in place after the code step, and only the gitignored build/ has to be written, once.
+            echo "== document root is $APP_REAL/public: syncing build/ in place only"
+            rsync -az --delete -e "$SSH" public/build/ "$DEST:$DEPLOY_PATH/public/build/"
+            exit 0
+          fi
           REAL_DOCROOT=$(dirname "$DEPLOY_PATH")
 
           # build/ gets its own --delete-scoped sync so old content-hashed
