@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\EcosystemAuthController;
+use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\DocumentAutosaveController;
 use App\Http\Controllers\DocumentExportController;
 use App\Http\Controllers\DocumentImageController;
@@ -24,15 +25,26 @@ use App\Livewire\Files\Navigator;
 use App\Models\AiSuggestion;
 use App\Models\Document;
 use App\Models\DocumentCollaborator;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Http\Request;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Laravel\Fortify\Features;
 use Laravel\Jetstream\Jetstream;
 
 Route::post('/auth/ecosystem', [EcosystemAuthController::class, 'handle'])
     ->withoutMiddleware(['Illuminate\Foundation\Http\Middleware\PreventRequestForgery', 'Illuminate\Foundation\Http\Middleware\VerifyCsrfToken', 'Illuminate\Foundation\Http\Middleware\ValidateCsrfToken'])->name('auth.ecosystem');
+
+// Browsers POST Content-Security-Policy violation reports here (the policy is report-only, see SecurityHeaders). The browser sends
+// no cookie, CSRF token or login, so the route drops the web group's session and CSRF middleware: a report neither starts a
+// session nor needs one. Throttled per IP; the controller keeps only the violated directive and the blocked host.
+Route::post('/csp-report', CspReportController::class)
+    ->withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])
+    ->middleware('throttle:60,1,csp-report')
+    ->name('csp.report');
 
 // Links minted before the token moved into a POST body carried it in the URL. They are no longer honoured:
 // the visitor is sent to the normal sign-in page and the token in the URL is never read.
