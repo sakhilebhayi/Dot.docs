@@ -43,7 +43,7 @@
      * says it through the `header` slot; anything else can pass a `title` slot.
      * The last resort is the route's own first word — NEVER config('app.name').
      * Spec §3 retired the platform-name readout, and a top bar that falls back
-     * to "Dot.Doc" in Fraunces is that readout with a new typeface. The brand
+     * to "Dot.docs" in Fraunces is that readout with a new typeface. The brand
      * keeps the tab title and the rail's colophon, which is where a brand goes.
      */
     $pageTitle = trim(strip_tags((string) ($title ?? '')));
@@ -75,7 +75,11 @@
         ? $sectionName
         : ($shellDocument?->title ?: ($pageTitle !== '' ? $pageTitle : $sectionName));
     $railState = $isEditor ? 'collapsed' : 'expanded';
-    $dockState = $isEditor ? 'collapsed' : 'expanded';
+    // The arrival page is the second route where the tools start put away: it
+    // has one action to offer, and an open dock beside it both squeezes the
+    // page and puts a second call to action next to the first. The rail stays
+    // open there, because the rail is how you leave.
+    $dockState = ($isEditor || request()->routeIs('dashboard')) ? 'collapsed' : 'expanded';
 @endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="{{ $theme === 'system' ? '' : $theme }}">

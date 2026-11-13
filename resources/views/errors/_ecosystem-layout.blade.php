@@ -6,7 +6,7 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>{{ $code }} — @yield('title') · Dot.Doc</title>
+        <title>{{ $code }} — @yield('title') · Dot.docs</title>
         <meta name="robots" content="noindex">
 
         @php
@@ -46,7 +46,7 @@
             // Self-exclusion uses this generator-verified literal name
             // rather than config('app.name'), since not every platform's
             // .env reliably has APP_NAME set correctly.
-            $currentPlatformName = 'Dot.Doc';
+            $currentPlatformName = 'Dot.docs';
             $discover = collect(config('ecosystem.platforms', []))
                 ->reject(fn ($p) => ($p['name'] ?? null) === $currentPlatformName)
                 ->reject(fn ($p) => ($p['active'] ?? true) === false)
@@ -104,7 +104,7 @@
                          platform's overall theme is light or dark -- so the
                          logo's ink-colored wordmark needs the dark-safe
                          white-ink variant here, not the default asset. --}}
-                    <img src="{{ asset($logoLightPath ?? 'images/logo.png') }}" alt="Dot.Doc" style="height: 40px; width: auto;">
+                    <img src="{{ asset($logoLightPath ?? 'images/logo.png') }}" alt="Dot.docs" style="height: 40px; width: auto;">
                 </a>
                 <div style="display: flex; align-items: center; gap: 12px;">
                     @auth
@@ -150,7 +150,7 @@
 
         <footer style="background: var(--chrome-soft); padding: 24px 20px;">
             <div style="max-width: 1400px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 16px;">
-                <p class="font-mono" style="font-size: 12px; color: rgba(255,255,255,0.6); margin: 0;">&copy; {{ date('Y') }} Dot.Doc.</p>
+                <p class="font-mono" style="font-size: 12px; color: rgba(255,255,255,0.6); margin: 0;">&copy; {{ date('Y') }} Dot.docs.</p>
                 @if (Route::has('contact'))
                     <a href="{{ route('contact') }}" class="link-underline font-mono" style="font-size: 12px; color: rgba(255,255,255,0.6); text-decoration: none; padding-bottom: 1px;">Contact support</a>
                 @endif

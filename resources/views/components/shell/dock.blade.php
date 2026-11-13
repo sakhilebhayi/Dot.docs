@@ -108,7 +108,7 @@
         @else
             <div class="empty">
                 <p class="empty-line">The assistant works inside a document, alongside what you are writing.</p>
-                <a href="{{ route('documents.index') }}" class="btn btn-primary">Open a document</a>
+                <a href="{{ route('documents.index') }}" class="btn">Open a document</a>
             </div>
         @endif
     </div>

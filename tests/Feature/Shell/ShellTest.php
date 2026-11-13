@@ -30,13 +30,13 @@ class ShellTest extends TestCase
             ->assertSee('aria-label="Intelligence and data"', false)
             ->assertSee('class="topbar"', false)
             ->assertDontSee('class="status-line"', false)
-            ->assertSee('<title>R · Dot.Doc</title>', false);
+            ->assertSee('<title>R · Dot.docs</title>', false);
     }
 
     public function test_dashboard_and_index_render_on_the_shell(): void
     {
         $user = User::factory()->withPersonalTeam()->create();
-        $this->actingAs($user)->get(route('dashboard'))->assertOk()->assertSee('Dot.Doc')->assertDontSee('Dot.docs');
+        $this->actingAs($user)->get(route('dashboard'))->assertOk()->assertSee('Dot.docs')->assertDontSee('Dot.Doc');
         $this->actingAs($user)->get(route('documents.index'))->assertOk()->assertSee('class="topbar"', false);
     }
 

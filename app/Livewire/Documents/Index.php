@@ -145,6 +145,14 @@ class Index extends Component
         if (! in_array($this->filter, self::FILTERS, true)) {
             $this->filter = 'all';
         }
+
+        // The arrival page's one action lands here with ?new=1, and the sheet
+        // it asked for is already open: "start a document" is one click from
+        // /dashboard rather than a link to a page with the real button on it.
+        // The same convention the template gallery keeps with ?gallery=1.
+        if (request()->boolean('new')) {
+            $this->openSmartSave();
+        }
     }
 
     public function updatingSearch(): void

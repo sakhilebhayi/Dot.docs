@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="public/dot_doc.png" alt="Dot.Doc" width="220" />
+<img src="public/dot_doc.png" alt="Dot.docs" width="220" />
 
 <br /><br />
 
@@ -18,9 +18,9 @@
 
 ---
 
-## What is Dot.Doc?
+## What is Dot.docs?
 
-Dot.Doc is the team document platform in the InfoDot ecosystem. Documents are stored as structured ProseMirror JSON, not raw HTML — which is what makes numbered outlines, cross-references, a table of contents, fourteen switchable document styles, and a real print/PDF surface possible, alongside real-time collaboration, full version history, and granular sharing controls.
+Dot.docs is the team document platform in the InfoDot ecosystem. Documents are stored as structured ProseMirror JSON, not raw HTML — which is what makes numbered outlines, cross-references, a table of contents, fourteen switchable document styles, and a real print/PDF surface possible, alongside real-time collaboration, full version history, and granular sharing controls.
 
 ## Core Features
 
@@ -91,7 +91,7 @@ php artisan serve
 
 ## Ecosystem
 
-**Dot.Doc** is one of **21 platforms** in the InfoDot ecosystem, connected via shared PostgreSQL and Sanctum SSO. Visit [InfoDot](https://github.com/sakhileb/InfoDot) to explore the full platform map.
+**Dot.docs** is one of **21 platforms** in the InfoDot ecosystem, connected via shared PostgreSQL and Sanctum SSO. Visit [InfoDot](https://github.com/sakhileb/InfoDot) to explore the full platform map.
 
 ## License
 
