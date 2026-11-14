@@ -114,7 +114,7 @@
 <body>
     <a href="#canvas" class="skip-link">Skip to the document</a>
 
-    <div class="shell" data-shell data-shell-context="{{ $isEditor ? 'editor' : 'page' }}">
+    <div class="shell" data-shell data-shell-context="{{ $isEditor ? 'editor' : 'page' }}"@if (request()->routeIs('dashboard')) data-shell-page="dashboard"@endif>
         <x-shell.topbar :rail-expanded="$railState === 'expanded'" :save-owner="$isEditor">
             <x-slot:title>{{ $topbarTitle }}</x-slot:title>
 

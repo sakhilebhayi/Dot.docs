@@ -584,6 +584,52 @@ function initDockTabs() {
     });
 }
 
+/**
+ * The dashboard's sortable table (progressive enhancement).
+ *
+ * The server renders the twelve most recent documents in edit order with plain header
+ * text. This turns the headers that name a `data-sort-key` into buttons that reorder the
+ * rows already on the page; it fetches nothing and never claims to sort anything else
+ * (the table says it lists the twelve most recent). aria-sort follows the active header.
+ */
+function initSortableTables() {
+    document.querySelectorAll('table[data-sortable]').forEach((table) => {
+        const body = table.tBodies[0];
+        if (!body) return;
+        const headers = [...table.querySelectorAll('th[data-sort-key]')];
+
+        headers.forEach((th) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = th.textContent.trim();
+            th.textContent = '';
+            th.appendChild(button);
+
+            button.addEventListener('click', () => {
+                const key = th.dataset.sortKey;
+                const current = th.getAttribute('aria-sort');
+                // First click: the natural direction (A-Z, newest, highest); then flip.
+                const natural = key === 'title' ? 'ascending' : 'descending';
+                const next = current ? (current === 'ascending' ? 'descending' : 'ascending') : natural;
+                const sign = next === 'ascending' ? 1 : -1;
+                const attr = `sort${key[0].toUpperCase()}${key.slice(1)}`;
+
+                const rows = [...body.rows];
+                rows.sort((a, b) => {
+                    const x = a.dataset[attr] ?? '';
+                    const y = b.dataset[attr] ?? '';
+                    const order = key === 'title' ? x.localeCompare(y) : Number(x) - Number(y);
+                    return sign * order;
+                });
+                rows.forEach((row) => body.appendChild(row));
+
+                headers.forEach((other) => other.removeAttribute('aria-sort'));
+                th.setAttribute('aria-sort', next);
+            });
+        });
+    });
+}
+
 function boot() {
     initTheme();
     initPanels();
@@ -591,6 +637,7 @@ function boot() {
     initSaveState();
     initOutline();
     initDockTabs();
+    initSortableTables();
 }
 
 // Guarded so tests/js/shell.test.js can import the two predicates above
