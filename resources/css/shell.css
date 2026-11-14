@@ -749,7 +749,7 @@ html.dark .landing-logo .landing-logo-night {
 
 .arrive-title {
     margin: 0;
-    max-width: 26ch;
+    max-width: 30ch;
     font-family: var(--font-display);
     font-optical-sizing: auto;
     font-size: var(--t-display);
@@ -1052,7 +1052,7 @@ html.dark .landing-logo .landing-logo-night {
 .rec-title {
     display: block;
     font-family: var(--font-sheet-head);
-    font-size: 17px;
+    font-size: var(--t-lede);
     font-weight: 700;
     line-height: 1.25;
     overflow-wrap: break-word;
