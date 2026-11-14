@@ -234,7 +234,7 @@ class ContextualToolbarTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $this->assertSame(1, preg_match('/<input id="doc-search"[^>]*>/', $focused, $field));
+        $this->assertSame(1, preg_match('/<input[^>]*\bid="doc-search"[^>]*>/', $focused, $field));
         $this->assertStringContainsString('autofocus', $field[0]);
 
         // ...and not otherwise: a page anyone opens from the rail must not
@@ -243,7 +243,7 @@ class ContextualToolbarTest extends TestCase
 
         $plain = $this->actingAs($user)->get(route('documents.index'))->assertOk()->getContent();
 
-        $this->assertSame(1, preg_match('/<input id="doc-search"[^>]*>/', $plain, $unfocused));
+        $this->assertSame(1, preg_match('/<input[^>]*\bid="doc-search"[^>]*>/', $plain, $unfocused));
         $this->assertStringNotContainsString('autofocus', $unfocused[0]);
     }
 

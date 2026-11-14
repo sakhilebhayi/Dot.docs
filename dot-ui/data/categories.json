@@ -1,0 +1,124 @@
+{
+  "_comment": "The ONE canonical copy of the switcher data. PHP (src/PlatformSwitcher.php) reads this file; static/dot-switcher-data.js is generated from it and from img/platforms/manifest.json by tools/build-data.cjs (npm run build:data), and tests fail on drift. Edit here, then regenerate.",
+  "core": [
+    "infodot",
+    "files",
+    "docs",
+    "tasks",
+    "finance"
+  ],
+  "plain": [
+    "mines",
+    "charts"
+  ],
+  "internal": [
+    "memory",
+    "dopemine",
+    "brain",
+    "assets"
+  ],
+  "notice": "Could not check your platforms just now",
+  "personal_message": "You are in your personal workspace, which has no company platforms to switch between. Switch to a company in InfoDot to see what it has.",
+  "names": {
+    "infodot": "InfoDot",
+    "files": "Dot.Files",
+    "docs": "Dot.docs",
+    "tasks": "Dot.Tasks",
+    "finance": "Dot.Finance",
+    "agents": "Dot.Agents",
+    "analytics": "Dot.Analytics",
+    "auction": "Dot.Auction",
+    "central": "Dot.Central",
+    "charts": "Dot.Charts",
+    "design": "Dot.Design",
+    "ehail": "Dot.Ehail",
+    "emall": "Dot.Emall",
+    "engage": "Dot.Engage",
+    "forms": "Dot.Forms",
+    "hr": "Dot.HR",
+    "mines": "Dot.Mines",
+    "notify": "Dot.Notify",
+    "press": "Dot.Press",
+    "projects": "Dot.Projects",
+    "pulse": "Dot.Pulse",
+    "sheet": "Dot.Sheet",
+    "tutor": "Dot.Tutor"
+  },
+  "categories": {
+    "business_management": {
+      "code": "BSNS",
+      "tone": "people",
+      "name": "Business Management"
+    },
+    "finance_administration": {
+      "code": "FINA",
+      "tone": "files",
+      "name": "Finance and Administration"
+    },
+    "productivity_collaboration": {
+      "code": "WORK",
+      "tone": "knowledge",
+      "name": "Productivity and Collaboration"
+    },
+    "sales_commerce": {
+      "code": "SALE",
+      "tone": "platforms",
+      "name": "Sales and Commerce"
+    },
+    "marketing_design": {
+      "code": "MRKT",
+      "tone": "documents",
+      "name": "Marketing and Design"
+    },
+    "data_intelligence": {
+      "code": "DATA",
+      "tone": "analytics",
+      "name": "Data and Intelligence"
+    },
+    "human_resources": {
+      "code": "CREW",
+      "tone": "people",
+      "name": "Human Resources"
+    },
+    "learning_development": {
+      "code": "LEARN",
+      "tone": "documents",
+      "name": "Learning and Development"
+    },
+    "operations_industry": {
+      "code": "OPER",
+      "tone": "files",
+      "name": "Operations and Industry"
+    },
+    "automation_ai": {
+      "code": "AUTO",
+      "tone": "analytics",
+      "name": "Automation and AI"
+    }
+  },
+  "primary_category": {
+    "infodot": "business_management",
+    "engage": "business_management",
+    "projects": "business_management",
+    "files": "productivity_collaboration",
+    "docs": "productivity_collaboration",
+    "tasks": "productivity_collaboration",
+    "forms": "productivity_collaboration",
+    "press": "productivity_collaboration",
+    "sheet": "productivity_collaboration",
+    "finance": "finance_administration",
+    "agents": "automation_ai",
+    "notify": "automation_ai",
+    "analytics": "data_intelligence",
+    "charts": "data_intelligence",
+    "auction": "sales_commerce",
+    "emall": "sales_commerce",
+    "pulse": "sales_commerce",
+    "central": "operations_industry",
+    "ehail": "operations_industry",
+    "mines": "operations_industry",
+    "design": "marketing_design",
+    "hr": "human_resources",
+    "tutor": "learning_development"
+  }
+}
