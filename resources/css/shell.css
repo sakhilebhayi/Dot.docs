@@ -270,6 +270,11 @@ body {
     flex: none;
 }
 
+/* The word only means something where a page saves; elsewhere it said "Ready" forever. */
+.topbar-status:not([data-shell-save-owner]) {
+    display: none;
+}
+
 .topbar-action,
 .topbar-toggle {
     flex: none;
@@ -695,46 +700,6 @@ html.dark .landing-logo .landing-logo-night {
     min-height: 44px;
 }
 
-.landing-lead {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 288px);
-    align-items: start;
-    gap: var(--s6);
-    margin-bottom: var(--s6);
-}
-
-.landing-title {
-    margin: 0;
-    max-width: 13ch;
-    font-family: var(--font-display);
-    font-optical-sizing: auto;
-    /* The one place the shell goes above --t-display, and it scales with the
-       canvas it is actually given (the rail and the dock both eat into it). */
-    font-size: clamp(var(--t-display), 7.4cqi, 54px);
-    font-weight: 500;
-    line-height: 1.06;
-    letter-spacing: -0.02em;
-    text-wrap: balance;
-    overflow-wrap: break-word;
-    color: var(--ink);
-}
-
-.landing-welcome {
-    margin: var(--s4) 0 0;
-    max-width: 44ch;
-    font-size: var(--t-lede);
-    line-height: 1.5;
-    color: var(--ink);
-}
-
-.landing-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--s2) var(--s4);
-    margin-top: var(--s5);
-}
-
 .landing-primary {
     min-height: 52px;
     padding: var(--s3) var(--s5);
@@ -746,105 +711,648 @@ html.dark .landing-logo .landing-logo-night {
     transform: translateY(1px);
 }
 
+/* ── The arrival page (/dashboard): one sentence, a table, the record ──── */
+
 /*
- * The sheet: the newest document, on the document's own white, in A4's
- * proportion. It takes --paper and --paper-ink, which do not invert, so at
- * night it is a lit page on a dark desk exactly as the editor's is. It has no
- * shadow: the real .paper keeps the product's one.
+ * Where somebody lands from InfoDot. Arrival (what is true, what to do), then a
+ * desk: the table of twelve beside the record of the selected document. Rows,
+ * tables and the sheet are square; only what you click is rounded. Hairlines are
+ * Fair Copy's own and stay. Motion is declared once, at the bottom of this
+ * block, in a no-preference query: chrome never moves.
  */
-.landing-sheet {
+.landing {
+    max-width: 1120px;
+    --paper-rule: #e8e4da;
+    --paper-margin: #c4d4c1;
+    --row-s: 40px;
+    --row-m: 52px;
+    --row-l: 56px;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.landing .btn {
+    min-height: 40px;
+}
+
+.arrive {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--s4) var(--s5);
+    align-items: start;
+}
+
+.arrive-logo img {
+    width: 72px;
+    height: 72px;
+}
+
+.arrive-title {
+    margin: 0;
+    max-width: 30ch;
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-size: var(--t-display);
+    font-weight: 400;
+    line-height: 1.15;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+    overflow-wrap: break-word;
+    color: var(--ink);
+}
+
+.arrive-sub {
+    margin: var(--s2) 0 0;
+    max-width: 60ch;
+    color: var(--ink-soft);
+}
+
+.arrive-sub a {
+    color: var(--ink);
+}
+
+.arrive-actions {
     display: flex;
     flex-direction: column;
-    aspect-ratio: 210 / 297;
-    padding: var(--s5) var(--s4) var(--s4);
+    align-items: flex-end;
+    gap: var(--s2);
+}
+
+.arrive-actions .link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+}
+
+.find {
+    margin: 0;
+    display: flex;
+}
+
+.find .dsr-filter {
+    width: 240px;
+}
+
+/* The short accent mark that is drawn along the hairline under the arrival. */
+.arrive-rule {
+    grid-column: 1 / -1;
+    position: relative;
+    height: 1px;
+    background: var(--line);
+}
+
+.arrive-rule::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: -1px;
+    width: 72px;
+    height: 3px;
+    background: var(--accent);
+}
+
+.desk {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: var(--s6);
+    align-items: start;
+    margin-top: var(--s5);
+}
+
+.sec-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s3);
+    min-height: var(--row-s);
+    padding: var(--s2) 0;
+    border-bottom: 1px solid var(--ink);
+}
+
+.sec-head h2 {
+    margin: 0;
+    font-size: var(--t-body);
+    font-weight: 500;
+    line-height: 1.3;
+}
+
+.sec-head .link {
+    font-size: 14px;
+}
+
+@media (pointer: coarse) {
+    .sec-head .link {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+    }
+}
+
+.tbl {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.tbl col.c-edited { width: 110px; }
+.tbl col.c-by { width: 118px; }
+.tbl col.c-ver { width: 64px; }
+.tbl col.c-open { width: 64px; }
+.tbl col.c-role { width: 96px; }
+
+.tbl th {
+    height: 32px;
+    padding: 0 var(--s3);
+    text-align: left;
+    font-size: var(--t-micro);
+    font-weight: 400;
+    color: var(--ink-soft);
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+}
+
+.tbl th.num,
+.num {
+    text-align: right;
+}
+
+.tbl th button {
+    all: unset;
+    cursor: pointer;
+    padding: var(--s1) 0;
+}
+
+.tbl th button:hover {
+    color: var(--ink);
+}
+
+.tbl th button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.tbl th[aria-sort] button {
+    color: var(--ink);
+    box-shadow: 0 2px 0 var(--accent);
+}
+
+.tbl td {
+    position: relative;
+    height: var(--row-m);
+    padding: 0 var(--s3);
+    vertical-align: middle;
+    transition: background-color var(--chrome-move) ease;
+}
+
+.tbl tbody tr {
+    border-bottom: 1px solid var(--line);
+}
+
+.tbl tbody tr:hover td,
+.tbl tr[aria-current='true'] td {
+    background: var(--accent-soft);
+}
+
+.tbl td.t {
     overflow: hidden;
-    border: 1px solid var(--line);
+}
+
+.t-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink);
+    text-decoration: none;
+}
+
+/* The whole row is the target of the select link. */
+.t-name::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+}
+
+.t-sub {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    font-size: var(--t-micro);
+    color: var(--ink-soft);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.t-sub .status-word {
+    font-size: var(--t-micro);
+}
+
+.soft {
+    color: var(--ink-soft);
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+.row-open {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 0 var(--s2);
+    font-size: 14px;
+    color: var(--accent);
+    text-decoration: none;
     border-radius: var(--r-control);
+}
+
+.row-open:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.on-phone {
+    display: none;
+}
+
+.shared {
+    margin-top: var(--s5);
+}
+
+.desk-note {
+    margin: var(--s3) 0 0;
+    font-size: 14px;
+    color: var(--ink-soft);
+}
+
+.empty-rows {
+    margin: 0;
+    padding: var(--s4) 0;
+    color: var(--ink-soft);
+    border-bottom: 1px solid var(--line);
+}
+
+/* The record: the sheet on the document's own white, then label and value. */
+.detail {
+    position: sticky;
+    top: 0;
+}
+
+/* One quiet layer behind the sheet per earlier version (at most two). */
+.rec-stack {
+    --l: 0;
+    position: relative;
+    margin-top: var(--s3);
+    padding: 0 calc(var(--l) * 6px) calc(var(--l) * 6px) 0;
+}
+
+.rec-stack[data-layers='1'] { --l: 1; }
+.rec-stack[data-layers='2'] { --l: 2; }
+
+.rec-under {
+    position: absolute;
+    background: var(--paper);
+    border: 1px solid var(--paper-rule);
+}
+
+.rec-under:nth-of-type(1) {
+    z-index: 2;
+    top: 6px;
+    left: 6px;
+    right: calc((var(--l) - 1) * 6px);
+    bottom: calc((var(--l) - 1) * 6px);
+}
+
+.rec-under:nth-of-type(2) {
+    z-index: 1;
+    top: 12px;
+    left: 12px;
+    right: 0;
+    bottom: 0;
+}
+
+.rec-sheet {
+    position: relative;
+    z-index: 3;
+    display: block;
+    aspect-ratio: 16 / 9;
+    padding: var(--s4) var(--s4) var(--s3);
+    overflow: hidden;
     background: var(--paper);
     color: var(--paper-ink);
+    border: 1px solid var(--line);
     text-decoration: none;
-    transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), border-color var(--chrome-move) ease;
+    transition: transform 200ms var(--ease-out);
 }
 
-a.landing-sheet:hover {
-    transform: translateY(-3px);
-    border-color: var(--ink-soft);
+.rec-sheet:hover {
+    transform: translateY(-2px);
 }
 
-.landing-sheet-title {
+.rec-title {
+    display: block;
     font-family: var(--font-sheet-head);
     font-size: var(--t-lede);
-    font-weight: 600;
+    font-weight: 700;
     line-height: 1.25;
     overflow-wrap: break-word;
 }
 
-.landing-sheet-text {
-    flex: 1 1 auto;
-    min-height: 0;
-    margin-top: var(--s3);
+.rec-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    line-clamp: 6;
+    -webkit-box-orient: vertical;
     overflow: hidden;
+    margin-top: var(--s2);
     font-family: var(--font-sheet);
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.55;
 }
 
-.landing-sheet-foot {
-    flex: none;
-    padding-top: var(--s3);
-    font-size: var(--t-micro);
-    line-height: 1.4;
+.facts {
+    margin: var(--s3) 0 0;
 }
 
-.landing-sheet-blank .landing-sheet-text {
-    margin-top: 0;
-    font-size: var(--t-body);
+.facts > div {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr);
+    align-items: center;
+    min-height: var(--row-s);
+    border-bottom: 1px solid var(--line);
 }
 
-.landing-tally {
-    margin: var(--s5) 0 0;
-    max-width: 68ch;
-    font-size: var(--t-body);
+.facts dt {
+    font-size: 14px;
     color: var(--ink-soft);
 }
 
-/* One authored moment: the lead settles into place, once. It is not declared
-   at all for anybody who asked for less motion. */
+.facts dd {
+    margin: 0;
+}
+
+.facts .status-word {
+    display: inline-flex;
+}
+
+.acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+    margin-top: var(--s4);
+}
+
+/* Nothing written yet: a blank ruled sheet with its margin line, drawn in CSS from
+   the document's own paper tokens. The sentence is the only content. */
+.blank-sheet {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    aspect-ratio: 16 / 9;
+    margin-top: var(--s3);
+    padding: 44px var(--s4) 0 56px;
+    overflow: hidden;
+    background-color: var(--paper);
+    background-image: repeating-linear-gradient(to bottom, transparent 0 21px, var(--paper-rule) 21px 22px);
+    color: var(--paper-ink);
+    border: 1px solid var(--line);
+    font-family: var(--font-sheet);
+    font-size: 14px;
+    line-height: 22px;
+}
+
+.blank-sheet::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 40px;
+    width: 1px;
+    background: var(--paper-margin);
+}
+
+.foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--s4);
+    margin-top: var(--s6);
+    padding-top: var(--s3);
+    border-top: 1px solid var(--line);
+    font-size: 14px;
+    color: var(--ink-soft);
+}
+
+.foot p {
+    margin: 0;
+    max-width: 78ch;
+}
+
+/*
+ * Motion. Content moves, chrome never does. transform and opacity only, ease-out,
+ * 200 to 400ms, once. Declared nowhere for anybody who asked for less motion.
+ * No fill after the end: if a tab never runs animations the page is simply there.
+ *
+ * ARRIVAL (no ?doc=): the band rises in four beats, the accent mark is drawn along
+ * the hairline, then the rows follow, 30ms apart.
+ * SELECTION (every load): the sheet settles, its stack unfolds from behind it, the
+ * facts follow one by one.
+ */
 @media (prefers-reduced-motion: no-preference) {
-    .landing-intro,
-    .landing-sheet {
-        animation: landing-settle 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    .is-arriving .arrive-logo,
+    .is-arriving .arrive-copy,
+    .is-arriving .arrive-actions {
+        animation: dash-rise 360ms var(--ease-out) backwards;
     }
 
-    .landing-sheet {
-        animation-delay: 90ms;
+    .is-arriving .arrive-copy { animation-delay: 60ms; }
+    .is-arriving .arrive-actions { animation-delay: 120ms; }
+
+    .is-arriving .arrive-rule::after {
+        transform-origin: left center;
+        animation: dash-draw 420ms var(--ease-out) 200ms backwards;
     }
+
+    .is-arriving ~ .desk .tbl tbody tr {
+        animation: dash-rise 320ms var(--ease-out) backwards;
+    }
+
+    .is-arriving ~ .desk .tbl tbody tr:nth-child(1) { animation-delay: 200ms; }
+    .is-arriving ~ .desk .tbl tbody tr:nth-child(2) { animation-delay: 230ms; }
+    .is-arriving ~ .desk .tbl tbody tr:nth-child(3) { animation-delay: 260ms; }
+    .is-arriving ~ .desk .tbl tbody tr:nth-child(4) { animation-delay: 290ms; }
+    .is-arriving ~ .desk .tbl tbody tr:nth-child(5) { animation-delay: 320ms; }
+    .is-arriving ~ .desk .tbl tbody tr:nth-child(6) { animation-delay: 350ms; }
+    .is-arriving ~ .desk .tbl tbody tr:nth-child(7) { animation-delay: 380ms; }
+    .is-arriving ~ .desk .tbl tbody tr:nth-child(8) { animation-delay: 410ms; }
+    .is-arriving ~ .desk .tbl tbody tr:nth-child(n + 9) { animation-delay: 440ms; }
+
+    .detail .rec-sheet { animation: dash-settle 280ms var(--ease-out) backwards; }
+    .detail .blank-sheet { animation: dash-settle 280ms var(--ease-out) backwards; }
+    .is-arriving ~ .desk .detail .rec-sheet { animation-delay: 200ms; }
+
+    .rec-under { animation: dash-unfold 360ms var(--ease-out) 120ms backwards; }
+
+    .facts > div { animation: dash-rise 260ms var(--ease-out) backwards; }
+    .facts > div:nth-child(1) { animation-delay: 60ms; }
+    .facts > div:nth-child(2) { animation-delay: 90ms; }
+    .facts > div:nth-child(3) { animation-delay: 120ms; }
+    .facts > div:nth-child(4) { animation-delay: 150ms; }
+    .facts > div:nth-child(5) { animation-delay: 180ms; }
+    .facts > div:nth-child(6) { animation-delay: 210ms; }
+
+    .btn:active { transform: translateY(1px); }
 }
 
-/* Transform only, never opacity: a tab that is painted but not yet running
-   animations (a background tab, a slow first frame) still shows the whole
-   page, a few pixels low, instead of an empty one. */
-@keyframes landing-settle {
+@keyframes dash-rise {
     from {
-        transform: translateY(12px);
+        opacity: 0;
+        transform: translateY(8px);
     }
 }
 
-@container (max-width: 640px) {
-    .landing-lead {
+@keyframes dash-settle {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+}
+
+@keyframes dash-draw {
+    from {
+        transform: scaleX(0);
+    }
+}
+
+@keyframes dash-unfold {
+    from {
+        transform: translate(-6px, -6px);
+        opacity: 0;
+    }
+}
+
+/* Tablet and below: the rail is already an overlay (900); the desk stacks. */
+@media (width <= 900px) {
+    .desk {
         grid-template-columns: minmax(0, 1fr);
         gap: var(--s5);
     }
 
-    /* Stacked, a full A4 would push everything else off the first screen. */
-    .landing-sheet {
-        aspect-ratio: auto;
-        max-height: 260px;
+    .detail {
+        position: static;
     }
 
-    .landing-logo img {
-        width: 72px;
-        height: 72px;
+    .arrive {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .arrive-actions {
+        grid-column: 1 / -1;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .col-by,
+    .tbl col.c-by {
+        display: none;
+    }
+
+    .rec-sheet,
+    .blank-sheet {
+        aspect-ratio: auto;
+        max-height: 200px;
+        min-height: 120px;
+    }
+
+    /* The panel is not beside the list here, so a row opens the document itself. */
+    .row-select {
+        display: none;
+    }
+}
+
+@media (width > 900px) {
+    .row-direct {
+        display: none;
+    }
+}
+
+@media (width <= 480px) {
+    .arrive-logo img {
+        width: 56px;
+        height: 56px;
+    }
+
+    .arrive-title {
+        font-size: var(--t-title);
+    }
+
+    .arrive-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .arrive-actions .btn {
+        min-height: 48px;
+    }
+
+    .arrive-actions .link,
+    .arrive-actions .find {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .find .dsr-filter {
+        width: 100%;
+        height: 44px;
+    }
+
+    .tbl td {
+        height: var(--row-l);
+    }
+
+    .col-edited,
+    .col-ver,
+    .tbl col.c-edited,
+    .tbl col.c-ver {
+        display: none;
+    }
+
+    .tbl col.c-open { width: 56px; }
+    .tbl col.c-role { width: 72px; }
+
+    .on-phone {
+        display: inline;
+    }
+
+    .t-sub {
+        white-space: normal;
+        flex-wrap: wrap;
+    }
+
+    .row-open {
+        min-height: 44px;
+        min-width: 44px;
+        justify-content: center;
+    }
+
+    .rec-sheet,
+    .blank-sheet {
+        min-height: 150px;
+    }
+
+    .facts > div {
+        min-height: 44px;
+    }
+
+    .acts .btn {
+        flex: 1 1 40%;
+        min-height: 44px;
+    }
+
+    .foot {
+        flex-direction: column;
     }
 }
 
@@ -2317,5 +2825,12 @@ button.list-row {
     .gate-actions .btn {
         width: 100%;
         justify-content: center;
+    }
+}
+
+/* The dashboard's phone bar: the dock says nothing there, and the title no longer truncates to one letter. */
+@media (width <= 480px) {
+    [data-shell-page='dashboard'] [data-shell-panel-toggle='dock'] {
+        display: none;
     }
 }
