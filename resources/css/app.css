@@ -217,3 +217,25 @@ body {
     --dsw-radius: var(--r-control);
     --dsw-btn-height: 32px;
 }
+
+/*
+ * The switcher panel hangs from the bottom edge of the nearest positioned ancestor, so the bar is that ancestor, and it
+ * sits above the rail and dock overlays (z-index 60 on a phone). On a phone the bar used to scroll sideways on its own
+ * (shell.css, max-width 420px); a scroll container would clip the panel, so on pages (not the editor) it does not.
+ */
+.topbar {
+    position: relative;
+    z-index: 70;
+}
+
+@media (max-width: 420px) {
+    /* Pages only: the editor has no switcher and keeps its own scrolling bar. A page's status word only ever says
+       "Ready" (no save owner), so on a phone it gives way to the switcher button. */
+    [data-shell-context='page'] .topbar {
+        overflow: visible;
+    }
+
+    [data-shell-context='page'] .topbar-status {
+        display: none;
+    }
+}
