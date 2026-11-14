@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureCompanyEntitled;
 use Laravel\Jetstream\Features;
 use Laravel\Jetstream\Http\Middleware\AuthenticateSession;
 
@@ -29,7 +30,8 @@ return [
     |
     */
 
-    'middleware' => ['web'],
+    // R-50: Jetstream's signed-in pages honour the company's entitlement too.
+    'middleware' => ['web', EnsureCompanyEntitled::class],
 
     'auth_session' => AuthenticateSession::class,
 

@@ -15,6 +15,7 @@ use App\Http\Controllers\LandingController;
 use App\Http\Controllers\PublishedDocumentController;
 use App\Http\Controllers\SchedulerProbeController;
 use App\Http\Middleware\AuthenticateGuardian;
+use App\Http\Middleware\EnsureCompanyEntitled;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
 use App\Livewire\Documents\Index;
@@ -133,6 +134,8 @@ Route::middleware([
     'auth:sanctum',
     config('jetstream.auth_session'),
     'verified',
+    // R-50: the company must still hold Dot.docs. Published and shared pages above are deliberately outside.
+    EnsureCompanyEntitled::class,
 ])->group(function () {
     // Where a person arrives from InfoDot. One company at a time: see LandingController.
     Route::get('/dashboard', LandingController::class)->name('dashboard');

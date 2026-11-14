@@ -81,6 +81,10 @@ return [
         'secret' => env('INFODOT_SERVICE_SECRET'),
         'timeout' => (int) env('INFODOT_REDEEM_TIMEOUT', 5),
         'provision' => (bool) env('INFODOT_PROVISION_USERS', true),
+
+        // R-50: during a session, ask InfoDot whether the current company still holds this platform (cached ten
+        // minutes per company; an outage or a misconfiguration never locks anyone out). See EnsureCompanyEntitled.
+        'entitlement_check' => (bool) env('DOCS_ENTITLEMENT_CHECK', true),
     ],
 
 ];

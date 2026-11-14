@@ -2210,3 +2210,112 @@ button.list-row {
         scroll-behavior: auto !important;
     }
 }
+
+/* ── R-50: the company does not hold Dot.docs (entitlement/refused) ───── */
+
+.gate {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: var(--s5) var(--s4) var(--s6);
+    color: var(--ink);
+    font-family: var(--font-body, system-ui, sans-serif);
+}
+
+.gate-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--s4);
+    margin-bottom: var(--s5);
+}
+
+.gate-top form {
+    margin: 0;
+}
+
+.gate-top .landing-logo img {
+    width: 72px;
+    height: 72px;
+}
+
+.gate-out {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 var(--s2);
+    border: 0;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+}
+
+.gate-title {
+    margin: 0 0 var(--s4);
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-size: clamp(26px, 6vw, var(--t-display));
+    font-weight: 500;
+    line-height: 1.12;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    overflow-wrap: break-word;
+}
+
+.gate-body {
+    margin: 0;
+    max-width: 62ch;
+    font-size: var(--t-lede);
+    line-height: 1.55;
+    text-wrap: pretty;
+}
+
+.gate-actions {
+    margin: var(--s5) 0 0;
+}
+
+.gate-others {
+    margin-top: var(--s6);
+}
+
+.gate-others h2 {
+    margin: 0 0 var(--s2);
+    font-size: var(--t-body);
+    font-weight: 600;
+    color: var(--ink-soft);
+}
+
+.gate-others ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.gate-others li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    padding: var(--s2) 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.gate-others li span {
+    min-width: 0;
+    overflow-wrap: break-word;
+}
+
+.gate-others form {
+    margin: 0;
+    flex: none;
+}
+
+.gate-others .btn {
+    min-height: 44px;
+}
+
+@media (max-width: 640px) {
+    .gate-actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}

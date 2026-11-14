@@ -21,6 +21,9 @@ use Laravel\Jetstream\Jetstream;
  *   someone in InfoDot removes their access here at their next sign-in.
  * - The company InfoDot says is active becomes the person's current team.
  * - Personal teams are never linked or removed.
+ * - R-50: a company InfoDot marks `entitled: false` for this platform is left exactly as it is here: not created,
+ *   not renamed, no membership or role change, and it cannot be the person's current company. A company without
+ *   the key (an InfoDot from before R-50) is treated as it always was.
  */
 class SyncTeamsFromInfoDot
 {
@@ -29,26 +32,58 @@ class SyncTeamsFromInfoDot
      */
     public function __invoke(User $user, array $identity): void
     {
-        $listed = collect($identity['teams'] ?? [])
+        $named = collect($identity['teams'] ?? [])
             ->filter(fn ($t) => is_array($t) && filled($t['uuid'] ?? null) && ! ($t['personal'] ?? false))
             ->keyBy('uuid');
 
-        DB::transaction(function () use ($user, $listed, $identity) {
+        // Present and anything but exactly true is a refusal; absent is not.
+        $refused = $named->filter(fn ($t) => array_key_exists('entitled', $t) && $t['entitled'] !== true);
+        $listed = $named->diffKeys($refused);
+
+        DB::transaction(function () use ($user, $named, $refused, $listed, $identity) {
             foreach ($listed as $uuid => $info) {
                 $this->apply($user, (string) $uuid, $info);
                 $this->forgetCachedTeams($user);
             }
 
-            $this->revoke($user, $listed->keys()->all());
+            // Revocation is about companies InfoDot no longer lists at all; a listed company that does not hold
+            // this platform keeps whatever membership it has here.
+            $this->revoke($user, $named->keys()->map(fn ($uuid) => (string) $uuid)->all());
             $this->forgetCachedTeams($user);
 
             $active = $identity['current_team_uuid'] ?? null;
-            $team = $active ? Team::where('infodot_team_uuid', $active)->first() : null;
+            $team = $active && $listed->has($active) ? Team::where('infodot_team_uuid', $active)->first() : null;
 
             if ($team && $user->belongsToTeam($team)) {
                 $user->switchTeam($team);
+            } else {
+                $this->leaveRefusedCompany($user, $refused->keys()->all(), $listed->keys()->all());
             }
         });
+    }
+
+    /**
+     * A company that does not hold this platform cannot stay the person's current company: move them to an
+     * entitled company they belong to here, else to their personal team.
+     *
+     * @param  list<int|string>  $refused
+     * @param  list<int|string>  $entitled
+     */
+    private function leaveRefusedCompany(User $user, array $refused, array $entitled): void
+    {
+        $current = $user->current_team_id ? Team::find($user->current_team_id) : null;
+
+        if (! $current || blank($current->infodot_team_uuid) || ! in_array($current->infodot_team_uuid, array_map('strval', $refused), true)) {
+            return;
+        }
+
+        $next = $user->allTeams()->first(fn ($team) => in_array($team->infodot_team_uuid, array_map('strval', $entitled), true))
+            ?? $user->personalTeam();
+
+        if ($next) {
+            $user->switchTeam($next);
+            $this->forgetCachedTeams($user);
+        }
     }
 
     /** Membership checks read relations cached on the model; reload after changing them. */
