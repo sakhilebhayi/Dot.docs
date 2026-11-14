@@ -6,7 +6,7 @@
 
         <div class="mb-6 text-center">
             <h1 class="text-2xl font-display font-semibold text-[var(--ink)]">Welcome back</h1>
-            <p class="text-sm text-[var(--ink-soft)] mt-1">Sign in to your dot.doc account</p>
+            <p class="text-sm text-[var(--ink-soft)] mt-1">Sign in to your Dot.docs account</p>
         </div>
 
         <x-validation-errors class="mb-4" />

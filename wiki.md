@@ -73,7 +73,7 @@ Source: `database/migrations/*`, `app/Models/`.
 4. `Auth::login($user)`
 5. Redirects to this app's own `dashboard` route
 
-This is correct and consistent with the contract described in [Dot.Billing's wiki.md](../Dot.Billing/wiki.md) §2.
+This is correct and consistent with the ecosystem's sign-in contract.
 
 **Database finding (fixed this pass):** `.env.example` had `DB_DATABASE` commented out as `# DB_DATABASE=laravel`, meaning any environment built from the example file — before this fix — would fall back to `config/database.php`'s hardcoded default of `'laravel'`, a database that does not exist in the shared InfoDot PostgreSQL instance. Every other platform's `.env.example` (Dot.Billing, Dot.Tasks, Dot.Projects checked directly) sets `DB_DATABASE=infodot` uncommented. This has been corrected to `DB_DATABASE=infodot` in this pass — see Change Log. This was not caught by CI or any prior review because this environment cannot run `php artisan migrate` or connect to Postgres at all (see §9); it was found by reading the config, not by running it.
 

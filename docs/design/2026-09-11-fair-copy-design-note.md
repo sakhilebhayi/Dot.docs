@@ -96,3 +96,26 @@ changing it is a rename to make deliberately, not a side effect of an accessibil
 - An icon-only collapsed rail: a 56px strip of initials is worse than no rail. Collapsed
   is width zero plus one labelled toggle.
 - Material Symbols, emoji, and a spinner for "Saving". Words, still.
+
+## The arrival page (R-50, 2026-11-14)
+
+Skills loaded before any markup: `impeccable` (context, craft floor), with `hallmark` and
+`design-taste-frontend` read as taste checks. Their page-building runs (dealt themes, new
+typefaces, picture floors) were NOT followed: the page is built inside Fair Copy, and where a
+skill's house style and this note disagree, this note won.
+
+- **The idea.** A fair copy is the clean sheet, so the arrival page puts a sheet beside the one
+  thing to do. The sheet is the newest real document in the company (title, the opening of its
+  text, who edited it and when) on the document's own white, in A4's proportion; it is a link
+  into that document. With nothing written it is a blank sheet that says so.
+- **Hierarchy.** Logo, then one Fraunces headline ("Put it in writing, together.", the only type
+  in the shell above `--t-display`, scaled to the canvas with `cqi`), a welcome sentence with
+  the person's first name and the company's name, and ONE filled button. Templates and the full
+  list are text links. No label above the heading.
+- **What was demoted.** The four counts were a panel of figures at the top of the page; they
+  are one sentence at the foot now, and a count of zero is not printed. The two lists keep the
+  product's own quiet panels and only render when they have rows.
+- **Rejected.** A shadow under the sheet (the real page owns the only one); an opacity fade-in
+  (blank in a tab that is painted but not animating); a redrawn or recoloured mark (the PNG is
+  used as it is, the night file at night); an illustration for the empty state.
+

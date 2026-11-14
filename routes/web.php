@@ -11,9 +11,11 @@ use App\Http\Controllers\DocumentSyncMetricsController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\FileViewController;
 use App\Http\Controllers\GuardianHealthController;
+use App\Http\Controllers\LandingController;
 use App\Http\Controllers\PublishedDocumentController;
 use App\Http\Controllers\SchedulerProbeController;
 use App\Http\Middleware\AuthenticateGuardian;
+use App\Http\Middleware\EnsureCompanyEntitled;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
 use App\Livewire\Documents\Index;
@@ -21,9 +23,7 @@ use App\Livewire\Documents\ShareManager;
 use App\Livewire\Documents\SlashCommandManager;
 use App\Livewire\Documents\VersionHistory;
 use App\Livewire\Files\Navigator;
-use App\Models\AiSuggestion;
 use App\Models\Document;
-use App\Models\DocumentCollaborator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
@@ -134,19 +134,11 @@ Route::middleware([
     'auth:sanctum',
     config('jetstream.auth_session'),
     'verified',
+    // R-50: the company must still hold Dot.docs. Published and shared pages above are deliberately outside.
+    EnsureCompanyEntitled::class,
 ])->group(function () {
-    Route::get('/dashboard', function () {
-        $userId = auth()->id();
-        $myDocs = Document::where('owner_id', $userId)->count();
-        $sharedDocs = DocumentCollaborator::where('user_id', $userId)->count();
-        $publicDocs = Document::where('owner_id', $userId)->where('is_public', true)->count();
-        $aiSuggestions = AiSuggestion::where('user_id', $userId)->whereNull('accepted_at')->count();
-        $recentDocs = Document::where('owner_id', $userId)->latest()->limit(8)->get();
-        $recentShared = DocumentCollaborator::where('user_id', $userId)
-            ->with('document.owner')->latest()->limit(5)->get();
-
-        return view('dashboard', compact('myDocs', 'sharedDocs', 'publicDocs', 'aiSuggestions', 'recentDocs', 'recentShared'));
-    })->name('dashboard');
+    // Where a person arrives from InfoDot. One company at a time: see LandingController.
+    Route::get('/dashboard', LandingController::class)->name('dashboard');
 
     // Documents
     Route::get('/documents', Index::class)->name('documents.index');

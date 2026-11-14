@@ -50,7 +50,7 @@
                     <span data-shell-theme-word>{{ $theme === 'dark' ? 'Night' : 'Day' }}</span>
                     <span class="sr-only">Switch to {{ $theme === 'dark' ? 'day' : 'night' }} mode</span>
                 </button>
-                <a class="topbar-action" href="{{ url('/') }}">Dot.Doc</a>
+                <a class="topbar-action" href="{{ url('/') }}">Dot.docs</a>
             </div>
         </header>
     </div>

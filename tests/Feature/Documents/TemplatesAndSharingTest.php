@@ -44,7 +44,7 @@ class TemplatesAndSharingTest extends TestCase
             $template = DocumentTemplate::where('name', $name)->firstOrFail();
             $json = $template->content_json;
 
-            $this->assertSame([], $schema->validate($json), "{$name} is not valid Dot.Doc JSON");
+            $this->assertSame([], $schema->validate($json), "{$name} is not valid Dot.docs JSON");
             $this->assertSame($spec['style'], $template->style_key);
             $this->assertTrue($template->is_global);
 
@@ -231,7 +231,7 @@ class TemplatesAndSharingTest extends TestCase
             ->assertSee('class="paper"', false)
             ->assertSee('id="doc-style"', false)
             ->assertSee('window.print()', false)
-            ->assertSee('Made with Dot.Doc');
+            ->assertSee('Made with Dot.docs');
 
         // .ai/rules/views.md: a chrome colour is never a literal in a view.
         // The Document Style CSS inside <style id="doc-style"> is the one

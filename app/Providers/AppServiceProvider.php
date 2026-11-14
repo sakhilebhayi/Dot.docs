@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Http\Middleware\EnsureCompanyEntitled;
 use App\Models\Document;
 use App\Models\Files\File;
 use App\Models\Files\Folder;
@@ -17,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Livewire\Livewire;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -29,6 +31,9 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // R-50: Livewire updates from a page in the signed-in area carry that page's entitlement check with them.
+        Livewire::addPersistentMiddleware([EnsureCompanyEntitled::class]);
+
         Document::observe(DocumentObserver::class);
         Document::observe(InfoDotResourceObserver::class);
 

@@ -207,7 +207,7 @@ class FairCopyTest extends TestCase
      * Spec §3: the top bar carries no platform-name readout. A page with no
      * document names ITSELF there — "Dashboard", "Documents", "Files" — and the
      * brand stays where a brand belongs, in the tab title and the rail's
-     * colophon. Falling back to config('app.name') put "Dot.Doc" in Fraunces
+     * colophon. Falling back to config('app.name') put "Dot.docs" in Fraunces
      * across the dashboard: the exact row this redesign retired.
      */
     public function test_the_topbar_names_the_page_and_never_the_platform(): void
