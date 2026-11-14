@@ -140,6 +140,10 @@
 
 /* the "Ctrl K" hint, hidden while the box is open and under 640px */
 .dsr .dsr-kbd {
+    /* stated, so a host's global `kbd { display: none }` (0,0,1) cannot hide the hint at widths where the pill shows it.
+       `block` is what an absolutely positioned kbd computes to anyway: the pill's measured values are unchanged. The
+       hiding rules below (focus-within, is-open, under 640px) are stronger or later, so they still win. */
+    display: block;
     position: absolute;
     right: 48px;
     top: 50%;
@@ -362,8 +366,12 @@
 }
 
 /* ---- compact filter: InfoDot's 36px .ix-input, for in-page filters (not the pill) ---- */
-.dsr-filter {
+/* display has zero specificity: a host's plain `.toolbar .dsr-filter { display: none }` at a breakpoint wins without a longer selector */
+:where(.dsr-filter) {
     display: block;
+}
+
+.dsr-filter {
     width: 100%;
     height: var(--dsr-filter-h);
     margin: 0;
@@ -386,7 +394,7 @@
 }
 
 /* The doubled class lifts these to (0,3,0), above a host's global `input:focus` or `input[type=search]:focus`
-   (0,2,1), so the filter keeps its own border and no ring in every host. The computed values are unchanged. */
+   (0,2,1), so the filter keeps its own border in every host. The border change stays; the keyboard ring is added on top. */
 .dsr-filter.dsr-filter:hover {
     border-color: var(--dsr-filter-border-hover, var(--dsr-text-3));
 }
@@ -398,10 +406,26 @@
     box-shadow: none;
 }
 
+/* Keyboard focus ring: 2px, 1px off the border, in --dsr-focus-ring (default: the pill's gold; a host maps its accent on any
+   ancestor). A real `outline`, not a box-shadow, so forced-colors / high-contrast modes keep it. Same weight as the pill. */
+.dsr-filter.dsr-filter:focus-visible {
+    outline: 2px solid var(--dsr-focus-ring, var(--dsr-ring, #f0bc2e));
+    outline-offset: 1px;
+}
+
+@media (forced-colors: active) {
+    .dsr-filter.dsr-filter:focus-visible {
+        outline: 2px solid Highlight;
+    }
+}
+
+/* touch and small screens: 44px high, and 16px type so iOS does not zoom the page on focus. Both are tokens a host may map
+   on any ancestor (a dense host: --dsr-filter-h-touch: 36px). The desktop 14px and --dsr-filter-h are untouched. */
 @media (pointer: coarse), (max-width: 768px) {
     .dsr-filter {
-        height: 44px;
-        min-height: 44px;
+        height: var(--dsr-filter-h-touch, 44px);
+        min-height: var(--dsr-filter-h-touch, 44px);
+        font-size: var(--dsr-filter-fs-touch, 16px);
     }
 }
 

@@ -15,7 +15,11 @@
     id           the panel's id (default dsw-panel; change it only if a page holds two switchers)
     notice       override of the visible degraded line, e.g. "Could not check your platforms from here" (a platform that
                  structurally cannot ask InfoDot). Default: the model's "Could not check your platforms just now"
-    notice-detail  override of the sentence after it. Default: "These open through InfoDot, which checks your access."
+    notice-detail  override of the sentence after it. Default: the model's `notice_detail` (PlatformSwitcher::plain() sets one),
+                 else "These open through InfoDot, which checks your access."
+    button-label the trigger's accessible name (aria-label), default "Dot Apps". The visible label is hidden under 640px and in
+                 compact mode, so the name must not depend on the `title` attribute. Localise it here.
+    compact      true: the icon-only trigger at any width (a narrow host: the label never shows). Sets data-compact on the root.
 
   Needs css/dot-switcher.css and, for open/close/filter/"Opening...", js/dot-switcher.js (no inline script, no inline style attributes).
   The nearest positioned ancestor (the header) is where the panel hangs from.
@@ -30,6 +34,8 @@
     'id' => 'dsw-panel',
     'notice' => null,
     'noticeDetail' => null,
+    'buttonLabel' => 'Dot Apps',
+    'compact' => false,
 ])
 @php
     if ($model === null) {
@@ -45,12 +51,12 @@
     $count = $model['count'] ?? 0;
 @endphp
 @if ($model !== null)
-<div {{ $attributes->class(['dsw', 'dsw--'.$mode]) }} data-dsw data-state="{{ $state }}" data-platform="{{ $model['current'] }}">
-    <a class="dsw-fallback" href="{{ $model['platforms_url'] }}" title="Switch Dot platform">
+<div {{ $attributes->class(['dsw', 'dsw--'.$mode]) }} @if($compact) data-compact @endif data-dsw data-state="{{ $state }}" data-platform="{{ $model['current'] }}">
+    <a class="dsw-fallback" href="{{ $model['platforms_url'] }}" title="Switch Dot platform" aria-label="{{ $buttonLabel }}">
         <svg class="dsw-btn__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="10" y="4" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="16" y="4" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="4" y="10" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="10" y="10" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="16" y="10" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="4" y="16" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="10" y="16" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="16" y="16" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/></svg>
         <span class="dsw-btn__label">Dot Apps</span>
     </a>
-    <button type="button" class="dsw-btn" data-dsw-trigger aria-expanded="false" aria-controls="{{ $id }}" title="Switch Dot platform">
+    <button type="button" class="dsw-btn" data-dsw-trigger aria-expanded="false" aria-controls="{{ $id }}" title="Switch Dot platform" aria-label="{{ $buttonLabel }}">
         <svg class="dsw-btn__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="10" y="4" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="16" y="4" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="4" y="10" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="10" y="10" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="16" y="10" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="4" y="16" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="10" y="16" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/><rect x="16" y="16" width="4" height="4" rx="1.2" fill="currentColor" stroke="none"/></svg>
         <span class="dsw-btn__label">Dot Apps</span>
     </button>
@@ -81,7 +87,7 @@
             </div>
 
             @if ($state === 'degraded')
-                <p class="dsw-notice" role="status"><strong>{{ $notice ?: $model['notice'] }}.</strong> <span>{{ $noticeDetail ?: 'These open through InfoDot, which checks your access.' }}</span></p>
+                <p class="dsw-notice" role="status"><strong>{{ $notice ?: $model['notice'] }}.</strong> <span>{{ $noticeDetail ?: ($model['notice_detail'] ?? null) ?: 'These open through InfoDot, which checks your access.' }}</span></p>
             @endif
 
             @if ($state === 'personal')

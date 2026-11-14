@@ -48,7 +48,11 @@
        --dsw-ink) and the tiles stay readable on the plate. Each defaults to the value the tile used before. */
     --dsw-tile-ink: var(--dsw-ink);
     --dsw-tile-surface: var(--dsw-tile);
-    --dsw-tile-tag-ink: var(--dsw-paper);
+    /* the tag ("YOU ARE HERE") is drawn in --dsw-tile-ink (its background) with --dsw-tile-tag-ink on top. The ink defaults to
+       the light sheet's cream, a fixed value: it is NOT the panel paper, which goes dark in a dark panel and left the tag
+       unreadable. Browsers with relative colours (the @supports block below) pick the cream or a near-black from the lightness of
+       --dsw-tile-ink, so a light tag gets dark type; others keep the cream. A host may still set --dsw-tile-tag-ink itself. */
+    --dsw-tile-tag-ink: #f6f4ee;
     --dsw-stencil: #e7a717;
     --dsw-plate-ink: #ffffff;
     --dsw-max: 1280px;
@@ -60,6 +64,14 @@
     --dsw-tone-platforms: #c98f12;
     --dsw-tone-analytics: #2b3439;
     --dsw-tone-people: #56636b;
+}
+
+/* tag type follows the tag's own background (--dsw-tile-ink): cream on a dark tag (the light sheet's #f6f4ee, exactly), near-black
+   on a light one. Zero specificity, so a host's --dsw-tile-tag-ink wins. */
+@supports (color: oklch(from red l c h)) {
+    :where(.dsw) {
+        --dsw-tile-tag-ink: oklch(from var(--dsw-tile-ink) clamp(0.243, calc((0.62 - l) * 1000), 0.9670330748) 0.0082380364 91.4828664638);
+    }
 }
 
 .dsw {
@@ -357,6 +369,20 @@
     outline-offset: 0;
 }
 
+/* forced-colors / high-contrast: the ring is a real outline in a system colour, never a colour the mode would drop */
+@media (forced-colors: active) {
+    .dsw .dsw-filter input:focus-visible {
+        outline: 3px solid Highlight;
+    }
+}
+
+/* touch and small screens: 16px type, so iOS does not zoom the page when the filter takes focus (token, as the search filter's) */
+@media (pointer: coarse), (max-width: 768px) {
+    .dsw .dsw-filter input {
+        font-size: var(--dsw-filter-fs-touch, var(--dsr-filter-fs-touch, 16px));
+    }
+}
+
 /* ---- groups and tiles ---- */
 
 .dsw-groups {
@@ -634,6 +660,12 @@
 }
 
 /* ---- phone: a sheet, groups stacked, three tiles to a row ---- */
+
+/* compact / icon-only at any width: <div class="dsw" data-compact> (the `compact` prop). Narrow hosts (a crowded top bar) use it
+   instead of their own rule. The button sizes from --dsw-btn-h, --dsw-btn-min-w and --dsw-btn-pad-x like the full one. */
+.dsw[data-compact] .dsw-btn__label {
+    display: none;
+}
 
 @media (max-width: 639px) {
     .dsw-btn__label {

@@ -66,6 +66,7 @@ final class PlatformSwitcher
      * @param  string  $infodotUrl  InfoDot's base URL (config `ecosystem.platforms.infodot.url`).
      * @param  string|null  $secret  This platform's service secret (config `ecosystem.infodot.secret`).
      * @param  string|null  $companiesUrl  Where the read goes, `{companies_url}/{uuid}/platforms`. Blank: `{infodot}/api/ecosystem/companies`.
+     * @param  Cache|null  $cache  The answer cache. `null` is for a host that never asks (see `plain()`).
      * @param  string|\Closure|null  $cacheKey  Where the answer is cached. A string with `{platform}` and `{company}`
      *                                          placeholders, or `fn (string $platform, string $company): string`.
      *                                          Default `infodot:platforms:{platform}:{company}`. See "Sharing the answer" in docs/SWITCHER.md.
@@ -74,7 +75,7 @@ final class PlatformSwitcher
         private readonly string $platform,
         string $infodotUrl,
         #[\SensitiveParameter] private readonly ?string $secret,
-        private readonly Cache $cache,
+        private readonly ?Cache $cache,
         ?Http $http = null,
         private readonly ?LoggerInterface $log = null,
         private readonly ?string $companiesUrl = null,
@@ -221,7 +222,7 @@ final class PlatformSwitcher
         $key = $this->cacheKey($company);
 
         try {
-            $cached = $this->cache->get($key);
+            $cached = $this->cache?->get($key);
         } catch (Throwable) {
             $cached = null;
         }
@@ -233,7 +234,7 @@ final class PlatformSwitcher
         $answer = $this->ask($company);
 
         try {
-            $this->cache->put($key, $answer, $answer['ok'] ? self::ANSWER_SECONDS : self::FAILURE_SECONDS);
+            $this->cache?->put($key, $answer, $answer['ok'] ? self::ANSWER_SECONDS : self::FAILURE_SECONDS);
         } catch (Throwable) {
             // An unwritable cache must not take the page down. The next render asks again.
         }
@@ -368,6 +369,38 @@ final class PlatformSwitcher
         return $this->model(self::STATE_DEGRADED, $company, $tiles, [], self::notice(), null);
     }
 
+    /**
+     * The degraded-style view model for a host that never asks InfoDot (Dot.Mines, Dot.Charts): the core set as
+     * "open via InfoDot" tiles (`{infodot}/go/<key>`, no company, InfoDot decides for the person), the current platform marked
+     * "You are here", a visible notice line and no claim that anything is active. Nothing is read, cached or sent.
+     *
+     * Feed it to `<x-dot.switcher :model="...">`.
+     *
+     * @param  string  $current  This platform's key (marked as the current tile, also when it is outside the core set).
+     * @param  string|null  $notice  The visible label, e.g. "These open through InfoDot". Default: the degraded label,
+     *                               "Could not check your platforms just now" (a host that never asks should pass its own).
+     * @param  string|null  $detail  The sentence after it. Default: "These open through InfoDot, which checks your access."
+     * @param  string|null  $infodotUrl  InfoDot's base URL. Default: config `ecosystem.platforms.infodot.url`, else the origin of
+     *                                   `ecosystem.infodot.redeem_url`, else https://infodot.co.za.
+     * @return array<string, mixed> The same shape as `for()`, plus `notice_detail`.
+     */
+    public static function plain(string $current, ?string $notice = null, ?string $detail = null, ?string $infodotUrl = null): array
+    {
+        if ($infodotUrl === null || $infodotUrl === '') {
+            $config = static fn (string $key): string => function_exists('config') ? (string) config($key, '') : '';
+            $infodotUrl = $config('ecosystem.platforms.infodot.url') ?: self::origin($config('ecosystem.infodot.redeem_url')) ?: 'https://infodot.co.za';
+        }
+
+        $model = (new self($current, $infodotUrl, null, null))->degraded(null);
+
+        if ($notice !== null && trim($notice) !== '') {
+            $model['notice'] = rtrim(trim($notice), '.');
+        }
+        $model['notice_detail'] = $detail !== null && trim($detail) !== '' ? trim($detail) : null;
+
+        return $model;
+    }
+
     private function personal(?string $company): array
     {
         return $this->model(self::STATE_PERSONAL, $company, [], [], null, self::personalMessage());
@@ -378,7 +411,7 @@ final class PlatformSwitcher
      */
     private function tile(string $key, string $name, ?string $company, bool $current, bool $plainFromAnswer): array
     {
-        $plain = in_array($key, self::plain(), true) || $plainFromAnswer;
+        $plain = in_array($key, self::plainKeys(), true) || $plainFromAnswer;
         $home = $key === 'infodot';
 
         // A tile for the current platform is a marker, not a link. InfoDot's own tile goes to its home, no handoff.
@@ -433,6 +466,7 @@ final class PlatformSwitcher
             'infodot_url' => $this->infodot,
             'platforms_url' => $this->platformsUrl(),
             'notice' => $notice,
+            'notice_detail' => null,
             'message' => $message,
             'count' => count($tiles),
             'groups' => $ordered,
@@ -475,8 +509,8 @@ final class PlatformSwitcher
         return self::data()['core'];
     }
 
-    /** Platforms with their own sign-in and no InfoDot receiver: opened by a plain link, nothing is handed over. */
-    public static function plain(): array
+    /** Platforms with their own sign-in and no InfoDot receiver: opened by a plain link, nothing is handed over. (Was `plain()` before 0.3.0.) */
+    public static function plainKeys(): array
     {
         return self::data()['plain'];
     }
