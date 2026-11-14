@@ -100,6 +100,13 @@
          front door finally read as one product. Document defaults are
          unchanged: Source Serif 4 body, Source Sans 3 headings. --}}
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..600&family=Work+Sans:wght@400..600&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+    {{-- Shared Dot UI (platform switcher, filter), served from this site's own public/dot-ui, so a 'self' policy is enough.
+         Loaded before the app CSS; the host token mapping sits in resources/css/app.css, outside every @layer. --}}
+    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-fonts.css') }}">
+    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-tokens.css') }}">
+    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-search.css') }}">
+    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-switcher-fonts.css') }}">
+    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-switcher.css') }}">
     @livewireStyles
     @vite(['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js'])
     @stack('styles')
@@ -112,6 +119,17 @@
             <x-slot:title>{{ $topbarTitle }}</x-slot:title>
 
             <x-slot:actions>
+                {{-- The shared "Dot Apps" switcher (dot-ui). Not on the editor: the writing surface gets no extra chrome,
+                     and everywhere else the bar has room for it. The company is the current team's InfoDot uuid; a
+                     personal or unlinked workspace has none and gets the component's personal state. --}}
+                @if (! $isEditor && auth()->check())
+                    @php($shellTeam = auth()->user()->currentTeam)
+                    <x-dot.switcher platform="docs"
+                                    :company="$shellTeam && ! $shellTeam->personal_team ? ($shellTeam->infodot_team_uuid ?: null) : null"
+                                    :company-name="$shellTeam?->name"
+                                    logos="/dot-ui/img/platforms" />
+                @endif
+
                 <button type="button"
                         class="topbar-action"
                         data-shell-theme-toggle
@@ -159,6 +177,9 @@
     </div>
 
     @stack('modals')
+    @if (! $isEditor && auth()->check())
+        <script src="{{ asset('dot-ui/js/dot-switcher.js') }}" defer></script>
+    @endif
     @livewireScripts
     @stack('scripts')
 </body>

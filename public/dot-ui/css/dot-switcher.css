@@ -1,0 +1,725 @@
+/*
+ * dot-ui / switcher: the "Dot Apps" control and panel, in every Dot platform.
+ *
+ * The look is InfoDot's (its `.ix-btn` "Dot Apps" button and the `.ix-yardmap` bay directory), reproduced as plain
+ * CSS. Rules this file keeps:
+ *   - every class is `.dsw-*`, every custom property `--dsw-*`, all declared on `:where(.dsw)` (zero specificity, so a
+ *     host's `.dsw { --dsw-ink: ... }` or `.topbar .dsw { ... }` always wins, in either file order) with baked-in fallbacks;
+ *   - no Tailwind utilities, no `style=""` anywhere, nothing that relies on a host's preflight (a small scoped
+ *     reset sits under `.dsw`);
+ *   - a host re-skins it by mapping its own tokens onto the `--dsw-*` names in ONE block, for example
+ *       .topbar .dsw { --dsw-btn-ink: var(--ink); --dsw-btn-border: var(--rule); --dsw-focus: var(--accent); }
+ *     The panel is a light paper sheet by default, as in InfoDot. A dark host MAY theme it with --dsw-paper, --dsw-ink,
+ *     --dsw-ink-2, --dsw-rule (and --dsw-plate, the logo plate, which stays white unless set).
+ *
+ * Placement: the panel hangs from the bottom edge of the host header, full width, so the nearest ancestor with a
+ * position (the header, `position: relative|sticky|fixed`) is the anchor. `.dsw` itself is static.
+ *
+ * The additions to InfoDot's own switcher: the current-platform marker (`.is-current`), the "Opening..." state
+ * (`.is-busy`), the "nothing matches" line (`.dsw-empty`) and the "could not check" line (`.dsw-notice`).
+ */
+
+:where(.dsw) {
+    --dsw-font: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --dsw-stencil-font: 'Big Shoulders Stencil Display', 'Archivo', system-ui, sans-serif;
+    --dsw-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --dsw-radius: 2px;
+
+    /* the trigger, as InfoDot paints it on its dark top bar */
+    --dsw-btn-height: 36px;
+    --dsw-btn-bg: transparent;
+    --dsw-btn-bg-hover: #2b3439;
+    --dsw-btn-ink: #f1f3f3;
+    --dsw-btn-border: rgba(255, 255, 255, 0.28);
+    --dsw-focus: #e7a717;
+
+    /* the panel: a paper sheet, light by default (InfoDot's). A host MAY theme it (a dark host: --dsw-paper, --dsw-ink,
+       --dsw-ink-2, --dsw-rule); the logo plate stays white unless the host sets --dsw-plate, because the logos are
+       drawn for white. See docs/SWITCHER.md. */
+    --dsw-paper: #f6f4ee;
+    --dsw-ink: #1b2124;
+    --dsw-ink-2: #4a555a;
+    --dsw-rule: rgba(27, 33, 36, 0.22);
+    --dsw-plate: #ffffff;
+    --dsw-tile: var(--dsw-plate);
+    --dsw-tile-rule: var(--dsw-rule);
+    --dsw-tile-current: #ece9df;
+    /* the tiles are white logo plates: their own text and surface, so a host can dark-theme the panel (--dsw-paper,
+       --dsw-ink) and the tiles stay readable on the plate. Each defaults to the value the tile used before. */
+    --dsw-tile-ink: var(--dsw-ink);
+    --dsw-tile-surface: var(--dsw-tile);
+    /* the tag ("YOU ARE HERE") is drawn in --dsw-tile-ink (its background) with --dsw-tile-tag-ink on top. The ink defaults to
+       the light sheet's cream, a fixed value: it is NOT the panel paper, which goes dark in a dark panel and left the tag
+       unreadable. Browsers with relative colours (the @supports block below) pick the cream or a near-black from the lightness of
+       --dsw-tile-ink, so a light tag gets dark type; others keep the cream. A host may still set --dsw-tile-tag-ink itself. */
+    --dsw-tile-tag-ink: #f6f4ee;
+    --dsw-stencil: #e7a717;
+    --dsw-plate-ink: #ffffff;
+    --dsw-max: 1280px;
+
+    /* the plate colours InfoDot gives its categories */
+    --dsw-tone-knowledge: #1d4f91;
+    --dsw-tone-files: #a63a2b;
+    --dsw-tone-documents: #2f6a4a;
+    --dsw-tone-platforms: #c98f12;
+    --dsw-tone-analytics: #2b3439;
+    --dsw-tone-people: #56636b;
+}
+
+/* tag type follows the tag's own background (--dsw-tile-ink): cream on a dark tag (the light sheet's #f6f4ee, exactly), near-black
+   on a light one. Zero specificity, so a host's --dsw-tile-tag-ink wins. */
+@supports (color: oklch(from red l c h)) {
+    :where(.dsw) {
+        --dsw-tile-tag-ink: oklch(from var(--dsw-tile-ink) clamp(0.243, calc((0.62 - l) * 1000), 0.9670330748) 0.0082380364 91.4828664638);
+    }
+}
+
+.dsw {
+    position: static;
+    font-family: var(--dsw-font);
+}
+
+/* ---- scoped reset: only what the elements below need, never a host's global reset ----
+   `:where()` keeps it at zero specificity, so every `.dsw-*` rule below wins over it. */
+
+:where(.dsw),
+:where(.dsw) *,
+:where(.dsw) *::before,
+:where(.dsw) *::after {
+    box-sizing: border-box;
+}
+
+:where(.dsw) :where(ul, li, p, h3) {
+    margin: 0;
+    padding: 0;
+}
+
+:where(.dsw) ul {
+    list-style: none;
+}
+
+:where(.dsw) img {
+    display: block;
+    border: 0;
+}
+
+:where(.dsw) a {
+    color: inherit;
+    text-decoration: none;
+}
+
+:where(.dsw) :where(button, input, summary) {
+    font: inherit;
+    color: inherit;
+}
+
+.dsw [hidden] {
+    display: none !important;
+}
+
+.dsw-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* ---- shared links ----
+   The reset above is `:where()`, so it has no weight against a host's `a { color }`, `.prose a`, `.cb a:hover` or a
+   `:visited` colour. Every link the switcher owns states its own colour and decoration here, one class above the element
+   and with the state pseudo-classes included, so a host's link colour never tints a tile name, the "See all platforms"
+   link, the "Not switched on" chips. A host re-colours them through the variables
+   (--dsw-tile-ink, --dsw-ink, --dsw-btn-ink), which still win because they are read here. */
+
+.dsw a.dsw-bay,
+.dsw a.dsw-bay:visited,
+.dsw a.dsw-bay:hover,
+.dsw a.dsw-bay:focus,
+.dsw a.dsw-bay:active {
+    color: var(--dsw-tile-ink);
+    text-decoration: none;
+}
+
+.dsw a.dsw-all,
+.dsw a.dsw-all:visited,
+.dsw a.dsw-all:hover,
+.dsw a.dsw-all:focus,
+.dsw a.dsw-all:active {
+    color: var(--dsw-ink);
+    text-decoration: underline;
+}
+
+.dsw .dsw-more a,
+.dsw .dsw-more a:visited,
+.dsw .dsw-more a:hover,
+.dsw .dsw-more a:focus,
+.dsw .dsw-more a:active {
+    color: var(--dsw-ink);
+    text-decoration: none;
+}
+
+.dsw a.dsw-fallback,
+.dsw a.dsw-fallback:visited,
+.dsw a.dsw-fallback:hover,
+.dsw a.dsw-fallback:focus,
+.dsw a.dsw-fallback:active {
+    color: var(--dsw-btn-ink);
+    text-decoration: none;
+}
+
+/* ---- trigger ---- */
+
+/* `.dsw-fallback` is the no-script link to InfoDot's platforms page. It shares the trigger's look through this list but is
+   NOT a `.dsw-btn`, so a host selector such as `.topbar .dsw-btn` or `.dsw-btn:first-child` hits the real button. */
+.dsw-btn,
+.dsw-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    /* sized by tokens a host may set on .dsw or on any ancestor (read here with their fallbacks, not declared on :root) */
+    height: var(--dsw-btn-h, var(--dsw-btn-height));
+    min-width: var(--dsw-btn-min-w, 0);
+    padding: 0 var(--dsw-btn-pad-x, 14px);
+    border: 1px solid var(--dsw-btn-border);
+    border-radius: var(--dsw-radius);
+    background: var(--dsw-btn-bg);
+    color: var(--dsw-btn-ink);
+    font: 600 14px/1 var(--dsw-font);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.12s var(--dsw-ease), border-color 0.12s var(--dsw-ease), color 0.12s var(--dsw-ease);
+}
+
+.dsw-btn:hover,
+.dsw-fallback:hover,
+.dsw-btn[aria-expanded='true'] {
+    background: var(--dsw-btn-bg-hover);
+}
+
+.dsw-btn:focus-visible,
+.dsw-fallback:focus-visible {
+    outline: 2px solid var(--dsw-focus);
+    outline-offset: 2px;
+}
+
+.dsw-btn__icon {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+}
+
+/* Without the script the button cannot open anything, so a plain link to InfoDot's platforms page stands in. */
+.dsw .dsw-btn[data-dsw-trigger] {
+    display: none;
+}
+
+.dsw.is-ready .dsw-btn[data-dsw-trigger] {
+    display: inline-flex;
+}
+
+.dsw.is-ready .dsw-fallback {
+    display: none;
+}
+
+/* ---- panel ---- */
+
+.dsw-panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 60;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    background: var(--dsw-paper);
+    color: var(--dsw-ink);
+    border-bottom: 6px solid var(--dsw-stencil);
+    font-size: 14px;
+    line-height: 1.55;
+    text-align: left;
+}
+
+/* Opaque from the first frame: only the position eases in (6px, 100ms), so a screenshot taken the instant the panel opens
+   is the finished panel, never see-through. prefers-reduced-motion turns it off below. */
+.dsw-panel[data-open] {
+    animation: dsw-in 0.1s var(--dsw-ease);
+}
+
+@keyframes dsw-in {
+    from {
+        transform: translateY(6px);
+    }
+
+    to {
+        transform: none;
+    }
+}
+
+.dsw-in {
+    max-width: var(--dsw-max);
+    margin: 0 auto;
+    padding: 22px 24px 28px;
+}
+
+.dsw-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--dsw-ink);
+}
+
+.dsw-title {
+    font-family: var(--dsw-stencil-font);
+    font-weight: 900;
+    font-size: 34px;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.dsw-sub {
+    margin-top: 6px;
+    font-size: 14px;
+    color: var(--dsw-ink-2);
+}
+
+.dsw-all {
+    display: inline-block;
+    margin-left: 4px;
+    color: var(--dsw-ink);
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.dsw-all:hover {
+    text-decoration-thickness: 2px;
+}
+
+.dsw-all:focus-visible,
+.dsw-more a:focus-visible,
+.dsw-more summary:focus-visible {
+    outline: 3px solid var(--dsw-stencil);
+    outline-offset: 2px;
+}
+
+/* ---- filter ---- */
+
+.dsw-filter {
+    position: relative;
+    display: block;
+    width: min(320px, 100%);
+}
+
+.dsw-filter__icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    width: 20px;
+    height: 20px;
+    margin-top: -10px;
+    fill: none;
+    stroke: var(--dsw-ink-2);
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    pointer-events: none;
+}
+
+.dsw .dsw-filter input {
+    display: inline-block;
+    width: 100%;
+    height: 42px;
+    padding: 0 14px 0 40px;
+    border: 2px solid var(--dsw-ink);
+    border-radius: var(--dsw-radius);
+    background: var(--dsw-tile-surface);
+    color: var(--dsw-tile-ink);
+    font: 500 15px var(--dsw-font);
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.dsw .dsw-filter input::placeholder {
+    color: #6b767b;
+    opacity: 1;
+}
+
+.dsw .dsw-filter input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    display: none;
+}
+
+/* The focus look is stated here, one step above a host's global `input:focus { border-color: ... }` or
+   `input[type=search]:focus { ... }`: the filter keeps its own border and ring in every host. */
+.dsw .dsw-filter input:focus,
+.dsw .dsw-filter input:focus-visible {
+    border-color: var(--dsw-ink);
+    box-shadow: none;
+    outline: 3px solid var(--dsw-stencil);
+    outline-offset: 0;
+}
+
+/* forced-colors / high-contrast: the ring is a real outline in a system colour, never a colour the mode would drop */
+@media (forced-colors: active) {
+    .dsw .dsw-filter input:focus-visible {
+        outline: 3px solid Highlight;
+    }
+}
+
+/* touch and small screens: 16px type, so iOS does not zoom the page when the filter takes focus (token, as the search filter's) */
+@media (pointer: coarse), (max-width: 768px) {
+    .dsw .dsw-filter input {
+        font-size: var(--dsw-filter-fs-touch, var(--dsr-filter-fs-touch, 16px));
+    }
+}
+
+/* ---- groups and tiles ---- */
+
+.dsw-groups {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 26px 28px;
+    padding-top: 20px;
+}
+
+.dsw-bays {
+    min-width: 0;
+    --tone: var(--dsw-tone-platforms);
+}
+
+.dsw-bays[data-tone='knowledge'] {
+    --tone: var(--dsw-tone-knowledge);
+}
+
+.dsw-bays[data-tone='files'] {
+    --tone: var(--dsw-tone-files);
+}
+
+.dsw-bays[data-tone='documents'] {
+    --tone: var(--dsw-tone-documents);
+}
+
+.dsw-bays[data-tone='platforms'] {
+    --tone: var(--dsw-tone-platforms);
+}
+
+.dsw-bays[data-tone='analytics'] {
+    --tone: var(--dsw-tone-analytics);
+}
+
+.dsw-bays[data-tone='people'] {
+    --tone: var(--dsw-tone-people);
+}
+
+.dsw-bays__head {
+    display: flex;
+    align-items: stretch;
+    margin: 0 0 10px;
+    font: inherit;
+}
+
+.dsw-bays__code {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px 2px;
+    background: var(--tone);
+    color: var(--dsw-plate-ink);
+    font-family: var(--dsw-stencil-font);
+    font-weight: 900;
+    font-size: 20px;
+    letter-spacing: 0.06em;
+    line-height: 1.1;
+}
+
+.dsw-bays__name {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--dsw-ink);
+}
+
+.dsw-bays__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+    gap: 8px;
+}
+
+.dsw-bay {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    height: 100%;
+    /* the top 24px is the tag strip (.dsw-bay__tag): a tag sits above the logo and the name, never on them */
+    padding: 24px 6px 10px;
+    border: 1px solid var(--dsw-tile-rule);
+    border-radius: var(--dsw-radius);
+    background: var(--dsw-tile-surface);
+    color: var(--dsw-tile-ink);
+    font: 600 13px/1.25 var(--dsw-font);
+    text-align: center;
+    cursor: pointer;
+    outline: 3px solid transparent;
+    outline-offset: -1px;
+    transition: outline-color 0.1s var(--dsw-ease), transform 0.1s var(--dsw-ease);
+}
+
+.dsw-bay:hover,
+.dsw-bay:focus-visible {
+    outline-color: var(--tone);
+    transform: translateY(-2px);
+}
+
+.dsw-bay__logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 68px;
+}
+
+.dsw-bay__logo img {
+    display: block;
+    max-width: 112px;
+    max-height: 68px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+}
+
+.dsw-bay__name {
+    overflow-wrap: anywhere;
+}
+
+/* a short stencil tag in the tile's top strip (the tile's padding reserves it, so it cannot cover the logo or the name) */
+.dsw-bay__tag {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    max-width: calc(100% - 8px);
+    padding: 1px 5px;
+    white-space: nowrap;
+    background: var(--dsw-tile-ink);
+    color: var(--dsw-tile-tag-ink);
+    font-family: var(--dsw-stencil-font);
+    font-weight: 800;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    line-height: 1.3;
+    text-transform: uppercase;
+}
+
+.dsw-bay__tag--busy {
+    display: none;
+}
+
+/* current platform: a marker, not a link */
+.dsw-bay.is-current {
+    background: var(--dsw-tile-current);
+    border-color: var(--dsw-tile-ink);
+    cursor: default;
+}
+
+.dsw-bay.is-current:hover {
+    outline-color: transparent;
+    transform: none;
+}
+
+/* "Opening..." after a click: the tile dims, says so, and ignores further clicks until the page moves on */
+.dsw-bay.is-busy {
+    cursor: progress;
+    pointer-events: none;
+    outline-color: var(--tone);
+    transform: none;
+}
+
+.dsw-bay.is-busy .dsw-bay__logo,
+.dsw-bay.is-busy .dsw-bay__name {
+    opacity: 0.45;
+}
+
+.dsw-bay.is-busy .dsw-bay__tag--busy {
+    display: block;
+}
+
+.dsw-bay.is-busy .dsw-bay__tag--own,
+.dsw-bay.is-busy .dsw-bay__tag--here {
+    display: none;
+}
+
+/* ---- states: nothing matches, could not check, personal, not switched on ---- */
+
+.dsw-empty {
+    padding-top: 22px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--dsw-ink);
+}
+
+/* the label ("Could not check your platforms just now.") and, on its own line beneath it, the one-line detail */
+.dsw-notice {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    margin-top: 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--dsw-ink);
+    border-radius: var(--dsw-radius);
+    background: var(--dsw-tile-surface);
+    font-size: 14px;
+    color: var(--dsw-tile-ink);
+}
+
+.dsw-notice strong {
+    font-weight: 700;
+}
+
+.dsw-personal {
+    padding-top: 18px;
+    max-width: 62ch;
+    font-size: 15px;
+    color: var(--dsw-ink);
+}
+
+.dsw-more {
+    margin-top: 22px;
+    padding-top: 14px;
+    border-top: 1px solid var(--dsw-tile-rule);
+}
+
+.dsw-more summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--dsw-ink);
+    list-style: none;
+}
+
+.dsw-more summary::-webkit-details-marker {
+    display: none;
+}
+
+.dsw-more summary::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid var(--dsw-ink);
+    border-bottom: 2px solid var(--dsw-ink);
+    transform: rotate(-45deg);
+    transition: transform 0.1s var(--dsw-ease);
+}
+
+.dsw-more[open] summary::before {
+    transform: rotate(45deg);
+}
+
+.dsw-more__note {
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--dsw-ink-2);
+}
+
+.dsw-more ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    margin-top: 10px;
+}
+
+.dsw-more a {
+    display: inline-block;
+    padding: 5px 10px;
+    border: 1px solid var(--dsw-tile-rule);
+    border-radius: var(--dsw-radius);
+    background: var(--dsw-tile);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--dsw-ink);
+}
+
+.dsw-more a:hover {
+    border-color: var(--dsw-ink);
+}
+
+/* ---- phone: a sheet, groups stacked, three tiles to a row ---- */
+
+/* compact / icon-only at any width: <div class="dsw" data-compact> (the `compact` prop). Narrow hosts (a crowded top bar) use it
+   instead of their own rule. The button sizes from --dsw-btn-h, --dsw-btn-min-w and --dsw-btn-pad-x like the full one. */
+.dsw[data-compact] .dsw-btn__label {
+    display: none;
+}
+
+@media (max-width: 639px) {
+    .dsw-btn__label {
+        display: none;
+    }
+
+    .dsw-in {
+        padding: 16px 16px 24px;
+    }
+
+    .dsw-title {
+        font-size: 28px;
+    }
+
+    .dsw-groups {
+        grid-template-columns: 1fr;
+    }
+
+    .dsw-bays__grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    /* "You are here" has to fit a 90px tile at 320px */
+    .dsw-bay__tag {
+        padding: 1px 4px;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+    }
+
+    /* three narrow tiles to a row: keep a wide logo (InfoDot's) inside its tile */
+    .dsw-bay__logo img {
+        max-width: 100%;
+    }
+
+    .dsw-panel {
+        max-height: calc(100vh - 100px);
+        max-height: calc(100dvh - 100px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dsw-bay,
+    .dsw-btn,
+    .dsw-fallback,
+    .dsw-more summary::before {
+        transition: none;
+    }
+
+    .dsw-bay:hover,
+    .dsw-bay:focus-visible {
+        transform: none;
+    }
+
+    .dsw-panel[data-open] {
+        animation: none;
+    }
+}

@@ -1,0 +1,145 @@
+{
+  "source": "InfoDot origin/main bf2b27e, resources/img/apps/<key>.png, copied byte for byte. Never redraw, recolour or replace.",
+  "key_to_file": "<key>.png",
+  "excluded": "discontinued platforms and internal bridge services (memory, dopemine, brain, assets), none of which InfoDot lists in its switcher",
+  "platforms": {
+    "agents": {
+      "file": "agents.png",
+      "sha256": "06d96b42071b6517b0f830a5bbdf2bd29e271c222c1220fe203e2f7ad5d25818",
+      "width": 200,
+      "height": 200
+    },
+    "analytics": {
+      "file": "analytics.png",
+      "sha256": "d1b18b5c5d3326aa90519f65216aa4f241e279b372fe251f4dbfa4bf0768e4a9",
+      "width": 200,
+      "height": 150
+    },
+    "auction": {
+      "file": "auction.png",
+      "sha256": "14b2f024bd905a1edb16f3e3003f9380a3df76e64a751cf0ca9fb5a721edad2a",
+      "width": 200,
+      "height": 150
+    },
+    "central": {
+      "file": "central.png",
+      "sha256": "3335f6da0a75c5db9a6255a3cdfcce97101198bed2bd64d9d5fd309ddfbca280",
+      "width": 200,
+      "height": 150
+    },
+    "charts": {
+      "file": "charts.png",
+      "sha256": "a72d14c92847b8de1a681e00c0bcb4f00de6c600bec829b8ad0f8f7486c81b4c",
+      "width": 200,
+      "height": 150
+    },
+    "design": {
+      "file": "design.png",
+      "sha256": "67ee544dffa22aab8b8accac8da652c1dde721c5caa45139fb4cccc4bde6b448",
+      "width": 200,
+      "height": 150
+    },
+    "docs": {
+      "file": "docs.png",
+      "sha256": "d5d1436146e37ec4e7729ff8a114b9f37fbc82efb44b4c91c9cddc906016eeba",
+      "width": 200,
+      "height": 200
+    },
+    "ehail": {
+      "file": "ehail.png",
+      "sha256": "499bd5f5d3d16c275128bfc7a7f589f8d94257158c09d41fd675d43abc752764",
+      "width": 200,
+      "height": 150
+    },
+    "emall": {
+      "file": "emall.png",
+      "sha256": "e0f20e93a4ff45b3bc0f57651f086a9289e24861229172bca3cf5bd850df7312",
+      "width": 200,
+      "height": 150
+    },
+    "engage": {
+      "file": "engage.png",
+      "sha256": "7411cd1872399aba9f99739d7bfcf9a5406867f8571794f1e16d0f4f4bb9f83d",
+      "width": 200,
+      "height": 200
+    },
+    "files": {
+      "file": "files.png",
+      "sha256": "ed8c487972c5cde9c38788f20cc692df036af8d8a57f193dac94f1156e279155",
+      "width": 200,
+      "height": 200
+    },
+    "finance": {
+      "file": "finance.png",
+      "sha256": "ace3a0119d7fd6083f91d6a0dd3cb53868c1603859ac6acd5d9b6d5aa35f7559",
+      "width": 200,
+      "height": 150
+    },
+    "forms": {
+      "file": "forms.png",
+      "sha256": "ba590e0df7280ea163c6e8e3d1d020030f20ed756325d97bd9346c8a9b85af90",
+      "width": 200,
+      "height": 200
+    },
+    "hr": {
+      "file": "hr.png",
+      "sha256": "a78c4ee16a01fc064fbbdad68397c1d9fc34eb08644f3c7de48da06370559634",
+      "width": 200,
+      "height": 150
+    },
+    "infodot": {
+      "file": "infodot.png",
+      "sha256": "4b09cff76ab2beba82446d2fa9825ed1176842c7d11d4fa681a7836dfed20025",
+      "width": 200,
+      "height": 83
+    },
+    "mines": {
+      "file": "mines.png",
+      "sha256": "b87cd6581945284b778d3ef64b447125a7dff508bf49890cc85993cb99cdd663",
+      "width": 200,
+      "height": 150
+    },
+    "notify": {
+      "file": "notify.png",
+      "sha256": "387eb5065b4ab81280894e8621a8d889b73497da664d5250e2b94e38cd7a8563",
+      "width": 200,
+      "height": 150
+    },
+    "press": {
+      "file": "press.png",
+      "sha256": "e0c19b2c8e1ac40e7c1418814c83336571a2e934ac171e5548b0405b72d52f64",
+      "width": 200,
+      "height": 200
+    },
+    "projects": {
+      "file": "projects.png",
+      "sha256": "a77b241cfeacfff418249eeabe6aaaa72fb3b8b382c982883b023055f9329ba0",
+      "width": 200,
+      "height": 150
+    },
+    "pulse": {
+      "file": "pulse.png",
+      "sha256": "778074e867a1bb24fb28c5c3a688e4fa1f4eb8230ec5c8e3a6843121aa6bc977",
+      "width": 200,
+      "height": 150
+    },
+    "sheet": {
+      "file": "sheet.png",
+      "sha256": "f32e7beb244e7ea8e6aeff336664cf8ad582a01c4b62f3d62993254440bf7555",
+      "width": 200,
+      "height": 200
+    },
+    "tasks": {
+      "file": "tasks.png",
+      "sha256": "2b83e9ff66e163519268b2a3e103e8c41aa978f65925181f07297d412f16c5ca",
+      "width": 200,
+      "height": 150
+    },
+    "tutor": {
+      "file": "tutor.png",
+      "sha256": "7ed3eaf2b0f94a4553dce088ba5bef14776e2ec02092b5e52bd32bd5662ea031",
+      "width": 200,
+      "height": 200
+    }
+  }
+}

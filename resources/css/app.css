@@ -183,3 +183,59 @@
         outline-offset: 2px;
     }
 }
+
+/*
+ * Host token mapping for the shared Dot UI (dot-ui, public/dot-ui/css). UNLAYERED on purpose: the package's own
+ * defaults are unlayered :where() rules, and an unlayered rule beats any @layer rule whatever its specificity, so a
+ * mapping that sat in the base layer (shell.css) would lose. The switcher button and the compact filter take Fair
+ * Copy's own tokens, in day and in night (every value is a var() that html.dark and the dark media query redefine).
+ * The switcher PANEL stays InfoDot's paper sheet with white logo plates, as the package ships it.
+ */
+body {
+    --dsr-panel: var(--surface-raised);
+    --dsr-hover: var(--accent-soft);
+    --dsr-rule: var(--line);
+    --dsr-rule-strong: var(--line);
+    --dsr-text: var(--ink);
+    --dsr-text-2: var(--ink-soft);
+    --dsr-text-3: var(--ink-soft);
+    --dsr-radius-panel: var(--r-control);
+    --dsr-filter-radius: var(--r-control);
+    --dsr-filter-bg: var(--surface-raised);
+    --dsr-filter-ink: var(--ink);
+    --dsr-filter-placeholder: var(--ink-soft);
+    --dsr-filter-border: var(--line);
+    --dsr-filter-border-hover: var(--ink-soft);
+    --dsr-filter-border-focus: var(--ink);
+}
+
+.topbar .dsw {
+    --dsw-btn-ink: var(--ink-soft);
+    --dsw-btn-border: transparent;
+    --dsw-btn-bg-hover: var(--accent-soft);
+    --dsw-focus: var(--ink);
+    --dsw-radius: var(--r-control);
+    --dsw-btn-height: 32px;
+}
+
+/*
+ * The switcher panel hangs from the bottom edge of the nearest positioned ancestor, so the bar is that ancestor, and it
+ * sits above the rail and dock overlays (z-index 60 on a phone). On a phone the bar used to scroll sideways on its own
+ * (shell.css, max-width 420px); a scroll container would clip the panel, so on pages (not the editor) it does not.
+ */
+.topbar {
+    position: relative;
+    z-index: 70;
+}
+
+@media (max-width: 420px) {
+    /* Pages only: the editor has no switcher and keeps its own scrolling bar. A page's status word only ever says
+       "Ready" (no save owner), so on a phone it gives way to the switcher button. */
+    [data-shell-context='page'] .topbar {
+        overflow: visible;
+    }
+
+    [data-shell-context='page'] .topbar-status {
+        display: none;
+    }
+}

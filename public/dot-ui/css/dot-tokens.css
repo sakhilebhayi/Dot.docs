@@ -1,0 +1,84 @@
+/*
+ * dot-ui design tokens for search. Load this BEFORE dot-search.css.
+ *
+ * Two groups:
+ *  - PILL tokens: copied literally from InfoDot's header search. They do not change with the colour scheme (InfoDot's
+ *    pill is cream on a dark bar in light and dark). A host should NOT remap them: the look must be identical everywhere.
+ *  - SURFACE tokens (dropdown panel, rules, hover, ink, compact filter): a host maps these onto its own tokens in one
+ *    small block, see docs/SEARCH.md. The values here are InfoDot's own, so the package works with zero host tokens.
+ *
+ * Every selector here is wrapped in :where(), which has ZERO specificity. A host's plain `:root { --dsr-panel: ... }`
+ * (specificity 0,1,0) therefore beats the defaults in every scheme, light or dark, whichever file loads first. Without
+ * it the dark block `:root[data-theme='dark']` (0,2,0) would outrank the host's mapping. The defaults still follow
+ * source order among themselves (dark after light), so the package works with zero host tokens.
+ */
+:where(:root) {
+    /* PILL (fixed) */
+    --dsr-font: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --dsr-h: 44px;
+    --dsr-w: 640px;
+    --dsr-radius: 999px;
+    --dsr-pad-l: 22px;
+    --dsr-pad-r: 104px;
+    /* Below 640px the "Ctrl K" hint is hidden: the right padding is --dsr-pad-r-narrow (52px, InfoDot's value there).
+       With no hint (.dsr--nohint) it is --dsr-pad-r-nohint: room for the circle only, 34px + its 5px edge + 13px of air.
+       Neither is declared here: dot-search.css reads them with their fallbacks, so a host may set them on any ancestor. */
+    --dsr-pill-bg: #f6f4ee;
+    --dsr-pill-bg-focus: #fff;
+    --dsr-pill-ink: #1b2124;
+    --dsr-placeholder: #5b666b;
+    --dsr-ring: #f0bc2e;
+    --dsr-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.55);
+    --dsr-btn-size: 34px;
+    --dsr-btn-bg: #1b2124;
+    --dsr-btn-bg-hover: #2b3439;
+    --dsr-btn-ink: #f1c62e;
+    --dsr-kbd-ink: #5b666b;
+    --dsr-kbd-bg: #f6f4ee;
+    --dsr-kbd-rule: rgba(27, 33, 36, 0.3);
+    --dsr-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+    /* SURFACE (mappable): dropdown panel */
+    --dsr-panel: #f7f8f8;
+    --dsr-hover: #eceeee;
+    --dsr-rule: #c4c9cc;
+    --dsr-rule-strong: #8c959a;
+    --dsr-text: #14181a;
+    --dsr-text-2: #394349;
+    --dsr-text-3: #4f5a60;
+    --dsr-radius-panel: 3px;
+    --dsr-panel-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    /* InfoDot paints the row icons #aeb8bc in both schemes (an old header-bar rule wins over --ix-text-3). Copied as is. */
+    --dsr-icon: #aeb8bc;
+    --dsr-mark: rgba(240, 188, 46, 0.45);
+
+    /* SURFACE (mappable): compact filter, InfoDot's 36px .ix-input. Height and radius are plain values. The colours
+       (--dsr-filter-bg, -ink, -placeholder, -border, -border-hover, -border-focus) are deliberately NOT derived here
+       (`--dsr-filter-bg: var(--dsr-panel)` would be resolved on :root, so a host that maps --dsr-panel on <body> would
+       not reach the filter). dot-search.css reads them with var() fallbacks at the point of use: a mapping on any
+       ancestor works, and unmapped they follow --dsr-panel, --dsr-text, --dsr-text-3 and --dsr-rule-strong. */
+    --dsr-filter-h: 36px;
+    --dsr-filter-radius: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+    :where(:root:not([data-theme='light']):not(.light)) {
+        --dsr-panel: #191f22;
+        --dsr-hover: #20272a;
+        --dsr-rule: #2b3438;
+        --dsr-rule-strong: #4c5960;
+        --dsr-text: #e9ecec;
+        --dsr-text-2: #b1babe;
+        --dsr-text-3: #8d989d;
+    }
+}
+
+:where(:root[data-theme='dark'], :root.dark) {
+    --dsr-panel: #191f22;
+    --dsr-hover: #20272a;
+    --dsr-rule: #2b3438;
+    --dsr-rule-strong: #4c5960;
+    --dsr-text: #e9ecec;
+    --dsr-text-2: #b1babe;
+    --dsr-text-3: #8d989d;
+}

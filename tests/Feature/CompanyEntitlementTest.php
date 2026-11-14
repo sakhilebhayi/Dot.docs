@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -50,6 +51,13 @@ class CompanyEntitlementTest extends TestCase
             'entitlement_check' => true,
         ]]);
         config(['ecosystem.platforms.infodot.url' => 'https://infodot.test']);
+
+        // The shell's "Dot Apps" switcher (dot-ui) reads the same endpoint under its own cache key. These tests count
+        // and sequence the ENTITLEMENT client's reads, so the switcher's answer is parked here (a cached failure, which
+        // makes it show its degraded state without asking). The switcher itself is covered by DotUiHeaderTest.
+        foreach ([self::ACME, self::GLOBEX] as $uuid) {
+            Cache::forever('infodot:platforms:docs:'.$uuid, ['ok' => false, 'personal' => false, 'rows' => []]);
+        }
     }
 
     // ------------------------------------------------------------------ helpers

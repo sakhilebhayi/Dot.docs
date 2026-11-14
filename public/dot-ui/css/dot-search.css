@@ -1,0 +1,436 @@
+/*
+ * dot-ui search. Plain CSS, no Tailwind, no @apply, no style attributes, nothing that relies on a host's preflight.
+ * Load order: dot-fonts.css, dot-tokens.css, dot-search.css.
+ *
+ * The pill reproduces the FINAL computed values of InfoDot's header search (.ix-search), verified in a browser
+ * (tests/compare/). The dropdown reproduces .ix-results. The compact filter reproduces InfoDot's 36px .ix-input.
+ */
+
+/* ---- scoped reset: only what a host's preflight would otherwise decide for us ---- */
+.dsr,
+.dsr *,
+.dsr *::before,
+.dsr *::after,
+.dsr-filter {
+    box-sizing: border-box;
+}
+
+.dsr {
+    position: relative;
+    width: 100%;
+    max-width: var(--dsr-w);
+    min-width: 0;
+    margin: 0 auto;
+    font: 400 14px/1.55 var(--dsr-font);
+    color: var(--dsr-text);
+    -webkit-font-smoothing: antialiased;
+}
+
+.dsr form {
+    margin: 0;
+    padding: 0;
+}
+
+.dsr a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.dsr button {
+    margin: 0;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: none;
+}
+
+.dsr-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* ---- the pill ---- */
+.dsr .dsr-input {
+    display: block;
+    width: 100%;
+    height: var(--dsr-h);
+    min-height: var(--dsr-h);
+    margin: 0;
+    padding: 0 var(--dsr-pad-r) 0 var(--dsr-pad-l);
+    border: 0;
+    border-color: transparent;
+    border-radius: var(--dsr-radius);
+    background: var(--dsr-pill-bg);
+    background-image: none;
+    color: var(--dsr-pill-ink);
+    font: 400 15px/1.5 var(--dsr-font);
+    letter-spacing: normal;
+    text-overflow: ellipsis;
+    box-shadow: var(--dsr-shadow);
+    outline: 0;
+    caret-color: var(--dsr-pill-ink);
+    -webkit-appearance: textfield;
+    appearance: textfield;
+    transition: border-color 0.12s var(--dsr-ease), box-shadow 0.12s var(--dsr-ease);
+}
+
+.dsr .dsr-input::placeholder {
+    color: var(--dsr-placeholder);
+    opacity: 1;
+}
+
+.dsr .dsr-input:focus,
+.dsr .dsr-input:focus-visible {
+    background: var(--dsr-pill-bg-focus);
+    color: var(--dsr-pill-ink);
+    border-color: transparent;
+    outline: 2px solid var(--dsr-ring);
+    outline-offset: 0;
+    box-shadow: var(--dsr-shadow);
+}
+
+/* no hint: the 104px reserved for "Ctrl K" and the circle shrinks to what the circle needs. Set by the components when
+   `hint` is empty; the default look (with a hint) is untouched. The circle is 44px on touch and small screens. */
+.dsr.dsr--nohint .dsr-input {
+    padding-right: var(--dsr-pad-r-nohint, calc(var(--dsr-btn-size) + 18px));
+}
+
+/* the arrow button: a dark circle holding the gold forward arrow from the logo (img/arrow-mask.png) */
+.dsr .dsr-go {
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--dsr-btn-size);
+    height: var(--dsr-btn-size);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--dsr-btn-bg);
+    color: var(--dsr-btn-ink);
+    cursor: pointer;
+    transition: background-color 0.12s var(--dsr-ease);
+}
+
+.dsr .dsr-go:hover {
+    background: var(--dsr-btn-bg-hover);
+}
+
+.dsr .dsr-go:focus-visible {
+    outline: 2px solid var(--dsr-btn-bg);
+    outline-offset: 2px;
+}
+
+.dsr .dsr-arrow {
+    display: inline-block;
+    flex: none;
+    font-size: 17px;
+    height: 1em;
+    aspect-ratio: 196 / 310;
+    background: currentColor;
+    -webkit-mask: url('../img/arrow-mask.png') center / contain no-repeat;
+    mask: url('../img/arrow-mask.png') center / contain no-repeat;
+}
+
+/* the "Ctrl K" hint, hidden while the box is open and under 640px */
+.dsr .dsr-kbd {
+    /* stated, so a host's global `kbd { display: none }` (0,0,1) cannot hide the hint at widths where the pill shows it.
+       `block` is what an absolutely positioned kbd computes to anyway: the pill's measured values are unchanged. The
+       hiding rules below (focus-within, is-open, under 640px) are stronger or later, so they still win. */
+    display: block;
+    position: absolute;
+    right: 48px;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 2px 6px;
+    border: 1px solid var(--dsr-kbd-rule);
+    border-radius: 2px;
+    background: var(--dsr-kbd-bg);
+    color: var(--dsr-kbd-ink);
+    font: 600 11px/1.4 var(--dsr-font);
+    pointer-events: none;
+}
+
+.dsr:focus-within .dsr-kbd,
+.dsr.is-open .dsr-kbd {
+    display: none;
+}
+
+/* touch and small screens: the circle grows to 44px, as in InfoDot (pointer: coarse, or 768px and narrower) */
+@media (pointer: coarse), (max-width: 768px) {
+    .dsr .dsr-go {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    .dsr .dsr-input {
+        height: 44px;
+        min-height: 44px;
+    }
+
+    .dsr.dsr--nohint .dsr-input {
+        padding-right: calc(44px + 18px);
+    }
+}
+
+/* Under 640px the hint is hidden, and so is the room for it: the padding follows the hint's visibility, at this breakpoint
+   only (above it the 104px default is untouched). 52px is InfoDot's value there; --dsr-pad-r-narrow lets a host tune it. */
+@media (max-width: 639px) {
+    .dsr .dsr-kbd {
+        display: none;
+    }
+
+    .dsr .dsr-input {
+        padding-right: var(--dsr-pad-r-narrow, 52px);
+    }
+}
+
+/* ---- the dropdown ---- */
+.dsr .dsr-panel {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 60;
+    min-width: 320px;
+    max-height: min(70vh, 560px);
+    overflow: hidden auto;
+    background: var(--dsr-panel);
+    color: var(--dsr-text);
+    border: 1px solid var(--dsr-rule);
+    border-radius: var(--dsr-radius-panel);
+    box-shadow: var(--dsr-panel-shadow);
+    outline: 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--dsr-rule-strong) transparent;
+}
+
+/* progressive: with no script the panel opens while focus is inside the box. The script adds data-closed after Escape. */
+.dsr:focus-within .dsr-panel,
+.dsr.is-open .dsr-panel {
+    display: block;
+    animation: dsr-fade 0.1s linear;
+}
+
+.dsr[data-closed] .dsr-panel {
+    display: none;
+}
+
+@keyframes dsr-fade {
+    from {
+        opacity: 0;
+    }
+}
+
+.dsr .dsr-quick {
+    padding: 4px;
+}
+
+.dsr .dsr-head {
+    padding: 8px 10px 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--dsr-text-3);
+}
+
+.dsr .dsr-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 0;
+    border-bottom: 1px solid var(--dsr-rule);
+    background: transparent;
+    color: var(--dsr-text);
+    font: 500 14px/1.55 var(--dsr-font);
+    text-align: left;
+    cursor: pointer;
+}
+
+.dsr .dsr-item:last-child {
+    border-bottom: 0;
+}
+
+.dsr .dsr-item:hover,
+.dsr .dsr-item.is-active {
+    background: var(--dsr-hover);
+}
+
+.dsr .dsr-item:focus-visible,
+.dsr .dsr-chip:focus-visible {
+    outline: 2px solid var(--dsr-text);
+    outline-offset: -2px;
+}
+
+.dsr .dsr-item--action {
+    font-weight: 600;
+}
+
+.dsr .dsr-icon {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    color: var(--dsr-icon);
+}
+
+.dsr .dsr-label {
+    min-width: 0;
+}
+
+.dsr .dsr-label mark,
+.dsr .dsr-mark {
+    background: var(--dsr-mark);
+    color: inherit;
+    padding: 0 1px;
+}
+
+.dsr .dsr-ref {
+    display: inline-block;
+    font-family: var(--dsr-font);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--dsr-text-2);
+}
+
+.dsr .dsr-tag {
+    margin-left: 8px;
+    padding: 1px 6px;
+    border: 1px solid var(--dsr-rule-strong);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.dsr .dsr-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 10px 10px;
+}
+
+.dsr .dsr-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--dsr-rule-strong);
+    border-radius: 0;
+    background: var(--dsr-panel);
+    color: var(--dsr-text);
+    font: 600 13px var(--dsr-font);
+    cursor: pointer;
+}
+
+.dsr .dsr-chip:hover {
+    background: var(--dsr-hover);
+}
+
+.dsr .dsr-chip .dsr-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.dsr .dsr-foot {
+    margin: 0;
+    padding: 12px;
+    color: var(--dsr-text-2);
+}
+
+@media (max-width: 639px) {
+    .dsr .dsr-item:has(.dsr-ref) {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+}
+
+/* ---- compact filter: InfoDot's 36px .ix-input, for in-page filters (not the pill) ---- */
+/* display has zero specificity: a host's plain `.toolbar .dsr-filter { display: none }` at a breakpoint wins without a longer selector */
+:where(.dsr-filter) {
+    display: block;
+}
+
+.dsr-filter {
+    width: 100%;
+    height: var(--dsr-filter-h);
+    margin: 0;
+    padding: 0 12px;
+    border: 1px solid var(--dsr-filter-border, var(--dsr-rule-strong));
+    border-radius: var(--dsr-filter-radius);
+    background: var(--dsr-filter-bg, var(--dsr-panel));
+    background-image: none;
+    color: var(--dsr-filter-ink, var(--dsr-text));
+    font: 400 14px/1.5 var(--dsr-font);
+    -webkit-appearance: textfield;
+    appearance: textfield;
+    box-shadow: none;
+    transition: border-color 0.12s var(--dsr-ease), box-shadow 0.12s var(--dsr-ease);
+}
+
+.dsr-filter::placeholder {
+    color: var(--dsr-filter-placeholder, var(--dsr-text-3));
+    opacity: 1;
+}
+
+/* The doubled class lifts these to (0,3,0), above a host's global `input:focus` or `input[type=search]:focus`
+   (0,2,1), so the filter keeps its own border in every host. The border change stays; the keyboard ring is added on top. */
+.dsr-filter.dsr-filter:hover {
+    border-color: var(--dsr-filter-border-hover, var(--dsr-text-3));
+}
+
+.dsr-filter.dsr-filter:focus,
+.dsr-filter.dsr-filter:focus-visible {
+    outline: none;
+    border-color: var(--dsr-filter-border-focus, var(--dsr-text));
+    box-shadow: none;
+}
+
+/* Keyboard focus ring: 2px, 1px off the border, in --dsr-focus-ring (default: the pill's gold; a host maps its accent on any
+   ancestor). A real `outline`, not a box-shadow, so forced-colors / high-contrast modes keep it. Same weight as the pill. */
+.dsr-filter.dsr-filter:focus-visible {
+    outline: 2px solid var(--dsr-focus-ring, var(--dsr-ring, #f0bc2e));
+    outline-offset: 1px;
+}
+
+@media (forced-colors: active) {
+    .dsr-filter.dsr-filter:focus-visible {
+        outline: 2px solid Highlight;
+    }
+}
+
+/* touch and small screens: 44px high, and 16px type so iOS does not zoom the page on focus. Both are tokens a host may map
+   on any ancestor (a dense host: --dsr-filter-h-touch: 36px). The desktop 14px and --dsr-filter-h are untouched. */
+@media (pointer: coarse), (max-width: 768px) {
+    .dsr-filter {
+        height: var(--dsr-filter-h-touch, 44px);
+        min-height: var(--dsr-filter-h-touch, 44px);
+        font-size: var(--dsr-filter-fs-touch, 16px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dsr .dsr-panel {
+        animation: none;
+    }
+}

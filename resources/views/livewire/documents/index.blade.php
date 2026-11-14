@@ -39,9 +39,9 @@
                      row arrives with: without it that row landed on this page
                      with the cursor nowhere, which is the same thing "Open
                      another document" does. --}}
-                <input id="doc-search" wire:model.live.debounce.300ms="search" type="search" class="field"
-                       placeholder="A word you remember writing"
-                       @if (request()->query('focus') === 'search') autofocus @endif />
+                <x-dot.filter-search id="doc-search" name="search" wire:model.live.debounce.300ms="search"
+                       placeholder="A word you remember writing" label="Search titles and text"
+                       :autofocus="request()->query('focus') === 'search' ? true : null" />
             </div>
 
             <div class="field-row">

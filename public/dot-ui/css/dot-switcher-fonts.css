@@ -1,0 +1,13 @@
+/*
+ * dot-ui / switcher: the stencil face InfoDot uses for the "Dot Apps" title and the group plates (BSNS, WORK ...).
+ * Optional. Without it the title and plates fall back to Archivo 900. Link it (or copy the file and the woff2) from the
+ * host's own public path: strict CSPs need font-src 'self'. Archivo itself is in dot-fonts.css.
+ * The url() is relative to this file; the sync script copies switcher-fonts/ beside the css.
+ */
+@font-face {
+    font-family: 'Big Shoulders Stencil Display';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url('../switcher-fonts/big-shoulders-stencil-display-latin-wght-normal.woff2') format('woff2-variations');
+}
