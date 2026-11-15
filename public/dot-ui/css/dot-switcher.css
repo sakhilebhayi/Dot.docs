@@ -20,8 +20,11 @@
  */
 
 :where(.dsw) {
-    --dsw-font: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --dsw-stencil-font: 'Big Shoulders Stencil Display', 'Archivo', system-ui, sans-serif;
+    /* Roboto since 0.5.0 (R-52). The "stencil" display face of the title, plates and tags is Roboto too (heavy, uppercase,
+       tracked: the InfoDot signage look without a second face). To get the old Big Shoulders Stencil back: link
+       css/dot-switcher-fonts.css and set --dsw-stencil-font on .dsw. Nothing else changes: sizes stay literal below. */
+    --dsw-font: var(--dot-font-sans, 'Roboto', 'Roboto Fallback', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif);
+    --dsw-stencil-font: var(--dsw-font);
     --dsw-ease: cubic-bezier(0.22, 1, 0.36, 1);
     --dsw-radius: 2px;
 
@@ -173,6 +176,18 @@
 
 /* `.dsw-fallback` is the no-script link to InfoDot's platforms page. It shares the trigger's look through this list but is
    NOT a `.dsw-btn`, so a host selector such as `.topbar .dsw-btn` or `.dsw-btn:first-child` hits the real button. */
+/* insulation from a host's bare `button { text-transform: uppercase; letter-spacing }` rule (0.6.0): the trigger and the tiles set what such a rule would change */
+.dsw-btn,
+.dsw-fallback,
+.dsw-bay,
+.dsw-more summary,
+.dsw-more a {
+    margin: 0;
+    text-transform: none;
+    letter-spacing: normal;
+    text-shadow: none;
+}
+
 .dsw-btn,
 .dsw-fallback {
     display: inline-flex;
@@ -237,7 +252,10 @@
     top: 100%;
     z-index: 60;
     max-height: calc(100vh - 120px);
+    max-height: calc(var(--dh-vv-h, 100dvh) - 120px);
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     background: var(--dsw-paper);
     color: var(--dsw-ink);
     border-bottom: 6px solid var(--dsw-stencil);
@@ -280,10 +298,10 @@
 
 .dsw-title {
     font-family: var(--dsw-stencil-font);
-    font-weight: 900;
-    font-size: 34px;
+    font-weight: 800;
+    font-size: 30px;
     line-height: 1;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
 }
 
@@ -435,9 +453,9 @@
     background: var(--tone);
     color: var(--dsw-plate-ink);
     font-family: var(--dsw-stencil-font);
-    font-weight: 900;
-    font-size: 20px;
-    letter-spacing: 0.06em;
+    font-weight: 800;
+    font-size: 17px;
+    letter-spacing: 0.08em;
     line-height: 1.1;
 }
 
@@ -516,7 +534,7 @@
     background: var(--dsw-tile-ink);
     color: var(--dsw-tile-tag-ink);
     font-family: var(--dsw-stencil-font);
-    font-weight: 800;
+    font-weight: 700;
     font-size: 11px;
     letter-spacing: 0.08em;
     line-height: 1.3;
@@ -667,17 +685,21 @@
     display: none;
 }
 
-@media (max-width: 639px) {
+/* the "Dot Apps" label hides at 860px, the header's collapse point (--dot-bp-md), not at 640 (0.6.0): between 640 and 860 the header is already the one-row
+   mobile bar, and a labelled trigger there pushed the bell and the menu button off the row. */
+@media (max-width: 860px) {
     .dsw-btn__label {
         display: none;
     }
+}
 
+@media (max-width: 639px) {
     .dsw-in {
         padding: 16px 16px 24px;
     }
 
     .dsw-title {
-        font-size: 28px;
+        font-size: 26px;
     }
 
     .dsw-groups {
@@ -699,10 +721,95 @@
     .dsw-bay__logo img {
         max-width: 100%;
     }
+}
 
+/* ---- phone: a bottom sheet (0.5.0). Fixed to the bottom of the screen, as tall as the screen allows (internal scroll), over a
+   scrim that covers the whole viewport, with the page scroll locked by js/dot-switcher.js. The scrim is a fixed pseudo-element
+   of the (static, untransformed) root, so it is never inside the panel's animated transform. `:has()` marks the open state without
+   a new attribute; a browser without it still gets the sheet, just no scrim. ---- */
+@media (max-width: 860px) {
     .dsw-panel {
-        max-height: calc(100vh - 100px);
-        max-height: calc(100dvh - 100px);
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: auto;
+        bottom: 0;
+        z-index: 61;
+        max-height: 85vh;
+        max-height: min(85dvh, calc(var(--dh-vv-h, 100dvh) - 24px));
+        border-bottom: 0;
+        border-top: 6px solid var(--dsw-stencil);
+        border-radius: 14px 14px 0 0;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.28);
+    }
+
+    .dsw-panel[data-open] {
+        animation-name: dsw-sheet-in;
+    }
+
+    .dsw:has([data-dsw-panel][data-open])::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        background: rgba(10, 14, 16, 0.5);
+    }
+}
+
+@keyframes dsw-sheet-in {
+    from {
+        transform: translateY(24px);
+        opacity: 0.6;
+    }
+
+    to {
+        transform: none;
+        opacity: 1;
+    }
+}
+
+/* ---- tablet: a popover on the right instead of a full-bleed sheet (640 to 1023px) ---- */
+@media (min-width: 861px) and (max-width: 1023px) {
+    .dsw-panel {
+        left: auto;
+        right: 12px;
+        width: min(680px, calc(100% - 24px));
+        top: calc(100% + 4px);
+        border: 1px solid var(--dsw-rule);
+        border-bottom: 6px solid var(--dsw-stencil);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    }
+}
+
+/* ---- touch targets: 44px on touch and on narrow windows (the trigger, the filter, the "Not switched on" chips) ---- */
+@media (pointer: coarse), (max-width: 1024px) {
+    .dsw-btn,
+    .dsw-fallback {
+        min-height: 44px;
+        min-width: 44px;
+        height: max(44px, var(--dsw-btn-h, var(--dsw-btn-height)));
+    }
+
+    .dsw .dsw-filter input {
+        height: 44px;
+    }
+
+    .dsw-more summary,
+    .dsw-more a {
+        min-height: 44px;
+        align-items: center;
+    }
+
+    .dsw-more a {
+        display: inline-flex;
+    }
+
+    .dsw a.dsw-all {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        margin-left: 0;
     }
 }
 
@@ -722,4 +829,19 @@
     .dsw-panel[data-open] {
         animation: none;
     }
+}
+
+/* ---- scroll lock (shared with js/dot-nav.js: the same rules are in css/dot-header.css; identical, so either file alone is enough) ----
+   js adds html.dot-scroll-locked, and --gutter when the page has a classic scrollbar (the gutter stays, so nothing jumps sideways). */
+html.dot-scroll-locked {
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
+html.dot-scroll-locked--gutter {
+    scrollbar-gutter: stable;
+}
+
+html.dot-scroll-locked body {
+    overflow: hidden;
 }

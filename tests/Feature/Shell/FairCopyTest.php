@@ -83,7 +83,7 @@ class FairCopyTest extends TestCase
             $at = [];
 
             foreach ([
-                'the top bar' => 'class="topbar"',
+                'the header' => 'shell-header" id="dh"',
                 'the rail' => 'id="shell-rail"',
                 'the canvas' => 'id="canvas"',
                 'the dock' => 'id="shell-dock"',
@@ -97,7 +97,7 @@ class FairCopyTest extends TestCase
             asort($ordered);
 
             $this->assertSame(
-                ['the top bar', 'the rail', 'the canvas', 'the dock'],
+                ['the header', 'the rail', 'the canvas', 'the dock'],
                 array_keys($ordered),
                 "{$url}: the shell's DOM order no longer matches what is on screen, so the panel toggles are not the first tab stops",
             );
@@ -165,10 +165,14 @@ class FairCopyTest extends TestCase
 
         $this->actingAs($user)->get(route('documents.edit', $doc->uuid))
             ->assertOk()
-            ->assertSee('class="topbar"', false)
+            ->assertSee('shell-header" id="dh"', false)
             ->assertSee('data-panel-state="collapsed"', false)
-            ->assertSee('Fraunces', false)
-            ->assertSee('Work+Sans', false);
+            ->assertSee('dot-ui/css/dot-roboto.css', false)
+            // The editor's <style id="doc-style"> may @import the DOCUMENT's own font (a DocumentStyle, user content); the chrome never links one.
+            ->assertDontSee('<link href="https://fonts.googleapis.com', false)
+            ->assertDontSee('rel="preconnect" href="https://fonts.googleapis.com"', false)
+            ->assertDontSee('Fraunces', false)
+            ->assertDontSee('Work+Sans', false);
     }
 
     /**
@@ -204,13 +208,11 @@ class FairCopyTest extends TestCase
     }
 
     /**
-     * Spec §3: the top bar carries no platform-name readout. A page with no
-     * document names ITSELF there — "Dashboard", "Documents", "Files" — and the
-     * brand stays where a brand belongs, in the tab title and the rail's
-     * colophon. Falling back to config('app.name') put "Dot.docs" in Fraunces
-     * across the dashboard: the exact row this redesign retired.
+     * R-52: the shared header replaced the title bar. It carries the brand mark, the search, the switcher, the bell and the
+     * account, and NO page title: every page names itself in its own heading and in the tab title (a Livewire ->title() or
+     * the Jetstream `header` slot), the rail marks where you are, and the document routes name the document in their heading.
      */
-    public function test_the_topbar_names_the_page_and_never_the_platform(): void
+    public function test_each_page_names_itself_in_the_tab_title_and_the_header_has_no_title_readout(): void
     {
         $this->seed(DocumentStyleSeeder::class);
         $user = User::factory()->withPersonalTeam()->create();
@@ -223,44 +225,21 @@ class FairCopyTest extends TestCase
             route('slash-commands.index') => 'Slash commands',
             route('profile.show') => 'Profile',
             route('api-tokens.index') => 'API Tokens',
-            // The editor is the exception, and deliberately so: it owns the
-            // one INLINE, EDITABLE copy of the document's title (.doc-bar's
-            // title field), and Task 1 shipped that title twice — readable in
-            // the bar, editable under it. Spec §4's rebuild of the persistent
-            // row resolved it in favour of the field you can actually type in,
-            // so up here the editor names its section. Every other document
-            // route still names the document, because on those pages nothing
-            // else does. Covered end to end in ContextualToolbarTest.
-            route('documents.edit', $doc->uuid) => 'Documents',
+            route('documents.edit', $doc->uuid) => 'Fair Copy check',
             route('documents.history', $doc->uuid) => 'Fair Copy check',
         ];
 
         foreach ($expected as $url => $name) {
-            // ShellContext is a SCOPED binding: it memoises the route's
-            // document for exactly one request. A test method issues several
-            // requests against ONE container, so without this the first URL's
-            // answer (null, for a page with no uuid) is still cached when the
-            // document routes are reached, and every later assertion measures
-            // the memo rather than the page. Forgetting them is what a new
-            // request does.
+            // ShellContext is a SCOPED binding: forget it, as a new request would.
             $this->app->forgetScopedInstances();
 
             $html = $this->actingAs($user)->get($url)->assertOk()->getContent();
 
-            $this->assertSame(
-                1,
-                preg_match('/<div class="topbar-title">(.*?)<\/div>/s', $html, $found),
-                "{$url} renders no topbar title",
-            );
-
-            $title = trim(html_entity_decode(strip_tags($found[1])));
-
-            $this->assertSame($name, $title, "{$url} must name itself in the top bar");
-            $this->assertStringNotContainsString(
-                config('app.name'),
-                $title,
-                "{$url} put the platform name in the top bar's title slot",
-            );
+            $this->assertStringNotContainsString('class="topbar-title"', $html, "{$url} still prints the retired title bar");
+            $this->assertSame(1, preg_match('#<title>(.*?)</title>#s', $html, $found), "{$url} has no tab title");
+            $this->assertStringContainsString($name, html_entity_decode($found[1]), "{$url} must name itself in the tab title");
+            $this->assertSame(1, preg_match('/<header class="dh [^"]*shell-header.*?<\/header>/s', $html, $header), "{$url} renders no shared header");
+            $this->assertStringContainsString('Dot.docs', $header[0], 'the brand sits in the header');
         }
     }
 
@@ -293,7 +272,7 @@ class FairCopyTest extends TestCase
     {
         $user = User::factory()->withPersonalTeam()->create();
         $res = $this->actingAs($user)->get(route('dashboard'));
-        $res->assertOk()->assertDontSee('class="dark"', false);
+        $res->assertOk()->assertDontSee('class="dot-roboto dark"', false);
     }
 
     /**
@@ -308,13 +287,14 @@ class FairCopyTest extends TestCase
      * press. There is no headless browser in this project (.ai/rules/views.md),
      * so the rule is read out of the stylesheet rather than off a rendering.
      */
-    public function test_both_panels_become_overlays_with_a_way_out_below_900px(): void
+    public function test_both_panels_become_overlays_with_a_way_out_below_860px(): void
     {
         $user = User::factory()->withPersonalTeam()->create();
 
         $html = $this->actingAs($user)->get(route('dashboard'))->assertOk()->getContent();
 
         $this->assertSame(2, substr_count($html, 'class="panel-overlay-head"'), 'both panels need an overlay close control');
+        $this->assertStringContainsString('data-dh-close', $html, 'the menu (rail) has its own close button');
         $this->assertStringContainsString('data-shell-panel-toggle="rail" aria-controls="shell-rail"', $html);
         $this->assertStringContainsString('data-shell-panel-toggle="dock" aria-controls="shell-dock"', $html);
 
@@ -324,13 +304,15 @@ class FairCopyTest extends TestCase
         // the reader is not in while the panel is a column.
         $this->assertMatchesRegularExpression('/\n\.panel-overlay-head \{\s*display: none;\s*\}/', $shell);
 
-        $overlay = $this->mediaBlock($shell, '@media (max-width: 900px)');
+        $overlay = $this->mediaBlock($shell, '@media (max-width: 860px)');
 
         $this->assertStringContainsString('.rail,', $overlay);
         $this->assertStringContainsString('.dock {', $overlay);
         $this->assertStringContainsString('position: fixed;', $overlay);
         $this->assertStringContainsString('inset: var(--topbar-h) 0 0 0;', $overlay);
-        $this->assertStringContainsString(".rail[data-panel-user='open'],", $overlay);
+        // The rail is dot-ui's adopt-mode menu (data-dh-open, delayed visibility), the dock opens on data-panel-user.
+        $this->assertStringContainsString('.rail[data-dh-open] {', $overlay);
+        $this->assertStringContainsString('visibility: hidden;', $overlay);
         $this->assertStringContainsString(".dock[data-panel-user='open'] {", $overlay);
         $this->assertMatchesRegularExpression('/\.panel-overlay-head \{[^}]*display: flex;/', $overlay);
 

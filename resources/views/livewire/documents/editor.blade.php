@@ -142,6 +142,8 @@
         aiError: '',
         tick: 0,
         thumbnailsOpen: false,
+        // The phone's document-tools sheet (see .doc-bar-tools); a desktop never opens it.
+        toolsOpen: false,
         viewMode: 'continuous',
 
         // The editor is NEVER stored in Alpine's reactive data: a reactivity
@@ -715,6 +717,15 @@
                    placeholder="Untitled"
                    @readonly(! $canEdit) />
 
+            {{-- Style, page view, pages, the command palette and filing. One row on a desktop (the wrapper is `display:
+                 contents`); on a phone they sit in a sheet opened by the Tools button, so the title keeps a full-width row of its own
+                 and editing starts deliberately (title row, tools sheet, then the paper). --}}
+            <div class="doc-bar-tools" id="doc-bar-tools" :data-open="toolsOpen ? '' : null"
+                 @keydown.escape.window="toolsOpen = false">
+                <div class="doc-bar-tools-head">
+                    <span class="doc-bar-tools-title">Document tools</span>
+                    <button type="button" class="tool" @click="toolsOpen = false">Done</button>
+                </div>
             <label class="sr-only" for="doc-style-picker">Document style</label>
             <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select"
                     @disabled(! $canEdit)>
@@ -759,6 +770,10 @@
             @error('location')
                 <span class="field-error">{{ $message }}</span>
             @enderror
+
+            </div>
+            <button type="button" class="tool doc-bar-toolsbtn" aria-controls="doc-bar-tools"
+                    :aria-expanded="toolsOpen ? 'true' : 'false'" @click="toolsOpen = !toolsOpen">Tools</button>
 
             @if (count($activeUsers) > 0)
                 <div class="presence" aria-label="People here now">

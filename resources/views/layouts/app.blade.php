@@ -82,7 +82,8 @@
     $dockState = ($isEditor || request()->routeIs('dashboard')) ? 'collapsed' : 'expanded';
 @endphp
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="{{ $theme === 'system' ? '' : $theme }}">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="dot-roboto{{ $theme === 'system' ? '' : ' '.$theme }}"
+      data-dh-theme-class="dark" data-dh-theme-key="dot-docs-theme" data-dh-theme-default="{{ $theme }}">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -92,21 +93,16 @@
     <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32x32.png') }}">
     <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16x16.png') }}">
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    {{-- Chrome: Fraunces for display, Work Sans for everything functional, IBM
-         Plex Mono only where a column of figures has to line up — the same
-         three the guest pages already load, so the signed-in shell and the
-         front door finally read as one product. Document defaults are
-         unchanged: Source Serif 4 body, Source Sans 3 headings. --}}
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..600&family=Work+Sans:wght@400..600&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
-    {{-- Shared Dot UI (platform switcher, filter), served from this site's own public/dot-ui, so a 'self' policy is enough.
-         Loaded before the app CSS; the host token mapping sits in resources/css/app.css, outside every @layer. --}}
-    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-fonts.css') }}">
+    {{-- Roboto, self-hosted (public/dot-ui/fonts/roboto): the one face of every Dot platform. No external font host.
+         Document faces are the document's own (DocumentStyle) and load on the document, never for the chrome. --}}
+    <link rel="preload" href="{{ asset('dot-ui/fonts/roboto/roboto-latin-wght-normal.woff2') }}" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-roboto.css') }}">
+    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-type.css') }}">
     <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-tokens.css') }}">
     <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-search.css') }}">
-    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-switcher-fonts.css') }}">
     <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-switcher.css') }}">
+    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-header.css') }}">
+    <script src="{{ asset('dot-ui/js/dot-theme-boot.js') }}"></script>
     @livewireStyles
     @vite(['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js'])
     @stack('styles')
@@ -115,38 +111,7 @@
     <a href="#canvas" class="skip-link">Skip to the document</a>
 
     <div class="shell" data-shell data-shell-context="{{ $isEditor ? 'editor' : 'page' }}"@if (request()->routeIs('dashboard')) data-shell-page="dashboard"@endif>
-        <x-shell.topbar :rail-expanded="$railState === 'expanded'" :save-owner="$isEditor">
-            <x-slot:title>{{ $topbarTitle }}</x-slot:title>
-
-            <x-slot:actions>
-                {{-- The shared "Dot Apps" switcher (dot-ui). Not on the editor: the writing surface gets no extra chrome,
-                     and everywhere else the bar has room for it. The company is the current team's InfoDot uuid; a
-                     personal or unlinked workspace has none and gets the component's personal state. --}}
-                @if (! $isEditor && auth()->check())
-                    @php($shellTeam = auth()->user()->currentTeam)
-                    <x-dot.switcher platform="docs"
-                                    :company="$shellTeam && ! $shellTeam->personal_team ? ($shellTeam->infodot_team_uuid ?: null) : null"
-                                    :company-name="$shellTeam?->name"
-                                    logos="/dot-ui/img/platforms" />
-                @endif
-
-                <button type="button"
-                        class="topbar-action"
-                        data-shell-theme-toggle
-                        aria-pressed="{{ $theme === 'dark' ? 'true' : 'false' }}">
-                    <span data-shell-theme-word>{{ $theme === 'dark' ? 'Night' : 'Day' }}</span>
-                    <span class="sr-only">Switch to {{ $theme === 'dark' ? 'day' : 'night' }} mode</span>
-                </button>
-
-                <button type="button"
-                        class="topbar-action"
-                        data-shell-panel-toggle="dock"
-                        aria-controls="shell-dock"
-                        aria-expanded="{{ $dockState === 'expanded' ? 'true' : 'false' }}">
-                    <span data-shell-dock-word>{{ $dockState === 'expanded' ? 'Hide the tools' : 'Show the tools' }}</span>
-                </button>
-            </x-slot:actions>
-        </x-shell.topbar>
+        @include('layouts.partials.header', ['isEditor' => $isEditor, 'railState' => $railState, 'dockState' => $dockState, 'theme' => $theme])
 
         {{-- The flash banner is a ROW of the grid, not a sibling above it:
              outside the 100dvh grid it pushed the shell down and gave the
@@ -177,9 +142,10 @@
     </div>
 
     @stack('modals')
-    @if (! $isEditor && auth()->check())
-        <script src="{{ asset('dot-ui/js/dot-switcher.js') }}" defer></script>
-    @endif
+    <script src="{{ asset('dot-ui/js/dot-search.js') }}" defer></script>
+    <script src="{{ asset('dot-ui/js/dot-search-results.js') }}" defer></script>
+    <script src="{{ asset('dot-ui/js/dot-switcher.js') }}" defer></script>
+    <script src="{{ asset('dot-ui/js/dot-nav.js') }}" defer></script>
     @livewireScripts
     @stack('scripts')
 </body>

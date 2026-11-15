@@ -21,7 +21,7 @@
     max-width: var(--dsr-w);
     min-width: 0;
     margin: 0 auto;
-    font: 400 14px/1.55 var(--dsr-font);
+    font: 400 var(--dot-text-body-sm-size, 0.875rem)/1.55 var(--dsr-font);
     color: var(--dsr-text);
     -webkit-font-smoothing: antialiased;
 }
@@ -47,6 +47,8 @@
     position: absolute;
     width: 1px;
     height: 1px;
+    margin: 0;
+    padding: 0;
     overflow: hidden;
     clip: rect(0 0 0 0);
     white-space: nowrap;
@@ -66,7 +68,7 @@
     background: var(--dsr-pill-bg);
     background-image: none;
     color: var(--dsr-pill-ink);
-    font: 400 15px/1.5 var(--dsr-font);
+    font: 400 var(--dot-search-input-size, 0.9375rem)/1.5 var(--dsr-font);
     letter-spacing: normal;
     text-overflow: ellipsis;
     box-shadow: var(--dsr-shadow);
@@ -130,7 +132,7 @@
 .dsr .dsr-arrow {
     display: inline-block;
     flex: none;
-    font-size: 17px;
+    font-size: var(--dot-search-arrow-size, 1.0625rem);
     height: 1em;
     aspect-ratio: 196 / 310;
     background: currentColor;
@@ -153,7 +155,7 @@
     border-radius: 2px;
     background: var(--dsr-kbd-bg);
     color: var(--dsr-kbd-ink);
-    font: 600 11px/1.4 var(--dsr-font);
+    font: 600 var(--dot-text-caption-size, 0.75rem)/1.4 var(--dsr-font);
     pointer-events: none;
 }
 
@@ -239,7 +241,7 @@
     padding: 8px 10px 4px;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 12px;
+    font-size: var(--dot-text-caption-size, 0.75rem);
     font-weight: 600;
     color: var(--dsr-text-3);
 }
@@ -254,7 +256,7 @@
     border-bottom: 1px solid var(--dsr-rule);
     background: transparent;
     color: var(--dsr-text);
-    font: 500 14px/1.55 var(--dsr-font);
+    font: 500 var(--dot-text-body-sm-size, 0.875rem)/1.55 var(--dsr-font);
     text-align: left;
     cursor: pointer;
 }
@@ -305,7 +307,7 @@
     display: inline-block;
     font-family: var(--dsr-font);
     font-weight: 700;
-    font-size: 12px;
+    font-size: var(--dot-text-caption-size, 0.75rem);
     letter-spacing: 0.06em;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -316,7 +318,7 @@
     margin-left: 8px;
     padding: 1px 6px;
     border: 1px solid var(--dsr-rule-strong);
-    font-size: 11px;
+    font-size: var(--dot-text-caption-size, 0.75rem);
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -338,7 +340,8 @@
     border-radius: 0;
     background: var(--dsr-panel);
     color: var(--dsr-text);
-    font: 600 13px var(--dsr-font);
+    /* 14px line: the chip's height (28px) used to come from Archivo's `normal` line height; pinned so Roboto does not make it 29px */
+    font: 600 var(--dot-text-body-sm-size, 0.875rem)/14px var(--dsr-font);
     cursor: pointer;
 }
 
@@ -355,6 +358,19 @@
     margin: 0;
     padding: 12px;
     color: var(--dsr-text-2);
+}
+
+/* Loading (0.5.0). InfoDot's only loading state is a line in the dropdown, "Looking in Files and Documents..." (.ix-results__foot,
+   aria-live polite), shown while its other platforms answer. There is no spinner and the pill does not change. This is that line,
+   driven by one attribute the host sets while it waits: <div class="dsr" data-dsr-loading>. The row itself is
+   <p class="dsr-foot dsr-loading" aria-live="polite">...</p> in the host's results slot (or the `loading-text` prop); it is hidden
+   unless the attribute is on the root. docs/SEARCH.md shows the Livewire, Alpine and Vue ways to toggle it. */
+.dsr .dsr-loading {
+    display: none;
+}
+
+.dsr[data-dsr-loading] .dsr-loading {
+    display: block;
 }
 
 @media (max-width: 639px) {
@@ -381,7 +397,7 @@
     background: var(--dsr-filter-bg, var(--dsr-panel));
     background-image: none;
     color: var(--dsr-filter-ink, var(--dsr-text));
-    font: 400 14px/1.5 var(--dsr-font);
+    font: 400 var(--dot-text-body-sm-size, 0.875rem)/1.5 var(--dsr-font);
     -webkit-appearance: textfield;
     appearance: textfield;
     box-shadow: none;

@@ -1,0 +1,141 @@
+/*
+ * dot-ui typography: one scale for every Dot platform. Load AFTER dot-roboto.css (the font files) and BEFORE the host's own CSS.
+ *
+ * What is in here
+ *  1. Font tokens   --dot-font-sans (Roboto, then metric-matched fallbacks), --dot-font-mono
+ *  2. The scale     --dot-text-<step>-size / -weight / -lh / -ls for display, h1 to h4, body-lg, body, body-sm, caption, label,
+ *                   button, input, table. Sizes in rem (the user's browser font size still works); display, h1, h2 and h3 are fluid.
+ *  3. Utilities     .dot-type-<step> (family + size + weight + line-height + letter-spacing), .dot-type-mono, .dot-nums
+ *  4. Opt-in base   .dot-roboto  (put it on <html>): Roboto for the page, controls inherit it, code stays monospace
+ *
+ * Nothing here changes a page that does not opt in: the tokens are inert custom properties and the utilities are classes.
+ * Every selector that could fight a host's own CSS is wrapped in :where() (zero specificity), so a host's one-class rule wins.
+ * The mono family is NOT Roboto on purpose: code, ids, hashes and data readouts need equal-width glyphs (see docs/TYPOGRAPHY.md).
+ */
+:where(:root) {
+    /* 1. Families */
+    --dot-font-sans: 'Roboto', 'Roboto Fallback', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    --dot-font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+    /* 2. The scale. 16px base; every value is a rem so browser zoom and a raised default font size still scale it. */
+    --dot-text-display-size: clamp(2.5rem, 1.9rem + 2.6vw, 4rem);     /* 40 to 64 */
+    --dot-text-display-weight: 700;
+    --dot-text-display-lh: 1.05;
+    --dot-text-display-ls: -0.02em;
+
+    --dot-text-h1-size: clamp(1.75rem, 1.45rem + 1.3vw, 2.5rem);       /* 28 to 40 */
+    --dot-text-h1-weight: 700;
+    --dot-text-h1-lh: 1.15;
+    --dot-text-h1-ls: -0.015em;
+
+    --dot-text-h2-size: clamp(1.5rem, 1.32rem + 0.8vw, 2rem);          /* 24 to 32 */
+    --dot-text-h2-weight: 700;
+    --dot-text-h2-lh: 1.2;
+    --dot-text-h2-ls: -0.01em;
+
+    --dot-text-h3-size: clamp(1.25rem, 1.16rem + 0.4vw, 1.5rem);       /* 20 to 24 */
+    --dot-text-h3-weight: 600;
+    --dot-text-h3-lh: 1.3;
+    --dot-text-h3-ls: -0.005em;
+
+    --dot-text-h4-size: 1.125rem;                                      /* 18 */
+    --dot-text-h4-weight: 600;
+    --dot-text-h4-lh: 1.35;
+    --dot-text-h4-ls: 0em;
+
+    --dot-text-body-lg-size: 1.125rem;                                 /* 18 */
+    --dot-text-body-lg-weight: 400;
+    --dot-text-body-lg-lh: 1.6;
+    --dot-text-body-lg-ls: 0em;
+
+    --dot-text-body-size: 1rem;                                        /* 16 */
+    --dot-text-body-weight: 400;
+    --dot-text-body-lh: 1.55;
+    --dot-text-body-ls: 0em;
+
+    --dot-text-body-sm-size: 0.875rem;                                 /* 14 */
+    --dot-text-body-sm-weight: 400;
+    --dot-text-body-sm-lh: 1.5;
+    --dot-text-body-sm-ls: 0.005em;
+
+    --dot-text-caption-size: 0.75rem;                                  /* 12 */
+    --dot-text-caption-weight: 400;
+    --dot-text-caption-lh: 1.4;
+    --dot-text-caption-ls: 0.01em;
+
+    --dot-text-label-size: 0.875rem;                                   /* 14 */
+    --dot-text-label-weight: 500;
+    --dot-text-label-lh: 1.3;
+    --dot-text-label-ls: 0.005em;
+
+    --dot-text-button-size: 0.875rem;                                  /* 14 */
+    --dot-text-button-weight: 500;
+    --dot-text-button-lh: 1.25;
+    --dot-text-button-ls: 0.01em;
+
+    /* Inputs never go below 16px: iOS Safari zooms the page when a focused field is smaller. */
+    --dot-text-input-size: 1rem;                                       /* 16 */
+    --dot-text-input-weight: 400;
+    --dot-text-input-lh: 1.4;
+    --dot-text-input-ls: 0em;
+
+    --dot-text-table-size: 0.875rem;                                   /* 14 */
+    --dot-text-table-weight: 400;
+    --dot-text-table-lh: 1.45;
+    --dot-text-table-ls: 0.005em;
+}
+
+/* 3. Utilities. Longhands, not the `font` shorthand, so a host's font-style / font-variant on the element survives. */
+:where(.dot-type-display, .dot-type-h1, .dot-type-h2, .dot-type-h3, .dot-type-h4, .dot-type-body-lg, .dot-type-body,
+       .dot-type-body-sm, .dot-type-caption, .dot-type-label, .dot-type-button, .dot-type-input, .dot-type-table) {
+    font-family: var(--dot-font-sans);
+}
+:where(.dot-type-display) { font-size: var(--dot-text-display-size); font-weight: var(--dot-text-display-weight); line-height: var(--dot-text-display-lh); letter-spacing: var(--dot-text-display-ls); }
+:where(.dot-type-h1) { font-size: var(--dot-text-h1-size); font-weight: var(--dot-text-h1-weight); line-height: var(--dot-text-h1-lh); letter-spacing: var(--dot-text-h1-ls); }
+:where(.dot-type-h2) { font-size: var(--dot-text-h2-size); font-weight: var(--dot-text-h2-weight); line-height: var(--dot-text-h2-lh); letter-spacing: var(--dot-text-h2-ls); }
+:where(.dot-type-h3) { font-size: var(--dot-text-h3-size); font-weight: var(--dot-text-h3-weight); line-height: var(--dot-text-h3-lh); letter-spacing: var(--dot-text-h3-ls); }
+:where(.dot-type-h4) { font-size: var(--dot-text-h4-size); font-weight: var(--dot-text-h4-weight); line-height: var(--dot-text-h4-lh); letter-spacing: var(--dot-text-h4-ls); }
+:where(.dot-type-body-lg) { font-size: var(--dot-text-body-lg-size); font-weight: var(--dot-text-body-lg-weight); line-height: var(--dot-text-body-lg-lh); letter-spacing: var(--dot-text-body-lg-ls); }
+:where(.dot-type-body) { font-size: var(--dot-text-body-size); font-weight: var(--dot-text-body-weight); line-height: var(--dot-text-body-lh); letter-spacing: var(--dot-text-body-ls); }
+:where(.dot-type-body-sm) { font-size: var(--dot-text-body-sm-size); font-weight: var(--dot-text-body-sm-weight); line-height: var(--dot-text-body-sm-lh); letter-spacing: var(--dot-text-body-sm-ls); }
+:where(.dot-type-caption) { font-size: var(--dot-text-caption-size); font-weight: var(--dot-text-caption-weight); line-height: var(--dot-text-caption-lh); letter-spacing: var(--dot-text-caption-ls); }
+:where(.dot-type-label) { font-size: var(--dot-text-label-size); font-weight: var(--dot-text-label-weight); line-height: var(--dot-text-label-lh); letter-spacing: var(--dot-text-label-ls); }
+:where(.dot-type-button) { font-size: var(--dot-text-button-size); font-weight: var(--dot-text-button-weight); line-height: var(--dot-text-button-lh); letter-spacing: var(--dot-text-button-ls); }
+:where(.dot-type-input) { font-size: var(--dot-text-input-size); font-weight: var(--dot-text-input-weight); line-height: var(--dot-text-input-lh); letter-spacing: var(--dot-text-input-ls); }
+:where(.dot-type-table) { font-size: var(--dot-text-table-size); font-weight: var(--dot-text-table-weight); line-height: var(--dot-text-table-lh); letter-spacing: var(--dot-text-table-ls); font-variant-numeric: tabular-nums; }
+
+/* Monospace is the one sanctioned exception: code, ids, hashes, terminal-style readouts. Keeps the body size and weight. */
+:where(.dot-type-mono, .dot-mono) { font-family: var(--dot-font-mono); font-variant-numeric: tabular-nums; }
+
+/* Figures that must line up in columns (money, counts, dates, KPIs). Roboto's default digits are proportional. */
+:where(.dot-nums) { font-variant-numeric: tabular-nums lining-nums; font-feature-settings: 'tnum' 1, 'lnum' 1; }
+
+/* Long words and ids wrap instead of forcing a horizontal scrollbar (opt-in, per element). */
+:where(.dot-wrap) { overflow-wrap: anywhere; hyphens: auto; }
+
+/* Balanced headings where the browser supports it (harmless where it does not). */
+:where(.dot-type-display, .dot-type-h1, .dot-type-h2, .dot-type-h3) { text-wrap: balance; }
+
+/*
+ * 4. Opt-in base. Put `class="dot-roboto"` on <html>.
+ *  - the page is Roboto; headings, nav, tables, cards inherit it
+ *  - buttons, inputs, selects, textareas inherit the page face instead of the browser default (Tailwind's preflight already does)
+ *  - code stays monospace
+ * What it deliberately does NOT touch: any element that sets its own font-family with a class (icon fonts such as Material
+ * Symbols / Font Awesome / Bootstrap Icons, a platform's display face, data readouts). An element's own class beats an inherited
+ * family, and these rules are :where() (zero specificity), so they never win against a class either.
+ */
+.dot-roboto {
+    font-family: var(--dot-font-sans);
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+:where(.dot-roboto) :where(button, input, select, textarea, optgroup) { font: inherit; letter-spacing: inherit; }
+:where(.dot-roboto) :where(code, kbd, samp, pre, tt) { font-family: var(--dot-font-mono); }
+/* iOS: a focused field under 16px zooms the page. On touch and narrow screens no field goes below 16px; on a wide pointer screen a
+   dense host may keep 14px inputs (its own one-class rule wins: this is :where()). */
+@media (max-width: 768px), (hover: none) and (pointer: coarse) {
+    :where(.dot-roboto) :where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='image']), select, textarea) { font-size: max(1rem, 16px); }
+}

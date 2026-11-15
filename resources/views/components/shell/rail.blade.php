@@ -26,9 +26,7 @@
          so there is no second source of truth about whether the panel is open.
          CSS shows it only at the width where the panel is an overlay. --}}
     <div class="panel-overlay-head">
-        <button type="button" class="btn btn-sm" data-shell-panel-toggle="rail" aria-controls="shell-rail">
-            Close the panel
-        </button>
+        <button type="button" class="btn btn-sm" data-dh-close aria-label="Close menu">Close</button>
     </div>
 
     {{-- The groups scroll; the account block below is pinned to the foot. The
@@ -36,8 +34,8 @@
          margin-top:auto on the foot, which is what opened the void between the
          last nav group and the user block. --}}
     <div class="rail-scroll">
-    <nav class="rail-group" aria-label="Workspace">
-        <div class="rail-label">Workspace</div>
+    <nav class="rail-group" aria-label="Library">
+        <div class="rail-label">Library</div>
 
         <a href="{{ route('dashboard') }}"
            class="rail-item {{ request()->routeIs('dashboard') ? 'is-current' : '' }}"
@@ -119,29 +117,24 @@
         </nav>
     @endif
 
-        @auth
-            <div class="rail-group">
-                @livewire('navigation-menu')
-            </div>
-        @endauth
+        {{-- The dock (assistant, comments, webhooks) opens from the bar on a desktop; on a phone the bar has no room for
+             it, so it is one row here. It closes the menu first (shell.js). --}}
+        <div class="rail-group rail-tools-group">
+            <div class="rail-label">Tools</div>
+            <button type="button" class="rail-item" data-shell-open-dock aria-controls="shell-dock">
+                <span class="rail-item-text">Assistant and document tools</span>
+            </button>
+        </div>
     </div>
 
-    @auth
-        <div class="rail-foot">
-            <span class="rail-account">
-                <span class="rail-account-name">{{ $user->name }}</span>
-                <span class="rail-account-team">{{ $user->currentTeam->name ?? 'Personal' }}</span>
-            </span>
-
-            {{-- The retired status line's row of figures, demoted to where it
-                 belongs: a quiet line at the foot of a panel nobody has to
-                 look at while writing. --}}
-            <p class="rail-colophon">
-                {{ config('app.name') }}@if ($document) ·
-                    <x-shell.figure :value="$document->version" prefix="v" label="Version" /> ·
-                    <x-shell.figure :value="$document->word_count ?? 0" /> words
-                @endif
-            </p>
-        </div>
-    @endauth
+    <div class="rail-foot">
+        {{-- The retired status line's row of figures, demoted to where it belongs: a quiet line at the foot of a panel nobody
+             has to look at while writing. Account, company and notifications live in the header now. --}}
+        <p class="rail-colophon">
+            {{ config('app.name') }}@if ($document) ·
+                <x-shell.figure :value="$document->version" prefix="v" label="Version" /> ·
+                <x-shell.figure :value="$document->word_count ?? 0" /> words
+            @endif
+        </p>
+    </div>
 </aside>
