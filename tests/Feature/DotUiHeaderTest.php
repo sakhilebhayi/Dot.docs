@@ -198,7 +198,7 @@ class DotUiHeaderTest extends TestCase
         $html = $this->actingAs($user)->get(route('documents.edit', $doc->uuid))->assertOk()->getContent();
 
         $this->assertStringContainsString('data-dsw', $html, 'R-52: the platform switcher is reachable on the editor too');
-        $this->assertStringContainsString('dot-ui/js/dot-switcher.js', $html);
+        $this->assertStringContainsString('dot-ui/js/dot-ui-core.min.js', $html);
         $this->assertStringContainsString('data-shell-panel-toggle="dock"', $html);
     }
 
@@ -263,7 +263,7 @@ class DotUiHeaderTest extends TestCase
         $this->fakeInfoDot([self::url(self::ACME) => Http::response(self::body(self::ACME))]);
         $html = $this->actingAs($this->memberOf(self::ACME, 'Acme Ltd'))->get(route('documents.index'))->assertOk()->getContent();
 
-        foreach (['css/dot-roboto.css', 'css/dot-type.css', 'css/dot-tokens.css', 'css/dot-search.css', 'css/dot-switcher.css', 'css/dot-header.css', 'js/dot-switcher.js', 'js/dot-nav.js', 'js/dot-search.js', 'js/dot-search-results.js', 'js/dot-theme-boot.js'] as $asset) {
+        foreach (['css/dot-ui.min.css', 'js/dot-ui-core.min.js', 'js/dot-theme-boot.min.js'] as $asset) {
             $this->assertStringContainsString(asset('dot-ui/'.$asset), $html, $asset.' is linked from this site');
             $this->assertFileExists(public_path('dot-ui/'.$asset));
         }

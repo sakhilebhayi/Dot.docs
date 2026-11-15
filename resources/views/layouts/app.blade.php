@@ -95,13 +95,8 @@
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
     {{-- Roboto, self-hosted (public/dot-ui/fonts/roboto): the one face of every Dot platform. No external font host.
          Document faces are the document's own (DocumentStyle) and load on the document, never for the chrome. --}}
-    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-roboto.css') }}">
-    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-type.css') }}">
-    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-tokens.css') }}">
-    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-search.css') }}">
-    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-switcher.css') }}">
-    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-header.css') }}">
-    <script src="{{ asset('dot-ui/js/dot-theme-boot.js') }}"></script>
+    <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-ui.min.css') }}">
+    <script src="{{ asset('dot-ui/js/dot-theme-boot.min.js') }}"></script>
     @livewireStyles
     @vite(['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js'])
     @stack('styles')
@@ -141,10 +136,7 @@
     </div>
 
     @stack('modals')
-    <script src="{{ asset('dot-ui/js/dot-search.js') }}" defer></script>
-    <script src="{{ asset('dot-ui/js/dot-search-results.js') }}" defer></script>
-    <script src="{{ asset('dot-ui/js/dot-switcher.js') }}" defer></script>
-    <script src="{{ asset('dot-ui/js/dot-nav.js') }}" defer></script>
+    <script src="{{ asset('dot-ui/js/dot-ui-core.min.js') }}" defer></script>
     @livewireScripts
     @stack('scripts')
 </body>

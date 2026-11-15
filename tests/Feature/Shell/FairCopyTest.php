@@ -167,7 +167,7 @@ class FairCopyTest extends TestCase
             ->assertOk()
             ->assertSee('shell-header" id="dh"', false)
             ->assertSee('data-panel-state="collapsed"', false)
-            ->assertSee('dot-ui/css/dot-roboto.css', false)
+            ->assertSee('dot-ui/css/dot-ui.min.css', false)
             // The editor's <style id="doc-style"> may @import the DOCUMENT's own font (a DocumentStyle, user content); the chrome never links one.
             ->assertDontSee('<link href="https://fonts.googleapis.com', false)
             ->assertDontSee('rel="preconnect" href="https://fonts.googleapis.com"', false)

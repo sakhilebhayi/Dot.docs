@@ -52,8 +52,8 @@ class R52TypographyTest extends TestCase
         foreach ([route('dashboard'), route('documents.index')] as $url) {
             $html = $this->actingAs($user)->get($url)->assertOk()->getContent();
             $this->assertStringContainsString('class="dot-roboto', $html);
-            $this->assertStringContainsString(asset('dot-ui/css/dot-roboto.css'), $html);
-            $this->assertStringContainsString(asset('dot-ui/css/dot-type.css'), $html);
+            // 0.6.1: the app layout links the one minified bundle (Roboto faces + type + header + search + switcher).
+            $this->assertStringContainsString(asset('dot-ui/css/dot-ui.min.css'), $html);
             $this->assertStringNotContainsString('dot-fonts.css', $html);
             $this->assertStringNotContainsString('googleapis', $html);
         }
