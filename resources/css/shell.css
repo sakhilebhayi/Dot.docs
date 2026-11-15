@@ -2893,8 +2893,16 @@ button.list-row {
 }
 
 .doc-bar-tools-head,
-.doc-bar-toolsbtn {
+.doc-bar-toolsbtn,
+.doc-bar-cmd-label {
     display: none;
+}
+
+@media (max-width: 860px) {
+    .doc-bar-cmd-label {
+        display: inline;
+        margin-right: var(--s2);
+    }
 }
 
 /*
@@ -2919,10 +2927,14 @@ button.list-row {
         background: var(--surface-raised);
     }
 
+    /* flex-basis 0: the row does not re-wrap when Alpine hides the words that show before it starts (that was a 0.2 shift). */
     .doc-status {
         order: 1;
-        flex: 1 1 auto;
+        flex: 1 1 0;
         min-width: 0;
+        min-height: 24px;
+        overflow: hidden;
+        white-space: nowrap;
     }
 
     .presence {
@@ -2931,7 +2943,13 @@ button.list-row {
 
     .doc-bar-toolsbtn {
         display: inline-flex;
+        align-items: center;
         order: 3;
+    }
+
+    .doc-bar-end > .tool {
+        display: inline-flex;
+        align-items: center;
     }
 
     .doc-bar-end {
@@ -2986,7 +3004,29 @@ button.list-row {
     .doc-bar-tools .tool,
     .doc-bar-tools .tool-select {
         width: 100%;
+        display: flex;
+        align-items: center;
         justify-content: flex-start;
+        text-align: left;
+        border: 1px solid var(--line);
+        background: var(--surface);
+    }
+
+    /* The sheet names what the desktop row only implies. */
+    .doc-bar-tools label.sr-only {
+        position: static;
+        width: auto;
+        height: auto;
+        margin: 0 0 calc(var(--s2) * -1);
+        overflow: visible;
+        clip: auto;
+        white-space: normal;
+        color: var(--ink-soft);
+        font-size: var(--t-micro);
+    }
+
+    .doc-bar-tools-head .tool {
+        width: auto;
     }
 
     .doc-bar .menu-list {
@@ -3063,5 +3103,71 @@ button.list-row {
     .tbl .t-name {
         padding-block: 11px;
         margin-block: -11px;
+        position: static;
+    }
+}
+
+/* The footer link on the arrival page is a tap target like the rest. */
+@media (max-width: 1024px) {
+    .foot a.link {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+    }
+
+    .tbl td.t {
+        overflow: visible;
+    }
+}
+
+@media (max-width: 860px) {
+    .doc-bar-toolsbtn,
+    .doc-bar-end > .tool {
+        border-color: var(--line);
+        background: var(--surface-raised);
+        padding-inline: var(--s3);
+    }
+}
+
+/* R-52: the arrival page's own controls are 44px up to the tablet, as they already are on a phone. */
+@media (max-width: 1024px) {
+    .arrive-actions .btn,
+    .arrive-actions .link,
+    .acts .btn,
+    .row-open,
+    .tbl th button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
+
+@media (max-width: 1024px) {
+    button.tag {
+        min-width: 44px;
+        justify-content: center;
+    }
+}
+
+/*
+ * R-52: where the page heading and its action row share a line, the row wrapped or not depending on the width of the face in
+ * use, so the page jumped when Roboto replaced its fallback (CLS 0.13 at 1024px). Up to 1100px the actions take their own
+ * row, which does not depend on text width.
+ */
+@media (max-width: 1100px) {
+    .page-head {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--s3);
+    }
+}
+
+@media (max-width: 1024px) {
+    .tool,
+    .doc-title-field {
+        min-width: 44px;
+        min-height: 44px;
     }
 }

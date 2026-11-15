@@ -95,7 +95,6 @@
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
     {{-- Roboto, self-hosted (public/dot-ui/fonts/roboto): the one face of every Dot platform. No external font host.
          Document faces are the document's own (DocumentStyle) and load on the document, never for the chrome. --}}
-    <link rel="preload" href="{{ asset('dot-ui/fonts/roboto/roboto-latin-wght-normal.woff2') }}" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-roboto.css') }}">
     <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-type.css') }}">
     <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-tokens.css') }}">

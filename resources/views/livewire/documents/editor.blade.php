@@ -756,7 +756,7 @@
                  the registry, which this button and the `/` menu both list. --}}
             <button type="button" class="tool tool-mono doc-bar-palette"
                     title="Commands — or type / in the document" aria-keyshortcuts="Meta+K Control+K"
-                    @click="window.DotDoc.openPalette(ed())">&#8984;K</button>
+                    @click="window.DotDoc.openPalette(ed())"><span class="doc-bar-cmd-label">Commands </span>&#8984;K</button>
 
             {{-- Where this document is filed in the shared Dot.Files tree.
                  A quiet line of text, not a link: the button beside it is the one

@@ -25,6 +25,8 @@
 @import '../../dot-ui/tailwind/tailwind-theme.css';
 
 @source '../views/**/*.blade.php';
+/* dot-ui's copied components are styled by dot-ui's own CSS; scanning their doc comments only added unused utilities. */
+@source not '../views/components/dot/**';
 @source '../js/**/*.js';
 @source '../../storage/framework/views/*.php';
 @source '../../vendor/laravel/jetstream/**/*.blade.php';
