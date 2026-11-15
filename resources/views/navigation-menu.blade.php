@@ -9,7 +9,7 @@
 <div class="rail-account">
     @auth
         @if (Laravel\Jetstream\Jetstream::hasTeamFeatures() && Auth::user()->currentTeam)
-            <div class="rail-label">Workspace</div>
+            <div class="rail-label">Company</div>
             <a href="{{ route('teams.show', Auth::user()->currentTeam->id) }}" class="rail-item">
                 <span class="rail-item-text">{{ Auth::user()->currentTeam->name }}</span>
             </a>

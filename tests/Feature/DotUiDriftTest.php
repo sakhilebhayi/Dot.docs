@@ -82,7 +82,7 @@ class DotUiDriftTest extends TestCase
             }
         }
 
-        $this->assertSame([], $extra, "Files in shared dot-ui folders that the manifest does not list:\n".implode("\n", $extra));
+        $this->assertSame([], $extra, "Files in shared dot-ui folders that the manifest does not list. A host-owned copy (for example the Archivo / stencil fonts that 0.6.0 stopped distributing) belongs OUTSIDE the dot-ui folders: see docs/MIGRATION_0.5_to_0.6.md.\n".implode("\n", $extra));
     }
 
     private function version(): string

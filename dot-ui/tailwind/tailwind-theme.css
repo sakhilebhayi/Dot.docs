@@ -1,0 +1,67 @@
+/*
+ * dot-ui Tailwind 4 theme. Tailwind 4 has no JS preset: import this file from the host's CSS entry, after `@import 'tailwindcss'`:
+ *
+ *   @import 'tailwindcss';
+ *   @import '../../dot-ui/tailwind/tailwind-theme.css';     (adjust the relative path)
+ *
+ * `inline` makes Tailwind emit the var() references themselves, so the scale stays in css/dot-type.css (which the page must also
+ * load) and a change there reaches every utility. Gives: font-sans, font-mono and text-dot-display ... text-dot-table, each with
+ * its own line-height, letter-spacing and font-weight. Write the @import outside any @layer.
+ */
+@theme inline {
+    --font-sans: var(--dot-font-sans);
+    --font-mono: var(--dot-font-mono);
+
+    --text-dot-display: var(--dot-text-display-size);
+    --text-dot-display--line-height: var(--dot-text-display-lh);
+    --text-dot-display--letter-spacing: var(--dot-text-display-ls);
+    --text-dot-display--font-weight: var(--dot-text-display-weight);
+    --text-dot-h1: var(--dot-text-h1-size);
+    --text-dot-h1--line-height: var(--dot-text-h1-lh);
+    --text-dot-h1--letter-spacing: var(--dot-text-h1-ls);
+    --text-dot-h1--font-weight: var(--dot-text-h1-weight);
+    --text-dot-h2: var(--dot-text-h2-size);
+    --text-dot-h2--line-height: var(--dot-text-h2-lh);
+    --text-dot-h2--letter-spacing: var(--dot-text-h2-ls);
+    --text-dot-h2--font-weight: var(--dot-text-h2-weight);
+    --text-dot-h3: var(--dot-text-h3-size);
+    --text-dot-h3--line-height: var(--dot-text-h3-lh);
+    --text-dot-h3--letter-spacing: var(--dot-text-h3-ls);
+    --text-dot-h3--font-weight: var(--dot-text-h3-weight);
+    --text-dot-h4: var(--dot-text-h4-size);
+    --text-dot-h4--line-height: var(--dot-text-h4-lh);
+    --text-dot-h4--letter-spacing: var(--dot-text-h4-ls);
+    --text-dot-h4--font-weight: var(--dot-text-h4-weight);
+    --text-dot-body-lg: var(--dot-text-body-lg-size);
+    --text-dot-body-lg--line-height: var(--dot-text-body-lg-lh);
+    --text-dot-body-lg--letter-spacing: var(--dot-text-body-lg-ls);
+    --text-dot-body-lg--font-weight: var(--dot-text-body-lg-weight);
+    --text-dot-body: var(--dot-text-body-size);
+    --text-dot-body--line-height: var(--dot-text-body-lh);
+    --text-dot-body--letter-spacing: var(--dot-text-body-ls);
+    --text-dot-body--font-weight: var(--dot-text-body-weight);
+    --text-dot-body-sm: var(--dot-text-body-sm-size);
+    --text-dot-body-sm--line-height: var(--dot-text-body-sm-lh);
+    --text-dot-body-sm--letter-spacing: var(--dot-text-body-sm-ls);
+    --text-dot-body-sm--font-weight: var(--dot-text-body-sm-weight);
+    --text-dot-caption: var(--dot-text-caption-size);
+    --text-dot-caption--line-height: var(--dot-text-caption-lh);
+    --text-dot-caption--letter-spacing: var(--dot-text-caption-ls);
+    --text-dot-caption--font-weight: var(--dot-text-caption-weight);
+    --text-dot-label: var(--dot-text-label-size);
+    --text-dot-label--line-height: var(--dot-text-label-lh);
+    --text-dot-label--letter-spacing: var(--dot-text-label-ls);
+    --text-dot-label--font-weight: var(--dot-text-label-weight);
+    --text-dot-button: var(--dot-text-button-size);
+    --text-dot-button--line-height: var(--dot-text-button-lh);
+    --text-dot-button--letter-spacing: var(--dot-text-button-ls);
+    --text-dot-button--font-weight: var(--dot-text-button-weight);
+    --text-dot-input: var(--dot-text-input-size);
+    --text-dot-input--line-height: var(--dot-text-input-lh);
+    --text-dot-input--letter-spacing: var(--dot-text-input-ls);
+    --text-dot-input--font-weight: var(--dot-text-input-weight);
+    --text-dot-table: var(--dot-text-table-size);
+    --text-dot-table--line-height: var(--dot-text-table-lh);
+    --text-dot-table--letter-spacing: var(--dot-text-table-ls);
+    --text-dot-table--font-weight: var(--dot-text-table-weight);
+}

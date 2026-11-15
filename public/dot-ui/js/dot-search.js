@@ -36,6 +36,15 @@
         var input = inputOf(root);
         var s = state.get(root);
 
+        // loading: the host's data-dsr-loading attribute is the source of truth; the input says so to assistive technology
+        if (input) {
+            if (root.hasAttribute('data-dsr-loading')) {
+                if (input.getAttribute('aria-busy') !== 'true') { input.setAttribute('aria-busy', 'true'); }
+            } else if (input.hasAttribute('aria-busy')) {
+                input.removeAttribute('aria-busy');
+            }
+        }
+
         if (!input || !s) {
             return;
         }
@@ -88,6 +97,12 @@
         var root = rootOf(e.target);
         if (root && e.key === 'Escape') {
             var input = inputOf(root);
+            // InfoDot: Escape also empties the box (wire:keydown.escape sets the query to ''). Opt in with data-dsr-escape-clear
+            // (the `escape-clears` prop); an `input` event is dispatched so a Livewire / Vue / Alpine model hears it.
+            if (input && root.hasAttribute('data-dsr-escape-clear') && input.value !== '') {
+                input.value = '';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
             state.set(root, ESCAPED);
             sync(root);
             if (input) { input.blur(); }
@@ -141,7 +156,7 @@
             subtree: true,
             childList: true,
             attributes: true,
-            attributeFilter: ['class', 'data-closed', 'aria-expanded'],
+            attributeFilter: ['class', 'data-closed', 'aria-expanded', 'data-dsr-loading'],
         });
     }
 

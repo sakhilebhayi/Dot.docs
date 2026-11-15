@@ -72,6 +72,54 @@ export function themeChoiceIn(cookies) {
     return found ? found[1] : null;
 }
 
+/**
+ * The header's account menu owns the day/night choice now (dot-ui, `dot:theme`). The choice still has to reach the
+ * server: layouts/app.blade.php reads the `theme` cookie so a night-mode reload never flashes day. `system` clears
+ * the cookie, and the explicit `light` class is dropped with it so the OS guard in shell.css applies again.
+ */
+function initHeaderTheme() {
+    document.addEventListener('dot:theme', (event) => {
+        const detail = event.detail || {};
+        const root = document.documentElement;
+
+        if (detail.mode === 'system') {
+            document.cookie = `${THEME_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+            root.classList.remove('light');
+        } else if (detail.mode === 'light' || detail.mode === 'dark') {
+            writeThemeCookie(detail.mode);
+            root.classList.toggle('light', detail.mode === 'light');
+        }
+
+        const meta = document.querySelector('meta[name="color-scheme"]');
+        if (meta) meta.setAttribute('content', detail.dark ? 'dark light' : 'light dark');
+    });
+}
+
+/**
+ * dot-ui's panel bell keeps its open state in attributes (data-open, hidden, aria-expanded) that a Livewire morph of the
+ * component rewrites from the server HTML, so every commit (mark as read) closed it. Remember what dot-ui announced
+ * (`dot:menu-open` / `dot:menu-close`) and put the attributes back after each morph.
+ */
+function initNotifPanel() {
+    let open = false;
+    const inBell = (event) => event.target instanceof Element && event.target.closest('[data-shell-notif]');
+
+    document.addEventListener('dot:menu-open', (event) => { if (inBell(event)) open = true; });
+    document.addEventListener('dot:menu-close', (event) => { if (inBell(event)) open = false; });
+
+    document.addEventListener('livewire:init', () => {
+        window.Livewire.hook('morphed', ({ el }) => {
+            if (!open || !el || !el.matches?.('[data-shell-notif]')) return;
+
+            const wrap = el.querySelector('.dh-bellwrap');
+            if (!wrap) return;
+            wrap.setAttribute('data-open', '');
+            wrap.querySelector('[data-dh-menu-panel]')?.removeAttribute('hidden');
+            wrap.querySelector('[data-dh-menu-trigger]')?.setAttribute('aria-expanded', 'true');
+        });
+    });
+}
+
 function initTheme() {
     document.addEventListener('click', (event) => {
         const button = event.target.closest('[data-shell-theme-toggle]');
@@ -129,7 +177,7 @@ const PANEL_WORDS = {
  * over the page (shell.css, spec §6). The dock crosses over first, because
  * there is still room for the rail at 1180px.
  */
-const OVERLAY_AT = { rail: '(max-width: 900px)', dock: '(max-width: 1180px)' };
+const OVERLAY_AT = { rail: '(max-width: 860px)', dock: '(max-width: 1180px)' };
 
 function panelContext() {
     const shell = document.querySelector('[data-shell]');
@@ -350,6 +398,15 @@ function initPanels() {
     );
 
     document.addEventListener('click', (event) => {
+        // Phone menu row: the dock opens over the page, so the menu (dot-ui adopt mode) closes first.
+        if (event.target.closest('[data-shell-open-dock]')) {
+            window.DotNav?.closeDrawer?.();
+            applyPanel('dock', 'expanded');
+            storePanel('dock', 'expanded');
+
+            return;
+        }
+
         const toggle = event.target.closest('[data-shell-panel-toggle]');
         if (toggle) {
             const name = toggle.getAttribute('data-shell-panel-toggle');
@@ -584,13 +641,62 @@ function initDockTabs() {
     });
 }
 
+/**
+ * The dashboard's sortable table (progressive enhancement).
+ *
+ * The server renders the twelve most recent documents in edit order with plain header
+ * text. This turns the headers that name a `data-sort-key` into buttons that reorder the
+ * rows already on the page; it fetches nothing and never claims to sort anything else
+ * (the table says it lists the twelve most recent). aria-sort follows the active header.
+ */
+function initSortableTables() {
+    document.querySelectorAll('table[data-sortable]').forEach((table) => {
+        const body = table.tBodies[0];
+        if (!body) return;
+        const headers = [...table.querySelectorAll('th[data-sort-key]')];
+
+        headers.forEach((th) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = th.textContent.trim();
+            th.textContent = '';
+            th.appendChild(button);
+
+            button.addEventListener('click', () => {
+                const key = th.dataset.sortKey;
+                const current = th.getAttribute('aria-sort');
+                // First click: the natural direction (A-Z, newest, highest); then flip.
+                const natural = key === 'title' ? 'ascending' : 'descending';
+                const next = current ? (current === 'ascending' ? 'descending' : 'ascending') : natural;
+                const sign = next === 'ascending' ? 1 : -1;
+                const attr = `sort${key[0].toUpperCase()}${key.slice(1)}`;
+
+                const rows = [...body.rows];
+                rows.sort((a, b) => {
+                    const x = a.dataset[attr] ?? '';
+                    const y = b.dataset[attr] ?? '';
+                    const order = key === 'title' ? x.localeCompare(y) : Number(x) - Number(y);
+                    return sign * order;
+                });
+                rows.forEach((row) => body.appendChild(row));
+
+                headers.forEach((other) => other.removeAttribute('aria-sort'));
+                th.setAttribute('aria-sort', next);
+            });
+        });
+    });
+}
+
 function boot() {
     initTheme();
+    initHeaderTheme();
+    initNotifPanel();
     initPanels();
     initSkipLink();
     initSaveState();
     initOutline();
     initDockTabs();
+    initSortableTables();
 }
 
 // Guarded so tests/js/shell.test.js can import the two predicates above

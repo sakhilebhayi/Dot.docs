@@ -1,0 +1,44 @@
+/*
+ * Roboto, self-hosted (strict CSP: font-src 'self' is enough). Roboto 3 variable font (wght 100 to 900), OFL 1.1, from
+ * @fontsource-variable/roboto 5.3.0. One variable file per subset covers every weight the type scale uses.
+ * Paths are relative to this file: keep css/ and fonts/ side by side (public/dot-ui/css + public/dot-ui/fonts), which is
+ * the layout sync.sh creates for the blade and vue stacks and for the static stack ({src}/dot-ui/css + fonts).
+ *
+ * Load order: dot-roboto.css, dot-type.css (then dot-tokens.css / dot-search.css if the host uses the search).
+ * Upright only. An italic is a synthesised oblique (docs/TYPOGRAPHY.md).
+ */
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('../fonts/roboto/roboto-latin-ext-wght-normal.woff2') format('woff2');
+    unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('../fonts/roboto/roboto-latin-wght-normal.woff2') format('woff2');
+    unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+/*
+ * 'Roboto Fallback': a local Arial (or its metric twin Liberation Sans / Arimo) scaled and re-spaced to Roboto's measured
+ * metrics, so the swap from fallback to Roboto moves almost nothing. Numbers are computed, not guessed: Roboto 3 hhea
+ * ascent 1900, descent 500, lineGap 0, upm 2048; Arial ascent 1854, descent 434, lineGap 67; the average advance over English
+ * letter frequency is 0.4546 em (Roboto) against 0.4514 em (Arial), so size-adjust = 100.72%. ascent/descent are divided
+ * by that factor, as the spec asks (they are applied after size-adjust). tools/fallback-metrics.py reproduces them.
+ */
+@font-face {
+    font-family: 'Roboto Fallback';
+    font-style: normal;
+    font-weight: 100 900;
+    src: local('Arial'), local('Liberation Sans'), local('Arimo'), local('ArialMT');
+    size-adjust: 100.72%;
+    ascent-override: 92.11%;
+    descent-override: 24.24%;
+    line-gap-override: 0%;
+}

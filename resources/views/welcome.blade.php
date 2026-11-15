@@ -2,7 +2,7 @@
 {{-- `light` pins this page to its own warm day palette: shell.css's night
      guard is `html:not(.light)` under prefers-color-scheme: dark, and the
      marketing and auth pages have never had a night mode of their own. --}}
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="scroll-smooth light">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="dot-roboto scroll-smooth light">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,9 +14,9 @@
         <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16x16.png') }}">
         <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
 
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+        <link rel="preload" href="{{ asset('dot-ui/fonts/roboto/roboto-latin-wght-normal.woff2') }}" as="font" type="font/woff2" crossorigin>
+        <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-roboto.min.css') }}">
+        <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-type.min.css') }}">
 
         @if (file_exists(public_path('build/manifest.json')) || file_exists(public_path('hot')))
             @vite(['resources/css/app.css', 'resources/js/app.js'])
@@ -41,9 +41,9 @@
                 --cream-75: rgba(245, 239, 222, 0.75);
                 --cream-40: rgba(245, 239, 222, 0.4);
                 --ink-60: rgba(31, 27, 20, 0.6);
-                --font-display: 'Fraunces', Georgia, serif;
-                --font-body: 'Work Sans', system-ui, sans-serif;
-                --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+                --font-display: var(--dot-font-sans);
+                --font-body: var(--dot-font-sans);
+                --font-mono: var(--dot-font-mono);
                 --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
             }
             html { background: var(--paper); }
