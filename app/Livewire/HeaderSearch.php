@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Models\Document;
+use App\Models\Team;
 use App\Search\CompanyDocuments;
 use Illuminate\Support\Collection;
 use Livewire\Component;
@@ -35,9 +36,11 @@ class HeaderSearch extends Component
 
     public function render()
     {
+        $team = auth()->user()?->currentTeam;
+
         return view('livewire.header-search', [
             'searching' => mb_strlen(trim($this->q)) >= CompanyDocuments::MIN_LENGTH,
-            'company' => auth()->user()?->currentTeam?->name,
+            'company' => $team instanceof Team ? $team->name : null,
         ]);
     }
 }
