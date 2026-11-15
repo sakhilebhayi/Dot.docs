@@ -153,12 +153,9 @@ class ContextualToolbarTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $this->assertSame(1, preg_match('/<div class="topbar-title">(.*?)<\/div>/s', $html, $found));
-        $this->assertSame(
-            'Documents',
-            trim(html_entity_decode(strip_tags($found[1]))),
-            'the top bar repeated the document title the editor already edits inline',
-        );
+        // R-52: the shared header carries the brand, search and account, no page or document title at all.
+        $this->assertSame(1, preg_match('/<header class="dh [^"]*shell-header.*?<\/header>/s', $html, $header));
+        $this->assertStringNotContainsString('Singular Title', $header[0], 'the header repeated the document title the editor already edits inline');
 
         // Exactly one editable copy, and it is the editor's own.
         $this->assertSame(1, substr_count($html, 'id="doc-title"'));
@@ -182,8 +179,7 @@ class ContextualToolbarTest extends TestCase
         );
         $this->assertStringNotContainsString('rail-title', $html);
 
-        // Every OTHER document route still names the document up there, because
-        // on those pages nothing else does.
+        // Every OTHER document route names the document in its own heading, because on those pages nothing else does.
         foreach ([
             route('documents.history', $document->uuid),
             route('documents.share', $document->uuid),
@@ -193,12 +189,9 @@ class ContextualToolbarTest extends TestCase
 
             $other = $this->actingAs($user)->get($url)->assertOk()->getContent();
 
-            $this->assertSame(1, preg_match('/<div class="topbar-title">(.*?)<\/div>/s', $other, $named));
-            $this->assertSame(
-                'Singular Title',
-                trim(html_entity_decode(strip_tags($named[1]))),
-                "{$url} stopped naming the document it is about",
-            );
+            $this->assertSame(1, preg_match('/<h1 class="page-title">/', $other), "{$url} lost its heading");
+            $this->assertStringContainsString('Singular Title', $other, "{$url} stopped naming the document it is about");
+            $this->assertStringNotContainsString('class="topbar-title"', $other);
         }
     }
 

@@ -14,7 +14,11 @@
  */
 :where(:root) {
     /* PILL (fixed) */
-    --dsr-font: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    /* Since 0.4.0 the pill is Roboto (owner rule R-52: every search bar matches InfoDot's AND is Roboto). It follows the shared
+       --dot-font-sans (css/dot-type.css) when that is loaded, and is Roboto on its own otherwise (load css/dot-roboto.css for the
+       files). To get the old Archivo pill back: --dsr-font: 'Archivo', system-ui, ...; plus css/dot-fonts.css. Only the typeface
+       changes: every size, weight, line-height and spacing below and in dot-search.css is the same literal as before. */
+    --dsr-font: var(--dot-font-sans, 'Roboto', 'Roboto Fallback', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif);
     --dsr-h: 44px;
     --dsr-w: 640px;
     --dsr-radius: 999px;

@@ -50,15 +50,13 @@
     --marker-bg: #2a5f7a14;
     --marker-chrome: #2a5f7a;
 
-    /* Type — Fraunces displays, Work Sans works, mono only where figures align */
-    --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
-    /* The document's own default body and heading faces (Source Serif 4 and
-       Source Sans 3, already loaded by the layout), for the one place the
-       chrome quotes a document: the sheet on the arrival page. */
-    --font-sheet: 'Source Serif 4', 'Iowan Old Style', Georgia, serif;
-    --font-sheet-head: 'Source Sans 3', 'Work Sans', system-ui, sans-serif;
-    --font-chrome: 'Work Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
-    --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+    /* Type — Roboto is the one face (dot-ui, self-hosted). The old display, chrome and document-quote faces map onto it so
+       every existing rule follows; a monospace stays only for code and ids. */
+    --font-display: var(--dot-font-sans, 'Roboto', 'Roboto Fallback', system-ui, sans-serif);
+    --font-sheet: var(--dot-font-sans, 'Roboto', 'Roboto Fallback', system-ui, sans-serif);
+    --font-sheet-head: var(--dot-font-sans, 'Roboto', 'Roboto Fallback', system-ui, sans-serif);
+    --font-chrome: var(--dot-font-sans, 'Roboto', 'Roboto Fallback', system-ui, sans-serif);
+    --font-mono: var(--dot-font-mono, ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace);
     --t-micro: 12px;
     --t-body: 15px;
     --t-lede: 19px;
@@ -2326,7 +2324,7 @@ button.list-row {
  * above 1180px the dock is a column and the canvas ends where it begins.)
  * The dock comes AFTER the canvas in .shell, which is why this needs :has().
  */
-@media (min-width: 901px) and (max-width: 1180px) {
+@media (min-width: 861px) and (max-width: 1180px) {
     .shell:has(.dock[data-panel-user='open']) .doc-notice {
         padding-right: calc(min(var(--dock-w), 92vw) + var(--s4));
     }
@@ -2634,7 +2632,7 @@ button.list-row {
  * by resources/js/shell.js, so a panel the server rendered expanded for a
  * desktop layout does not land on a phone already covering the page.
  */
-@media (max-width: 900px) {
+@media (max-width: 860px) {
     .shell {
         grid-template-columns: minmax(0, 1fr);
         grid-template-areas:
@@ -2643,7 +2641,32 @@ button.list-row {
             'canvas';
     }
 
+    /*
+     * The rail is the platform's own menu, opened by the header's menu button (dot-ui adopt mode, HEADER.md "Sidebar
+     * shells"): off-canvas on the left, hidden with a DELAYED visibility so the slide-out is not cut and the closed rail's
+     * links are out of the tab order, shown on [data-dh-open]. It sits above dot-ui's scrim, and the header stays below it.
+     */
     .rail,
+    .rail[data-panel-state='collapsed'] {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: min(320px, 88vw);
+        z-index: 130;
+        align-self: stretch;
+        display: flex;
+        border-right: 1px solid var(--line);
+        padding-top: env(safe-area-inset-top, 0);
+        transform: translateX(-100%);
+        visibility: hidden;
+        transition: transform 0.22s ease, visibility 0s linear 0.22s;
+    }
+
+    .rail[data-dh-open] {
+        transform: none;
+        visibility: visible;
+        transition-delay: 0s;
+    }
+
     .dock {
         position: fixed;
         inset: var(--topbar-h) 0 0 0;
@@ -2654,18 +2677,24 @@ button.list-row {
         display: none;
     }
 
-    .rail[data-panel-user='open'],
     .dock[data-panel-user='open'] {
         display: flex;
     }
 
-    /*
-     * The way out of a panel that is covering the page. It is the SAME control
-     * as the top bar's toggle (`data-shell-panel-toggle`), so there is no
-     * second source of truth about whether a panel is open and no second
-     * keyboard path to keep in step.
-     */
-    .panel-overlay-head {
+    /* The way out of the open menu; 44px like every control. */
+    .rail .panel-overlay-head {
+        display: flex;
+        flex: none;
+        justify-content: flex-end;
+        padding: var(--s2) var(--s3) 0;
+    }
+
+    .rail .panel-overlay-head .btn,
+    .dock .panel-overlay-head .btn {
+        min-height: 44px;
+    }
+
+    .dock .panel-overlay-head {
         display: flex;
         flex: none;
         justify-content: flex-end;
@@ -2832,5 +2861,313 @@ button.list-row {
 @media (width <= 480px) {
     [data-shell-page='dashboard'] [data-shell-panel-toggle='dock'] {
         display: none;
+    }
+}
+
+/* The assistant and document tools row is the phone's way to the dock; the desktop bar has its own toggle. */
+.rail-tools-group {
+    display: none;
+}
+
+@media (max-width: 860px) {
+    .rail-tools-group {
+        display: block;
+    }
+}
+
+@media (min-width: 861px) {
+    .rail .panel-overlay-head {
+        display: none;
+    }
+}
+
+/* ── R-52: the editor's bar on a desktop and on a phone ─────────────── */
+
+/* A desktop: the tools are part of the one row, exactly as before. */
+.doc-bar-tools {
+    display: contents;
+}
+
+.doc-bar-tools > * {
+    flex: none;
+}
+
+.doc-bar-tools-head,
+.doc-bar-toolsbtn,
+.doc-bar-cmd-label {
+    display: none;
+}
+
+@media (max-width: 860px) {
+    .doc-bar-cmd-label {
+        display: inline;
+        margin-right: var(--s2);
+    }
+}
+
+/*
+ * A phone and a small tablet: row one is the title, alone and 44px tall (16px type, so iOS does not zoom the page); row two is
+ * the state, the people, Tools and More. Style, page view, pages, commands and filing are in the Tools sheet: a bottom sheet
+ * that scrolls inside itself and never covers the title. Nothing scrolls sideways.
+ */
+@media (max-width: 860px) {
+    .doc-bar {
+        flex-wrap: wrap;
+        gap: var(--s2);
+        overflow: visible;
+        padding: var(--s2) var(--s3);
+    }
+
+    .doc-title-field {
+        order: -2;
+        flex: 1 1 100%;
+        min-height: 44px;
+        font-size: max(16px, var(--t-lede));
+        border-color: var(--line);
+        background: var(--surface-raised);
+    }
+
+    /* flex-basis 0: the row does not re-wrap when Alpine hides the words that show before it starts (that was a 0.2 shift). */
+    .doc-status {
+        order: 1;
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 24px;
+        overflow: hidden;
+        white-space: nowrap;
+    }
+
+    .presence {
+        order: 2;
+    }
+
+    .doc-bar-toolsbtn {
+        display: inline-flex;
+        align-items: center;
+        order: 3;
+    }
+
+    .doc-bar-end > .tool {
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .doc-bar-end {
+        order: 4;
+        margin-left: 0;
+    }
+
+    .doc-bar-tools {
+        display: none;
+        position: fixed;
+        inset: auto 0 0 0;
+        z-index: 90;
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--s3);
+        max-height: min(70vh, 70dvh);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: var(--s3) var(--s4) calc(var(--s4) + env(safe-area-inset-bottom, 0px));
+        background: var(--surface-raised);
+        border-top: 1px solid var(--line);
+        box-shadow: 0 -12px 32px rgb(0 0 0 / 0.16);
+    }
+
+    .doc-bar-tools[data-open] {
+        display: flex;
+    }
+
+    .doc-bar-tools > * {
+        flex: none;
+    }
+
+    .doc-bar-tools-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .doc-bar-tools-title {
+        font-weight: 500;
+    }
+
+    .doc-bar-tools .doc-bar-palette {
+        margin-left: 0;
+    }
+
+    .doc-bar-tools .doc-bar-filed {
+        display: block;
+        white-space: normal;
+    }
+
+    .doc-bar-tools .tool,
+    .doc-bar-tools .tool-select {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        text-align: left;
+        border: 1px solid var(--line);
+        background: var(--surface);
+    }
+
+    /* The sheet names what the desktop row only implies. */
+    .doc-bar-tools label.sr-only {
+        position: static;
+        width: auto;
+        height: auto;
+        margin: 0 0 calc(var(--s2) * -1);
+        overflow: visible;
+        clip: auto;
+        white-space: normal;
+        color: var(--ink-soft);
+        font-size: var(--t-micro);
+    }
+
+    .doc-bar-tools-head .tool {
+        width: auto;
+    }
+
+    .doc-bar .menu-list {
+        right: 0;
+        left: auto;
+        max-width: calc(100vw - var(--s4));
+        max-height: min(60vh, 60dvh);
+        overflow-y: auto;
+    }
+}
+
+/* ── R-52: touch targets up to the tablet (the harness line is 1024) ─── */
+@media (max-width: 1024px) {
+    .btn,
+    .btn-sm,
+    .tool,
+    .tool-select,
+    .field,
+    .dock-tab,
+    .rail-item,
+    .menu-list a,
+    .menu-list button,
+    .topbar-action,
+    .rail-outline-item {
+        min-height: 44px;
+    }
+
+    .btn-sm {
+        padding-block: 10px;
+    }
+}
+
+/* ── R-52: /files rows ────────────────────────────────────────────────── */
+.list-link {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    min-width: 0;
+    max-width: 100%;
+}
+
+@media (max-width: 860px) {
+    /* The name takes a row of its own, then the kind and the three actions wrap under it. */
+    .list-row:has(> .list-link) {
+        flex-wrap: wrap;
+        row-gap: var(--s1);
+    }
+
+    .list-row > .list-link {
+        flex: 1 1 100%;
+    }
+
+    .list-link .list-key {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+}
+
+/* ── R-52: tap targets of controls that are not buttons ──────────────── */
+@media (max-width: 1024px) {
+    button.tag,
+    .field-check {
+        min-height: 44px;
+    }
+
+    .field-check {
+        display: flex;
+        align-items: center;
+    }
+
+    .tbl th button {
+        min-height: 44px;
+    }
+
+    .tbl .t-name {
+        padding-block: 11px;
+        margin-block: -11px;
+        position: static;
+    }
+}
+
+/* The footer link on the arrival page is a tap target like the rest. */
+@media (max-width: 1024px) {
+    .foot a.link {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+    }
+
+    .tbl td.t {
+        overflow: visible;
+    }
+}
+
+@media (max-width: 860px) {
+    .doc-bar-toolsbtn,
+    .doc-bar-end > .tool {
+        border-color: var(--line);
+        background: var(--surface-raised);
+        padding-inline: var(--s3);
+    }
+}
+
+/* R-52: the arrival page's own controls are 44px up to the tablet, as they already are on a phone. */
+@media (max-width: 1024px) {
+    .arrive-actions .btn,
+    .arrive-actions .link,
+    .acts .btn,
+    .row-open,
+    .tbl th button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
+
+@media (max-width: 1024px) {
+    button.tag {
+        min-width: 44px;
+        justify-content: center;
+    }
+}
+
+/*
+ * R-52: where the page heading and its action row share a line, the row wrapped or not depending on the width of the face in
+ * use, so the page jumped when Roboto replaced its fallback (CLS 0.13 at 1024px). Up to 1100px the actions take their own
+ * row, which does not depend on text width.
+ */
+@media (max-width: 1100px) {
+    .page-head {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--s3);
+    }
+}
+
+@media (max-width: 1024px) {
+    .tool,
+    .doc-title-field {
+        min-width: 44px;
+        min-height: 44px;
     }
 }

@@ -45,7 +45,24 @@ final class SwitcherView
         $compiler = new BladeCompiler($files, $cache);
         $resolver = new EngineResolver();
         $resolver->register('blade', fn () => new CompilerEngine($compiler, $files));
-        $factory = new Factory($resolver, new FileViewFinder($files, [dirname(__DIR__).'/blade']), new Dispatcher($container));
+        // <x-dot.*> tags inside the components (the header prints <x-dot.nav-menu>, <x-dot.drawer>, <x-dot.account-menu>) resolve as they do
+        // in a Laravel host, from components/dot/: a symlink in a temp view root points at the blade folder
+        $root = sys_get_temp_dir().'/dot-ui-views-'.md5(__DIR__);
+        $files->ensureDirectoryExists($root.'/components');
+        if (! is_link($root.'/components/dot')) {
+            @symlink(dirname(__DIR__).'/blade', $root.'/components/dot');
+        }
+        $factory = new Factory($resolver, new FileViewFinder($files, [dirname(__DIR__).'/blade', $root]), new Dispatcher($container));
+        $container->instance(\Illuminate\Contracts\View\Factory::class, $factory);
+        $container->instance('view', $factory);
+        // the tag compiler asks the application for its namespace when it guesses a component class; there is none here
+        $container->instance(\Illuminate\Contracts\Foundation\Application::class, new class () {
+            public function getNamespace(): string
+            {
+                return 'App\\';
+            }
+        });
+        Container::setInstance($container);
 
         $attributes = $props['attributes'] ?? [];
         $props['attributes'] = $attributes instanceof ComponentAttributeBag ? $attributes : new ComponentAttributeBag($attributes);

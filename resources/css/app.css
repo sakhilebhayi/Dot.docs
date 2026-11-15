@@ -22,8 +22,11 @@
 @import './shell.css' layer(base);
 @import 'tailwindcss' source(none);
 @import './tailwind-v3-palette.css';
+@import '../../dot-ui/tailwind/tailwind-theme.css';
 
 @source '../views/**/*.blade.php';
+/* dot-ui's copied components are styled by dot-ui's own CSS; scanning their doc comments only added unused utilities. */
+@source not '../views/components/dot/**';
 @source '../js/**/*.js';
 @source '../../storage/framework/views/*.php';
 @source '../../vendor/laravel/jetstream/**/*.blade.php';
@@ -51,9 +54,6 @@
  * That is what keeps one palette instead of two.
  */
 @theme {
-    --font-sans: 'Atkinson Hyperlegible Next', 'Atkinson Hyperlegible', ui-sans-serif, system-ui, sans-serif,
-        'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
-    --font-serif: 'Source Serif 4', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
 
     --color-desk: var(--desk);
     --color-desk-raised: var(--desk-raised);
@@ -84,19 +84,6 @@
     --radius-sm: 0.125rem;
     --blur: 8px;
     --blur-sm: 4px;
-}
-
-/*
- * `font-mono` is Atkinson Hyperlegible Mono, as in v3. It is declared inline
- * (not as a `--font-mono` theme variable) because shell.css, the welcome page
- * and the guest layout each define their own `--font-mono` (IBM Plex Mono) and
- * a shared name would make the utility and `code`/`pre` pick that one instead.
- */
-@theme inline {
-    --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-        'Liberation Mono', 'Courier New', monospace;
-    --default-mono-font-family: 'Atkinson Hyperlegible Mono', ui-monospace, SFMono-Regular, Menlo, Monaco,
-        Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
 /*
@@ -209,33 +196,107 @@ body {
     --dsr-filter-border-focus: var(--ink);
 }
 
-.topbar .dsw {
-    --dsw-btn-ink: var(--ink-soft);
-    --dsw-btn-border: transparent;
-    --dsw-btn-bg-hover: var(--accent-soft);
-    --dsw-focus: var(--ink);
-    --dsw-radius: var(--r-control);
-    --dsw-btn-height: 32px;
+/*
+ * The shared header (dot-ui 0.6.0). UNLAYERED, like the mapping above. The bar takes Fair Copy's own tokens, in day and in
+ * night (every value is a var() that html.dark and the dark media query redefine); the shell grid places it in its first row.
+ */
+:root {
+    --dh-bg: var(--surface);
+    --dh-ink: var(--ink);
+    --dh-ink-2: var(--ink-soft);
+    --dh-rule: var(--line);
+    --dh-hover: var(--accent-soft);
+    --dh-accent: var(--accent);
+    --dh-focus: var(--ink);
+    --dh-avatar-bg: var(--accent);
+    --dh-avatar-ink: var(--surface-raised);
+    --dh-logo-h: 34px;
+    --dh-radius: var(--r-control);
+    --dh-search-w: clamp(280px, 30vw, 560px);
+    --topbar-h: var(--dot-header-h, 56px);
 }
 
-/*
- * The switcher panel hangs from the bottom edge of the nearest positioned ancestor, so the bar is that ancestor, and it
- * sits above the rail and dock overlays (z-index 60 on a phone). On a phone the bar used to scroll sideways on its own
- * (shell.css, max-width 420px); a scroll container would clip the panel, so on pages (not the editor) it does not.
- */
-.topbar {
+.shell-header {
+    grid-area: topbar;
     position: relative;
     z-index: 70;
 }
 
-@media (max-width: 420px) {
-    /* Pages only: the editor has no switcher and keeps its own scrolling bar. A page's status word only ever says
-       "Ready" (no save owner), so on a phone it gives way to the switcher button. */
-    [data-shell-context='page'] .topbar {
-        overflow: visible;
+/* The mark carries the brand between 861px and 1360px; the name comes back where the bar has room for it. */
+@media (min-width: 861px) and (max-width: 1360px) {
+    .shell-header .dh-brand__name {
+        display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .shell-header .dh-brand__name {
+        display: none;
+    }
+}
+
+/* The panel toggles are desktop controls (a phone has the menu button and a menu row for the tools). */
+.shell-rail-toggle,
+.shell-dock-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--dot-hit, 44px);
+    padding: 0 var(--s3);
+    border: 1px solid transparent;
+    border-radius: var(--r-control);
+    background: transparent;
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: var(--t-micro);
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.shell-rail-toggle:hover,
+.shell-dock-toggle:hover {
+    background: var(--accent-soft);
+    color: var(--ink);
+}
+
+@media (max-width: 860px) {
+    .shell-rail-toggle,
+    .shell-dock-toggle {
+        display: none;
     }
 
-    [data-shell-context='page'] .topbar-status {
+    /* The save word is the editor's alone; the editor's own strip says the same under the bar. */
+    .shell-header .dh-status:not(:has([data-shell-save-owner])) {
         display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .shell-header .dh-status {
+        display: none;
+    }
+}
+
+/* The Livewire wrappers are not boxes of the bar. */
+.shell-notif,
+.shell-search {
+    display: contents;
+}
+
+.shell-notif-time {
+    display: block;
+    margin-top: 2px;
+    color: var(--ink-soft);
+    font-size: var(--t-micro);
+}
+
+.dh-panel__item > .dh-mark {
+    margin-top: var(--s1);
+}
+
+/* The result rows are 44px up to the tablet (the dot-ui row is 41px between 861 and 1024). */
+@media (max-width: 1024px) {
+    .dsr-item {
+        min-height: 44px;
     }
 }

@@ -84,13 +84,13 @@
                     <li class="list-row" wire:key="node-{{ $row->uuid }}">
                         @if ($row->isFolder())
                             <button type="button" wire:click="open('{{ $row->uuid }}')"
-                                    class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start">
+                                    class="btn btn-quiet list-link">
                                 <span class="list-key">{{ $row->name() }}</span>
                             </button>
                             <x-shell.status-word tone="idle" word="Folder" />
                         @elseif ($row->isDocument())
                             <a href="{{ route('documents.edit', $row->objectable->uuid) }}"
-                               class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start">
+                               class="btn btn-quiet list-link">
                                 <span class="list-key">
                                     {{ $row->name() }}
                                     <span class="list-sub">Edited {{ $row->objectable->updated_at?->diffForHumans() }}</span>
@@ -102,7 +102,7 @@
                             </span>
                         @else
                             <a href="{{ $this->fileUrl($row) }}" target="_blank" rel="noopener"
-                               class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start">
+                               class="btn btn-quiet list-link">
                                 <span class="list-key">
                                     {{ $row->name() }}
                                     <span class="list-sub">{{ $row->objectable->sizeForHumans() }}</span>

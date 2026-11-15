@@ -17,7 +17,7 @@ use Tests\TestCase;
 
 /**
  * The shell carries the shared Dot UI (dot-ui): the platform switcher in the top bar and the compact filter on the
- * documents ledger. Docs has no header search, so none was added. Presentation changed; the ledger's search (its
+ * documents ledger, and since R-52 the shared header search (tests/Feature/HeaderSearchTest.php). Presentation changed; the ledger's search (its
  * Livewire property, DocumentSearch, scope and tenant rules) did not, and the switcher only ever shows what InfoDot
  * says the CURRENT company holds, linking through InfoDot's /go (never straight to a host, never with a token).
  */
@@ -189,7 +189,7 @@ class DotUiHeaderTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_the_editor_gets_no_switcher_and_the_dock_toggle_is_still_there(): void
+    public function test_the_editor_has_the_switcher_too_and_the_dock_toggle_is_still_there(): void
     {
         $this->fakeInfoDot([]);
         $user = User::factory()->withPersonalTeam()->create();
@@ -197,10 +197,9 @@ class DotUiHeaderTest extends TestCase
 
         $html = $this->actingAs($user)->get(route('documents.edit', $doc->uuid))->assertOk()->getContent();
 
-        $this->assertStringNotContainsString('data-dsw', $html, 'the writing surface gets no extra chrome');
-        $this->assertStringNotContainsString('dot-ui/js/dot-switcher.js', $html, 'the editor does not load the switcher script');
+        $this->assertStringContainsString('data-dsw', $html, 'R-52: the platform switcher is reachable on the editor too');
+        $this->assertStringContainsString('dot-ui/js/dot-ui-core.min.js', $html);
         $this->assertStringContainsString('data-shell-panel-toggle="dock"', $html);
-        Http::assertNothingSent();
     }
 
     public function test_the_dashboard_with_its_collapsed_dock_carries_the_switcher(): void
@@ -234,7 +233,7 @@ class DotUiHeaderTest extends TestCase
         $this->assertStringContainsString('type="search"', $input[0]);
         $this->assertStringContainsString('placeholder="A word you remember writing"', $input[0]);
         $this->assertStringContainsString('for="doc-search"', $html, 'the visible label still points at it');
-        $this->assertSame(0, substr_count($html, 'role="search"'), 'docs has no header search and none was added');
+        $this->assertSame(1, substr_count($html, 'data-dsr-nav'), 'the header search is the only dot-ui pill on the page (the ledger uses the compact filter)');
     }
 
     public function test_ledger_search_finds_by_title_and_text_and_never_shows_another_business(): void
@@ -264,7 +263,7 @@ class DotUiHeaderTest extends TestCase
         $this->fakeInfoDot([self::url(self::ACME) => Http::response(self::body(self::ACME))]);
         $html = $this->actingAs($this->memberOf(self::ACME, 'Acme Ltd'))->get(route('documents.index'))->assertOk()->getContent();
 
-        foreach (['css/dot-fonts.css', 'css/dot-tokens.css', 'css/dot-search.css', 'css/dot-switcher-fonts.css', 'css/dot-switcher.css', 'js/dot-switcher.js'] as $asset) {
+        foreach (['css/dot-ui.min.css', 'js/dot-ui-core.min.js', 'js/dot-theme-boot.min.js'] as $asset) {
             $this->assertStringContainsString(asset('dot-ui/'.$asset), $html, $asset.' is linked from this site');
             $this->assertFileExists(public_path('dot-ui/'.$asset));
         }

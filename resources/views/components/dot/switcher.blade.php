@@ -109,7 +109,7 @@
                                             <div class="dsw-bay is-current" aria-current="page">
                                                 <span class="dsw-bay__logo">
                                                     @if ($tile['logo'] && $size)
-                                                        <img src="{{ $logoBase }}/{{ $tile['logo'] }}" alt="{{ $tile['name'] }}" width="{{ $size[0] }}" height="{{ $size[1] }}" decoding="async">
+                                                        <img src="{{ $logoBase }}/{{ $tile['logo'] }}" alt="{{ $tile['name'] }}" width="{{ $size[0] }}" height="{{ $size[1] }}" loading="lazy" decoding="async">
                                                     @endif
                                                 </span>
                                                 <span class="dsw-bay__name">{{ $tile['name'] }}</span>

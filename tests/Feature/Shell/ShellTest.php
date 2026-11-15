@@ -22,13 +22,17 @@ class ShellTest extends TestCase
             ->assertDontSee('cdn.tailwindcss.com', false)
             ->assertDontSee('unpkg.com/alpinejs', false)
             ->assertDontSee('Inter', false)
-            ->assertSee('Fraunces', false)
-            ->assertSee('Work+Sans', false)
+            ->assertSee('dot-ui/css/dot-ui.min.css', false)
+            // The editor's <style id="doc-style"> may @import the DOCUMENT's own font (a DocumentStyle, user content); the chrome never links one.
+            ->assertDontSee('<link href="https://fonts.googleapis.com', false)
+            ->assertDontSee('rel="preconnect" href="https://fonts.googleapis.com"', false)
+            ->assertDontSee('Fraunces', false)
+            ->assertDontSee('Work+Sans', false)
             ->assertDontSee('Atkinson+Hyperlegible', false)
             ->assertSee('class="skip-link"', false)
             ->assertSee('aria-label="Navigator"', false)
             ->assertSee('aria-label="Intelligence and data"', false)
-            ->assertSee('class="topbar"', false)
+            ->assertSee('shell-header" id="dh"', false)
             ->assertDontSee('class="status-line"', false)
             ->assertSee('<title>R · Dot.docs</title>', false);
     }
@@ -37,7 +41,7 @@ class ShellTest extends TestCase
     {
         $user = User::factory()->withPersonalTeam()->create();
         $this->actingAs($user)->get(route('dashboard'))->assertOk()->assertSee('Dot.docs')->assertDontSee('Dot.Doc');
-        $this->actingAs($user)->get(route('documents.index'))->assertOk()->assertSee('class="topbar"', false);
+        $this->actingAs($user)->get(route('documents.index'))->assertOk()->assertSee('shell-header" id="dh"', false);
     }
 
     /**
@@ -115,23 +119,23 @@ class ShellTest extends TestCase
 
         $unset = $this->actingAs($user)->get(route('dashboard'));
         $unset->assertOk()
-            ->assertSee('<html lang="en" class="">', false)
-            ->assertSee('aria-pressed="false"', false);
+            ->assertSee('<html lang="en" class="dot-roboto"', false)
+            ->assertSee('data-dh-theme-default="system"', false);
 
         $night = $this->actingAs($user)
             ->withUnencryptedCookie('theme', 'dark')
             ->get(route('dashboard'));
         $night->assertOk()
-            ->assertSee('<html lang="en" class="dark">', false)
-            ->assertSee('aria-pressed="true"', false);
+            ->assertSee('<html lang="en" class="dot-roboto dark"', false)
+            ->assertSee('data-dh-theme-default="dark"', false);
 
         $day = $this->actingAs($user)
             ->withUnencryptedCookie('theme', 'light')
             ->get(route('dashboard'));
         $day->assertOk()
-            ->assertSee('<html lang="en" class="light">', false)
-            ->assertDontSee('<html lang="en" class="dark">', false)
-            ->assertSee('aria-pressed="false"', false);
+            ->assertSee('<html lang="en" class="dot-roboto light"', false)
+            ->assertDontSee('<html lang="en" class="dot-roboto dark"', false)
+            ->assertSee('data-dh-theme-default="light"', false);
     }
 
     /**

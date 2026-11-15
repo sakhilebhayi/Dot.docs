@@ -511,3 +511,21 @@
         scroll-behavior: auto !important;
     }
 }
+
+/*
+ * R-52, a phone: the sheet is an A4 page with 20mm margins, which leaves a column about 130px wide at 320px (the text ran one
+ * letter to a line). Below 640px the margins are the page's gutter instead; the type, the styles and the pagination of the
+ * document are the document's own and are not touched.
+ */
+@media (max-width: 640px) {
+    .canvas {
+        padding: var(--s3) var(--s2) 96px;
+    }
+
+    .canvas .paper {
+        max-width: 100%;
+        min-height: 0;
+        padding: var(--s4) var(--s3);
+        box-sizing: border-box;
+    }
+}

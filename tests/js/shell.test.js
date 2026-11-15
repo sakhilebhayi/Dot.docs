@@ -160,14 +160,14 @@ test('both panels get a listener on their own breakpoint, and it reports which w
 
     assert.deepEqual(watched, ['rail', 'dock']);
     assert.deepEqual(registered, [
-        ['(max-width: 900px)', 'change'],
+        ['(max-width: 860px)', 'change'],
         ['(max-width: 1180px)', 'change'],
     ]);
 
     // The handler reads the CHANGE event, not the stale MediaQueryList it
     // closed over: Safari fires `change` on a list whose `matches` it has
     // already updated, but the event is what every browser agrees on.
-    listeners['(max-width: 900px)']({ matches: true });
+    listeners['(max-width: 860px)']({ matches: true });
     listeners['(max-width: 1180px)']({ matches: false });
 
     assert.deepEqual(crossings, [

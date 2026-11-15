@@ -7,6 +7,7 @@ use App\Models\Document;
 use App\Models\DocumentCollaborator;
 use App\Models\Team;
 use App\Models\User;
+use App\Search\CompanyDocuments;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -145,8 +146,6 @@ class LandingController extends Controller
      */
     private function inCompany(Builder $query, ?int $teamId, int $userId): Builder
     {
-        return $teamId === null
-            ? $query->whereNull('team_id')->where('owner_id', $userId)
-            : $query->where('team_id', $teamId);
+        return CompanyDocuments::scope($query, $teamId, $userId);
     }
 }
