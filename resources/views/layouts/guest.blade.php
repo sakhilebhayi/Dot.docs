@@ -43,6 +43,10 @@
         body { background: var(--paper); font-family: var(--font-body); }
         .font-display { font-family: var(--font-display); }
         .font-mono { font-family: var(--font-mono); }
+        /* R-54 claim page: the code field, in the same palette */
+        .dsso-code { text-align: center; font-size: 1.4rem; font-weight: 600; letter-spacing: 0.3em; font-variant-numeric: tabular-nums; min-height: 48px; }
+        .dsso-code[aria-invalid="true"] { border-color: #b91c1c; }
+        .dsso-err:empty { display: none; }
     </style>
 </head>
 <body class="antialiased">
