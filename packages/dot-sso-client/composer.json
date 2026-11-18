@@ -1,0 +1,25 @@
+{
+    "name": "dot/sso-client",
+    "description": "Dot ecosystem relying-party integration: authenticate through the InfoDot central identity provider (OIDC authorization code + PKCE).",
+    "type": "library",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.2",
+        "laravel/framework": "^12.0|^13.0",
+        "guzzlehttp/guzzle": "^7.0",
+        "ext-openssl": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Dot\\SsoClient\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Dot\\SsoClient\\DotSsoServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable"
+}
