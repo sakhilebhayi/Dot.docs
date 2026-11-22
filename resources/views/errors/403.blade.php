@@ -13,7 +13,7 @@
     <a href="{{ route('dashboard') }}" class="press link-underline" style="padding: 12px 24px; color: var(--ink); font-size: 15px; text-decoration: none;">Go to dashboard</a>
     @else
         @if (Route::has('login'))
-    <a href="{{ route('login') }}" class="press link-underline" style="padding: 12px 24px; color: var(--ink); font-size: 15px; text-decoration: none;">Sign in</a>
+    <a href="{{ \App\Support\CentralSignIn::login() }}" class="press link-underline" style="padding: 12px 24px; color: var(--ink); font-size: 15px; text-decoration: none;">Sign in</a>
         @endif
     @endauth
 @endsection

@@ -119,11 +119,11 @@
                                 Dashboard
                             </a>
                         @else
-                            <a href="{{ route('login') }}" class="hidden sm:inline-flex items-center min-h-[44px] px-2 text-sm font-medium text-[var(--cream)] hover:text-white transition-colors">
+                            <a href="{{ \App\Support\CentralSignIn::login() }}" class="hidden sm:inline-flex items-center min-h-[44px] px-2 text-sm font-medium text-[var(--cream)] hover:text-white transition-colors">
                                 Sign in
                             </a>
                             @if (Route::has('register'))
-                                <a href="{{ route('register') }}" class="press inline-flex items-center min-h-[44px] px-5 py-2.5 bg-[var(--gold)] hover:bg-[var(--gold-soft)] text-[var(--ink)] text-sm font-display font-semibold rounded-lg transition-colors">
+                                <a href="{{ \App\Support\CentralSignIn::register(route('register')) }}" class="press inline-flex items-center min-h-[44px] px-5 py-2.5 bg-[var(--gold)] hover:bg-[var(--gold-soft)] text-[var(--ink)] text-sm font-display font-semibold rounded-lg transition-colors">
                                     Start writing
                                 </a>
                             @endif
@@ -146,7 +146,7 @@
                     <a href="#features" class="px-3 py-2.5 text-[var(--cream)] hover:text-white">Features</a>
                     <a href="#capabilities" class="px-3 py-2.5 text-[var(--cream)] hover:text-white">For teams</a>
                     @guest
-                        <a href="{{ route('login') }}" class="px-3 py-2.5 text-[var(--cream)] hover:text-white">Sign in</a>
+                        <a href="{{ \App\Support\CentralSignIn::login() }}" class="px-3 py-2.5 text-[var(--cream)] hover:text-white">Sign in</a>
                     @endguest
                 </div>
             </div>
@@ -183,7 +183,7 @@
 
                     @guest
                         <div class="flex flex-wrap items-center gap-4">
-                            <a href="{{ route('register') }}" class="press px-7 py-3.5 bg-[var(--gold)] hover:bg-[var(--gold-soft)] text-[var(--ink)] font-display font-semibold rounded-lg transition-colors">
+                            <a href="{{ \App\Support\CentralSignIn::register(route('register')) }}" class="press px-7 py-3.5 bg-[var(--gold)] hover:bg-[var(--gold-soft)] text-[var(--ink)] font-display font-semibold rounded-lg transition-colors">
                                 Start writing
                             </a>
                             <a href="#features" class="press flex items-center gap-2 px-7 py-3.5 text-[var(--cream)] font-medium rounded-lg border border-[var(--line-dark)] hover:border-[var(--cream-40)] transition-colors">
@@ -292,10 +292,10 @@
 
                 @guest
                     <div class="flex flex-wrap justify-center gap-4">
-                        <a href="{{ route('register') }}" class="press px-8 py-3.5 bg-[var(--gold)] hover:bg-[var(--gold-soft)] text-[var(--ink)] font-display font-semibold rounded-lg transition-colors">
+                        <a href="{{ \App\Support\CentralSignIn::register(route('register')) }}" class="press px-8 py-3.5 bg-[var(--gold)] hover:bg-[var(--gold-soft)] text-[var(--ink)] font-display font-semibold rounded-lg transition-colors">
                             Start writing
                         </a>
-                        <a href="{{ route('login') }}" class="press px-8 py-3.5 text-[var(--cream)] font-medium rounded-lg border border-[var(--line-dark)] hover:border-[var(--cream-40)] transition-colors">
+                        <a href="{{ \App\Support\CentralSignIn::login() }}" class="press px-8 py-3.5 text-[var(--cream)] font-medium rounded-lg border border-[var(--line-dark)] hover:border-[var(--cream-40)] transition-colors">
                             Sign in
                         </a>
                     </div>

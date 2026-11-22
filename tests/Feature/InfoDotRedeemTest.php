@@ -96,20 +96,60 @@ class InfoDotRedeemTest extends TestCase
         $this->assertSame('Local Name', $existing->fresh()->name);
     }
 
-    public function test_an_unverified_local_account_is_adopted_and_its_password_replaced(): void
+    /** R-54: this used to be "adopted and its password replaced". An unverified account is now claimed, never taken over. */
+    public function test_an_unverified_local_account_is_sent_to_the_claim_flow_and_its_password_is_kept(): void
     {
-        $squatter = User::factory()->create([
+        $squatter = User::factory()->withPersonalTeam()->create([
             'email' => 'amara@example.test',
             'email_verified_at' => null,
             'password' => Hash::make('attacker-knows-this'),
         ]);
-        Http::fake([self::URL => Http::response($this->identity())]);
+        $token = $squatter->createToken('integration')->plainTextToken;
+        $hash = $squatter->password;
+        Http::fake([self::URL => Http::response($this->identity(['uuid' => 'infodot-uuid-7']))]);
+
+        $this->post(route('auth.ecosystem'), ['token' => 't'], $this->fromInfodot())->assertRedirect(route('dotsso.claim'));
+
+        $this->assertGuest();
+        $fresh = $squatter->fresh();
+        $this->assertSame($hash, $fresh->password, 'the password is not replaced');
+        $this->assertNull($fresh->email_verified_at, 'nothing is verified until the code is entered');
+        $this->assertNull($fresh->infodot_user_uuid);
+        $this->assertSame(1, $fresh->tokens()->count(), 'API tokens are untouched');
+        $this->assertTrue($fresh->ownedTeams()->exists(), 'teams are untouched');
+        $this->assertNotEmpty($token);
+    }
+
+    public function test_a_verified_local_account_is_linked_to_the_infodot_user_id_at_first_sign_in(): void
+    {
+        $existing = User::factory()->create(['email' => 'amara@example.test', 'email_verified_at' => now()]);
+        Http::fake([self::URL => Http::response($this->identity(['uuid' => 'infodot-uuid-7']))]);
 
         $this->post(route('auth.ecosystem'), ['token' => 't'], $this->fromInfodot());
 
-        $this->assertAuthenticatedAs($squatter);
-        $this->assertFalse(Hash::check('attacker-knows-this', $squatter->fresh()->password));
-        $this->assertNotNull($squatter->fresh()->email_verified_at);
+        $this->assertAuthenticatedAs($existing);
+        $this->assertSame('infodot-uuid-7', $existing->fresh()->infodot_user_uuid);
+    }
+
+    public function test_the_stored_infodot_user_id_wins_over_a_changed_email_so_no_second_account_is_made(): void
+    {
+        $existing = User::factory()->create(['email' => 'old@example.test', 'email_verified_at' => now(), 'infodot_user_uuid' => 'infodot-uuid-7']);
+        Http::fake([self::URL => Http::response($this->identity(['uuid' => 'infodot-uuid-7', 'email' => 'new@example.test']))]);
+
+        $this->post(route('auth.ecosystem'), ['token' => 't'], $this->fromInfodot());
+
+        $this->assertAuthenticatedAs($existing);
+        $this->assertSame(1, User::count());
+    }
+
+    public function test_an_account_linked_to_another_infodot_identity_is_not_taken(): void
+    {
+        User::factory()->create(['email' => 'amara@example.test', 'email_verified_at' => now(), 'infodot_user_uuid' => 'someone-else']);
+        Http::fake([self::URL => Http::response($this->identity(['uuid' => 'infodot-uuid-7']))]);
+
+        $this->post(route('auth.ecosystem'), ['token' => 't'], $this->fromInfodot())->assertStatus(303)->assertRedirect('/login');
+
+        $this->assertGuest();
     }
 
     public function test_a_token_infodot_refuses_signs_nobody_in(): void
