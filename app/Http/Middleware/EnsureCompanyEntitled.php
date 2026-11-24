@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\InfoDot\EntitlementClient;
 use App\Support\EntitlementRefusal;
 use Closure;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
@@ -15,7 +16,7 @@ use Symfony\Component\HttpFoundation\Response;
  * The signed-in area honours the company's entitlement (R-50).
  *
  * InfoDot decides whether a company holds Dot.docs. A person who is already signed in must stop working when that
- * ends, so each request in the signed-in area asks (through a ten-minute cache) whether the company whose documents are
+ * ends, so each request in the signed-in area asks (through a one-minute cache) whether the company whose documents are
  * being opened still holds the platform. A clear "no" answers with the plain refusal page and HTTP 403: nothing is
  * read from or written to its documents. Anything else, including every kind of failure, lets the request through
  * exactly as before.
@@ -77,6 +78,12 @@ class EnsureCompanyEntitled
 
         $answer = $this->entitlements->forCompany((string) $team->infodot_team_uuid);
 
+        // R-61: a platform InfoDot has switched off (maintenance, unavailable) is off for everyone, whatever they hold, and this is
+        // asked before what the company holds. Nothing is deleted, changed or signed out; the page says so plainly.
+        if ($answer !== null && ! $answer['available']) {
+            return $this->unavailable($request, $answer['message']);
+        }
+
         if ($answer === null || $answer['entitled'] === true) {
             return $next($request);
         }
@@ -86,6 +93,26 @@ class EnsureCompanyEntitled
             $team->name,
             $user->allTeams()->reject(fn ($other) => $other->id === $team->id),
         ));
+    }
+
+    /** 503 with Retry-After 60 and no-store. A component update must abort: Livewire discards a persistent middleware's non-redirect page. */
+    private function unavailable(Request $request, ?string $message): Response
+    {
+        $text = $message ?? 'Dot.docs is temporarily unavailable.';
+
+        if ($request->expectsJson() || $request->headers->has('X-Livewire') || $request->is('livewire/*')) {
+            $json = response()->json(['message' => $text, 'reason' => 'platform_unavailable'], 503)
+                ->header('Retry-After', '60')->header('Cache-Control', 'no-store, private');
+
+            if ($request->headers->has('X-Livewire') || $request->is('livewire/*')) {
+                throw new HttpResponseException($json);
+            }
+
+            return $json;
+        }
+
+        return response()->view('errors.platform-unavailable', ['message' => $message, 'signedIn' => true], 503)
+            ->header('Cache-Control', 'no-store, private')->header('Retry-After', '60');
     }
 
     /**

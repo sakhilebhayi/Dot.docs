@@ -11,13 +11,18 @@ use Throwable;
  * Asks InfoDot whether a company still holds this platform (R-50).
  *
  * One question, about one company, answered from InfoDot's read endpoint with this platform's own service secret.
- * The answer is kept for ten minutes per company; a failure for one minute. Anything that is not a clear answer
- * (InfoDot down, slow, refusing, a body this app cannot read, no secret configured) is "unknown", and unknown never
- * locks a company out: the caller carries on as if the check did not exist. A failure is logged once per window.
+ * The answer is kept for one minute per company, so a switch made at InfoDot (a platform put in maintenance, R-61)
+ * takes effect within about a minute. Every clear answer is also remembered for six hours. Anything that is not a
+ * clear answer (InfoDot down, slow, refusing, a body this app cannot read, no secret configured) is "unknown": the
+ * last clear answer under six hours old is used (a platform last told "unavailable" stays unavailable); with none,
+ * the caller carries on as if the check did not exist. A failure is logged once per window.
  */
 class EntitlementClient
 {
-    public const ANSWER_TTL = 600;
+    public const ANSWER_TTL = 60;
+
+    /** How long the last clear answer is used when InfoDot gives no clear answer. */
+    public const LAST_KNOWN_TTL = 21600;
 
     public const FAILURE_TTL = 60;
 
@@ -27,7 +32,7 @@ class EntitlementClient
     }
 
     /**
-     * @return array{entitled: bool, status: string}|null null when InfoDot gave no usable answer
+     * @return array{entitled: bool, status: string, available: bool, message: ?string}|null null when InfoDot gave no clear answer and none is remembered
      */
     public function forCompany(string $uuid): ?array
     {
@@ -39,20 +44,29 @@ class EntitlementClient
             $cached = null;
         }
 
-        if (is_array($cached)) {
-            return isset($cached['entitled']) ? ['entitled' => (bool) $cached['entitled'], 'status' => (string) ($cached['status'] ?? '')] : null;
+        if (is_array($cached) && array_key_exists('answer', $cached)) {
+            return $cached['answer'];
         }
 
         $answer = $this->ask($uuid);
 
         if (is_string($answer)) {
             Log::warning('InfoDot entitlement check gave no answer; carrying on without it.', ['company' => $uuid, 'reason' => $answer]);
-            $this->remember($key, ['unknown' => true], self::FAILURE_TTL);
 
-            return null;
+            try {
+                $last = Cache::get($key.':last');
+            } catch (Throwable) {
+                $last = null;
+            }
+
+            $answer = is_array($last) && is_array($last['answer'] ?? null) && time() - (int) ($last['at'] ?? 0) < self::LAST_KNOWN_TTL ? $last['answer'] : null;
+            $this->remember($key, ['answer' => $answer], self::FAILURE_TTL);
+
+            return $answer;
         }
 
-        $this->remember($key, $answer, self::ANSWER_TTL);
+        $this->remember($key.':last', ['answer' => $answer, 'at' => time()], self::LAST_KNOWN_TTL);
+        $this->remember($key, ['answer' => $answer], self::ANSWER_TTL);
 
         return $answer;
     }
@@ -70,7 +84,7 @@ class EntitlementClient
     }
 
     /**
-     * @return array{entitled: bool, status: string}|string the answer, or why there is none
+     * @return array{entitled: bool, status: string, available: bool, message: ?string}|string the answer, or why there is none
      */
     private function ask(string $uuid): array|string
     {
@@ -109,7 +123,13 @@ class EntitlementClient
                     return 'malformed body';
                 }
 
-                return ['entitled' => $row['entitled'], 'status' => is_string($row['status'] ?? null) ? $row['status'] : ''];
+                return [
+                    'entitled' => $row['entitled'],
+                    'status' => is_string($row['status'] ?? null) ? $row['status'] : '',
+                    // R-61: an InfoDot from before contract 2 gives no `available`, which is not a switch-off.
+                    'available' => ($row['available'] ?? true) !== false,
+                    'message' => is_string($row['message'] ?? null) && $row['message'] !== '' ? mb_substr($row['message'], 0, 400) : null,
+                ];
             }
         }
 
