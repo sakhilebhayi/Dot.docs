@@ -302,7 +302,7 @@ class CompanyEntitlementTest extends TestCase
         $this->assertCount(1, array_filter($logged, fn ($m) => str_contains((string) $m, 'InfoDot entitlement check gave no answer')), 'logged once per cache window');
     }
 
-    public function test_a_failure_is_remembered_for_a_minute_and_an_answer_for_ten(): void
+    public function test_a_failure_is_remembered_for_a_minute_and_an_answer_for_a_minute(): void
     {
         [$owner] = $this->company();
         $this->infodotSays([self::readUrl(self::ACME) => Http::sequence()
@@ -595,5 +595,94 @@ class CompanyEntitlementTest extends TestCase
     public function test_livewire_updates_from_the_signed_in_area_carry_the_check(): void
     {
         $this->assertContains(EnsureCompanyEntitled::class, app(PersistentMiddleware::class)->getPersistentMiddleware());
+    }
+
+    // ---- R-61 availability contract -------------------------------------------------------------------------------
+
+    /** @return array<string, mixed> */
+    private function maintenance(bool $entitled = true): array
+    {
+        $body = self::platforms(self::ACME, $entitled, 'temporarily_unavailable');
+        $body['platforms'][0] += ['available' => false, 'state' => 'maintenance', 'message' => 'Dot.docs is under maintenance. Your data is safe and nothing about your account has changed. Please try again later.'];
+
+        return $body;
+    }
+
+    public function test_a_platform_switched_off_at_infodot_is_unavailable_even_to_a_company_that_holds_it(): void
+    {
+        [$owner, , $document] = $this->company();
+        $this->infodotSays([self::readUrl(self::ACME) => Http::response($this->maintenance())]);
+
+        $this->actingAs($owner)->get(route('documents.index'))->assertStatus(503)->assertSee('under maintenance')->assertSee('kept as they are')
+            ->assertHeader('Retry-After', '60')->assertDontSee($document->title);
+        $this->actingAs($owner)->getJson(route('documents.index'))->assertStatus(503)->assertJsonPath('reason', 'platform_unavailable');
+        $this->assertDatabaseHas('documents', ['id' => $document->id]);
+        $this->assertAuthenticatedAs($owner);
+    }
+
+    public function test_a_livewire_update_is_refused_with_503_while_switched_off_and_changes_nothing(): void
+    {
+        [$owner, $team] = $this->company();
+        $this->infodotSays([self::readUrl(self::ACME) => Http::sequence()
+            ->push(self::platforms(self::ACME, true, 'active'))
+            ->push($this->maintenance())]);
+        $this->actingAs($owner);
+        $before = Document::query()->where('team_id', $team->id)->count();
+        $snapshot = $this->livewireSnapshot();
+
+        $this->travel(EntitlementClient::ANSWER_TTL + 1)->seconds();
+        $response = $this->livewireCreateDocument($snapshot);
+
+        $this->assertSame(503, $response->getStatusCode());
+        $this->assertSame('platform_unavailable', $response->json('reason'));
+        $this->assertSame($before, Document::query()->where('team_id', $team->id)->count());
+    }
+
+    public function test_switching_it_back_on_takes_effect_within_a_minute_and_nothing_was_lost(): void
+    {
+        [$owner, , $document] = $this->company();
+        $this->infodotSays([self::readUrl(self::ACME) => Http::response($this->maintenance())]);
+        $this->actingAs($owner)->get(route('documents.index'))->assertStatus(503);
+
+        $this->infodotSays([self::readUrl(self::ACME) => Http::response(self::platforms(self::ACME, true, 'active'))]);
+        $this->actingAs($owner)->get(route('documents.index'))->assertStatus(503); // inside the one-minute window
+        $this->travel(70)->seconds();
+        $this->actingAs($owner)->get(route('documents.index'))->assertOk();
+        $this->assertDatabaseHas('documents', ['id' => $document->id]);
+    }
+
+    public function test_an_infodot_from_before_the_contract_is_not_a_switch_off(): void
+    {
+        [$owner] = $this->company();
+        $this->infodotSays([self::readUrl(self::ACME) => Http::response(self::platforms(self::ACME, true, 'active'))]);
+
+        $this->actingAs($owner)->get(route('documents.index'))->assertOk();
+    }
+
+    public function test_an_outage_keeps_the_last_answer_for_six_hours_and_then_carries_on(): void
+    {
+        [$owner] = $this->company();
+        $this->infodotSays([self::readUrl(self::ACME) => Http::response($this->maintenance())]);
+        $this->actingAs($owner)->get(route('documents.index'))->assertStatus(503);
+
+        $this->infodotSays([self::readUrl(self::ACME) => Http::response('', 503)]);
+        $this->travel(90)->seconds();
+        $this->actingAs($owner)->get(route('documents.index'))->assertStatus(503);
+        $this->travel(5)->hours();
+        $this->actingAs($owner)->get(route('documents.index'))->assertStatus(503);
+
+        $this->travel(2)->hours();
+        $this->actingAs($owner)->get(route('documents.index'))->assertOk();
+    }
+
+    public function test_a_platform_that_was_available_stays_available_through_an_outage(): void
+    {
+        [$owner] = $this->company();
+        $this->infodotSays([self::readUrl(self::ACME) => Http::response(self::platforms(self::ACME, true, 'active'))]);
+        $this->actingAs($owner)->get(route('documents.index'))->assertOk();
+
+        $this->infodotSays([self::readUrl(self::ACME) => Http::response('', 500)]);
+        $this->travel(2)->minutes();
+        $this->actingAs($owner)->get(route('documents.index'))->assertOk();
     }
 }
