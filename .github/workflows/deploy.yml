@@ -340,7 +340,7 @@ jobs:
         # Last step, on purpose: a deploy is green only once the live
         # pages have been seen loading their own assets. Runs on the
         # runner with plain curl (no SSH), exactly as a browser would: /
-        # and /login must answer 200, and every $SITE_URL/build/ asset
+        # must answer 200 (/login may instead hand over to central sign-in), and every $SITE_URL/build/ asset
         # either page references must answer 200 too. A page with NO
         # build references fails as well - every page here loads the app
         # bundle, so zero matches means the page is broken.
@@ -353,6 +353,21 @@ jobs:
 
           for PAGE in "$SITE_URL/" "$SITE_URL/login"; do
             STATUS=$(curl -s --max-time 30 -o "$WORK/page.html" -w '%{http_code}' "$PAGE" || true)
+
+            # Central sign-in (R-54, DOTSSO_ENABLED): /login hands over to this app's own /sso/login instead of showing a form. That is a
+            # healthy answer. It is accepted only for that exact redirect, and the target must itself answer (a redirect or a page),
+            # never an error. There is no page to scan for assets in that case, so the loop moves on.
+            if [ "$PAGE" = "$SITE_URL/login" ] && [ "$STATUS" = "302" ]; then
+              TARGET=$(curl -s --max-time 30 -o /dev/null -w '%{redirect_url}' "$PAGE" || true)
+              if [ "$TARGET" = "$SITE_URL/sso/login" ]; then
+                HOP=$(curl -s --max-time 30 -o /dev/null -w '%{http_code}' "$TARGET" || true)
+                case "$HOP" in
+                  200|302) echo "302 $PAGE -> $TARGET ($HOP): central sign-in is on"; continue ;;
+                  *) echo "::error::$PAGE redirects to central sign-in, but $TARGET answered ${HOP:-no response}"; FAILED=1; continue ;;
+                esac
+              fi
+            fi
+
             if [ "$STATUS" != "200" ]; then
               echo "::error::$PAGE answered ${STATUS:-no response} (expected 200)"
               FAILED=1
@@ -400,7 +415,7 @@ jobs:
             echo "::error::Smoke check failed: the live site does not load its own pages or build assets (see above). The deploy is NOT healthy."
             exit 1
           fi
-          echo "== Smoke check passed: $SITE_URL/ and $SITE_URL/login answered 200, and so did all $(wc -l < "$WORK/unique" | tr -d ' ') build asset(s) they reference (listed above)."
+          echo "== Smoke check passed: $SITE_URL/ answered 200, $SITE_URL/login answered 200 or handed over to central sign-in, and so did all $(wc -l < "$WORK/unique" | tr -d ' ') build asset(s) they reference (listed above)."
 
       - name: Probe the application folder from outside
         # Public requests only (no SSH, nothing is read): the app folder next to the docroot
