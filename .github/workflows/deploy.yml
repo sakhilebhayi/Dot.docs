@@ -411,6 +411,19 @@ jobs:
             echo "No debug page on POST $SITE_URL/up ($(wc -c < "$WORK/probe.html" | tr -d ' ') bytes)."
           fi
 
+          # Security headers (App\Http\Middleware\SecurityHeaders) must reach the
+          # browser: a host or cache layer that drops them would otherwise go
+          # unnoticed, as it did before EA-1 (none were sent at all).
+          curl -s --max-time 30 -o /dev/null -D "$WORK/headers.txt" "$SITE_URL/" || true
+          for H in x-content-type-options x-frame-options referrer-policy strict-transport-security content-security-policy-report-only; do
+            if grep -qi "^$H:" "$WORK/headers.txt"; then
+              echo "Header present: $H"
+            else
+              echo "::error::$SITE_URL/ answered without the $H header."
+              FAILED=1
+            fi
+          done
+
           if [ "$FAILED" -ne 0 ]; then
             echo "::error::Smoke check failed: the live site does not load its own pages or build assets (see above). The deploy is NOT healthy."
             exit 1
