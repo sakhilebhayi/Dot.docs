@@ -3,6 +3,7 @@
 namespace App\Actions\Fortify;
 
 use App\Models\User;
+use App\Notifications\Account\PasswordChanged;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -28,5 +29,8 @@ class ResetUserPassword implements ResetsUserPasswords
         $user->forceFill([
             'password' => Hash::make($input['password']),
         ])->save();
+
+        // Security notice, always sent (EA-3 / E-04).
+        $user->notify(new PasswordChanged);
     }
 }

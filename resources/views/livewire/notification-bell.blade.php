@@ -14,7 +14,7 @@
             @forelse ($notifications as $notification)
                 <li class="dh-panel__item" @if (! $notification['read']) data-unread @endif>
                     @if ($notification['url'])
-                        <a href="{{ $notification['url'] }}" wire:click="markRead('{{ $notification['id'] }}')">{{ $notification['message'] }}</a>
+                        <a href="{{ $notification['url'] }}" wire:click.prevent="open('{{ $notification['id'] }}')">{{ $notification['message'] }}</a>
                     @else
                         <span>{{ $notification['message'] }}</span>
                     @endif

@@ -49,7 +49,9 @@ class InviteTeamMember implements InvitesTeamMembers
             'role' => $role,
         ]);
 
-        Mail::to($email)->send(new TeamInvitation($invitation));
+        // Queued on the mail queue (EA-3 / E-05): the invitation row exists
+        // either way, and a slow SMTP server no longer stalls the request.
+        Mail::to($email)->queue((new TeamInvitation($invitation))->onQueue('mail'));
     }
 
     /**

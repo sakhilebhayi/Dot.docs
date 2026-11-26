@@ -2,14 +2,19 @@
 
 namespace App\Notifications;
 
+use App\Http\Controllers\CommentEmailPreferenceController;
 use App\Models\Comment;
 use App\Models\Document;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\DatabaseNotification;
+use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\HtmlString;
+use Symfony\Component\Mime\Email;
 
 /**
  * The email half of a comment notification.
@@ -77,12 +82,45 @@ abstract class CommentEmailNotification extends Notification implements ShouldQu
     }
 
     /**
+     * Every comment email carries its own way out (EA-3 / E-06): a line at
+     * the foot and the List-Unsubscribe headers mail clients turn into a
+     * one-click button (RFC 8058).
+     */
+    protected function withUnsubscribe(MailMessage $message, object $user): MailMessage
+    {
+        if (! $user instanceof User) {
+            return $message;
+        }
+
+        $link = CommentEmailPreferenceController::link($user);
+
+        // Our own signed address, so a Markdown link is safe here (it is not user text).
+        return $message
+            ->line(new HtmlString('[Stop comment emails]('.$link.')'))
+            ->withSymfonyMessage(function (Email $email) use ($link) {
+                $email->getHeaders()->addTextHeader('List-Unsubscribe', '<'.$link.'>');
+                $email->getHeaders()->addTextHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
+            });
+    }
+
+    /** Last retry failed: logged at error, which the Guardian error-rate check counts (EA-3 / E-02). */
+    public function failed(\Throwable $e): void
+    {
+        Log::error('Comment email could not be sent.', ['notice' => static::class, 'error' => $e::class]);
+    }
+
+    /**
      * Runs when the queued job is processed - after the delay - not when it
      * is dispatched, so every check here sees the state at send time.
      */
     public function shouldSend(object $notifiable, string $channel): bool
     {
         if (! $notifiable instanceof User) {
+            return false;
+        }
+
+        // The person switched comment emails off (EA-3 / E-06).
+        if ($notifiable->comment_emails === false) {
             return false;
         }
 

@@ -4,6 +4,7 @@ namespace App\Actions\Jetstream;
 
 use App\Models\Team;
 use App\Models\User;
+use App\Notifications\Account\RemovedFromTeam;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
@@ -24,6 +25,12 @@ class RemoveTeamMember implements RemovesTeamMembers
         $team->removeUser($teamMember);
 
         TeamMemberRemoved::dispatch($team, $teamMember);
+
+        // Removed by someone else: they are told (EA-3 / E-04). Leaving on
+        // your own needs no email.
+        if ($user->id !== $teamMember->id) {
+            $teamMember->notify(new RemovedFromTeam($team->name));
+        }
     }
 
     /**

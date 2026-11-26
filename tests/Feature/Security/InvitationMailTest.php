@@ -29,7 +29,7 @@ class InvitationMailTest extends TestCase
 
         app(InviteTeamMember::class)->invite($owner, $team->fresh(), 'someone@example.com', 'editor');
 
-        Mail::assertSent(TeamInvitation::class, function (TeamInvitation $mail) {
+        Mail::assertQueued(TeamInvitation::class, function (TeamInvitation $mail) {
             $html = $mail->render();
 
             $this->assertStringNotContainsString('href="https://evil.test', $html);

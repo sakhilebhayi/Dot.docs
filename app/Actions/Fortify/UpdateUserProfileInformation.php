@@ -3,9 +3,13 @@
 namespace App\Actions\Fortify;
 
 use App\Models\User;
+use App\Notifications\Account\EmailAddressChanged;
+use App\Support\CentralSignIn;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Laravel\Fortify\Contracts\UpdatesUserProfileInformation;
 
 class UpdateUserProfileInformation implements UpdatesUserProfileInformation
@@ -23,6 +27,16 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
             'photo' => ['nullable', 'mimes:jpg,jpeg,png', 'max:1024'],
         ])->validateWithBag('updateProfileInformation');
 
+        // With central sign-in on, the address is InfoDot's: changing it here
+        // would only make the two disagree (EA-3 / E-03).
+        if ($input['email'] !== $user->email && CentralSignIn::active()) {
+            throw ValidationException::withMessages([
+                'email' => __('Your email address is managed by your InfoDot account. Change it there.'),
+            ])->errorBag('updateProfileInformation');
+        }
+
+        $oldEmail = $user->email;
+
         if (isset($input['photo'])) {
             $user->updateProfilePhoto($input['photo']);
         }
@@ -35,6 +49,12 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
                 'name' => $input['name'],
                 'email' => $input['email'],
             ])->save();
+        }
+
+        // The OLD inbox hears about it, so a hijacked session cannot move
+        // the account quietly (EA-3 / E-03).
+        if ($oldEmail !== $user->email) {
+            Notification::route('mail', $oldEmail)->notify(new EmailAddressChanged($user->email));
         }
     }
 

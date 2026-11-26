@@ -50,6 +50,29 @@ class NotificationBell extends Component
         $this->loadNotifications();
     }
 
+    /**
+     * Marks the notice read, THEN goes to it (EA-3 / E-08). A link with a
+     * wire:click beside it raced the navigation: the browser often cancelled
+     * the Livewire request, the notice stayed unread, and the delayed email
+     * went out anyway. The address comes from the person's own stored
+     * notice, never from the browser.
+     */
+    public function open(string $id): void
+    {
+        $notification = auth()->user()->notifications()->where('id', $id)->first();
+
+        if ($notification === null) {
+            return;
+        }
+
+        $notification->markAsRead();
+        $url = $notification->data['url'] ?? null;
+
+        if (is_string($url) && str_starts_with($url, url('/'))) {
+            $this->redirect($url);
+        }
+    }
+
     public function toggle(): void
     {
         $this->open = ! $this->open;
@@ -63,6 +86,8 @@ class NotificationBell extends Component
         return match ($data['type'] ?? '') {
             'comment' => ($data['commenter'] ?? 'Someone').' commented on "'.($data['document_title'] ?? 'a document').'"',
             'mention' => ($data['mentioner'] ?? 'Someone').' mentioned you in "'.($data['document_title'] ?? 'a document').'"',
+            'shared' => ($data['actor'] ?? 'Someone').' shared "'.($data['document_title'] ?? 'a document').'" with you',
+            'access_changed' => ($data['actor'] ?? 'Someone').' changed your access to "'.($data['document_title'] ?? 'a document').'"',
             default => 'You have a new notification',
         };
     }
