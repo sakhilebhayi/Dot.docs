@@ -445,10 +445,19 @@ class ImportExportTest extends TestCase
         }
 
         $this->actingAs($user)
+            ->withHeaders(['Accept' => 'application/json'])
             ->post(route('documents.import', $doc->uuid), [
                 'file' => UploadedFile::fake()->createWithContent('notes11.txt', 'Line.'),
             ])
             ->assertStatus(429);
+
+        // From the page: back to the editor with the reason (EA-4 / F-06).
+        $this->flushHeaders()->actingAs($user)
+            ->post(route('documents.import', $doc->uuid), [
+                'file' => UploadedFile::fake()->createWithContent('notes12.txt', 'Line.'),
+            ])
+            ->assertRedirect(route('documents.edit', $doc->uuid))
+            ->assertSessionHasErrors('file');
     }
 
     public function test_export_route_is_rate_limited(): void

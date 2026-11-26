@@ -9,11 +9,13 @@ use App\Livewire\Documents\VersionHistory;
 use App\Livewire\Documents\WebhookManager;
 use App\Models\AiSuggestion;
 use App\Models\Document;
+use App\Models\DocumentSlashCommand;
 use App\Models\DocumentVersion;
 use App\Models\DocumentWebhook;
 use App\Models\User;
 use App\Services\AiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 use RuntimeException;
 use Tests\TestCase;
@@ -54,7 +56,7 @@ class Ea4FunctionalTest extends TestCase
         Livewire::actingAs($user)->test(AiAssistant::class, ['document' => $doc])
             ->call('handleAction', 'continue')
             ->assertSet('applyMode', 'insert')
-            ->assertSee('Insert it at the cursor')
+            ->assertSee('Add it at the end')
             ->call('applyResult')
             ->assertDispatched('ai-apply', mode: 'insert');
 
@@ -73,7 +75,7 @@ class Ea4FunctionalTest extends TestCase
         Livewire::actingAs($user)->test(AiAssistant::class, ['document' => $doc])
             ->call('handleAction', 'summarize')
             ->assertSet('applyMode', null)
-            ->assertDontSee('Insert it at the cursor')
+            ->assertDontSee('Add it at the end')
             ->call('applyResult')
             ->assertNotDispatched('ai-apply');
     }
@@ -146,5 +148,44 @@ class Ea4FunctionalTest extends TestCase
             ->get('diffHtml');
 
         $this->assertLessThan(strpos($html, 'New'), strpos($html, 'Old'), 'older text on the left');
+    }
+
+    public function test_a_summary_or_a_custom_command_from_the_palette_is_added_never_replaces(): void
+    {
+        [$user, $doc] = $this->ownerAndDoc();
+
+        foreach (['/summarize', '/outline', '/grammar', '/tone formal', '/translate French'] as $command) {
+            $expected = in_array(strtok($command, ' '), ['/grammar', '/tone', '/translate'], true) ? 'replace' : 'insert';
+            Livewire::actingAs($user)->test(AiAssistant::class, ['document' => $doc])
+                ->set('command', $command)->call('runCommand')
+                ->assertSet('applyMode', $expected);
+        }
+
+        DocumentSlashCommand::create(['user_id' => $user->id, 'name' => 'tweet', 'prompt_template' => 'Write a tweet about {content}']);
+        Livewire::actingAs($user)->test(AiAssistant::class, ['document' => $doc])
+            ->set('command', '/tweet')->call('runCommand')
+            ->assertSet('applyMode', 'insert');
+    }
+
+    public function test_the_result_text_cannot_be_rewritten_by_the_browser(): void
+    {
+        [$user, $doc] = $this->ownerAndDoc();
+
+        $this->expectException(CannotUpdateLockedPropertyException::class);
+        Livewire::actingAs($user)->test(AiAssistant::class, ['document' => $doc])->set('result', '<p>x</p>');
+    }
+
+    public function test_the_banner_fallback_only_speaks_on_the_editor(): void
+    {
+        [$user] = $this->ownerAndDoc();
+
+        $this->actingAs($user)
+            ->withSession(['status' => 'Uploaded the file.'])
+            ->get(route('documents.index'))
+            ->assertOk();
+        $this->assertSame(1, substr_count(
+            $this->actingAs($user)->withSession(['status' => 'Uploaded the file.'])->get(route('files.index'))->getContent(),
+            'Uploaded the file.'
+        ), 'Files shows its own status once, the banner does not repeat it');
     }
 }

@@ -1,4 +1,10 @@
 <div>
+    {{-- Toolbar actions arrive as the ai-action event (handleAction); this is their progress (EA-4 / U-01). --}}
+    <p class="note" role="status" wire:loading.flex wire:target="handleAction" style="position:fixed;bottom:var(--s4);right:var(--s4);z-index:90;margin:0">
+        <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+        The assistant is working…
+    </p>
+
     {{-- Command palette --}}
     @if ($showPalette)
         <div class="scrim" style="align-items:flex-start;padding-top:12vh" role="dialog" aria-modal="true"
@@ -11,7 +17,7 @@
                            placeholder="/summarize, /grammar, /tone formal, /translate French" />
                     {{-- wire:loading, not $loading: the flag was set and cleared inside one
                          request, so the browser never saw it (EA-4 / U-01). --}}
-                    <span class="toolbar" aria-live="polite" wire:loading wire:target="runCommand">
+                    <span class="toolbar" aria-live="polite" wire:loading.flex wire:target="runCommand">
                         <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
                         <span class="micro">Working</span>
                     </span>
@@ -60,7 +66,7 @@
                     @if ($applyMode !== null)
                         @can('update', $document)
                             <button type="button" class="btn btn-primary" wire:click="applyResult">
-                                {{ $applyMode === 'replace' ? 'Replace the document with it' : 'Insert it at the cursor' }}
+                                {{ $applyMode === 'replace' ? 'Replace the document with it' : 'Add it at the end' }}
                             </button>
                         @else
                             <span class="micro">You can read this document but not change it.</span>

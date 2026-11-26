@@ -209,8 +209,9 @@ class EditorReadOnlyTest extends TestCase
         $open()->call('acceptSuggestion', $suggestion->id)->assertForbidden();
         $open()->call('rejectSuggestion', $suggestion->id)->assertForbidden();
 
+        // A viewer may run the assistant and read its answer, never apply it.
         $assistant = Livewire::actingAs($viewer)->test(AiAssistant::class, ['document' => $doc])
-            ->set('result', '<p>Replace everything</p>');
+            ->call('handleAction', 'grammar');
         $assistant->call('applyResult')->assertForbidden();
 
         $this->assertSame($doc->version, $doc->fresh()->version);

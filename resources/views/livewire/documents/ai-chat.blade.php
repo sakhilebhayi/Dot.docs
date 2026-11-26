@@ -45,7 +45,7 @@
         <div class="toolbar">
             <input id="assistant-message" wire:model="message" wire:keydown.enter="send" type="text"
                    class="field" style="flex:1 1 auto" placeholder="What should I look at?" />
-            <button type="button" class="btn btn-primary" wire:click="send">Send</button>
+            <button type="button" class="btn btn-primary" wire:click="send" wire:loading.attr="disabled" wire:target="send">Send</button>
         </div>
     </div>
 </section>

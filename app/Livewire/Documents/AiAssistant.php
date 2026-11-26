@@ -25,6 +25,7 @@ class AiAssistant extends Component
     public string $param = '';
 
     /** Result text shown in preview panel */
+    #[Locked]
     public string $result = '';
 
     /** Whether the result panel is visible */
@@ -213,14 +214,23 @@ class AiAssistant extends Component
         return app(HtmlSanitizer::class)->clean($this->result);
     }
 
-    /** @param  string|array{type?: string, content?: string}  $output */
+    /**
+     * Only a rewrite of the whole text replaces it: grammar, tone, translate,
+     * whether chosen from the toolbar or typed in the palette. Everything else
+     * - summaries, outlines, continuations, free prompts, custom slash
+     * commands - is added, never put in place of the writer's text. Decided
+     * from the command, not from the service's own `type`, which still says
+     * 'replace' for /summarize, /outline and every custom command.
+     *
+     * @param  string|array{type?: string, content?: string}  $output
+     */
     private function modeFor(string|array $output): string
     {
-        if (is_array($output)) {
-            return ($output['type'] ?? '') === 'replace' ? 'replace' : 'insert';
-        }
+        $name = $this->action === 'command'
+            ? ltrim((string) strtok(trim($this->command), ' '), '/')
+            : $this->action;
 
-        return in_array($this->action, ['grammar', 'tone', 'translate'], true) ? 'replace' : 'insert';
+        return in_array($name, ['grammar', 'tone', 'translate'], true) ? 'replace' : 'insert';
     }
 
     /** True while the mock provider answers: no model is connected (EA-4 / F-03). */

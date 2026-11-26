@@ -62,7 +62,11 @@ class DocumentImportController extends Controller
 
         $key = 'import:'.Auth::id();
         if (! RateLimiter::attempt($key, self::RATE_LIMIT, fn () => true, 3600)) {
-            abort(429, 'Import limit reached. Try again in '.RateLimiter::availableIn($key).' seconds.');
+            $wait = 'Import limit reached. Try again in '.RateLimiter::availableIn($key).' seconds.';
+            if (! $request->expectsJson()) {
+                return redirect()->route('documents.edit', $document->uuid)->withErrors(['file' => $wait]);
+            }
+            abort(429, $wait);
         }
 
         $request->validate([
@@ -88,7 +92,7 @@ class DocumentImportController extends Controller
                 'md', 'markdown' => $markdown->import($this->read($path)),
                 'html', 'htm' => $html->convert($this->read($path)),
                 'txt' => $plainText->import($this->read($path)),
-                default => abort(422, 'Unsupported file type.'),
+                default => throw new \InvalidArgumentException('Unsupported file type.'),
             };
         } catch (HttpException $e) {
             throw $e;
