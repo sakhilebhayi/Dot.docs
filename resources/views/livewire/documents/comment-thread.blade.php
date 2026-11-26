@@ -30,7 +30,7 @@
 
                 <div class="split" style="gap:var(--s2)">
                     <span class="list-key" style="flex:1 1 auto">
-                        {{ $comment->user->name }}
+                        {{ $comment->user?->name ?? 'Former member' }}
                         <span class="list-sub">{{ $comment->created_at->diffForHumans() }}</span>
                     </span>
                     @if ($comment->isResolved())
@@ -60,7 +60,7 @@
                         @foreach ($comment->replies as $reply)
                             <li style="padding:var(--s2) 0" wire:key="reply-{{ $reply->id }}">
                                 <span class="list-key">
-                                    {{ $reply->user->name }}
+                                    {{ $reply->user?->name ?? 'Former member' }}
                                     <span class="list-sub">{{ $reply->created_at->diffForHumans() }}</span>
                                 </span>
                                 <p style="margin:var(--s1) 0 0;white-space:pre-line">

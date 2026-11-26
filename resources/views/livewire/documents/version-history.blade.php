@@ -57,7 +57,7 @@
                                     <x-shell.figure :value="$version->version_number" prefix="v" label="Version" />
                                 </span>
                                 <span class="list-sub">
-                                    {{ $version->created_at->diffForHumans() }}@if ($version->author) · {{ $version->author->name }}@endif
+                                    {{ $version->created_at->diffForHumans() }}@if ($version->created_by === null) · Former member @elseif ($version->author) · {{ $version->author->name }}@endif
                                 </span>
                             </span>
                         </button>
@@ -116,7 +116,7 @@
                     <div class="split">
                         <span class="micro">
                             <x-shell.figure :value="$previewVersion->version_number" prefix="v" label="Version" />
-                            @if ($previewVersion->author) · {{ $previewVersion->author->name }} @endif
+                            @if ($previewVersion->created_by === null) · Former member @elseif ($previewVersion->author) · {{ $previewVersion->author->name }} @endif
                         </span>
                         @if ($previewVersion->version_number !== $document->version)
                             <button type="button" class="btn btn-primary" wire:click="restore({{ $previewVersion->id }})"
