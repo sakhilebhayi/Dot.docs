@@ -9,6 +9,7 @@ use App\Models\AiSuggestion;
 use App\Models\User;
 use App\Services\AiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 use RuntimeException;
 use Tests\TestCase;
@@ -73,7 +74,7 @@ class AiOutputIsSanitisedTest extends TestCase
         $user = User::factory()->withPersonalTeam()->create();
         $doc = app(DocumentStore::class)->create($user, 'Notes');
 
-        $this->expectException(\Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException::class);
+        $this->expectException(CannotUpdateLockedPropertyException::class);
 
         Livewire::actingAs($user)
             ->test(AiChat::class, ['document' => $doc])
