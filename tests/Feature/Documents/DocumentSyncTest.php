@@ -116,7 +116,6 @@ class DocumentSyncTest extends TestCase
             'collaborator viewer' => ['collaborator:viewer', false],
             'team editor' => ['team:editor', true],
             'team viewer' => ['team:viewer', false],
-            'stranger on a public document' => ['public', false],
         ];
     }
 
@@ -126,11 +125,6 @@ class DocumentSyncTest extends TestCase
         $doc = $this->doc($owner);
         if ($kind === 'owner') {
             return [$owner, $doc];
-        }
-        if ($kind === 'public') {
-            $doc->forceFill(['is_public' => true])->save();
-
-            return [User::factory()->withPersonalTeam()->create(), $doc->fresh()];
         }
         [$source, $role] = explode(':', $kind);
         $user = User::factory()->withPersonalTeam()->create();

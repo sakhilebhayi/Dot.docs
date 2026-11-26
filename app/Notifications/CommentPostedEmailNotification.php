@@ -20,13 +20,12 @@ class CommentPostedEmailNotification extends CommentEmailNotification
     }
 
     /**
-     * Somebody who commented on a link-shared document can still open it,
-     * so they may hear about a reply; on a private one they must still be
-     * a participant.
+     * Only a participant can open the editor this mail links to, published
+     * or not, so only a participant hears about it.
      */
     protected function mayReceive(User $user): bool
     {
-        return $this->document->is_public || $this->document->isParticipant($user);
+        return $this->document->isParticipant($user);
     }
 
     public function toMail(object $notifiable): MailMessage

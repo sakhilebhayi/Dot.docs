@@ -24,8 +24,6 @@ class DocumentSettings extends Component
 
     public string $title = '';
 
-    public bool $isPublic = false;
-
     public bool $showDeleteConfirm = false;
 
     public string $transferEmail = '';
@@ -56,7 +54,6 @@ class DocumentSettings extends Component
         $this->authorize('update', $this->document);
 
         $this->title = $this->document->title;
-        $this->isPublic = $this->document->is_public;
         $this->folderId = $this->node()?->parent_id;
 
         $setup = PageSetup::fromDocument($this->document, app(StyleEngine::class)->resolve($this->document));
@@ -118,9 +115,11 @@ class DocumentSettings extends Component
         $this->authorize('update', $this->document);
         $this->validate(['title' => 'required|string|max:255']);
 
+        // Title only. Publishing lives on the Share page, which requires the
+        // `manage` right and writes a share.updated audit row; this form
+        // needs only `update`, so it must never touch `is_public`.
         $this->document->update([
             'title' => $this->title,
-            'is_public' => $this->isPublic,
         ]);
 
         $this->dispatch('settings-saved');

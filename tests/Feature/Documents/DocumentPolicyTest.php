@@ -103,13 +103,17 @@ class DocumentPolicyTest extends TestCase
         }
     }
 
-    public function test_on_a_public_document_a_stranger_may_read_and_nothing_else(): void
+    /**
+     * Publishing does not widen the app's own access: a published document
+     * is read on /shared/{uuid} or /d/{slug}, behind the link's password and
+     * expiry (EA-1 / S-01; see Security\PublishedDocumentAccessTest).
+     */
+    public function test_on_a_public_document_a_stranger_may_do_nothing_in_the_app(): void
     {
         [$people, $doc] = $this->people(public: true);
         $outsider = User::findOrFail($people['outsider']->id);
 
-        $this->assertTrue($outsider->can('view', $doc->fresh()));
-        foreach (['update', 'share', 'delete', 'manage'] as $ability) {
+        foreach (['view', 'update', 'share', 'delete', 'manage'] as $ability) {
             $this->assertFalse($outsider->can($ability, $doc->fresh()), $ability);
         }
     }

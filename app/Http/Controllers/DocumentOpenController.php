@@ -25,6 +25,12 @@ class DocumentOpenController extends Controller
         $user = $request->user();
 
         if (! $user->can('view', $document)) {
+            // A published document opens on its public page, where the
+            // link's password and expiry still apply.
+            if ($document->publicUrl() !== null) {
+                return redirect()->to($document->publicUrl());
+            }
+
             return response()->view('documents.request-access', [], 403);
         }
 
