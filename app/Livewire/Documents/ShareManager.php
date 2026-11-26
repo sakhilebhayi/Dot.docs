@@ -89,6 +89,9 @@ class ShareManager extends Component
             : '';
     }
 
+    /** Shown under the invite form after a share or a role change. */
+    public string $inviteNotice = '';
+
     public function invite(): void
     {
         $this->authorize('share', $this->document);
@@ -96,6 +99,12 @@ class ShareManager extends Component
             'inviteEmail' => 'required|email|exists:users,email',
             'inviteRole' => 'required|in:viewer,editor,admin',
         ]);
+
+        // Handing out the admin role is a share-settings power: an editor may
+        // invite, but not make anyone (themselves included) more than an editor.
+        if ($this->inviteRole === 'admin') {
+            $this->authorize('manage', $this->document);
+        }
 
         $user = User::where('email', $this->inviteEmail)->firstOrFail();
         $before = DocumentCollaborator::where('document_id', $this->document->id)->where('user_id', $user->id)->value('role');
@@ -113,7 +122,7 @@ class ShareManager extends Component
             $actor = (string) Auth::user()?->name;
             $user->notify(new DocumentSharedBell($this->document, $actor, $changed));
             $user->notify(new DocumentSharedWithYou($this->document, $this->inviteRole, $actor, $changed));
-            session()->flash('status', $changed ? 'Access changed. They have been told.' : 'Shared. They have been told by email.');
+            $this->inviteNotice = $changed ? 'Access changed. They have been told.' : 'Shared. They have been told by email.';
         }
 
         $this->inviteEmail = '';

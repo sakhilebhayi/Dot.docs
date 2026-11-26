@@ -126,6 +126,12 @@
                     </select>
                 </div>
                 <button type="submit" class="btn btn-primary">Send the invitation</button>
+                @if ($inviteNotice !== '')
+                    <p class="note" role="status">
+                        <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
+                        {{ $inviteNotice }}
+                    </p>
+                @endif
             </form>
         </div>
     </section>

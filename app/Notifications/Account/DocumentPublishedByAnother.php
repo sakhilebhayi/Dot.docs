@@ -16,6 +16,14 @@ class DocumentPublishedByAnother extends AccountMail
         public readonly bool $published,
     ) {}
 
+    /** A document binned before the worker ran gets no email (SerializesModels restores trashed rows). */
+    public function shouldSend(object $notifiable, string $channel): bool
+    {
+        $current = $this->document->fresh();
+
+        return $current !== null && ! $current->trashed();
+    }
+
     public function toMail(object $notifiable): MailMessage
     {
         $who = MailText::plain($this->actorName, 40);

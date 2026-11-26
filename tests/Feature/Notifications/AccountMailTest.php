@@ -170,4 +170,46 @@ class AccountMailTest extends TestCase
         $this->assertStringNotContainsString('href="https://evil.test', $html);
         $this->assertStringNotContainsString('<b>x</b>', $html);
     }
+
+    public function test_an_editor_may_invite_but_not_hand_out_the_admin_role(): void
+    {
+        Notification::fake();
+        $owner = User::factory()->withPersonalTeam()->create();
+        $editor = User::factory()->withPersonalTeam()->create();
+        $friend = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($owner, 'Board pack');
+        DocumentCollaborator::create(['document_id' => $doc->id, 'user_id' => $editor->id, 'role' => 'editor']);
+
+        $page = Livewire::actingAs($editor)->test(ShareManager::class, ['uuid' => $doc->uuid]);
+        $page->set('inviteEmail', $friend->email)->set('inviteRole', 'admin')->call('invite')->assertForbidden();
+        $this->assertFalse(DocumentCollaborator::where('user_id', $friend->id)->exists());
+
+        Livewire::actingAs($editor)->test(ShareManager::class, ['uuid' => $doc->uuid])
+            ->set('inviteEmail', $friend->email)->set('inviteRole', 'editor')->call('invite')
+            ->assertSet('inviteNotice', 'Shared. They have been told by email.')
+            ->assertSee('Shared. They have been told by email.');
+    }
+
+    public function test_no_share_email_for_a_document_binned_before_the_worker_ran(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($owner, 'Binned');
+        $mail = new DocumentSharedWithYou($doc, 'viewer', 'Someone');
+
+        $this->assertTrue($mail->shouldSend($owner, 'mail'));
+        $doc->delete();
+        $this->assertFalse($mail->shouldSend($owner, 'mail'));
+    }
+
+    public function test_a_case_only_email_edit_is_not_a_change(): void
+    {
+        Notification::fake();
+        config(['dotsso.enabled' => true, 'dotsso.allow_local_login' => false]);
+        $user = User::factory()->create(['email' => 'Person@Example.test']);
+
+        app(UpdateUserProfileInformation::class)->update($user, ['name' => 'New Name', 'email' => 'person@example.test']);
+
+        $this->assertSame('New Name', $user->fresh()->name);
+        Notification::assertNothingSent();
+    }
 }

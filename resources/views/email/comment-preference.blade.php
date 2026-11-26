@@ -38,11 +38,11 @@
                 @if ($changed)
                     <p class="field-hint" role="status" style="margin-top:0">Saved.</p>
                 @endif
-                <form action="{{ $action }}" method="POST" class="stack">
-                    <input type="hidden" name="state" value="{{ $on ? 'off' : 'on' }}">
+                <form action="{{ $action }}" method="POST">
                     <button type="submit" class="btn {{ $on ? '' : 'btn-primary' }}">
                         {{ $on ? 'Turn comment emails off' : 'Turn comment emails back on' }}
                     </button>
+                    <input type="hidden" name="state" value="{{ $on ? 'off' : 'on' }}">
                 </form>
                 <p class="field-hint">Emails about your account and your access to documents are always sent.</p>
             </div>

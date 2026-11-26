@@ -50,10 +50,10 @@ Route::post('/csp-report', CspReportController::class)
 // The comment-email switch behind the link in every comment email (EA-3 / E-06). The signature is the credential, so
 // it works signed out and from a mail client's one-click POST, which carries no CSRF token.
 Route::get('/email/comments/{user}', [CommentEmailPreferenceController::class, 'show'])
-    ->middleware(['signed', 'throttle:30,1'])
+    ->middleware(['signed', 'throttle:30,1,email-prefs'])
     ->name('email.comments');
 Route::post('/email/comments/{user}', [CommentEmailPreferenceController::class, 'update'])
-    ->middleware(['signed', 'throttle:30,1'])
+    ->middleware(['signed', 'throttle:30,1,email-prefs'])
     ->withoutMiddleware([PreventRequestForgery::class])
     ->name('email.comments.update');
 

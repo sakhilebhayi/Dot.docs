@@ -80,7 +80,7 @@ class CommentEmailPreferenceTest extends TestCase
         $id = (string) Str::uuid();
         $user->notifications()->create(['id' => $id, 'type' => 'test', 'data' => ['type' => 'comment', 'url' => url('/documents/x/edit')]]);
 
-        Livewire::actingAs($user)->test(NotificationBell::class)->call('open', $id)->assertRedirect(url('/documents/x/edit'));
+        Livewire::actingAs($user)->test(NotificationBell::class)->call('openNotice', $id)->assertRedirect(url('/documents/x/edit'));
 
         $this->assertNotNull($user->notifications()->first()->read_at);
     }
@@ -91,6 +91,6 @@ class CommentEmailPreferenceTest extends TestCase
         $id = (string) Str::uuid();
         $user->notifications()->create(['id' => $id, 'type' => 'test', 'data' => ['url' => 'https://evil.test/']]);
 
-        Livewire::actingAs($user)->test(NotificationBell::class)->call('open', $id)->assertNoRedirect();
+        Livewire::actingAs($user)->test(NotificationBell::class)->call('openNotice', $id)->assertRedirect(route('dashboard'));
     }
 }

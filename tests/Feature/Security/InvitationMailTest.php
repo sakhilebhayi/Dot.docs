@@ -3,11 +3,11 @@
 namespace Tests\Feature\Security;
 
 use App\Actions\Jetstream\InviteTeamMember;
+use App\Mail\QueuedTeamInvitation;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
-use Laravel\Jetstream\Mail\TeamInvitation;
 use Tests\TestCase;
 
 /**
@@ -29,7 +29,7 @@ class InvitationMailTest extends TestCase
 
         app(InviteTeamMember::class)->invite($owner, $team->fresh(), 'someone@example.com', 'editor');
 
-        Mail::assertQueued(TeamInvitation::class, function (TeamInvitation $mail) {
+        Mail::assertQueued(QueuedTeamInvitation::class, function (QueuedTeamInvitation $mail) {
             $html = $mail->render();
 
             $this->assertStringNotContainsString('href="https://evil.test', $html);

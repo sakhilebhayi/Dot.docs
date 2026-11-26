@@ -57,7 +57,7 @@ class NotificationBell extends Component
      * went out anyway. The address comes from the person's own stored
      * notice, never from the browser.
      */
-    public function open(string $id): void
+    public function openNotice(string $id): void
     {
         $notification = auth()->user()->notifications()->where('id', $id)->first();
 
@@ -68,9 +68,19 @@ class NotificationBell extends Component
         $notification->markAsRead();
         $url = $notification->data['url'] ?? null;
 
-        if (is_string($url) && str_starts_with($url, url('/'))) {
-            $this->redirect($url);
-        }
+        // Named openNotice(), not open(): the component's `$open` property
+        // would shadow a method of that name in the browser's $wire.
+        // Same scheme and host as this app, compared parsed - a plain prefix
+        // test would pass "https://doc.infodot.co.za.evil.com". Anything else
+        // (an old domain in an old row) goes to the dashboard, never nowhere.
+        $here = parse_url(url('/'));
+        $there = is_string($url) ? parse_url($url) : false;
+        $sameSite = is_array($there)
+            && ($there['scheme'] ?? null) === ($here['scheme'] ?? null)
+            && ($there['host'] ?? null) === ($here['host'] ?? null)
+            && ($there['port'] ?? null) === ($here['port'] ?? null);
+
+        $this->redirect($sameSite ? $url : route('dashboard'));
     }
 
     public function toggle(): void

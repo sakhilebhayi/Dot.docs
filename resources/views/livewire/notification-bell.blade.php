@@ -14,7 +14,8 @@
             @forelse ($notifications as $notification)
                 <li class="dh-panel__item" @if (! $notification['read']) data-unread @endif>
                     @if ($notification['url'])
-                        <a href="{{ $notification['url'] }}" wire:click.prevent="open('{{ $notification['id'] }}')">{{ $notification['message'] }}</a>
+                        <a href="{{ $notification['url'] }}"
+                           @click="if (!$event.metaKey && !$event.ctrlKey && !$event.shiftKey && $event.button === 0) { $event.preventDefault(); $wire.openNotice('{{ $notification['id'] }}') }">{{ $notification['message'] }}</a>
                     @else
                         <span>{{ $notification['message'] }}</span>
                     @endif

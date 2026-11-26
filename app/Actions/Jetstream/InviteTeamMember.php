@@ -2,6 +2,7 @@
 
 namespace App\Actions\Jetstream;
 
+use App\Mail\QueuedTeamInvitation;
 use App\Models\Team;
 use App\Models\User;
 use Closure;
@@ -15,8 +16,8 @@ use Illuminate\Validation\ValidationException;
 use Laravel\Jetstream\Contracts\InvitesTeamMembers;
 use Laravel\Jetstream\Events\InvitingTeamMember;
 use Laravel\Jetstream\Jetstream;
-use Laravel\Jetstream\Mail\TeamInvitation;
 use Laravel\Jetstream\Rules\Role;
+use Laravel\Jetstream\TeamInvitation as JetstreamTeamInvitation;
 
 class InviteTeamMember implements InvitesTeamMembers
 {
@@ -51,7 +52,9 @@ class InviteTeamMember implements InvitesTeamMembers
 
         // Queued on the mail queue (EA-3 / E-05): the invitation row exists
         // either way, and a slow SMTP server no longer stalls the request.
-        Mail::to($email)->queue((new TeamInvitation($invitation))->onQueue('mail'));
+        if ($invitation instanceof JetstreamTeamInvitation) {
+            Mail::to($email)->queue((new QueuedTeamInvitation($invitation))->onQueue('mail'));
+        }
     }
 
     /**

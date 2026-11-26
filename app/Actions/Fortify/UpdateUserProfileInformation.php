@@ -29,7 +29,7 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
 
         // With central sign-in on, the address is InfoDot's: changing it here
         // would only make the two disagree (EA-3 / E-03).
-        if ($input['email'] !== $user->email && CentralSignIn::active()) {
+        if (mb_strtolower($input['email']) !== mb_strtolower($user->email) && CentralSignIn::active()) {
             throw ValidationException::withMessages([
                 'email' => __('Your email address is managed by your InfoDot account. Change it there.'),
             ])->errorBag('updateProfileInformation');
@@ -53,7 +53,7 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
 
         // The OLD inbox hears about it, so a hijacked session cannot move
         // the account quietly (EA-3 / E-03).
-        if ($oldEmail !== $user->email) {
+        if (mb_strtolower($oldEmail) !== mb_strtolower($user->email)) {
             Notification::route('mail', $oldEmail)->notify(new EmailAddressChanged($user->email));
         }
     }
