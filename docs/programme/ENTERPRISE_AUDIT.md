@@ -238,3 +238,11 @@ is proposed to land before any phase that adds a migration.
 10. **Old docroot leftovers** (O-17): delete `Dot.docs.tar.gz`, the hand-written `index.php` and the old `build/` from `/home/infodotc/doc.infodot.co.za/` (only after checking nothing serves them).
 11. **Staging** (EA-9): a staging subdomain with its own app folder on the same hosting, for load tests.
 12. **AI provider** (F-03): whether a real model key goes into production; until then the assistant says plainly that it is a demonstration.
+
+### Decided by the owner, 2026-11-26
+- **EA-1 security** merged (#193, `751802b9f`) and deployed the same day after a verified backup; live headers checked, HSTS included.
+- **Account deletion (S-03, EA-2):**
+  1. Documents the leaver owns in a company team **pass to the team's owner**, stay where they are, and the handover is audited.
+  2. Personal documents (no team) are **soft-deleted with the account and purged after 30 days**.
+  3. A person who **owns a company team cannot delete their account** until team ownership has moved to another member.
+  4. Their comments and the versions they wrote on other people's documents are **kept, shown as "Former member"**.
