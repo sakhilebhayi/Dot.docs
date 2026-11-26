@@ -1,0 +1,18 @@
+# Weekly dependency update PRs (EA-1 / S-15). Merging any PR deploys
+# production, so each one is reviewed and merged by hand like any other.
+version: 2
+updates:
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

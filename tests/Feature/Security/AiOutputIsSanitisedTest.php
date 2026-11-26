@@ -4,6 +4,7 @@ namespace Tests\Feature\Security;
 
 use App\Documents\DocumentStore;
 use App\Livewire\Documents\AiAssistant;
+use App\Livewire\Documents\AiChat;
 use App\Models\AiSuggestion;
 use App\Models\User;
 use App\Services\AiService;
@@ -65,5 +66,17 @@ class AiOutputIsSanitisedTest extends TestCase
         $this->assertStringContainsString('could not answer just now', $html);
         $this->assertStringNotContainsString('sk-secret', $html);
         $this->assertStringNotContainsString('onerror', $html);
+    }
+
+    public function test_the_chat_history_cannot_be_written_by_the_browser(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Notes');
+
+        $this->expectException(\Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException::class);
+
+        Livewire::actingAs($user)
+            ->test(AiChat::class, ['document' => $doc])
+            ->set('history', [['role' => 'user', 'content' => str_repeat('x', 500000)]]);
     }
 }

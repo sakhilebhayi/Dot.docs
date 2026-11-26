@@ -71,6 +71,47 @@ class SsrfGuard
     }
 
     /**
+     * The curl CURLOPT_RESOLVE entry that pins $url's host to an address this
+     * guard has just vetted, or null when the URL is not safe.
+     *
+     * isSafeUrl() alone resolves the host, and the HTTP client then resolves
+     * it AGAIN when it connects: a hostile name server can answer the first
+     * lookup with a public address and the second with 169.254.169.254
+     * (DNS rebinding). Handing curl the vetted address closes that gap - the
+     * request goes to exactly the IP that was checked, with the original
+     * Host header and TLS name (EA-1 / S-11).
+     *
+     * @return list<string>|null  [] for an IP literal (nothing to pin)
+     */
+    public static function pinnedResolve(string $url): ?array
+    {
+        if (! self::isSafeUrl($url)) {
+            return null;
+        }
+
+        $parts = parse_url($url);
+        $host = trim((string) $parts['host'], '[]');
+
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return [];
+        }
+
+        $ip = self::resolveAll($host)[0] ?? null;
+
+        // Re-vet the very address that will be used: it is a fresh lookup.
+        if ($ip === null
+            || ! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
+            || self::isCgnat($ip)) {
+            return null;
+        }
+
+        $port = $parts['port'] ?? (strtolower((string) $parts['scheme']) === 'https' ? 443 : 80);
+        $address = str_contains($ip, ':') ? '['.$ip.']' : $ip;
+
+        return [$host.':'.$port.':'.$address];
+    }
+
+    /**
      * 100.64.0.0/10. FILTER_FLAG_NO_PRIV_RANGE covers only RFC1918 and
      * NO_RES_RANGE only 0/8, 127/8, 169.254/16 and 240/4, so this range —
      * shared address space that a host may put internal services on — falls

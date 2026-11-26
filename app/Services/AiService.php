@@ -211,14 +211,17 @@ class AiService
 
         $transcript = [];
 
-        foreach ($history as $turn) {
+        // Bounded whatever the caller passes: the last 20 turns, 4,000
+        // characters each, so one request cannot run far past the per-user
+        // token budget that is checked before the call (EA-1 / S-14).
+        foreach (array_slice($history, -20) as $turn) {
             if (in_array($turn['role'] ?? '', ['user', 'assistant'])) {
                 $label = $turn['role'] === 'user' ? 'User' : 'Assistant';
-                $transcript[] = $label.': '.($turn['content'] ?? '');
+                $transcript[] = $label.': '.mb_substr((string) ($turn['content'] ?? ''), 0, 4000);
             }
         }
 
-        $transcript[] = 'User: '.$message;
+        $transcript[] = 'User: '.mb_substr($message, 0, 4000);
 
         $out = $this->client->text(
             'draft',

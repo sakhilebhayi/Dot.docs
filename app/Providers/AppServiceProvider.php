@@ -18,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\Rules\Password;
 use Livewire\Livewire;
 
 class AppServiceProvider extends ServiceProvider
@@ -31,6 +32,14 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // New passwords: at least 12 characters; in production also refused
+        // when they appear in a known breach (Pwned Passwords range lookup -
+        // only the first five characters of the SHA-1 hash leave the server).
+        // The same rule InfoDot adopted in R-72 (EA-1 / S-08).
+        Password::defaults(fn () => $this->app->isProduction()
+            ? Password::min(12)->uncompromised()
+            : Password::min(12));
+
         // R-50: Livewire updates from a page in the signed-in area carry that page's entitlement check with them.
         Livewire::addPersistentMiddleware([EnsureCompanyEntitled::class]);
 
