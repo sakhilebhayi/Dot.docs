@@ -233,10 +233,11 @@ class CommentThread extends Component
 
         // The author of an old comment may have lost access since writing
         // it, so they must still be able to open the document: a
-        // participant, or anyone at all while it is link-shared.
+        // participant. Publishing does not count - only participants can
+        // open the editor the notification links to.
         User::whereIn('id', $recipientIds)
             ->get()
-            ->filter(fn (User $user) => $this->document->is_public || $participants->contains('id', $user->id))
+            ->filter(fn (User $user) => $participants->contains('id', $user->id))
             ->each(function (User $user) use ($comment) {
                 $this->notifySafely($user, new CommentPostedNotification($this->document, $comment));
                 $this->notifySafely($user, new CommentPostedEmailNotification($this->document, $comment));

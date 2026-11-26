@@ -17,8 +17,16 @@ class DocumentPolicy
     }
 
     /**
-     * Determine whether the user can view the document.
-     * Owner, team members, collaborators, or public documents.
+     * Determine whether the user can view the document inside the app: the
+     * editor, its history, comments, sync, presence and every export.
+     * Owner, team members and named collaborators only.
+     *
+     * Publishing does NOT widen this. A published document is read through
+     * /shared/{uuid} and /d/{slug}, which enforce the link's password and
+     * expiry; letting `is_public` pass here would hand any signed-in account
+     * that holds the link the editor, the full version history (drafts
+     * written before publishing) and the exports, past the password and
+     * after the link expired.
      *
      * Answered from the database every time, never from a cache. This used
      * to be remembered per user for fifteen minutes, and nothing that
@@ -30,10 +38,6 @@ class DocumentPolicy
      */
     public function view(User $user, Document $document): bool
     {
-        if ($document->is_public) {
-            return true;
-        }
-
         if ($document->owner_id === $user->id) {
             return true;
         }

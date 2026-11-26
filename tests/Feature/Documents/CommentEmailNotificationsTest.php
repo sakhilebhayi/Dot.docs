@@ -225,6 +225,8 @@ class CommentEmailNotificationsTest extends TestCase
         $owner = User::factory()->withPersonalTeam()->create();
         $commenter = User::factory()->withPersonalTeam()->create(['name' => 'J. Smith']);
         $doc = app(DocumentStore::class)->create($owner, 'Q3 plan', null, ['is_public' => true]);
+        // Publishing no longer opens the editor to outsiders (EA-1 / S-01): commenting takes participation.
+        $this->collaborate($doc, $commenter);
 
         Livewire::actingAs($commenter)
             ->test(CommentThread::class, ['document' => $doc])

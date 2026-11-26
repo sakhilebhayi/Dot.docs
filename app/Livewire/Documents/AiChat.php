@@ -5,6 +5,7 @@ namespace App\Livewire\Documents;
 use App\Models\Document;
 use App\Services\AiService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 class AiChat extends Component
@@ -15,6 +16,12 @@ class AiChat extends Component
 
     public string $message = '';
 
+    /**
+     * The conversation so far. Locked: the browser may read it but never
+     * write it, so a page cannot stuff the transcript sent to the model
+     * past the token budget the AI guard checks (EA-1 / S-14).
+     */
+    #[Locked]
     public array $history = [];
 
     public bool $loading = false;
@@ -34,6 +41,8 @@ class AiChat extends Component
     public function send(): void
     {
         $this->authorize('view', $this->document);
+
+        $this->validate(['message' => 'nullable|string|max:4000']);
 
         $message = trim($this->message);
         if ($message === '') {
@@ -66,9 +75,10 @@ class AiChat extends Component
 
             $this->history[] = ['role' => 'assistant', 'content' => $reply];
         } catch (\Throwable $e) {
+            report($e);
             $this->history[] = [
                 'role' => 'assistant',
-                'content' => 'Error: '.$e->getMessage(),
+                'content' => 'The assistant could not answer just now. Try again in a minute.',
             ];
         } finally {
             $this->loading = false;

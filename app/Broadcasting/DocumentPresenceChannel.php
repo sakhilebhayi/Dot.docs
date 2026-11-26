@@ -20,8 +20,9 @@ class DocumentPresenceChannel
             return false;
         }
 
-        // Allow access if public, owner, team member, or collaborator
-        if ($document->is_public || $document->owner_id === $user->id) {
+        // Owner, team member or collaborator - DocumentPolicy::view(). A
+        // published document's readers use the public page, not the editor.
+        if ($document->owner_id === $user->id) {
             return $this->memberData($user);
         }
 

@@ -73,16 +73,16 @@ class DocumentSearch
     }
 
     /**
-     * Owner OR named collaborator OR current team OR public - DocumentPolicy
-     * ::view() in one WHERE group.
+     * Owner OR named collaborator OR current team - DocumentPolicy::view() in
+     * one WHERE group. Other companies' published documents are not search
+     * results: their readers use the public link, not the editor.
      *
      * @param  Builder<Document>  $q
      */
     private function visibleTo(Builder $q, User $user): void
     {
         $q->where('owner_id', $user->id)
-            ->orWhereHas('collaborators', fn ($c) => $c->where('user_id', $user->id))
-            ->orWhere('is_public', true);
+            ->orWhereHas('collaborators', fn ($c) => $c->where('user_id', $user->id));
 
         if ($user->currentTeam) {
             $q->orWhere('team_id', $user->currentTeam->id);

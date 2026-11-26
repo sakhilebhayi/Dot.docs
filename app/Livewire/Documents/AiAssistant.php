@@ -5,6 +5,7 @@ namespace App\Livewire\Documents;
 use App\Models\Document;
 use App\Models\DocumentSlashCommand;
 use App\Services\AiService;
+use App\Services\HtmlSanitizer;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\On;
@@ -139,7 +140,10 @@ class AiAssistant extends Component
                 $this->dispatch('ai-result', type: $output['type'], content: $output['content']);
             }
         } catch (\Throwable $e) {
-            $this->result = 'AI request failed: '.$e->getMessage();
+            // The exception text is for the log, not the page: it can carry
+            // provider details, and the result sheet prints HTML (EA-1 / S-04).
+            report($e);
+            $this->result = 'The assistant could not answer just now. Try again in a minute.';
             $this->showResult = true;
         } finally {
             $this->loading = false;
@@ -179,8 +183,21 @@ class AiAssistant extends Component
         // right as typing does. Reading what the assistant says does not.
         $this->authorize('update', $this->document);
 
-        $this->dispatch('ai-apply', content: $this->result);
+        // The cleaned answer, never the raw property the browser could have rewritten.
+        $this->dispatch('ai-apply', content: $this->safeResult());
         $this->showResult = false;
+    }
+
+    /**
+     * The result as it may be printed: model output is steered by the
+     * document's own text (a teammate's, or a pasted page), so it goes through
+     * the same allowlist as every other document HTML before it reaches the
+     * page. `$result` is a public property the browser could also change, so
+     * the cleaning happens here, at render time, every time (EA-1 / S-04).
+     */
+    public function safeResult(): string
+    {
+        return app(HtmlSanitizer::class)->clean($this->result);
     }
 
     public function dismissResult(): void

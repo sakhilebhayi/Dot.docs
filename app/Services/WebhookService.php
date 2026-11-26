@@ -34,7 +34,9 @@ class WebhookService
             // check SKIPS the delivery — it never throws into the request
             // that happened to trigger the webhook — and the warning names
             // the row, not the payload or the URL.
-            if (! SsrfGuard::isSafeUrl((string) $webhook->url)) {
+            $pin = SsrfGuard::pinnedResolve((string) $webhook->url);
+
+            if ($pin === null) {
                 Log::warning('Webhook delivery blocked: target does not resolve to a public address', [
                     'webhook_id' => $webhook->id,
                     'document_id' => $document->id,
@@ -69,6 +71,9 @@ class WebhookService
                 // legitimate reason to redirect; a 3xx is simply a failed
                 // delivery.
                 Http::withHeaders($headers)
+                    // Connect to the address the guard vetted, not to a
+                    // second DNS answer (see SsrfGuard::pinnedResolve()).
+                    ->withOptions($pin === [] ? [] : ['curl' => [CURLOPT_RESOLVE => $pin]])
                     ->withoutRedirecting()
                     ->timeout(5)
                     ->post($webhook->url, $body);

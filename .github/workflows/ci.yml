@@ -90,11 +90,9 @@ jobs:
   composer-audit:
     name: Composer dependency audit
     runs-on: ubuntu-latest
-    # Reports known advisories but never blocks the gate: PHP dependency
-    # upgrades (some of them major) are a deliberate, separate decision,
-    # not something this check should force on an unrelated PR. Check the
-    # Actions run for any newly-introduced advisory.
-    continue-on-error: true
+    # Gates the quality gate on HIGH, CRITICAL and UNRATED advisories (EA-1 /
+    # S-15): every merge deploys production, so a known serious hole must
+    # not ship. Low and medium are printed and do not block.
     steps:
       - uses: actions/checkout@v4
       - name: Setup PHP
@@ -106,14 +104,21 @@ jobs:
         run: composer install --no-interaction --no-progress --prefer-dist
         env:
           BROADCAST_CONNECTION: log
-      - name: composer audit
-        run: composer audit
+      - name: composer audit (blocks on high and critical)
+        run: |
+          composer audit || true
+          composer audit --format=json > audit.json || true
+          # Unrated advisories block too: Symfony and FriendsOfPHP advisories
+          # usually carry no severity. Accept one deliberately with
+          # composer.json "config.audit.ignore", never by weakening this.
+          SERIOUS=$(jq '[.advisories // {} | to_entries[] | .value | (if type == "object" then .[] else .[] end) | select(((.severity // "unrated") | test("high|critical|unrated"; "i")))] | length' audit.json)
+          echo "High, critical or unrated advisories: ${SERIOUS:-unreadable}"
+          test "${SERIOUS:-1}" -eq 0
 
   npm-audit:
     name: npm dependency audit
     runs-on: ubuntu-latest
-    # Same rationale as composer-audit above: visible, never blocking.
-    continue-on-error: true
+    # Same rule as composer-audit: high and critical block the gate.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -127,11 +132,9 @@ jobs:
   quality-gate:
     name: Quality gate (all checks must pass)
     runs-on: ubuntu-latest
-    # composer-audit and npm-audit deliberately do NOT gate this: they
-    # report known advisories on every run (see their own continue-on-error
-    # comments) but a pre-existing, unrelated advisory must never block an
-    # unrelated PR. Check their own job results in the Actions run.
-    needs: [tests, code-style, static-php]
+    # The dependency audits gate too, on high and critical advisories only
+    # (EA-1 / S-15): a merge here is a production deploy.
+    needs: [tests, code-style, static-php, composer-audit, npm-audit]
     if: always()
     steps:
       - name: Evaluate quality gate
@@ -140,6 +143,8 @@ jobs:
           results[tests]="${{ needs.tests.result }}"
           results[code-style]="${{ needs.code-style.result }}"
           results[static-php]="${{ needs.static-php.result }}"
+          results[composer-audit]="${{ needs.composer-audit.result }}"
+          results[npm-audit]="${{ needs.npm-audit.result }}"
           failed=0
           for job in "${!results[@]}"; do
             if [ "${results[$job]}" != "success" ]; then

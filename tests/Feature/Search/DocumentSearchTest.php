@@ -35,7 +35,9 @@ class DocumentSearchTest extends TestCase
         $ids = app(DocumentSearch::class)->search($me, 'Klipfontein')->pluck('id')->all();
 
         $this->assertContains($mine->id, $ids);
-        $this->assertContains($public->id, $ids);
+        // Another company's published document is read on its public page,
+        // not found in this search (EA-1 / S-01, S-17).
+        $this->assertNotContains($public->id, $ids);
         $this->assertNotContains($theirs->id, $ids);
     }
 

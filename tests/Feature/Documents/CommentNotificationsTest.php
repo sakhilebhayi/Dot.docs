@@ -43,6 +43,8 @@ class CommentNotificationsTest extends TestCase
         $owner = User::factory()->withPersonalTeam()->create();
         $commenter = User::factory()->withPersonalTeam()->create();
         $doc = app(DocumentStore::class)->create($owner, 'Shared doc', null, ['is_public' => true]);
+        // Publishing no longer opens the editor to outsiders (EA-1 / S-01): commenting takes participation.
+        $this->collaborate($doc, $commenter);
 
         Livewire::actingAs($commenter)->test(CommentThread::class, ['document' => $doc])
             ->set('newComment', 'Hello there')
@@ -169,6 +171,8 @@ class CommentNotificationsTest extends TestCase
         $owner = User::factory()->withPersonalTeam()->create();
         $replier = User::factory()->withPersonalTeam()->create();
         $doc = app(DocumentStore::class)->create($owner, 'Shared doc', null, ['is_public' => true]);
+        // Publishing no longer opens the editor to outsiders (EA-1 / S-01): commenting takes participation.
+        $this->collaborate($doc, $replier);
         $parent = Comment::create(['document_id' => $doc->id, 'user_id' => $owner->id, 'content' => 'First']);
 
         Livewire::actingAs($replier)->test(CommentThread::class, ['document' => $doc])
@@ -187,6 +191,8 @@ class CommentNotificationsTest extends TestCase
         $owner = User::factory()->withPersonalTeam()->create(['name' => 'docowner']);
         $commenter = User::factory()->withPersonalTeam()->create();
         $doc = app(DocumentStore::class)->create($owner, 'Shared doc', null, ['is_public' => true]);
+        // Publishing no longer opens the editor to outsiders (EA-1 / S-01): commenting takes participation.
+        $this->collaborate($doc, $commenter);
 
         Livewire::actingAs($commenter)->test(CommentThread::class, ['document' => $doc])
             ->set('newComment', 'Hey @docowner take a look')
@@ -288,6 +294,8 @@ class CommentNotificationsTest extends TestCase
         $owner = User::factory()->withPersonalTeam()->create();
         $commenter = User::factory()->withPersonalTeam()->create();
         $doc = app(DocumentStore::class)->create($owner, 'Shared doc', null, ['is_public' => true]);
+        // Publishing no longer opens the editor to outsiders (EA-1 / S-01): commenting takes participation.
+        $this->collaborate($doc, $commenter);
 
         Livewire::actingAs($commenter)->test(CommentThread::class, ['document' => $doc])
             ->set('newComment', 'Hello there')

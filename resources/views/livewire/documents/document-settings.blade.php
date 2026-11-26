@@ -28,13 +28,10 @@
                     @enderror
                 </div>
 
-                <label class="field-check" for="is_public">
-                    <input wire:model="isPublic" type="checkbox" id="is_public" class="field-box" />
-                    <span>
-                        Publish a read-only link
-                        <span class="list-sub">Anyone holding the link can read the document.</span>
-                    </span>
-                </label>
+                <p class="list-sub">
+                    Publishing a read-only link is on the
+                    <a href="{{ route('documents.share', $document->uuid) }}" class="link">Share page</a>.
+                </p>
 
                 <button type="submit" class="btn btn-primary">Save the settings</button>
             </form>
