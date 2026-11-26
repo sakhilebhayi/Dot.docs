@@ -98,6 +98,14 @@ class DocumentImportController extends Controller
             // DOMDocument warning promoted to an ErrorException. None of
             // that is an application fault: it is the same "this file could
             // not be read" the unreadable case already answers 422 with.
+            // From the page (not JSON) the writer goes back to the editor with
+            // the reason in the banner instead of a bare 422 (EA-4 / F-06).
+            if (! $request->expectsJson()) {
+                return redirect()
+                    ->route('documents.edit', $document->uuid)
+                    ->withErrors(['file' => 'That file could not be read, so nothing was imported. Check it opens in Word or a text editor, then try again.']);
+            }
+
             abort(422, 'This file could not be read.');
         }
 

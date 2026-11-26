@@ -728,10 +728,21 @@ class ImportExportTest extends TestCase
         $zip->close();
 
         $this->actingAs($user)
+            ->withHeaders(['Accept' => 'application/json'])
             ->post(route('documents.import', $document->uuid), [
                 'file' => new UploadedFile($corrupt, 'sample.docx', null, null, true),
             ])
             ->assertStatus(422);
+
+        // From the page itself the writer is sent back to the editor with the
+        // reason, not shown a bare 422 page (EA-4 / F-06).
+        $this->flushHeaders()
+            ->actingAs($user)
+            ->post(route('documents.import', $document->uuid), [
+                'file' => new UploadedFile($corrupt, 'sample.docx', null, null, true),
+            ])
+            ->assertRedirect(route('documents.edit', $document->uuid))
+            ->assertSessionHasErrors('file');
 
         @unlink($corrupt);
     }

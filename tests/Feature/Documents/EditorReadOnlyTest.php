@@ -150,7 +150,7 @@ class EditorReadOnlyTest extends TestCase
         $this->assertMatchesRegularExpression('/<select[^>]*id="doc-style-picker"[^>]*\bdisabled\b/s', $viewerPage);
         $this->assertDoesNotMatchRegularExpression('/<select[^>]*id="doc-style-picker"[^>]*\bdisabled\b/s', $ownerPage);
 
-        foreach (['Import it', 'Inline code', 'Suggest instead of editing', 'Start voice typing', '>Move<'] as $writes) {
+        foreach (['Import it', 'Inline code', 'Start voice typing', '>Move<'] as $writes) {
             $this->assertStringNotContainsString($writes, $viewerPage, "a viewer is offered: {$writes}");
             $this->assertStringContainsString($writes, $ownerPage, "the owner lost: {$writes}");
         }
@@ -221,11 +221,13 @@ class EditorReadOnlyTest extends TestCase
     {
         [$owner, $doc] = $this->ownerAndDocument();
 
+        // A result has to have been produced here first: since EA-4 / F-02
+        // the browser cannot hand in its own text to be applied.
         Livewire::actingAs($owner)->test(AiAssistant::class, ['document' => $doc])
-            ->set('result', '<p>Replace everything</p>')
+            ->call('handleAction', 'grammar')
             ->call('applyResult')
             ->assertOk()
-            ->assertDispatched('ai-apply');
+            ->assertDispatched('ai-apply', mode: 'replace');
     }
 
     public function test_the_beacon_and_image_endpoints_refuse_a_viewer_and_change_nothing(): void

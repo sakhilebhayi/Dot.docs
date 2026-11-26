@@ -1,5 +1,18 @@
 {{-- Flash banner. Tone is carried by a WORD and a dot, never by the fill. --}}
 @props(['style' => session('flash.bannerStyle', 'success'), 'message' => session('flash.banner')])
+@php
+    // Pages that redirect with ->with('status', …) or with a `file` error (import,
+    // save to Files, move, save as template) used to lose the message: only
+    // flash.banner was shown (EA-4 / F-05, F-06).
+    if (! $message && session('status')) {
+        $message = session('status');
+        $style = 'success';
+    }
+    if (! $message && isset($errors) && $errors->has('file')) {
+        $message = $errors->first('file');
+        $style = 'danger';
+    }
+@endphp
 
 <div x-data="{{ json_encode(['show' => true, 'style' => $style, 'message' => $message]) }}"
      style="display: none;"

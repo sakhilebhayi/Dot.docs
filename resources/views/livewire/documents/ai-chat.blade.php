@@ -34,11 +34,10 @@
             </div>
         @endforeach
 
-        @if ($loading)
-            <p aria-live="polite">
-                <x-shell.status-word tone="idle" word="Thinking" />
-            </p>
-        @endif
+        {{-- wire:loading: $loading was set and cleared in one request, so it never showed (EA-4 / U-01). --}}
+        <p aria-live="polite" wire:loading wire:target="send">
+            <x-shell.status-word tone="idle" word="Thinking" />
+        </p>
     </div>
 
     <div class="dock-chat-foot">

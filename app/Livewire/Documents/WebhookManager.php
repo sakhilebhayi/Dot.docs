@@ -6,6 +6,7 @@ use App\Models\Document;
 use App\Models\DocumentWebhook;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Str;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 class WebhookManager extends Component
@@ -20,6 +21,14 @@ class WebhookManager extends Component
     public array $newEvents = ['on_save', 'on_export'];
 
     public bool $generateSecret = true;
+
+    /**
+     * The new endpoint's full signing secret, shown ONCE right after it is
+     * created so the receiver can verify X-Dotdocs-Signature; the list only
+     * ever shows its first characters (EA-4 / F-07). Locked: display only.
+     */
+    #[Locked]
+    public ?string $revealedSecret = null;
 
     // Reject confirmation state -- one webhook at a time, mirroring the
     // confirm-then-act pattern already used for Dot.Mines' Level 2 process.
@@ -40,14 +49,18 @@ class WebhookManager extends Component
             'newUrl' => 'required|url|max:500',
         ]);
 
+        $secret = $this->generateSecret ? Str::random(32) : null;
+
         DocumentWebhook::create([
             'document_id' => $this->document->id,
             'user_id' => auth()->id(),
             'url' => $this->newUrl,
             'events' => $this->newEvents ?: ['on_save', 'on_export'],
-            'secret' => $this->generateSecret ? Str::random(32) : null,
+            'secret' => $secret,
             'status' => 'pending_approval',
         ]);
+
+        $this->revealedSecret = $secret;
 
         $this->newUrl = '';
         $this->newEvents = ['on_save', 'on_export'];
@@ -61,7 +74,7 @@ class WebhookManager extends Component
         $webhook = DocumentWebhook::where('document_id', $this->document->id)->findOrFail($id);
 
         if (! in_array($webhook->status, ['active', 'inactive'], true)) {
-            $this->dispatch('notify', ['type' => 'error', 'message' => 'This webhook must be approved before it can be toggled.']);
+            $this->addError('webhook', 'This webhook must be approved before it can be toggled.');
 
             return;
         }
@@ -83,7 +96,7 @@ class WebhookManager extends Component
         $webhook = DocumentWebhook::where('document_id', $this->document->id)->findOrFail($id);
 
         if ($webhook->status !== 'pending_approval') {
-            $this->dispatch('notify', ['type' => 'error', 'message' => 'Only a pending webhook can be approved.']);
+            $this->addError('webhook', 'Only a pending webhook can be approved.');
 
             return;
         }
@@ -102,13 +115,13 @@ class WebhookManager extends Component
         $webhook = DocumentWebhook::where('document_id', $this->document->id)->findOrFail($id);
 
         if ($webhook->status !== 'pending_approval') {
-            $this->dispatch('notify', ['type' => 'error', 'message' => 'Only a pending webhook can be rejected.']);
+            $this->addError('webhook', 'Only a pending webhook can be rejected.');
 
             return;
         }
 
         if (trim($reason) === '') {
-            $this->dispatch('notify', ['type' => 'error', 'message' => 'A rejection reason is required.']);
+            $this->addError('webhook', 'A rejection reason is required.');
 
             return;
         }
@@ -149,5 +162,10 @@ class WebhookManager extends Component
         $webhooks = DocumentWebhook::where('document_id', $this->document->id)->latest()->get();
 
         return view('livewire.documents.webhook-manager', compact('webhooks'));
+    }
+
+    public function forgetSecret(): void
+    {
+        $this->revealedSecret = null;
     }
 }
