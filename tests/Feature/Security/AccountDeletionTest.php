@@ -10,7 +10,10 @@ use App\Models\AuditLog;
 use App\Models\Comment;
 use App\Models\Document;
 use App\Models\DocumentVersion;
+use App\Models\DocumentWebhook;
+use App\Models\Files\Obj;
 use App\Models\User;
+use App\Notifications\CommentPostedEmailNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 use Laravel\Jetstream\Http\Livewire\DeleteUserForm;
@@ -114,7 +117,7 @@ class AccountDeletionTest extends TestCase
             app(DeleteUser::class)->delete($owner);
             $this->fail('deletion should be refused');
         } catch (ValidationException $e) {
-            $this->assertStringContainsString('Make another member its owner', $e->errors()['password'][0]);
+            $this->assertStringContainsString('Another member must become its owner', $e->errors()['password'][0]);
         }
 
         $this->assertNotNull($owner->fresh());
@@ -156,5 +159,114 @@ class AccountDeletionTest extends TestCase
         $this->actingAs($owner);
         Livewire::test(CommentThread::class, ['document' => $doc->fresh()])->assertSee('Former member')->assertSee('My review note');
         Livewire::test(VersionHistory::class, ['uuid' => $doc->uuid])->assertSee('Former member');
+    }
+
+    public function test_a_personal_document_binned_long_ago_still_gets_its_30_days(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Old draft');
+        $doc->delete();
+        Document::withTrashed()->whereKey($doc->id)->update(['deleted_at' => now()->subDays(60)]);
+
+        app(DeleteUser::class)->delete($user);
+        $this->artisan('doc:purge-deleted-accounts')->assertSuccessful();
+
+        $this->assertNotNull(Document::withTrashed()->find($doc->id), 'the 30 days start at the account deletion');
+    }
+
+    public function test_every_purge_is_audited(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Gone later');
+        app(DeleteUser::class)->delete($user);
+
+        $this->travel(31)->days();
+        $this->artisan('doc:purge-deleted-accounts')->assertSuccessful();
+
+        $this->assertTrue(AuditLog::where('action', 'document.purged')->where('subject_id', $doc->id)->exists());
+    }
+
+    public function test_another_persons_document_in_a_team_that_goes_moves_to_their_own_team(): void
+    {
+        $leaver = User::factory()->withPersonalTeam()->create();
+        $former = User::factory()->withPersonalTeam()->create();
+        $team = $leaver->currentTeam;
+        $doc = app(DocumentStore::class)->create($former, 'Written while a member', null, ['team_id' => $team->id]);
+        // They have since left the team; it now has no other members.
+
+        app(DeleteUser::class)->delete($leaver);
+
+        $doc = Document::find($doc->id);
+        $this->assertNotNull($doc);
+        $this->assertSame($former->personalTeam()->id, (int) $doc->team_id);
+        $this->assertNotNull(Obj::where('objectable_type', 'document')->where('objectable_id', $doc->id)->first(), 'listed in their tree');
+        $this->assertTrue($former->can('view', $doc));
+    }
+
+    public function test_the_leavers_webhooks_on_a_handed_over_document_keep_running_under_the_new_owner(): void
+    {
+        [$owner, $member] = $this->companyWithMember();
+        $doc = app(DocumentStore::class)->create($member, 'Integrated');
+        $hook = DocumentWebhook::create(['document_id' => $doc->id, 'user_id' => $member->id, 'url' => 'https://93.184.216.34/hook', 'events' => ['on_save'], 'status' => 'active']);
+
+        app(DeleteUser::class)->delete($member);
+
+        $this->assertSame($owner->id, (int) $hook->fresh()->user_id);
+    }
+
+    public function test_support_can_move_team_ownership_so_the_owner_can_then_leave(): void
+    {
+        [$owner, $member] = $this->companyWithMember();
+        $team = $owner->currentTeam;
+
+        $this->artisan('doc:transfer-team-ownership', ['team' => $team->id, 'email' => $member->email])->assertSuccessful();
+
+        $team->refresh();
+        $this->assertSame($member->id, (int) $team->user_id);
+        $this->assertTrue($team->users()->whereKey($owner->id)->exists(), 'the old owner stays as a member');
+        $this->assertTrue(AuditLog::where('action', 'team.owner_transferred')->exists());
+
+        $doc = app(DocumentStore::class)->create($owner, 'Handbook', null, ['team_id' => $team->id]);
+        app(DeleteUser::class)->delete($owner->fresh());
+
+        $this->assertSame($member->id, (int) Document::find($doc->id)->owner_id);
+        $this->assertNotNull($team->fresh());
+    }
+
+    public function test_ownership_cannot_go_to_someone_outside_the_team(): void
+    {
+        [$owner] = $this->companyWithMember();
+        $stranger = User::factory()->withPersonalTeam()->create();
+
+        $this->artisan('doc:transfer-team-ownership', ['team' => $owner->currentTeam->id, 'email' => $stranger->email])->assertFailed();
+        $this->assertSame($owner->id, (int) $owner->currentTeam->fresh()->user_id);
+    }
+
+    public function test_support_can_restore_a_deleted_accounts_document_to_a_living_account(): void
+    {
+        $leaver = User::factory()->withPersonalTeam()->create();
+        $heir = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($leaver, 'Wanted after all');
+        app(DeleteUser::class)->delete($leaver);
+
+        $this->artisan('doc:restore-deleted-account-document', ['uuid' => $doc->uuid, 'email' => $heir->email])->assertSuccessful();
+
+        $doc = Document::find($doc->id);
+        $this->assertNotNull($doc, 'live again');
+        $this->assertSame($heir->id, (int) $doc->owner_id);
+        $this->assertTrue($heir->can('update', $doc));
+        $this->assertNotNull(Obj::where('objectable_type', 'document')->where('objectable_id', $doc->id)->first());
+    }
+
+    public function test_a_comment_notice_for_an_author_who_has_since_left_still_renders(): void
+    {
+        [$owner, $member] = $this->companyWithMember();
+        $doc = app(DocumentStore::class)->create($owner, 'Plan');
+        $comment = Comment::create(['document_id' => $doc->id, 'user_id' => $member->id, 'content' => 'Note']);
+        $mail = new CommentPostedEmailNotification($doc, $comment);
+
+        app(DeleteUser::class)->delete($member);
+
+        $this->assertStringContainsString('Former member', implode(' ', array_map('strval', $mail->toMail($owner)->introLines)));
     }
 }

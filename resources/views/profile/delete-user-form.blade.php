@@ -9,7 +9,7 @@
 
     <x-slot name="content">
         <p class="field-hint">
-            {{ __('Documents you own in a company team pass to that team\'s owner and stay where they are. Your personal documents can be recovered for 30 days, then they are deleted for good. Your comments and edits on colleagues\' documents stay, shown as "Former member". If you own a team that others use, make another member its owner first.') }}
+            {{ __('Documents you own in a company team pass to that team\'s owner and stay where they are. Your administrator can recover your personal documents for 30 days, then they are deleted for good. Your comments and edits on colleagues\' documents stay, shown as "Former member". If you own a team that others use, another member must become its owner first.') }}
         </p>
 
         <div class="toolbar">

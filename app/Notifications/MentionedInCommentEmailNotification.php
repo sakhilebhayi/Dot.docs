@@ -31,7 +31,7 @@ class MentionedInCommentEmailNotification extends CommentEmailNotification
     {
         return (new MailMessage)
             ->subject('You were mentioned in "'.MailText::subject($this->document->title, 60).'"')
-            ->line(new HtmlString(MailText::plain($this->comment->user->name, 40).' mentioned you in a comment on &quot;'.MailText::plain($this->document->title, 60).'&quot;.'))
+            ->line(new HtmlString(MailText::plain($this->comment->user->name ?? 'Former member', 40).' mentioned you in a comment on &quot;'.MailText::plain($this->document->title, 60).'&quot;.'))
             ->line(new HtmlString('&quot;'.MailText::plain($this->comment->content, 120).'&quot;'))
             ->action('View Document', route('documents.edit', $this->document->uuid));
     }

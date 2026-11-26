@@ -3,10 +3,13 @@
 namespace App\Actions\Jetstream;
 
 use App\Audit\AuditLogger;
+use App\Files\FilesService;
 use App\Models\Document;
+use App\Models\DocumentWebhook;
 use App\Models\Files\Obj;
 use App\Models\Team;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Laravel\Jetstream\Contracts\DeletesTeams;
@@ -42,12 +45,15 @@ class DeleteUser implements DeletesUsers
      */
     public function delete(User $user): void
     {
-        $this->refuseWhileOwningASharedTeam($user);
-
         DB::transaction(function () use ($user) {
+            // Inside the transaction, so an invitation accepted between the
+            // check and the delete cannot have its team purged.
+            $this->refuseWhileOwningASharedTeam($user);
+
             $leavingTeamIds = $user->ownedTeams()->pluck('id');
 
             $this->handOverCompanyDocuments($user, $leavingTeamIds->all());
+            $this->refileOthersDocumentsFromLeavingTeams($user, $leavingTeamIds->all());
             $this->setAsidePersonalDocuments($user);
 
             $this->deleteTeams($user);
@@ -69,7 +75,7 @@ class DeleteUser implements DeletesUsers
 
         if ($shared->isNotEmpty()) {
             throw ValidationException::withMessages([
-                'password' => __('You own :teams, which other people still use. Make another member its owner before you delete your account.', [
+                'password' => __('You own :teams, which other people still use. Another member must become its owner before you delete your account: ask your Dot.docs administrator to transfer it.', [
                     'teams' => $shared->map(fn (string $name) => '"'.$name.'"')->join(', ', ' and '),
                 ]),
             ]);
@@ -104,12 +110,59 @@ class DeleteUser implements DeletesUsers
                     }
 
                     Document::withTrashed()->whereKey($document->id)->update(['owner_id' => $team->user_id]);
+                    Cache::forget("doc.content.{$document->uuid}");
+                    Cache::forget("doc.record.{$document->uuid}");
+
+                    // The company's integrations on this document keep running
+                    // under its new owner instead of vanishing with the account.
+                    DocumentWebhook::where('document_id', $document->id)
+                        ->where('user_id', $user->id)
+                        ->update(['user_id' => $team->user_id]);
 
                     $audit->record('document.owner_transferred', $document, [
                         'reason' => 'account_deleted',
                         'from_user_id' => $user->id,
                         'to_user_id' => (int) $team->user_id,
                     ], $user);
+                }
+            });
+    }
+
+    /**
+     * A team that goes with the account (the leaver owns it and nobody else
+     * is in it) may still hold documents of OTHER people - written while they
+     * were members. Deleting the team would leave them with no team and no
+     * tree node, listed nowhere. They move to their owner's personal team
+     * root instead, where the owner finds them.
+     *
+     * @param  list<int>  $leavingTeamIds
+     */
+    protected function refileOthersDocumentsFromLeavingTeams(User $user, array $leavingTeamIds): void
+    {
+        if ($leavingTeamIds === []) {
+            return;
+        }
+
+        $files = app(FilesService::class);
+
+        Document::withTrashed()
+            ->whereIn('team_id', $leavingTeamIds)
+            ->where('owner_id', '!=', $user->id)
+            ->with('owner')
+            ->chunkById(200, function ($documents) use ($files) {
+                foreach ($documents as $document) {
+                    $owner = $document->owner;
+                    $home = $owner instanceof User ? $owner->personalTeam() : null;
+
+                    if (! $home instanceof Team) {
+                        continue;
+                    }
+
+                    $document->forceFill(['team_id' => $home->id])->saveQuietly();
+
+                    if (! $document->trashed()) {
+                        $files->registerDocument($document, $files->root($home));
+                    }
                 }
             });
     }
@@ -133,6 +186,13 @@ class DeleteUser implements DeletesUsers
                     $document->delete();
                 }
             });
+
+        // Already in the bin: the 30 days count from the account's deletion,
+        // not from when the document was binned, or the next nightly purge
+        // would remove a long-binned one at once.
+        Document::onlyTrashed()
+            ->where('owner_id', $user->id)
+            ->update(['deleted_at' => now()]);
     }
 
     /**

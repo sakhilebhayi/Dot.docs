@@ -33,7 +33,7 @@ class MentionedInCommentNotification extends Notification
             'document_uuid' => $this->document->uuid,
             'document_title' => $this->document->title,
             'comment_id' => $this->comment->id,
-            'mentioner' => $this->comment->user->name,
+            'mentioner' => $this->comment->user->name ?? 'Former member',
             'excerpt' => Str::limit($this->comment->content, 80),
             'url' => route('documents.edit', $this->document->uuid),
         ];

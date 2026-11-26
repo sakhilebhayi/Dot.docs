@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Actions\Jetstream\DeleteUser;
+use App\Audit\AuditLogger;
 use App\Models\Document;
 use App\Models\Files\Obj;
 use Illuminate\Console\Command;
@@ -42,6 +43,10 @@ class PurgeDeletedAccountDocuments extends Command
             ->where('deleted_at', '<=', now()->subDays($days))
             ->chunkById(100, function ($documents) use (&$purged) {
                 foreach ($documents as $document) {
+                    app(AuditLogger::class)->record('document.purged', $document, [
+                        'reason' => 'account_deleted_30_days',
+                        'deleted_at' => $document->deleted_at?->toIso8601String(),
+                    ]);
                     Obj::where('objectable_type', 'document')->where('objectable_id', $document->id)->delete();
                     $document->forceDelete();
                     $purged++;
