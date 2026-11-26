@@ -2,12 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Mail\QueuedTeamInvitation;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
 use Laravel\Jetstream\Features;
 use Laravel\Jetstream\Http\Livewire\TeamMemberManager;
-use Laravel\Jetstream\Mail\TeamInvitation;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -31,7 +31,7 @@ class InviteTeamMemberTest extends TestCase
                 'role' => 'admin',
             ])->call('addTeamMember');
 
-        Mail::assertSent(TeamInvitation::class);
+        Mail::assertQueued(QueuedTeamInvitation::class);
 
         $this->assertCount(1, $user->currentTeam->fresh()->teamInvitations);
     }

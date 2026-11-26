@@ -29,10 +29,10 @@ class MentionedInCommentEmailNotification extends CommentEmailNotification
 
     public function toMail(object $notifiable): MailMessage
     {
-        return (new MailMessage)
+        return $this->withUnsubscribe((new MailMessage)
             ->subject('You were mentioned in "'.MailText::subject($this->document->title, 60).'"')
             ->line(new HtmlString(MailText::plain($this->comment->user->name ?? 'Former member', 40).' mentioned you in a comment on &quot;'.MailText::plain($this->document->title, 60).'&quot;.'))
             ->line(new HtmlString('&quot;'.MailText::plain($this->comment->content, 120).'&quot;'))
-            ->action('View Document', route('documents.edit', $this->document->uuid));
+            ->action('View Document', route('documents.edit', $this->document->uuid)), $notifiable);
     }
 }

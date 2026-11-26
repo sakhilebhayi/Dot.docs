@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -297,8 +298,11 @@ class CommentThread extends Component
     {
         try {
             $user->notify($notification);
-        } catch (\Throwable) {
-            // Notification channel unavailable (e.g. Reverb unreachable)
+        } catch (\Throwable $e) {
+            // Notification channel unavailable (e.g. Reverb unreachable).
+            // Logged, never silent (EA-3 / E-02): the Guardian error-rate
+            // check reads the log. The class only - no address, no text.
+            Log::warning('Comment notification could not be sent.', ['notice' => $notification::class, 'error' => $e::class]);
         }
     }
 

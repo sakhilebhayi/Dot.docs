@@ -50,6 +50,39 @@ class NotificationBell extends Component
         $this->loadNotifications();
     }
 
+    /**
+     * Marks the notice read, THEN goes to it (EA-3 / E-08). A link with a
+     * wire:click beside it raced the navigation: the browser often cancelled
+     * the Livewire request, the notice stayed unread, and the delayed email
+     * went out anyway. The address comes from the person's own stored
+     * notice, never from the browser.
+     */
+    public function openNotice(string $id): void
+    {
+        $notification = auth()->user()->notifications()->where('id', $id)->first();
+
+        if ($notification === null) {
+            return;
+        }
+
+        $notification->markAsRead();
+        $url = $notification->data['url'] ?? null;
+
+        // Named openNotice(), not open(): the component's `$open` property
+        // would shadow a method of that name in the browser's $wire.
+        // Same scheme and host as this app, compared parsed - a plain prefix
+        // test would pass "https://doc.infodot.co.za.evil.com". Anything else
+        // (an old domain in an old row) goes to the dashboard, never nowhere.
+        $here = parse_url(url('/'));
+        $there = is_string($url) ? parse_url($url) : false;
+        $sameSite = is_array($there)
+            && ($there['scheme'] ?? null) === ($here['scheme'] ?? null)
+            && ($there['host'] ?? null) === ($here['host'] ?? null)
+            && ($there['port'] ?? null) === ($here['port'] ?? null);
+
+        $this->redirect($sameSite ? $url : route('dashboard'));
+    }
+
     public function toggle(): void
     {
         $this->open = ! $this->open;
@@ -63,6 +96,8 @@ class NotificationBell extends Component
         return match ($data['type'] ?? '') {
             'comment' => ($data['commenter'] ?? 'Someone').' commented on "'.($data['document_title'] ?? 'a document').'"',
             'mention' => ($data['mentioner'] ?? 'Someone').' mentioned you in "'.($data['document_title'] ?? 'a document').'"',
+            'shared' => ($data['actor'] ?? 'Someone').' shared "'.($data['document_title'] ?? 'a document').'" with you',
+            'access_changed' => ($data['actor'] ?? 'Someone').' changed your access to "'.($data['document_title'] ?? 'a document').'"',
             default => 'You have a new notification',
         };
     }

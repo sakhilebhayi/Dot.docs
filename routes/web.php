@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\EcosystemAuthController;
+use App\Http\Controllers\CommentEmailPreferenceController;
 use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\DocumentAutosaveController;
 use App\Http\Controllers\DocumentExportController;
@@ -45,6 +46,16 @@ Route::post('/csp-report', CspReportController::class)
     ->withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])
     ->middleware('throttle:60,1,csp-report')
     ->name('csp.report');
+
+// The comment-email switch behind the link in every comment email (EA-3 / E-06). The signature is the credential, so
+// it works signed out and from a mail client's one-click POST, which carries no CSRF token.
+Route::get('/email/comments/{user}', [CommentEmailPreferenceController::class, 'show'])
+    ->middleware(['signed', 'throttle:30,1,email-prefs'])
+    ->name('email.comments');
+Route::post('/email/comments/{user}', [CommentEmailPreferenceController::class, 'update'])
+    ->middleware(['signed', 'throttle:30,1,email-prefs'])
+    ->withoutMiddleware([PreventRequestForgery::class])
+    ->name('email.comments.update');
 
 // Links minted before the token moved into a POST body carried it in the URL. They are no longer honoured:
 // the visitor is sent to the normal sign-in page and the token in the URL is never read.

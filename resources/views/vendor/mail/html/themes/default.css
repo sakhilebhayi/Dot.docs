@@ -35,7 +35,8 @@ blockquote {
 }
 
 a {
-    color: #c9970f;
+    /* Same gold, darkened to 5.5:1 on white and 4.6:1 on the sand frame (WCAG AA; EA-3 / E-09). Was #c9970f, 2.6:1. */
+    color: #86630a;
 }
 
 a img {
@@ -185,13 +186,13 @@ img {
 }
 
 .footer p {
-    color: #928a78;
+    color: #706857; /* 5.5:1 on white (EA-3 / E-09); was #928a78, 3.4:1 */
     font-size: 12px;
     text-align: center;
 }
 
 .footer a {
-    color: #928a78;
+    color: #706857; /* 5.5:1 on white (EA-3 / E-09); was #928a78, 3.4:1 */
     text-decoration: underline;
 }
 

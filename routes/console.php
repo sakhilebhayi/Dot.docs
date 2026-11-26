@@ -7,6 +7,7 @@ use App\Jobs\QueueHeartbeat;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
@@ -58,3 +59,10 @@ Schedule::command(BackupSqliteDatabase::class)->dailyAt('02:35')->onOneServer();
 // then go for good. After the nightly backup, so the last copy before a purge
 // still holds them.
 Schedule::command(PurgeDeletedAccountDocuments::class)->dailyAt('03:15')->onOneServer();
+
+// EA-3 / E-07: the bell keeps 90 days of read notices and 180 days of unread
+// ones; older rows only show stale titles of documents that may be gone.
+Schedule::call(function () {
+    DB::table('notifications')->whereNotNull('read_at')->where('created_at', '<', now()->subDays(90))->delete();
+    DB::table('notifications')->where('created_at', '<', now()->subDays(180))->delete();
+})->dailyAt('03:30')->name('prune-bell-notifications')->onOneServer();

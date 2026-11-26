@@ -6,7 +6,12 @@ use App\Audit\AuditLogger;
 use App\Models\Document;
 use App\Models\DocumentCollaborator;
 use App\Models\User;
+use App\Notifications\Account\DocumentAccessRemoved;
+use App\Notifications\Account\DocumentPublishedByAnother;
+use App\Notifications\Account\DocumentSharedBell;
+use App\Notifications\Account\DocumentSharedWithYou;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Component;
 
@@ -84,6 +89,9 @@ class ShareManager extends Component
             : '';
     }
 
+    /** Shown under the invite form after a share or a role change. */
+    public string $inviteNotice = '';
+
     public function invite(): void
     {
         $this->authorize('share', $this->document);
@@ -92,12 +100,30 @@ class ShareManager extends Component
             'inviteRole' => 'required|in:viewer,editor,admin',
         ]);
 
+        // Handing out the admin role is a share-settings power: an editor may
+        // invite, but not make anyone (themselves included) more than an editor.
+        if ($this->inviteRole === 'admin') {
+            $this->authorize('manage', $this->document);
+        }
+
         $user = User::where('email', $this->inviteEmail)->firstOrFail();
+        $before = DocumentCollaborator::where('document_id', $this->document->id)->where('user_id', $user->id)->value('role');
 
         DocumentCollaborator::updateOrCreate(
             ['document_id' => $this->document->id, 'user_id' => $user->id],
             ['role' => $this->inviteRole]
         );
+
+        // The person hears about it (EA-3 / E-04, F-11): the bell at once,
+        // the email from the queue. Nothing when the role did not change or
+        // when somebody adds themselves.
+        if ($before !== $this->inviteRole && $user->id !== Auth::id()) {
+            $changed = $before !== null;
+            $actor = (string) Auth::user()?->name;
+            $user->notify(new DocumentSharedBell($this->document, $actor, $changed));
+            $user->notify(new DocumentSharedWithYou($this->document, $this->inviteRole, $actor, $changed));
+            $this->inviteNotice = $changed ? 'Access changed. They have been told.' : 'Shared. They have been told by email.';
+        }
 
         $this->inviteEmail = '';
         $this->inviteRole = 'viewer';
@@ -107,9 +133,19 @@ class ShareManager extends Component
     public function removeCollaborator(int $collaboratorId): void
     {
         $this->authorize('share', $this->document);
-        DocumentCollaborator::where('id', $collaboratorId)
+        $collaborator = DocumentCollaborator::where('id', $collaboratorId)
             ->where('document_id', $this->document->id)
-            ->delete();
+            ->with('user')
+            ->first();
+
+        if ($collaborator !== null) {
+            $collaborator->delete();
+
+            $removed = $collaborator->user;
+            if ($removed instanceof User && $removed->id !== Auth::id()) {
+                $removed->notify(new DocumentAccessRemoved($this->document->title, (string) Auth::user()?->name));
+            }
+        }
 
         $this->document->load('collaborators.user');
     }
@@ -124,6 +160,13 @@ class ShareManager extends Component
             : '';
         $this->refreshPublishedLink();
         $this->auditShareChange(['is_public' => (bool) $this->document->is_public]);
+
+        // A team admin can publish a document somebody else owns: the owner
+        // is told (EA-3 / E-04).
+        $owner = $this->document->owner;
+        if ($owner instanceof User && $owner->id !== Auth::id()) {
+            $owner->notify(new DocumentPublishedByAnother($this->document, (string) Auth::user()?->name, (bool) $this->document->is_public));
+        }
     }
 
     public function saveShareOptions(): void

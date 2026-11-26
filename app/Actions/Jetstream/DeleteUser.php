@@ -9,8 +9,10 @@ use App\Models\DocumentWebhook;
 use App\Models\Files\Obj;
 use App\Models\Team;
 use App\Models\User;
+use App\Notifications\Account\AccountDeleted;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\ValidationException;
 use Laravel\Jetstream\Contracts\DeletesTeams;
 use Laravel\Jetstream\Contracts\DeletesUsers;
@@ -45,6 +47,8 @@ class DeleteUser implements DeletesUsers
      */
     public function delete(User $user): void
     {
+        $address = $user->email;
+
         DB::transaction(function () use ($user) {
             // Inside the transaction, so an invitation accepted between the
             // check and the delete cannot have its team purged.
@@ -61,6 +65,10 @@ class DeleteUser implements DeletesUsers
             $user->tokens->each->delete();
             $user->delete();
         });
+
+        // Confirmation to the address the account had (EA-3 / E-04). After the
+        // commit, so a refused or failed deletion sends nothing.
+        Notification::route('mail', $address)->notify(new AccountDeleted);
     }
 
     /**
