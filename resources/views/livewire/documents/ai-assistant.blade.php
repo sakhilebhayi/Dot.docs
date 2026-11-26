@@ -48,7 +48,7 @@
                     <h2 class="h-panel" id="ai-result-title">In marker — {{ ucfirst($action) }}</h2>
                 </div>
                 <div class="sheet-body ink-marker">
-                    {!! $result !!}
+                    {!! $this->safeResult() !!}
                 </div>
                 <div class="sheet-foot">
                     <button type="button" class="btn" wire:click="dismissResult">Drop it</button>

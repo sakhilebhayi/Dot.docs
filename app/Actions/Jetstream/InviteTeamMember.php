@@ -8,8 +8,10 @@ use Closure;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Laravel\Jetstream\Contracts\InvitesTeamMembers;
 use Laravel\Jetstream\Events\InvitingTeamMember;
 use Laravel\Jetstream\Jetstream;
@@ -19,6 +21,13 @@ use Laravel\Jetstream\Rules\Role;
 class InviteTeamMember implements InvitesTeamMembers
 {
     /**
+     * Invitations one person may send in an hour. An invitation is mail sent
+     * from this app's domain to any address the inviter types, so it is
+     * bounded like every other mail a user can trigger (EA-1 / E-01).
+     */
+    public const PER_HOUR = 20;
+
+    /**
      * Invite a new team member to the given team.
      */
     public function invite(User $user, Team $team, string $email, ?string $role = null): void
@@ -26,6 +35,12 @@ class InviteTeamMember implements InvitesTeamMembers
         Gate::forUser($user)->authorize('addTeamMember', $team);
 
         $this->validate($team, $email, $role);
+
+        if (! RateLimiter::attempt('team-invite:'.$user->id, self::PER_HOUR, fn () => true, 3600)) {
+            throw ValidationException::withMessages([
+                'email' => __('You have sent a lot of invitations in the last hour. Try again later.'),
+            ])->errorBag('addTeamMember');
+        }
 
         InvitingTeamMember::dispatch($team, $email, $role);
 
