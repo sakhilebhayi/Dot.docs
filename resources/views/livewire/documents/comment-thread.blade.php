@@ -119,7 +119,7 @@
             @if (count($mentionResults) > 0)
                 <ul class="menu-list" style="position:static;margin-top:var(--s2)">
                     @foreach ($mentionResults as $u)
-                        <li><button type="button" x-on:click="insertMention('{{ $u['name'] }}')">{{ $u['name'] }}</button></li>
+                        <li><button type="button" x-on:click="insertMention(@js($u['name']))">{{ $u['name'] }}</button></li>
                     @endforeach
                 </ul>
             @endif

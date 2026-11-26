@@ -154,7 +154,7 @@ class Navigator extends Component
             'is_public' => false,
         ], $parent);
 
-        session()->flash('status', 'Choose the file to import from the editor\'s Import menu.');
+        session()->flash('status', 'New document created here. Choose your file from the Import menu to bring its contents in.');
 
         $this->redirect(route('documents.edit', $document->uuid));
     }

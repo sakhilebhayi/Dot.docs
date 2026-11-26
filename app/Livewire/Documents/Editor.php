@@ -41,9 +41,6 @@ class Editor extends Component
 
     public array $activeUsers = [];
 
-    /** Suggestion / track-changes mode */
-    public bool $suggestionMode = false;
-
     /** Pending suggestions (not yet accepted/rejected) */
     public array $pendingSuggestions = [];
 
@@ -216,11 +213,6 @@ class Editor extends Component
     public function canEdit(): bool
     {
         return Auth::user()->can('update', $this->document);
-    }
-
-    public function toggleSuggestionMode(): void
-    {
-        $this->suggestionMode = ! $this->suggestionMode;
     }
 
     public function toggleCommentSidebar(): void

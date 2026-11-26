@@ -9,6 +9,25 @@
         until you approve it.
     </p>
 
+    {{-- Failures of approve / reject / toggle used to go to a `notify` event nothing listened to (EA-4 / F-08). --}}
+    @error('webhook')
+        <p class="note note-danger" role="alert">
+            <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
+            {{ $message }}
+        </p>
+    @enderror
+
+    @if ($revealedSecret)
+        <div class="note" role="status">
+            <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
+            <span style="flex:1 1 auto">
+                Signing secret for the new endpoint. Copy it into the receiver now: it is not shown in full again.
+                <code class="micro" style="display:block;user-select:all;word-break:break-all;margin-top:var(--s1)">{{ $revealedSecret }}</code>
+            </span>
+            <button type="button" class="btn btn-quiet btn-sm" wire:click="forgetSecret">I have copied it</button>
+        </div>
+    @endif
+
     @if ($pendingWebhooks->isNotEmpty())
         <section aria-labelledby="hook-pending">
             <h3 class="section-title" id="hook-pending">Waiting for your approval</h3>

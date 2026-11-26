@@ -1,4 +1,10 @@
 <div>
+    {{-- Toolbar actions arrive as the ai-action event (handleAction); this is their progress (EA-4 / U-01). --}}
+    <p class="note" role="status" wire:loading.flex wire:target="handleAction" style="position:fixed;bottom:var(--s4);right:var(--s4);z-index:90;margin:0">
+        <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+        The assistant is working…
+    </p>
+
     {{-- Command palette --}}
     @if ($showPalette)
         <div class="scrim" style="align-items:flex-start;padding-top:12vh" role="dialog" aria-modal="true"
@@ -9,14 +15,13 @@
                     <input id="ai-command" wire:model="command" wire:keydown.enter="runCommand"
                            wire:keydown.escape="closePalette" type="text" class="field"
                            placeholder="/summarize, /grammar, /tone formal, /translate French" />
-                    @if ($loading)
-                        <span class="toolbar" aria-live="polite">
-                            <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
-                            <span class="micro">Working</span>
-                        </span>
-                    @else
-                        <button type="button" class="btn btn-primary" wire:click="runCommand">Run</button>
-                    @endif
+                    {{-- wire:loading, not $loading: the flag was set and cleared inside one
+                         request, so the browser never saw it (EA-4 / U-01). --}}
+                    <span class="toolbar" aria-live="polite" wire:loading.flex wire:target="runCommand">
+                        <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                        <span class="micro">Working</span>
+                    </span>
+                    <button type="button" class="btn btn-primary" wire:click="runCommand" wire:loading.remove wire:target="runCommand">Run</button>
                 </div>
 
                 <ul class="list" style="max-height:46vh;overflow-y:auto">
@@ -47,16 +52,26 @@
                     <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
                     <h2 class="h-panel" id="ai-result-title">In marker — {{ ucfirst($action) }}</h2>
                 </div>
+                @if ($this->isDemonstration())
+                    <p class="note" role="note" style="margin:0">
+                        <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
+                        Demonstration answer: no AI model is connected to {{ config('app.name') }} yet, so this text is a placeholder.
+                    </p>
+                @endif
                 <div class="sheet-body ink-marker">
                     {!! $this->safeResult() !!}
                 </div>
                 <div class="sheet-foot">
-                    <button type="button" class="btn" wire:click="dismissResult">Drop it</button>
-                    @can('update', $document)
-                        <button type="button" class="btn btn-primary" wire:click="applyResult">Accept it into the document</button>
-                    @else
-                        <span class="micro">You can read this document but not change it.</span>
-                    @endcan
+                    <button type="button" class="btn" wire:click="dismissResult">{{ $applyMode === null ? 'Close' : 'Drop it' }}</button>
+                    @if ($applyMode !== null)
+                        @can('update', $document)
+                            <button type="button" class="btn btn-primary" wire:click="applyResult">
+                                {{ $applyMode === 'replace' ? 'Replace the document with it' : 'Add it at the end' }}
+                            </button>
+                        @else
+                            <span class="micro">You can read this document but not change it.</span>
+                        @endcan
+                    @endif
                 </div>
             </div>
         </div>

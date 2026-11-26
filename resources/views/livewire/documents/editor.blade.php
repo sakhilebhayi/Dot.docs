@@ -656,7 +656,7 @@
     }"
     x-init="init()"
     x-destroy="destroy()"
-    @ai-apply.window="applyAiContent('replace', $event.detail.content)"
+    @ai-apply.window="applyAiContent($event.detail.mode, $event.detail.content)"
     @suggestion-accepted.window="applySuggestion($event.detail.content, $event.detail.version)"
     @voice-transcript.window="insertVoiceText($event.detail.text)"
     @style-changed.window="document.getElementById('doc-style').textContent = $event.detail.css; adoptVersion($event.detail.version); refreshOutline()"
@@ -898,12 +898,9 @@
                         <span class="micro">Ctrl+Shift+K</span>
                     </button>
 
-                    @if ($canEdit)
-                        <button type="button" wire:click="toggleSuggestionMode"
-                                aria-pressed="{{ $suggestionMode ? 'true' : 'false' }}">
-                            {{ $suggestionMode ? 'Leave suggesting mode' : 'Suggest instead of editing' }}
-                        </button>
-                    @endif
+                    {{-- "Suggest instead of editing" is hidden until tracked suggestions
+                         exist: the toggle changed nothing, edits went straight in
+                         (EA-4 / F-01, owner decision 2026-11-26). --}}
 
                     {{-- No `data-shell-expand` here, deliberately: comments render
                          in `.editor-side`, beside the paper, NOT in the dock.

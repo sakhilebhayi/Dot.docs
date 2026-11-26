@@ -119,7 +119,7 @@
                                 wire:click="startMoving('{{ $row->uuid }}')">Move</button>
                         <button type="button" class="btn btn-quiet btn-sm"
                                 wire:click="deleteObject('{{ $row->uuid }}')"
-                                wire:confirm="Remove this from the tree? A document goes to the trash and can be restored; a file is deleted.">
+                                wire:confirm="Delete this? A document is deleted with its history, and a file is deleted. This cannot be undone from here.">
                             Delete
                         </button>
                     </li>

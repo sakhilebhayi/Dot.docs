@@ -34,11 +34,10 @@
             </div>
         @endforeach
 
-        @if ($loading)
-            <p aria-live="polite">
-                <x-shell.status-word tone="idle" word="Thinking" />
-            </p>
-        @endif
+        {{-- wire:loading: $loading was set and cleared in one request, so it never showed (EA-4 / U-01). --}}
+        <p aria-live="polite" wire:loading wire:target="send">
+            <x-shell.status-word tone="idle" word="Thinking" />
+        </p>
     </div>
 
     <div class="dock-chat-foot">
@@ -46,7 +45,7 @@
         <div class="toolbar">
             <input id="assistant-message" wire:model="message" wire:keydown.enter="send" type="text"
                    class="field" style="flex:1 1 auto" placeholder="What should I look at?" />
-            <button type="button" class="btn btn-primary" wire:click="send">Send</button>
+            <button type="button" class="btn btn-primary" wire:click="send" wire:loading.attr="disabled" wire:target="send">Send</button>
         </div>
     </div>
 </section>

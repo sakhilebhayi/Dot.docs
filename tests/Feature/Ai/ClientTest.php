@@ -139,7 +139,8 @@ class ClientTest extends TestCase
             ->assertSet('showResult', true)
             ->assertSee('[mock:draft]');
 
-        $this->assertDatabaseHas('ai_suggestions', ['document_id' => $doc->id, 'user_id' => $user->id]);
+        // EA-4 / F-04: a run is decided in the sheet, not parked as a pending suggestion.
+        $this->assertDatabaseMissing('ai_suggestions', ['document_id' => $doc->id]);
         $this->assertDatabaseHas('ai_model_usage', ['operation' => 'summarise', 'provider' => 'mock']);
     }
 

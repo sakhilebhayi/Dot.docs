@@ -84,9 +84,16 @@ class VersionHistory extends Component
             return;
         }
 
-        // Strip HTML tags to diff plain text
-        $textA = strip_tags($vA->content_snapshot ?? '');
-        $textB = strip_tags($vB->content_snapshot ?? '');
+        // Older on the left whatever order they were ticked in, and one line
+        // per paragraph, heading, list item or table row: strip_tags() alone
+        // ran the whole document into one line and the diff became one long
+        // run (EA-4 / F-10).
+        if ($vA->version_number > $vB->version_number) {
+            [$vA, $vB] = [$vB, $vA];
+        }
+
+        $textA = self::blocksAsLines($vA->content_snapshot ?? '');
+        $textB = self::blocksAsLines($vB->content_snapshot ?? '');
 
         $this->diffHtml = DiffHelper::calculate(
             $textA,
@@ -98,6 +105,18 @@ class VersionHistory extends Component
 
         $this->showDiff = true;
         $this->previewId = null;
+    }
+
+    /** The document's text with one line per block, for a line-and-word diff. */
+    public static function blocksAsLines(string $html): string
+    {
+        $html = (string) preg_replace('#<br\s*/?>#i', "\n", $html);
+        $html = (string) preg_replace('#</(p|h[1-6]|li|tr|blockquote|pre|div|figcaption|caption)\s*>#i', "$0\n", $html);
+        $html = (string) preg_replace('#</t[dh]\s*>#i', "$0 \t ", $html);
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $lines = array_map(fn (string $line) => trim((string) preg_replace('/[ \t]+/u', ' ', $line)), explode("\n", $text));
+
+        return implode("\n", array_values(array_filter($lines, fn (string $line) => $line !== '')));
     }
 
     public function restore(int $versionId): void

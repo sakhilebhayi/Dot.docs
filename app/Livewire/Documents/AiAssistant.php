@@ -8,6 +8,7 @@ use App\Services\AiService;
 use App\Services\HtmlSanitizer;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
 
@@ -24,10 +25,21 @@ class AiAssistant extends Component
     public string $param = '';
 
     /** Result text shown in preview panel */
+    #[Locked]
     public string $result = '';
 
     /** Whether the result panel is visible */
     public bool $showResult = false;
+
+    /**
+     * How an accepted result goes into the document: 'replace' (grammar,
+     * tone, translate: a rewrite of the whole text), 'insert' at the cursor
+     * (continue, summary, outline, free prompts), or null when there is
+     * nothing to accept (a refusal or an error). Locked: the browser must
+     * not turn an insert into a replace (EA-4 / F-02).
+     */
+    #[Locked]
+    public ?string $applyMode = null;
 
     /** Whether an AI request is in-flight */
     public bool $loading = false;
@@ -107,6 +119,7 @@ class AiAssistant extends Component
 
         if (! $ai->checkRateLimit(Auth::id())) {
             $this->result = 'Rate limit reached. You can make 20 AI requests per hour.';
+            $this->applyMode = null;
             $this->showResult = true;
             $this->showPalette = false;
 
@@ -128,22 +141,19 @@ class AiAssistant extends Component
                 default => $ai->freePrompt($this->action, $html),
             };
 
-            // Save to ai_suggestions
-            $ai->saveSuggestion($this->document, Auth::id(), is_array($output) ? ($output['content'] ?? '') : $output);
-
+            // Not stored as a pending suggestion any more (EA-4 / F-04): every
+            // run used to land in "Waiting for you", dropped and accepted ones
+            // included. The person decides here, in this sheet.
             $this->result = is_array($output) ? ($output['content'] ?? '') : $output;
+            $this->applyMode = $this->modeFor($output);
             $this->showResult = true;
             $this->showPalette = false;
-
-            // Tell the editor to apply if it's a direct replace/append
-            if (is_array($output)) {
-                $this->dispatch('ai-result', type: $output['type'], content: $output['content']);
-            }
         } catch (\Throwable $e) {
             // The exception text is for the log, not the page: it can carry
             // provider details, and the result sheet prints HTML (EA-1 / S-04).
             report($e);
             $this->result = 'The assistant could not answer just now. Try again in a minute.';
+            $this->applyMode = null;
             $this->showResult = true;
         } finally {
             $this->loading = false;
@@ -184,7 +194,11 @@ class AiAssistant extends Component
         $this->authorize('update', $this->document);
 
         // The cleaned answer, never the raw property the browser could have rewritten.
-        $this->dispatch('ai-apply', content: $this->safeResult());
+        if ($this->applyMode === null) {
+            return;
+        }
+
+        $this->dispatch('ai-apply', mode: $this->applyMode, content: $this->safeResult());
         $this->showResult = false;
     }
 
@@ -200,10 +214,36 @@ class AiAssistant extends Component
         return app(HtmlSanitizer::class)->clean($this->result);
     }
 
+    /**
+     * Only a rewrite of the whole text replaces it: grammar, tone, translate,
+     * whether chosen from the toolbar or typed in the palette. Everything else
+     * - summaries, outlines, continuations, free prompts, custom slash
+     * commands - is added, never put in place of the writer's text. Decided
+     * from the command, not from the service's own `type`, which still says
+     * 'replace' for /summarize, /outline and every custom command.
+     *
+     * @param  string|array{type?: string, content?: string}  $output
+     */
+    private function modeFor(string|array $output): string
+    {
+        $name = $this->action === 'command'
+            ? ltrim((string) strtok(trim($this->command), ' '), '/')
+            : $this->action;
+
+        return in_array($name, ['grammar', 'tone', 'translate'], true) ? 'replace' : 'insert';
+    }
+
+    /** True while the mock provider answers: no model is connected (EA-4 / F-03). */
+    public function isDemonstration(): bool
+    {
+        return config('ai.provider') === 'mock';
+    }
+
     public function dismissResult(): void
     {
         $this->showResult = false;
         $this->result = '';
+        $this->applyMode = null;
     }
 
     public function render()

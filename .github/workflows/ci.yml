@@ -42,7 +42,9 @@ jobs:
         run: echo "APP_KEY=base64:$(openssl rand -base64 32)" >> "$GITHUB_ENV"
 
       - name: Run PHP test suite
-        run: php artisan test --compact
+        # phpunit directly with the details shown: `artisan test --compact`
+        # reported "955 warnings" and hid what they were (EA-4 / O-08).
+        run: php -d memory_limit=-1 vendor/bin/phpunit --display-warnings --display-deprecations --display-phpunit-deprecations
         env:
           # phpunit.xml already forces sqlite/:memory: and AI_PROVIDER=mock,
           # so no database service container or real API keys are needed here.
