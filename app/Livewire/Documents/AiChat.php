@@ -42,6 +42,8 @@ class AiChat extends Component
     {
         $this->authorize('view', $this->document);
 
+        $this->validate(['message' => 'nullable|string|max:4000']);
+
         $message = trim($this->message);
         if ($message === '') {
             return;

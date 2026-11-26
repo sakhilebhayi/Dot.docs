@@ -10,7 +10,8 @@ use Illuminate\Support\Str;
  * The destination of an InfoDot deep link: /o/{document uuid}. InfoDot already checked the
  * person belongs to the company; the document's own policy decides here, so a link can never
  * open more than the editor would. A member lands in the editor with the document's company
- * made current; anyone else gets a request-access page that says nothing about the document.
+ * made current; a non-member is sent to the public /shared/{uuid} page when the document is published (password
+ * and expiry apply there), and otherwise gets a request-access page that says nothing about the document.
  */
 class DocumentOpenController extends Controller
 {
@@ -26,9 +27,10 @@ class DocumentOpenController extends Controller
 
         if (! $user->can('view', $document)) {
             // A published document opens on its public page, where the
-            // link's password and expiry still apply.
-            if ($document->publicUrl() !== null) {
-                return redirect()->to($document->publicUrl());
+            // link's password and expiry still apply. The uuid address, which
+            // the caller already holds: the slug is not revealed.
+            if ($document->is_public) {
+                return redirect()->route('documents.shared', $document->uuid);
             }
 
             return response()->view('documents.request-access', [], 403);

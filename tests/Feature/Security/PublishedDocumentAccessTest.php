@@ -2,14 +2,18 @@
 
 namespace Tests\Feature\Security;
 
+use App\Broadcasting\DocumentPresenceChannel;
 use App\Documents\DocumentStore;
 use App\Livewire\Documents\CommentThread;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
 use App\Livewire\Documents\VersionHistory;
 use App\Models\AuditLog;
+use App\Models\Comment;
 use App\Models\Document;
+use App\Models\DocumentCollaborator;
 use App\Models\User;
+use App\Notifications\CommentPostedEmailNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
@@ -138,5 +142,41 @@ class PublishedDocumentAccessTest extends TestCase
     public function test_the_settings_component_has_no_published_property_to_tamper_with(): void
     {
         $this->assertFalse(property_exists(DocumentSettings::class, 'isPublic'));
+    }
+
+    public function test_an_outsider_cannot_join_a_published_documents_presence_channel(): void
+    {
+        [$owner, $outsider, $document] = $this->publishedWithPassword();
+        $channel = new DocumentPresenceChannel;
+
+        $this->assertFalse($channel->join($outsider, $document->id));
+        $this->assertIsArray($channel->join($owner, $document->id));
+    }
+
+    public function test_a_former_commenter_who_is_no_participant_is_not_notified_of_a_reply(): void
+    {
+        [$owner, $outsider, $document] = $this->publishedWithPassword();
+        // An old comment by someone who has no relationship to the document now.
+        $parent = Comment::create(['document_id' => $document->id, 'user_id' => $outsider->id, 'content' => 'Earlier']);
+
+        Livewire::actingAs($owner)->test(CommentThread::class, ['document' => $document])
+            ->call('startReply', $parent->id)
+            ->set('replyContent', 'A reply')
+            ->call('postReply');
+
+        $this->assertSame(0, $outsider->fresh()->unreadNotifications()->count());
+    }
+
+    public function test_comment_mail_goes_only_to_participants_even_when_published(): void
+    {
+        [$owner, $outsider, $document] = $this->publishedWithPassword();
+        $collaborator = User::factory()->withPersonalTeam()->create();
+        DocumentCollaborator::create(['document_id' => $document->id, 'user_id' => $collaborator->id, 'role' => 'viewer']);
+        $comment = Comment::create(['document_id' => $document->id, 'user_id' => $owner->id, 'content' => 'Hi']);
+
+        $mail = new CommentPostedEmailNotification($document, $comment);
+
+        $this->assertFalse($mail->shouldSend($outsider, 'mail'));
+        $this->assertTrue($mail->shouldSend($collaborator, 'mail'));
     }
 }

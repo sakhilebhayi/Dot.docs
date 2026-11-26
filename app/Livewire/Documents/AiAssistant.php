@@ -183,7 +183,8 @@ class AiAssistant extends Component
         // right as typing does. Reading what the assistant says does not.
         $this->authorize('update', $this->document);
 
-        $this->dispatch('ai-apply', content: $this->result);
+        // The cleaned answer, never the raw property the browser could have rewritten.
+        $this->dispatch('ai-apply', content: $this->safeResult());
         $this->showResult = false;
     }
 

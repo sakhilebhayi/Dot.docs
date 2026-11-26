@@ -415,7 +415,7 @@ jobs:
           # browser: a host or cache layer that drops them would otherwise go
           # unnoticed, as it did before EA-1 (none were sent at all).
           curl -s --max-time 30 -o /dev/null -D "$WORK/headers.txt" "$SITE_URL/" || true
-          for H in x-content-type-options x-frame-options referrer-policy strict-transport-security content-security-policy-report-only; do
+          for H in x-content-type-options x-frame-options referrer-policy content-security-policy-report-only; do
             if grep -qi "^$H:" "$WORK/headers.txt"; then
               echo "Header present: $H"
             else
@@ -423,6 +423,13 @@ jobs:
               FAILED=1
             fi
           done
+          # HSTS is sent only when PHP sees the request as HTTPS. A warning, not a
+          # failure, until the first deploy has shown LiteSpeed passes that through.
+          if grep -qi "^strict-transport-security:" "$WORK/headers.txt"; then
+            echo "Header present: strict-transport-security"
+          else
+            echo "::warning::$SITE_URL/ answered without Strict-Transport-Security: check that the app sees HTTPS (TrustProxies / HTTPS=on)."
+          fi
 
           if [ "$FAILED" -ne 0 ]; then
             echo "::error::Smoke check failed: the live site does not load its own pages or build assets (see above). The deploy is NOT healthy."

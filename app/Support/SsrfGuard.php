@@ -20,6 +20,13 @@ class SsrfGuard
     private const CGNAT_CIDR = ['100.64.0.0', 10];
 
     /**
+     * Tests only: replaces the DNS lookup with fn (string $host): list<string>.
+     *
+     * @var (\Closure(string): list<string>)|null
+     */
+    public static ?\Closure $resolver = null;
+
+    /**
      * True only if $url is http(s), has a resolvable host, and every IP that
      * hostname resolves to is a public, routable address — no loopback,
      * private (RFC1918), link-local (including the 169.254.169.254 cloud
@@ -135,6 +142,10 @@ class SsrfGuard
      */
     private static function resolveAll(string $host): array
     {
+        if (self::$resolver !== null) {
+            return (self::$resolver)($host);
+        }
+
         $records = @dns_get_record($host, DNS_A + DNS_AAAA);
 
         if (! is_array($records)) {

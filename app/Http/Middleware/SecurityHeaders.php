@@ -21,6 +21,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class SecurityHeaders
 {
+    // microphone=(self): the editor's voice typing (resources/js/app.js, Web Speech API) needs the
+    // site's own pages to keep the microphone; every other origin, including frames, is refused.
     public function handle(Request $request, Closure $next): Response
     {
         $response = $next($request);
@@ -29,7 +31,7 @@ class SecurityHeaders
             'X-Content-Type-Options' => 'nosniff',
             'X-Frame-Options' => 'SAMEORIGIN',
             'Referrer-Policy' => 'strict-origin-when-cross-origin',
-            'Permissions-Policy' => 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+            'Permissions-Policy' => 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()',
             'Content-Security-Policy-Report-Only' => $this->policy(),
         ];
 

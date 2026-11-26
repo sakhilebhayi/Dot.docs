@@ -90,9 +90,9 @@ jobs:
   composer-audit:
     name: Composer dependency audit
     runs-on: ubuntu-latest
-    # Gates the quality gate on HIGH and CRITICAL advisories only (EA-1 /
+    # Gates the quality gate on HIGH, CRITICAL and UNRATED advisories (EA-1 /
     # S-15): every merge deploys production, so a known serious hole must
-    # not ship. Lower severities are printed and do not block.
+    # not ship. Low and medium are printed and do not block.
     steps:
       - uses: actions/checkout@v4
       - name: Setup PHP
@@ -108,9 +108,12 @@ jobs:
         run: |
           composer audit || true
           composer audit --format=json > audit.json || true
-          SERIOUS=$(jq '[.advisories // {} | to_entries[] | .value[] | select((.severity // "") | test("high|critical"; "i"))] | length' audit.json)
-          echo "High or critical advisories: $SERIOUS"
-          test "$SERIOUS" -eq 0
+          # Unrated advisories block too: Symfony and FriendsOfPHP advisories
+          # usually carry no severity. Accept one deliberately with
+          # composer.json "config.audit.ignore", never by weakening this.
+          SERIOUS=$(jq '[.advisories // {} | to_entries[] | .value | (if type == "object" then .[] else .[] end) | select(((.severity // "unrated") | test("high|critical|unrated"; "i")))] | length' audit.json)
+          echo "High, critical or unrated advisories: ${SERIOUS:-unreadable}"
+          test "${SERIOUS:-1}" -eq 0
 
   npm-audit:
     name: npm dependency audit
