@@ -17,7 +17,7 @@
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
         "league/commonmark": "^2.10.3",
-        "livewire/livewire": "^3.6.4",
+        "livewire/livewire": "^4.4.9",
         "phpoffice/phpword": "^1.1",
         "prism-php/prism": "^0.100"
     },
