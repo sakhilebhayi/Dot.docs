@@ -9,7 +9,7 @@
 
     <x-slot name="content">
         <p class="field-hint">
-            {{ __('Once your account is deleted, all of its resources and data will be permanently deleted. Before deleting your account, please download any data or information that you wish to retain.') }}
+            {{ __('Documents you own in a company team pass to that team\'s owner and stay where they are. Your personal documents can be recovered for 30 days, then they are deleted for good. Your comments and edits on colleagues\' documents stay, shown as "Former member". If you own a team that others use, make another member its owner first.') }}
         </p>
 
         <div class="toolbar">
@@ -24,7 +24,7 @@
             </x-slot>
 
             <x-slot name="content">
-                <p>{{ __('Are you sure you want to delete your account? Once your account is deleted, all of its resources and data will be permanently deleted. Please enter your password to confirm you would like to permanently delete your account.') }}</p>
+                <p>{{ __('Delete your account? Company documents go to each team\'s owner and your personal documents are deleted for good after 30 days. Enter your password to confirm.') }}</p>
 
                 <div class="field-row" x-data="{}" x-on:confirming-delete-user.window="setTimeout(() => $refs.password.focus(), 250)">
                     <x-label for="delete-account-password" value="{{ __('Password') }}" />

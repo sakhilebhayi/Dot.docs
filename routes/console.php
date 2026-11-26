@@ -1,6 +1,7 @@
 <?php
 
 use App\Console\Commands\BackupSqliteDatabase;
+use App\Console\Commands\PurgeDeletedAccountDocuments;
 use App\Http\Controllers\SchedulerProbeController;
 use App\Jobs\QueueHeartbeat;
 use Illuminate\Foundation\Inspiring;
@@ -52,3 +53,8 @@ Schedule::job(new QueueHeartbeat)->everyFiveMinutes()->name('queue-heartbeat');
 // share one host, so each one backs up at its own minute. No-op on other
 // database drivers. See docs/superpowers or the deploy README for restore.
 Schedule::command(BackupSqliteDatabase::class)->dailyAt('02:35')->onOneServer();
+
+// EA-2: a deleted account's personal documents stay recoverable for 30 days,
+// then go for good. After the nightly backup, so the last copy before a purge
+// still holds them.
+Schedule::command(PurgeDeletedAccountDocuments::class)->dailyAt('03:15')->onOneServer();

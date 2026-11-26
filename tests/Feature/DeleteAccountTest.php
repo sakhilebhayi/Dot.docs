@@ -34,18 +34,12 @@ class DeleteAccountTest extends TestCase
     }
 
     /**
-     * `documents.owner_id` cascades at the DATABASE level, so deleting an
-     * account hard-deletes every document that person owned - including the
-     * ones filed in ANOTHER team they merely belonged to. That cascade never
-     * reaches DocumentObserver or FilesService, so without an explicit step
-     * each of those documents would leave its `objects` row behind in a tree
-     * the account had nothing to do with: invisible in every listing, yet
-     * still counting as "something is filed in here" forever after.
-     *
-     * The documents going with the account is a tracked limitation, recorded
-     * in .ai/rules/files.md - what this pins is that the TREE is left clean.
+     * EA-2 (owner decision 2026-11-26): a document the leaver filed in a team
+     * that stays passes to that team's owner and stays exactly where it is -
+     * same team, same folder, same tree node. Before EA-2 the FK cascade
+     * hard-deleted it. More cases in Security\AccountDeletionTest.
      */
-    public function test_deleting_an_account_takes_its_documents_tree_rows_with_it(): void
+    public function test_a_document_filed_in_a_team_that_survives_stays_filed_under_the_team_owner(): void
     {
         $owner = User::factory()->withPersonalTeam()->create();
         $leaving = User::factory()->withPersonalTeam()->create();
@@ -69,13 +63,11 @@ class DeleteAccountTest extends TestCase
 
         app(DeleteUser::class)->delete($leaving);
 
-        $this->assertNull(Document::withTrashed()->find($document->id), 'the FK cascade is the documented limitation');
-        $this->assertNull(Obj::find($node->id), 'but it must not leave a node dangling in another team’s tree');
-
-        // Which is the point: the folder is genuinely empty, so the team can
-        // still tidy it away afterwards.
-        $files->deleteObject($folder->fresh(), $owner);
-        $this->assertNull(Obj::find($folder->id));
+        $document = Document::find($document->id);
+        $this->assertNotNull($document);
+        $this->assertSame($owner->id, (int) $document->owner_id);
+        $this->assertSame($team->id, (int) $document->team_id);
+        $this->assertNotNull(Obj::find($node->id), 'still filed in the same folder');
     }
 
     public function test_correct_password_must_be_provided_before_account_can_be_deleted(): void
