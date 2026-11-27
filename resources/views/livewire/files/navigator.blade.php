@@ -60,16 +60,16 @@
                 @csrf
                 <label class="field-label" for="files-upload">Upload a file</label>
                 <div class="toolbar">
-                    <input id="files-upload" type="file" name="file" class="field" style="flex:1 1 260px;min-width:0" required />
+                    <input id="files-upload" type="file" name="file" class="field" style="flex:1 1 260px;min-width:0" required @error('file') aria-invalid="true" aria-describedby="files-upload-error" @enderror />
                     <button type="submit" class="btn">Upload it</button>
                 </div>
                 @error('file')
-                    <p class="field-error">{{ $message }}</p>
+                    <p class="field-error" id="files-upload-error" role="alert">{{ $message }}</p>
                 @enderror
             </form>
 
             @error('object')
-                <p class="field-error">{{ $message }}</p>
+                <p class="field-error" role="alert">{{ $message }}</p>
             @enderror
         </div>
 
@@ -129,7 +129,7 @@
     </section>
 
     @if ($showCreateSheet)
-        <div class="scrim" wire:click.self="$set('showCreateSheet', false)" role="dialog" aria-modal="true"
+        <div class="scrim" x-data x-trap.noscroll="true" wire:click.self="$set('showCreateSheet', false)" role="dialog" aria-modal="true"
              aria-labelledby="files-new-doc-title"
              x-on:keydown.escape.window="$wire.set('showCreateSheet', false)">
             <div class="sheet">
@@ -141,9 +141,9 @@
                         <div class="field-row">
                             <label class="field-label" for="files-new-doc">Title</label>
                             <input id="files-new-doc" wire:model="newTitle" type="text" class="field" autofocus
-                                   placeholder="What is it about?" />
+                                   placeholder="What is it about?" @error('newTitle') aria-invalid="true" aria-describedby="files-new-doc-error" @enderror />
                             @error('newTitle')
-                                <p class="field-error">{{ $message }}</p>
+                                <p class="field-error" id="files-new-doc-error" role="alert">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>
@@ -157,7 +157,7 @@
     @endif
 
     @if ($showFolderSheet)
-        <div class="scrim" wire:click.self="$set('showFolderSheet', false)" role="dialog" aria-modal="true"
+        <div class="scrim" x-data x-trap.noscroll="true" wire:click.self="$set('showFolderSheet', false)" role="dialog" aria-modal="true"
              aria-labelledby="files-new-folder-title"
              x-on:keydown.escape.window="$wire.set('showFolderSheet', false)">
             <div class="sheet">
@@ -169,9 +169,9 @@
                         <div class="field-row">
                             <label class="field-label" for="files-new-folder">Folder name</label>
                             <input id="files-new-folder" wire:model="newFolderName" type="text" class="field" autofocus
-                                   placeholder="What goes in it?" />
+                                   placeholder="What goes in it?" @error('newFolderName') aria-invalid="true" aria-describedby="files-new-folder-error" @enderror />
                             @error('newFolderName')
-                                <p class="field-error">{{ $message }}</p>
+                                <p class="field-error" id="files-new-folder-error" role="alert">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>
@@ -185,7 +185,7 @@
     @endif
 
     @if ($renamingUuid)
-        <div class="scrim" wire:click.self="cancelRenaming" role="dialog" aria-modal="true"
+        <div class="scrim" x-data x-trap.noscroll="true" wire:click.self="cancelRenaming" role="dialog" aria-modal="true"
              aria-labelledby="files-rename-title"
              x-on:keydown.escape.window="$wire.cancelRenaming(); sheetTrigger && sheetTrigger.focus()">
             <div class="sheet">
@@ -196,9 +196,9 @@
                     <div class="sheet-body">
                         <div class="field-row">
                             <label class="field-label" for="files-rename">Name</label>
-                            <input id="files-rename" wire:model="renameName" type="text" class="field" autofocus />
+                            <input id="files-rename" wire:model="renameName" type="text" class="field" autofocus @error('renameName') aria-invalid="true" aria-describedby="files-rename-error" @enderror />
                             @error('renameName')
-                                <p class="field-error">{{ $message }}</p>
+                                <p class="field-error" id="files-rename-error" role="alert">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>
@@ -212,7 +212,7 @@
     @endif
 
     @if ($movingUuid)
-        <div class="scrim" wire:click.self="cancelMoving" role="dialog" aria-modal="true"
+        <div class="scrim" x-data x-trap.noscroll="true" wire:click.self="cancelMoving" role="dialog" aria-modal="true"
              aria-labelledby="files-move-title"
              x-on:keydown.escape.window="$wire.cancelMoving(); sheetTrigger && sheetTrigger.focus()">
             <div class="sheet">
@@ -221,7 +221,7 @@
                 </div>
                 <div class="sheet-body">
                     @error('object')
-                        <p class="field-error">{{ $message }}</p>
+                        <p class="field-error" role="alert">{{ $message }}</p>
                     @enderror
                     <ul class="list">
                         @foreach ($this->folderChoices as $choice)

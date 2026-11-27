@@ -738,7 +738,7 @@
                 @endforeach
             </select>
             @error('style')
-                <span class="field-error">{{ $message }}</span>
+                <span class="field-error" role="alert">{{ $message }}</span>
             @enderror
 
             <label class="sr-only" for="doc-view-mode">Page view</label>
@@ -766,13 +766,13 @@
                  A quiet line of text, not a link: the button beside it is the one
                  affordance, and it opens the same .sheet folder picker the
                  documents index uses for rename. --}}
-            <span class="micro doc-bar-filed" aria-label="Filed in">{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
+            <span class="micro doc-bar-filed"><span class="sr-only">Filed in: </span>{{ collect($this->locationCrumbs)->map(fn ($crumb) => $crumb->name())->join(' / ') ?: 'Unfiled' }}</span>
             @if ($canEdit)
                 <button type="button" class="tool tool-mono" x-ref="moveTrigger"
                         wire:click="$set('showMoveSheet', true)">Move</button>
             @endif
             @error('location')
-                <span class="field-error">{{ $message }}</span>
+                <span class="field-error" role="alert">{{ $message }}</span>
             @enderror
 
             </div>
@@ -780,7 +780,7 @@
                     :aria-expanded="toolsOpen ? 'true' : 'false'" @click="toolsOpen = !toolsOpen">Tools</button>
 
             @if (count($activeUsers) > 0)
-                <div class="presence" aria-label="People here now">
+                <div class="presence" role="group" aria-label="People here now">
                     @foreach (array_slice($activeUsers, 0, 4) as $member)
                         <span class="presence-face" title="{{ $member['name'] }}">
                             @if (! empty($member['avatar']))
@@ -817,11 +817,14 @@
                      word stayed up with nothing in it. Nothing here is
                      rendered by the server, so the morph can skip it
                      (.ai/rules/livewire.md). --}}
-                <span class="status-word status-word-danger" wire:ignore x-show="aiError" x-cloak
-                      @click="aiError = ''" style="cursor:pointer" title="Click to dismiss">
+                {{-- EA-8 (A-05): a real button, so the keyboard can dismiss it too. --}}
+                <button type="button" class="status-word status-word-danger" wire:ignore x-show="aiError" x-cloak
+                        @click="aiError = ''" title="Dismiss"
+                        style="cursor:pointer;background:none;border:0;padding:0;font:inherit;color:inherit">
                     <span class="status-word-dot" aria-hidden="true"></span>
-                    <span x-text="aiError"></span>
-                </span>
+                    <span role="alert" x-text="aiError"></span>
+                    <span class="sr-only">(dismiss)</span>
+                </button>
 
                 {{-- A newer version was saved elsewhere while this tab held
                      unsaved typing, and saving is suspended until the writer
@@ -964,9 +967,10 @@
                     @if ($canEdit)
                         <span class="menu-label">Import</span>
                         <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
-                              enctype="multipart/form-data" class="menu-form">
+                              enctype="multipart/form-data" class="menu-form"
+                              onsubmit="return confirm('Replace this document with the imported file? What is there now is kept in version history.')">
                             @csrf
-                            <label class="field-label" for="doc-import">A .docx or .md file</label>
+                            <label class="field-label" for="doc-import">A .docx, .md or .txt file</label>
                             <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />
                             <button type="submit" class="btn btn-primary">Import it</button>
                         </form>
@@ -1265,7 +1269,7 @@
              (just hidden) when Alpine initialises, well before the writer
              ever opens it. --}}
         <div class="editor-thumbnails" x-show="thumbnailsOpen" x-cloak
-             aria-label="Page thumbnails">
+             role="region" aria-label="Page thumbnails">
             <div class="dotdoc-thumbnail-rail" wire:ignore></div>
         </div>
 
@@ -1281,7 +1285,7 @@
          A folder picker rather than drag-and-drop, so it is keyboard-
          operable from the first commit rather than as a fallback. --}}
     @if ($showMoveSheet)
-        <div class="scrim" wire:click.self="$set('showMoveSheet', false)" role="dialog" aria-modal="true"
+        <div class="scrim" x-data x-trap.noscroll="true" wire:click.self="$set('showMoveSheet', false)" role="dialog" aria-modal="true"
              aria-labelledby="doc-move-title"
              x-on:keydown.escape.window="$wire.set('showMoveSheet', false); $refs.moveTrigger && $refs.moveTrigger.focus()">
             <div class="sheet">
@@ -1290,7 +1294,7 @@
                 </div>
                 <div class="sheet-body">
                     @error('location')
-                        <p class="field-error">{{ $message }}</p>
+                        <p class="field-error" role="alert">{{ $message }}</p>
                     @enderror
                     <ul class="list">
                         @foreach ($this->folderChoices as $choice)

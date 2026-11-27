@@ -56,3 +56,40 @@ test('Escape closes the assistant palette', async ({ browser }) => {
     await page.keyboard.press('Escape');
     await expect(page.locator('#ai-command')).toBeHidden();
 });
+
+test('the New document sheet keeps focus inside and closes with Escape (EA-8)', async ({ browser }) => {
+    const page = await as(browser, users.owner);
+    await page.goto('/documents');
+    await page.getByRole('button', { name: 'New document' }).first().click();
+    const sheet = page.getByRole('dialog', { name: 'New document' });
+    await expect(sheet).toBeVisible();
+    // The trap takes focus once Alpine has initialised the morphed-in sheet.
+    await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(true);
+
+    for (let i = 0; i < 12; i++) {
+        await page.keyboard.press('Tab');
+        expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), `Tab ${i + 1} stayed inside the sheet`).toBe(true);
+    }
+
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+});
+
+test('the command palette tells assistive technology which command is active (EA-8)', async ({ browser }) => {
+    const page = await as(browser, users.owner);
+    await openWelcomePack(page);
+    await page.locator('.ProseMirror').click();
+    await page.keyboard.press('ControlOrMeta+K');
+    const input = page.locator('.dotdoc-panel-input');
+    await expect(input).toBeFocused();
+    await expect(input).toHaveAttribute('role', 'combobox');
+    await page.keyboard.press('ArrowDown');
+
+    const activeId = await input.getAttribute('aria-activedescendant');
+    expect(activeId).toBeTruthy();
+    await expect(page.locator(`#${activeId}`)).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[role="option"][aria-selected="true"]')).toHaveCount(1);
+
+    await page.keyboard.press('Escape');
+    await expect(input).toBeHidden();
+});

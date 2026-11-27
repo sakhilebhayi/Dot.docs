@@ -39,15 +39,31 @@ export async function waitSaved(page: Page): Promise<void> {
 }
 
 /**
- * axe on the current page. Fails on CRITICAL violations; serious ones are attached to the report and counted, so
- * EA-8's accessibility work can drive them to zero and then tighten this to 'serious'.
+ * axe on the current page. Fails on SERIOUS and CRITICAL violations (EA-8; EA-7 failed on critical only).
+ *
+ * Waits for entrance animations first: axe reads colours with the ancestors' opacity, so a page caught mid
+ * fade-in reports text paler than it is.
+ *
+ * One known exclusion, owned elsewhere: the shared Dot UI account button (`.dh-account__btn`, from dot-ui/,
+ * identical on every platform and guarded by DotUiDriftTest) shows the person's initials while its accessible
+ * name is "Account menu: <name>" - axe's label-content-name-mismatch. The fix belongs in dot-ui for the whole
+ * fleet; listed as a follow-up in docs/programme/ENTERPRISE_AUDIT.md.
  */
-export async function expectNoCriticalA11y(page: Page, label: string): Promise<void> {
+export async function expectNoSeriousA11y(page: Page, label: string): Promise<void> {
+    await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, { timeout: 5_000 }).catch(() => {});
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
-    const critical = results.violations.filter((v) => v.impact === 'critical');
-    const serious = results.violations.filter((v) => v.impact === 'serious');
-    if (serious.length > 0) {
-        console.log(`[a11y] ${label}: ${serious.length} serious - ${serious.map((v) => v.id).join(', ')}`);
-    }
-    expect(critical.map((v) => `${v.id}: ${v.help} (${v.nodes.length})`), `${label}: critical axe violations`).toEqual([]);
+    const failing = results.violations
+        .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+        .map((v) => ({
+            ...v,
+            nodes: v.nodes.filter((n) => !(v.id === 'label-content-name-mismatch' && n.target.join(' ').includes('.dh-account__btn'))),
+        }))
+        .filter((v) => v.nodes.length > 0);
+    expect(
+        failing.map((v) => `${v.id}: ${v.help} -> ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`),
+        `${label}: serious or critical axe violations`,
+    ).toEqual([]);
 }
+
+/** @deprecated EA-7 name; same check, now serious and above. */
+export const expectNoCriticalA11y = expectNoSeriousA11y;

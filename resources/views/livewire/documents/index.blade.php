@@ -77,7 +77,7 @@
             </div>
             @error('folder')
                 <div class="panel-body">
-                    <p class="field-error">{{ $message }}</p>
+                    <p class="field-error" role="alert">{{ $message }}</p>
                 </div>
             @enderror
             <ul class="list">
@@ -226,7 +226,7 @@
          Escape closes it and returns focus to the control that opened it, the
          same convention every other dialog in this product keeps. --}}
     @if ($showSmartSave)
-        <div class="scrim" wire:click.self="closeSmartSave" role="dialog" aria-modal="true" aria-labelledby="new-doc-title"
+        <div class="scrim" x-data x-trap.noscroll="true" wire:click.self="closeSmartSave" role="dialog" aria-modal="true" aria-labelledby="new-doc-title"
              x-on:keydown.escape.window="$wire.closeSmartSave(); smartSaveTrigger && smartSaveTrigger.focus()">
             <div class="sheet">
                 <div class="sheet-head">
@@ -237,22 +237,22 @@
                         <div class="field-row">
                             <label class="field-label" for="new-doc-name">Title</label>
                             <input id="new-doc-name" wire:model="newDocumentName" type="text" class="field" autofocus
-                                   placeholder="What is it about?" />
+                                   placeholder="What is it about?" @error('newDocumentName') aria-invalid="true" aria-describedby="new-doc-name-error" @enderror />
                             @error('newDocumentName')
-                                <p class="field-error">{{ $message }}</p>
+                                <p class="field-error" id="new-doc-name-error" role="alert">{{ $message }}</p>
                             @enderror
                         </div>
 
                         <div class="field-row">
                             <label class="field-label" for="new-doc-template">Start from</label>
-                            <select id="new-doc-template" wire:model="newDocumentTemplateId" class="field">
+                            <select id="new-doc-template" wire:model="newDocumentTemplateId" class="field" @error('newDocumentTemplateId') aria-invalid="true" aria-describedby="new-doc-template-error" @enderror>
                                 <option value="">A blank document</option>
                                 @foreach ($this->newDocumentTemplates as $template)
                                     <option value="{{ $template->id }}">{{ $template->name }}</option>
                                 @endforeach
                             </select>
                             @error('newDocumentTemplateId')
-                                <p class="field-error">{{ $message }}</p>
+                                <p class="field-error" id="new-doc-template-error" role="alert">{{ $message }}</p>
                             @enderror
                         </div>
 
@@ -274,7 +274,7 @@
     @endif
 
     @if ($renamingFolderId)
-        <div class="scrim" wire:click.self="cancelRenamingFolder" role="dialog" aria-modal="true" aria-labelledby="rename-folder-title"
+        <div class="scrim" x-data x-trap.noscroll="true" wire:click.self="cancelRenamingFolder" role="dialog" aria-modal="true" aria-labelledby="rename-folder-title"
              x-on:keydown.escape.window="$wire.cancelRenamingFolder(); renameTrigger && renameTrigger.focus()">
             <div class="sheet">
                 <div class="sheet-head">
@@ -284,9 +284,9 @@
                     <div class="sheet-body">
                         <div class="field-row">
                             <label class="field-label" for="rename-folder-name">Folder name</label>
-                            <input id="rename-folder-name" wire:model="renameFolderName" type="text" class="field" autofocus />
+                            <input id="rename-folder-name" wire:model="renameFolderName" type="text" class="field" autofocus @error('renameFolderName') aria-invalid="true" aria-describedby="rename-folder-name-error" @enderror />
                             @error('renameFolderName')
-                                <p class="field-error">{{ $message }}</p>
+                                <p class="field-error" id="rename-folder-name-error" role="alert">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>
@@ -300,7 +300,7 @@
     @endif
 
     @if ($showFolderModal)
-        <div class="scrim" wire:click.self="$set('showFolderModal', false)" role="dialog" aria-modal="true" aria-labelledby="new-folder-title">
+        <div class="scrim" x-data x-trap.noscroll="true" x-on:keydown.escape.stop="$wire.set('showFolderModal', false)" wire:click.self="$set('showFolderModal', false)" role="dialog" aria-modal="true" aria-labelledby="new-folder-title">
             <div class="sheet">
                 <div class="sheet-head">
                     <h2 class="h-panel" id="new-folder-title">
@@ -312,9 +312,9 @@
                         <div class="field-row">
                             <label class="field-label" for="new-folder-name">Folder name</label>
                             <input id="new-folder-name" wire:model="newFolderName" type="text" class="field" autofocus
-                                   placeholder="What goes in it?" />
+                                   placeholder="What goes in it?" @error('newFolderName') aria-invalid="true" aria-describedby="new-folder-name-error" @enderror />
                             @error('newFolderName')
-                                <p class="field-error">{{ $message }}</p>
+                                <p class="field-error" id="new-folder-name-error" role="alert">{{ $message }}</p>
                             @enderror
                         </div>
                     </div>

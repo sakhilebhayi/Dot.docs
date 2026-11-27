@@ -1,4 +1,4 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { users } from '../support/env';
 import { as, expectNoCriticalA11y, openWelcomePack } from '../support/helpers';
 
@@ -28,4 +28,16 @@ test('document settings and history have no critical accessibility violations', 
 test('the signed-out home page has no critical accessibility violations', async ({ page }) => {
     await page.goto('/');
     await expectNoCriticalA11y(page, 'home');
+});
+
+test('an error page and the home page have their landmarks and no serious violations (EA-8)', async ({ page }) => {
+    const response = await page.goto('/this-page-does-not-exist');
+    expect(response?.status()).toBe(404);
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    await expectNoCriticalA11y(page, '404 page');
+
+    await page.goto('/');
+    await expect(page.getByRole('main')).toHaveCount(1);
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
 });

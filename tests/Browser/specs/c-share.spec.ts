@@ -17,8 +17,10 @@ test('sharing with someone lets them open it; removing them takes it away', asyn
     await outsider.goto(editUrl);
     await expect(outsider.locator('.ProseMirror')).toContainText('Seeded for the browser suite.');
 
-    await page.getByRole('button', { name: 'Remove', exact: true }).first().click();
-    await expect(page.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+    // EA-8 (U-02): removing someone asks first, and the button names who.
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: /^Remove / }).first().click();
+    await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0);
     const response = await outsider.goto(editUrl);
     expect(response?.status()).toBe(403);
 });
@@ -47,6 +49,8 @@ test('a password-protected published link asks a visitor for the password; an ou
     await visitor.locator('#password').fill('open-sesame-e2e');
     await visitor.getByRole('button', { name: 'Open the document' }).click();
     await expect(visitor.getByText('Seeded for the browser suite.').first()).toBeVisible();
+    await expect(visitor.locator('h1.topbar-title')).toBeVisible();
+    await expect(visitor.getByRole('button', { name: 'Print' })).toBeVisible();
     await expectNoCriticalA11y(visitor, 'shared page');
 
     // EA-1 / S-01: a signed-in outsider holding the link gets the public page, never the editor.

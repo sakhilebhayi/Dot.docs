@@ -8,12 +8,12 @@
 @section('message', "Either this belongs to a different team, needs a role you don't currently have, or requires signing in first. If you think this is wrong, check with whoever owns this workspace.")
 
 @section('actions')
-    <a href="/" class="press" style="padding: 12px 24px; background: var(--accent); color: #1f1b14; font-family: var(--font-display); font-weight: 600; font-size: 15px; border-radius: 999px; text-decoration: none;">Go home</a>
+    <a href="/" class="btn btn-primary press">Go home</a>
     @auth
-    <a href="{{ route('dashboard') }}" class="press link-underline" style="padding: 12px 24px; color: var(--ink); font-size: 15px; text-decoration: none;">Go to dashboard</a>
+    <a href="{{ route('dashboard') }}" class="btn btn-quiet press">Go to dashboard</a>
     @else
         @if (Route::has('login'))
-    <a href="{{ \App\Support\CentralSignIn::login() }}" class="press link-underline" style="padding: 12px 24px; color: var(--ink); font-size: 15px; text-decoration: none;">Sign in</a>
+    <a href="{{ \App\Support\CentralSignIn::login() }}" class="btn btn-quiet press">Sign in</a>
         @endif
     @endauth
 @endsection

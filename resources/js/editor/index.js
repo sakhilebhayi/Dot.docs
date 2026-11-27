@@ -200,7 +200,9 @@ function mount(element, opts = {}) {
             contentError = error;
         },
         editorProps: {
-            attributes: { class: 'paper' },
+            // The text area needs a name: screen readers otherwise announce an unnamed
+            // "edit text" field (axe aria-input-field-name, EA-8).
+            attributes: { class: 'paper', 'aria-label': 'Document text', 'aria-multiline': 'true' },
         },
         onUpdate: () => {
             if (typeof opts.onChange !== 'function' || !autosave || readOnly) {

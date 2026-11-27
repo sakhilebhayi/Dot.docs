@@ -8,5 +8,5 @@
 @section('message', "You've made a few too many requests in a short space of time — a safeguard that protects everyone's access. Wait a minute and try again.")
 
 @section('actions')
-    <a href="/" class="press" style="padding: 12px 24px; background: var(--accent); color: #1f1b14; font-family: var(--font-display); font-weight: 600; font-size: 15px; border-radius: 999px; text-decoration: none;">Go home</a>
+    <a href="/" class="btn btn-primary press">Go home</a>
 @endsection

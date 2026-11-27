@@ -5,6 +5,7 @@
  */
 
 let openOverlay = null;
+let listCount = 0;
 
 /** Subsequence match with a contiguity bonus — enough for a few dozen items. */
 export function fuzzyScore(haystack, needle) {
@@ -62,11 +63,23 @@ export function openList({ title = '', placeholder = 'Type to filter…', items,
     input.placeholder = placeholder;
     input.autocomplete = 'off';
     input.spellcheck = false;
+    // EA-8 (A-04): the input is a combobox whose active row is announced
+    // through aria-activedescendant, since focus never leaves the input.
+    const listId = `dotdoc-list-${++listCount}`;
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-label', title || placeholder);
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-expanded', 'true');
+    input.setAttribute('aria-controls', listId);
     panel.appendChild(input);
 
     const list = document.createElement('ul');
     list.className = 'dotdoc-panel-list';
+    list.id = listId;
     list.setAttribute('role', 'listbox');
+    if (title) {
+        list.setAttribute('aria-label', title);
+    }
     panel.appendChild(list);
 
     root.appendChild(panel);
@@ -92,8 +105,12 @@ export function openList({ title = '', placeholder = 'Type to filter…', items,
         if (!visible.length) {
             const none = document.createElement('li');
             none.className = 'dotdoc-panel-empty';
+            none.setAttribute('role', 'option');
+            none.setAttribute('aria-disabled', 'true');
+            none.setAttribute('aria-selected', 'false');
             none.textContent = empty;
             list.appendChild(none);
+            input.removeAttribute('aria-activedescendant');
 
             return;
         }
@@ -102,6 +119,7 @@ export function openList({ title = '', placeholder = 'Type to filter…', items,
             const row = document.createElement('li');
             row.className = 'dotdoc-panel-row';
             row.setAttribute('role', 'option');
+            row.id = `${listId}-${index}`;
             row.dataset.index = String(index);
 
             const label = document.createElement('span');
@@ -134,8 +152,12 @@ export function openList({ title = '', placeholder = 'Type to filter…', items,
     const highlight = () => {
         Array.from(list.children).forEach((row, index) => {
             row.classList.toggle('is-active', index === active);
+            row.setAttribute('aria-selected', index === active ? 'true' : 'false');
         });
         const current = list.children[active];
+        if (current && current.id) {
+            input.setAttribute('aria-activedescendant', current.id);
+        }
         if (current && current.scrollIntoView) {
             current.scrollIntoView({ block: 'nearest' });
         }

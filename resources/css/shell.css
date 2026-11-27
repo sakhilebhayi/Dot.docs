@@ -20,8 +20,13 @@
     --surface: #fbfaf7;
     --surface-raised: #ffffff;
     --ink: #23211d;
-    --ink-soft: #6b675f;
+    /* #625e56, not #6b675f: on a hovered or selected table row (--accent-soft over --ground) the old value
+       was 4.48:1, under WCAG AA's 4.5:1; this is 5.1:1 there and 5.8:1 on --ground (EA-8). */
+    --ink-soft: #625e56;
     --line: #e5e1d8;
+    /* Edges of the controls a person must find to use them - text fields and checkboxes - need 3:1
+       against what they sit on (WCAG 1.4.11; EA-8). Hairlines stay on --line. */
+    --line-control: #8c877c;
     --accent: #2f5233;
     --accent-soft: #2f523314;
     --danger: #a63b2c;
@@ -109,6 +114,7 @@ html.dark {
     --ink: #eeece6;
     --ink-soft: #a39d90;
     --line: #38352c;
+    --line-control: #7d776a;
     --accent: #7fae7a;
     --accent-soft: #7fae7a1f;
     --danger: #d97c68;
@@ -125,6 +131,7 @@ html.dark {
         --ink: #eeece6;
         --ink-soft: #a39d90;
         --line: #38352c;
+    --line-control: #7d776a;
         --accent: #7fae7a;
         --accent-soft: #7fae7a1f;
         --danger: #d97c68;
@@ -246,6 +253,7 @@ body {
 .topbar-title {
     flex: 1 1 auto;
     min-width: 0;
+    margin: 0; /* an <h1> on the published and shared pages (EA-8 / A-07) */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1648,7 +1656,7 @@ button.list-row {
 .field {
     width: 100%;
     padding: 9px var(--s3);
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-control);
     border-radius: var(--r-control);
     background: var(--surface-raised);
     color: var(--ink);
@@ -1717,7 +1725,7 @@ button.list-row {
 .field-box {
     width: 16px;
     height: 16px;
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-control);
     border-radius: 3px;
     background: var(--surface-raised);
     accent-color: var(--accent);

@@ -22,9 +22,9 @@
             <form wire:submit="save" class="stack">
                 <div class="field-row">
                     <label class="field-label" for="set-title">Title</label>
-                    <input id="set-title" wire:model="title" type="text" class="field" />
+                    <input id="set-title" wire:model="title" type="text" class="field" @error('title') aria-invalid="true" aria-describedby="set-title-error" @enderror />
                     @error('title')
-                        <p class="field-error">{{ $message }}</p>
+                        <p class="field-error" id="set-title-error" role="alert">{{ $message }}</p>
                     @enderror
                 </div>
 
@@ -46,7 +46,7 @@
             <div class="field-row">
                 <label class="field-label" for="set-folder">Folder</label>
                 <div class="toolbar">
-                    <select id="set-folder" wire:model="folderId" class="field" style="flex:1 1 auto">
+                    <select id="set-folder" wire:model="folderId" class="field" style="flex:1 1 auto" @error('folderId') aria-invalid="true" aria-describedby="set-folder-error" @enderror>
                         <option value="">The root of this workspace</option>
                         @foreach ($this->availableFolders as $folder)
                             <option value="{{ $folder['id'] }}">{{ $folder['label'] }}</option>
@@ -55,13 +55,13 @@
                     <button type="button" class="btn" wire:click="moveToFolder">Move it</button>
                 </div>
                 @error('folderId')
-                    <p class="field-error">{{ $message }}</p>
+                    <p class="field-error" id="set-folder-error" role="alert">{{ $message }}</p>
                 @enderror
             </div>
 
             <div class="field-row">
                 <span class="field-label" id="set-tags-label">Tags</span>
-                <div class="toolbar" aria-labelledby="set-tags-label" style="margin-bottom:var(--s3)">
+                <div class="toolbar" role="group" aria-labelledby="set-tags-label" style="margin-bottom:var(--s3)">
                     @forelse ($this->tags as $tag)
                         <span class="tag">
                             {{ $tag->name }}
@@ -92,23 +92,23 @@
                 <div class="grid-2">
                     <div class="field-row" style="margin-top:0">
                         <label class="field-label" for="set-size">Paper size</label>
-                        <select id="set-size" wire:model="pageSize" class="field">
+                        <select id="set-size" wire:model="pageSize" class="field" @error('pageSize') aria-invalid="true" aria-describedby="set-size-error" @enderror>
                             <option value="A4">A4</option>
                             <option value="A3">A3</option>
                             <option value="Letter">Letter</option>
                         </select>
                         @error('pageSize')
-                            <p class="field-error">{{ $message }}</p>
+                            <p class="field-error" id="set-size-error" role="alert">{{ $message }}</p>
                         @enderror
                     </div>
                     <div class="field-row" style="margin-top:0">
                         <label class="field-label" for="set-orientation">Orientation</label>
-                        <select id="set-orientation" wire:model="orientation" class="field">
+                        <select id="set-orientation" wire:model="orientation" class="field" @error('orientation') aria-invalid="true" aria-describedby="set-orientation-error" @enderror>
                             <option value="portrait">Portrait</option>
                             <option value="landscape">Landscape</option>
                         </select>
                         @error('orientation')
-                            <p class="field-error">{{ $message }}</p>
+                            <p class="field-error" id="set-orientation-error" role="alert">{{ $message }}</p>
                         @enderror
                     </div>
                 </div>
@@ -123,9 +123,9 @@
                         <div class="field-row" style="margin-top:0">
                             <label class="field-label" for="set-{{ $model }}">{{ $label }}</label>
                             <input id="set-{{ $model }}" wire:model="{{ $model }}" type="text" class="field field-mono"
-                                   placeholder="{{ $placeholder }}" />
+                                   placeholder="{{ $placeholder }}" @error($model) aria-invalid="true" aria-describedby="set-{{ $model }}-error" @enderror />
                             @error($model)
-                                <p class="field-error">{{ $message }}</p>
+                                <p class="field-error" id="set-{{ $model }}-error" role="alert">{{ $message }}</p>
                             @enderror
                         </div>
                     @endforeach
@@ -133,17 +133,17 @@
 
                 <div class="field-row">
                     <label class="field-label" for="set-header">Running header</label>
-                    <input id="set-header" wire:model="header" type="text" class="field field-mono" placeholder="@{{ title }}" />
+                    <input id="set-header" wire:model="header" type="text" class="field field-mono" placeholder="@{{ title }}" @error('header') aria-invalid="true" aria-describedby="set-header-error" @enderror />
                     @error('header')
-                        <p class="field-error">{{ $message }}</p>
+                        <p class="field-error" id="set-header-error" role="alert">{{ $message }}</p>
                     @enderror
                 </div>
 
                 <div class="field-row">
                     <label class="field-label" for="set-footer">Running footer</label>
-                    <input id="set-footer" wire:model="footer" type="text" class="field field-mono" placeholder="Page @{{ page }} of @{{ pages }}" />
+                    <input id="set-footer" wire:model="footer" type="text" class="field field-mono" placeholder="Page @{{ page }} of @{{ pages }}" @error('footer') aria-invalid="true" aria-describedby="set-footer-error" @enderror />
                     @error('footer')
-                        <p class="field-error">{{ $message }}</p>
+                        <p class="field-error" id="set-footer-error" role="alert">{{ $message }}</p>
                     @enderror
                     <p class="field-hint">
                         Takes @{{ title }}, @{{ date }}, @{{ team }}, @{{ page }}, @{{ pages }} and any variable the document defines.
@@ -163,9 +163,9 @@
             <form wire:submit="transferOwnership" class="stack">
                 <div class="field-row">
                     <label class="field-label" for="set-transfer">Hand the document to</label>
-                    <input id="set-transfer" wire:model="transferEmail" type="email" class="field" placeholder="name@example.com" />
+                    <input id="set-transfer" wire:model="transferEmail" type="email" class="field" placeholder="name@example.com" @error('transferEmail') aria-invalid="true" aria-describedby="set-transfer-error" @enderror />
                     @error('transferEmail')
-                        <p class="field-error">{{ $message }}</p>
+                        <p class="field-error" id="set-transfer-error" role="alert">{{ $message }}</p>
                     @enderror
                     <p class="field-hint">They become the owner; you keep access as an editor.</p>
                 </div>

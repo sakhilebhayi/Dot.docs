@@ -157,9 +157,10 @@
                         @for ($i = 0; $i < $layers; $i++)
                             <span class="rec-under" aria-hidden="true"></span>
                         @endfor
-                        <a class="rec-sheet" href="{{ route('documents.edit', $selected->uuid) }}"
-                           aria-label="Open {{ $selectedName }}">
-                            <span class="rec-title">{{ $selectedName }}</span>
+                        {{-- Named by its own text, with "Open" for screen readers: an aria-label that
+                             left out the visible title and excerpt broke WCAG 2.5.3 (EA-8). --}}
+                        <a class="rec-sheet" href="{{ route('documents.edit', $selected->uuid) }}">
+                            <span class="sr-only">Open </span><span class="rec-title">{{ $selectedName }}</span>
                             @if ($excerpt !== '')
                                 <span class="rec-text">{{ $excerpt }}</span>
                             @endif
