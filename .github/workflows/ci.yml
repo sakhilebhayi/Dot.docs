@@ -20,7 +20,7 @@ jobs:
           - php: '8.5'
             coverage: pcov
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -93,7 +93,7 @@ jobs:
     # publish behind a password, export, the assistant, keyboard, a phone) and axe on every main screen
     # (critical violations fail; serious ones are listed in the log). tests/Browser/README in the config.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -131,7 +131,7 @@ jobs:
     name: Pint (code style)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -149,7 +149,7 @@ jobs:
     name: PHPStan (static analysis)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -170,7 +170,7 @@ jobs:
     # S-15): every merge deploys production, so a known serious hole must
     # not ship. Low and medium are printed and do not block.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -196,7 +196,7 @@ jobs:
     runs-on: ubuntu-latest
     # Same rule as composer-audit: high and critical block the gate.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -211,7 +211,7 @@ jobs:
     # R2-2: a workflow GitHub cannot parse merged once (#212) and deployed nothing. actionlint checks every
     # workflow's syntax, expressions and (through shellcheck) its shell steps, plus the deploy's host scripts.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: actionlint
         run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
       - name: shellcheck the deploy's host scripts
