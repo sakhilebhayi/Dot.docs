@@ -123,11 +123,15 @@ storage/app/public/`). `-n` never overwrites a file that is there.
 - **A later step failed** (assets, crontab, going live): the last step, "Never leave the site in maintenance mode",
   takes the site out of maintenance mode; the new code is live. Read the failed step and redeploy (Actions > Deploy to
   Production > Run workflow) once it is fixed.
-- **The smoke check failed after going live** (assets or pages broken): roll the code back by hand to the previous
-  commit, then redeploy it from GitHub so the assets match:
-
-  ```bash
-  git log --oneline -3
-  ```
-
-  then in GitHub: revert the merge on `main` (a new PR), which deploys the previous state with its own assets.
+- **The health check failed after going live** (assets or pages broken): since R2-2 the deploy rolls itself back. The
+  step "Roll back when the live site is unhealthy" puts the previous release's code, dependencies, caches and built
+  assets back, takes the site out of maintenance mode and checks it again. Its log says which release is live and
+  whether it is healthy. Migrations of the failed release are NOT reversed: if the log says the old release is not
+  healthy either, restore the `predeploy-…` copy (section 2). Then fix forward with a new PR.
+- **The host check says INCONCLUSIVE** (the app could not be reached: a firewall or challenge page, 403/429, no
+  answer): nothing is rolled back, because nothing showed the release broken. The run is red: open the site in a
+  browser; if it works, nothing more is needed.
+- **CI failed on `main` for a flaky reason** (a download rate limit, say): nothing deploys until CI passes. Open that
+  CI run on GitHub and choose "Re-run failed jobs"; its success starts the deploy.
+- **The outside check is red but the host check passed:** the host's bot protection answered GitHub's runner with its
+  own page. The step is advisory; nothing to do.

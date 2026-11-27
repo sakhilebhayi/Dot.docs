@@ -1,6 +1,6 @@
 name: Deploy to Production
 
-# Deploys automatically on every push to main (i.e. every merge), and can
+# Deploys automatically after every merge to main once CI has passed on it, and can
 # also be triggered manually from the Actions tab (or
 # `gh workflow run deploy.yml -f confirm=deploy`) to redeploy the current
 # main without a new merge - e.g. after a manual server-side fix. Run
@@ -13,7 +13,12 @@ name: Deploy to Production
 # mergeable in the first place - the gate is the only thing standing
 # between a broken PR and production.
 on:
-  push:
+  # R2-2: a merge deploys only once CI has passed ON MAIN for that commit. Before, this ran on the push itself, in
+  # parallel with CI, so a red CI on main (seen for d4b9069) still deployed. If CI on main fails for a flaky reason,
+  # "Re-run failed jobs" on that CI run; its success starts the deploy.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -34,7 +39,12 @@ jobs:
   deploy:
     name: Deploy main to doc.infodot.co.za
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    # A CI run that failed, or ran for something other than a push to main, deploys nothing.
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    env:
+      # The commit CI passed (workflow_run) or the current main (manual run). Built, deployed and checked as one.
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
     steps:
       - name: Refuse unconfirmed manual runs
@@ -47,6 +57,8 @@ jobs:
           exit 1
 
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -69,9 +81,8 @@ jobs:
       - name: Deploy code and run migrations
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-          # The commit CI tested and this run built the assets from (EA-6 / O-11).
+          # The commit CI tested and this run built the assets from (EA-6 / O-11; job env above).
           # `origin/main` at fetch time could be a later merge.
-          DEPLOY_SHA: ${{ github.sha }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
               "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
@@ -94,6 +105,13 @@ jobs:
             echo "::error::$DEPLOY_SHA is not newer than the running release ${PREV:0:9}. Deploy the current main instead (Actions > Deploy to Production > Run workflow)."
             exit 1
           fi
+
+          # ---- What a rollback after a failed smoke check needs (R2-2): the running release's commit, and its
+          # built assets (public/build is not in git, and the asset step replaces it with --delete).
+          printf '%s\n' "$PREV" > storage/app/deploy-previous-release
+          # Kept outside public/, so it is never served.
+          rm -rf storage/app/build.prev
+          if [ -d public/build ]; then cp -a public/build storage/app/build.prev; fi
 
           # ---- A verified database copy BEFORE anything changes (EA-6 / O-03).
           # The SQLite online backup is consistent with writers active and needs
@@ -425,7 +443,88 @@ jobs:
             && echo "::warning::The deploy failed; the site was taken out of maintenance mode (see the steps above for what failed)." \
             || echo "::error::Could not take the site out of maintenance mode. Run 'php artisan up' in the app folder by hand."
 
-      - name: Smoke-check the live site
+      - name: Smoke-check the live site from the host
+        # R2-2: the deciding health check runs ON THE HOST (scripts/deploy/smoke-check.sh), through its own
+        # loopback when the web server answers there, so the host's bot protection - which answered GitHub's
+        # runners with its own page on 2026-11-27 and turned healthy deploys red - never sees it.
+        id: host_smoke
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        # The script answers 0 healthy, 1 unhealthy (the app answered and is broken: roll back), 2 inconclusive (the
+        # app could not be reached: red, but nothing is rolled back on no evidence).
+        run: |
+          RC=0
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              "cd '$DEPLOY_PATH' && SITE_URL='$SITE_URL' bash scripts/deploy/smoke-check.sh" || RC=$?
+          case "$RC" in
+            0) echo "result=healthy" >> "$GITHUB_OUTPUT" ;;
+            1) echo "result=unhealthy" >> "$GITHUB_OUTPUT" ;;
+            *) echo "result=inconclusive" >> "$GITHUB_OUTPUT" ;;
+          esac
+          exit "$RC"
+
+      - name: Roll back when the live site is unhealthy
+        # R2-2 / O-04: the new code went live but failed its health check. Put the previous release back - code,
+        # dependencies, caches and its own built assets - and check again. Migrations are NOT reversed: the
+        # pre-deploy database copy is the way back (docs/programme/RESTORE_RUNBOOK.md). The run stays red.
+        if: ${{ failure() && steps.host_smoke.outputs.result == 'unhealthy' }}
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              DEPLOY_PATH="$DEPLOY_PATH" SITE_URL="$SITE_URL" \
+              'bash -s' <<'ROLLBACK'
+          set -uo pipefail
+          # No `set -e` here (each step reports and the rollback carries on), so a failed cd must stop it: every
+          # line below runs git and artisan in the current folder.
+          cd "$DEPLOY_PATH" || { echo "::error::cannot enter the app folder; nothing was rolled back"; exit 1; }
+          PREV="$(cat storage/app/deploy-previous-release 2>/dev/null || true)"
+          if [ -z "$PREV" ] || ! git cat-file -e "$PREV^{commit}" 2>/dev/null; then
+            echo "::error::No previous release recorded; nothing was rolled back. Fix forward or restore by hand (RESTORE_RUNBOOK.md section 4)."; exit 1
+          fi
+          # The check script is part of the release being removed: keep a copy to check the rollback with.
+          cp scripts/deploy/smoke-check.sh storage/app/smoke-check.sh
+          echo "::error::Rolling back to ${PREV:0:9}: the new release went live but failed its health check."
+          php artisan down --retry=30 || true
+          git reset --hard "$PREV"
+          if [ -f .docroot-is-public ] || [ "$(uapi --output=json DomainInfo single_domain_data domain=doc.infodot.co.za 2>/dev/null | sed -n 's/.*"documentroot" *: *"\([^"]*\)".*/\1/p' | head -1)" = "$(pwd -P)/public" ]; then
+            [ -f .htaccess ] && mv -f .htaccess .htaccess.docroot-is-public-disabled
+            DOCROOT_BUILD=""
+          else
+            DOCROOT_BUILD="$(dirname "$(pwd -P)")/build"
+          fi
+          composer install --no-interaction --optimize-autoloader --no-dev || echo "::warning::composer install failed during the rollback"
+          if [ -d storage/app/build.prev ]; then
+            rm -rf public/build && cp -a storage/app/build.prev public/build
+            if [ -n "$DOCROOT_BUILD" ]; then rm -rf "$DOCROOT_BUILD" && cp -a storage/app/build.prev "$DOCROOT_BUILD"; fi
+          else
+            echo "::warning::no saved build of ${PREV:0:9}; its pages may name assets that are gone"
+          fi
+          # Every cache the failed release built (config, routes, views, events) goes, then the old release's are built.
+          php artisan optimize:clear || echo "::warning::clearing the caches failed"
+          { php artisan config:cache && php artisan route:cache && php artisan view:cache && php artisan event:cache; } || echo "::warning::rebuilding the caches failed"
+          php artisan queue:restart || true
+          # Never leave the site in maintenance mode, even if artisan itself is broken.
+          php artisan up || { rm -f storage/framework/down; echo "::warning::artisan up failed; the maintenance file was removed by hand"; }
+          # The page cache may hold pages of the failed release (the health check fetched them) naming its assets.
+          PURGE_URL="$(php artisan cache:purge-litespeed 2>/dev/null || true)"
+          if [ -n "$PURGE_URL" ] && curl -fsS -o /dev/null "$PURGE_URL"; then echo "LSCache purge requested."; else echo "::warning::LSCache purge failed after the rollback"; fi
+          echo "::error::Rolled back to $(git rev-parse --short HEAD). Migrations of the failed release, if any, were NOT reversed."
+          if SITE_URL="$SITE_URL" bash storage/app/smoke-check.sh; then
+            echo "== The previous release is healthy again."
+          else
+            echo "::error::The previous release did not pass the check either: look at the site, and restore by hand if needed (RESTORE_RUNBOOK.md section 4)."
+          fi
+          exit 1
+          ROLLBACK
+
+      - name: Check the live site from outside (advisory)
+        # The same checks from GitHub's runner, as a visitor elsewhere would see the site. Advisory since R2-2: the
+        # host's bot protection sometimes answers runners with its own page, so a failure here is a warning and the
+        # host check above decides.
+        continue-on-error: true
         # Last step, on purpose: a deploy is green only once the live
         # pages have been seen loading their own assets. Runs on the
         # runner with plain curl (no SSH), exactly as a browser would: /

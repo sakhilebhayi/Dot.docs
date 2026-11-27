@@ -51,4 +51,10 @@ return [
         'critical_multiplier' => (float) env('GUARDIAN_FRESHNESS_CRITICAL_X', 4.0),
     ],
 
+    /*
+    | R2-2 / O-06: where an error the app reports is mailed (App\Services\Guardian\ErrorAlert). Empty: no alert mail
+    | (the hourly counter Guardian reads still runs).
+    */
+    'alert_email' => env('OPS_ALERT_EMAIL'),
+
 ];
