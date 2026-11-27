@@ -51,6 +51,12 @@ return [
             'journal_mode' => env('DB_JOURNAL_MODE', 'wal'),
             'synchronous' => null,
             'transaction_mode' => 'IMMEDIATE',
+            // Incremental auto-vacuum (EA-9 / R2-9): freed pages are tracked so `php artisan doc:vacuum --incremental`
+            // can hand them back to the disk without rewriting the whole file. SQLite only takes this on a database
+            // that has no tables yet (it runs before the journal mode, on every connection), so it applies to a newly
+            // created file; on an existing file it is a no-op until the one-off conversion in
+            // docs/programme/RESTORE_RUNBOOK.md ("Reclaim free space"). Nothing here or in a migration ever VACUUMs.
+            'pragmas' => array_filter(['auto_vacuum' => env('DB_AUTO_VACUUM', 'incremental')]),
         ],
 
         'mysql' => [
