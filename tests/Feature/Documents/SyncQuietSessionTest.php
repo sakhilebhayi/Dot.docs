@@ -4,6 +4,7 @@ namespace Tests\Feature\Documents;
 
 use App\Documents\DocumentStore;
 use App\Http\Middleware\StartSession;
+use App\Livewire\HeaderSearch;
 use App\Models\Document;
 use App\Models\User;
 use Database\Seeders\DocumentStyleSeeder;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
@@ -192,5 +194,29 @@ class SyncQuietSessionTest extends TestCase
         }
 
         $this->assertSame(2, $this->sessionWrites);
+    }
+
+    public function test_livewire_updates_that_change_nothing_in_the_session_do_not_write_it(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = $this->document($user);
+        $id = $this->signIn($user);
+        $this->poll($id, $doc)->assertOk();
+
+        // A real component snapshot, as the page holds it, and an update that calls nothing.
+        $snapshot = json_encode(Livewire::actingAs($user)->test(HeaderSearch::class)->snapshot);
+        $this->forgetSession();
+
+        $this->sessionWrites = 0;
+        $this->travel(10)->seconds();
+        foreach (range(1, 3) as $_) {
+            $this->forgetSession();
+            $this->withCredentials()->withCookie(config('session.cookie'), $id)
+                ->withHeader('X-Livewire', '')
+                ->postJson(route('default.livewire.update'), ['components' => [['snapshot' => $snapshot, 'updates' => (object) [], 'calls' => []]]])
+                ->assertOk();
+        }
+
+        $this->assertSame(0, $this->sessionWrites, 'Three unchanged Livewire updates wrote the session row.');
     }
 }
