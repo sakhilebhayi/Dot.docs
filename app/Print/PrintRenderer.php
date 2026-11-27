@@ -2,12 +2,15 @@
 
 namespace App\Print;
 
+use App\Brand\Brand;
 use App\Documents\DocumentStore;
 use App\Documents\Outline\Outline;
 use App\Documents\Render\HtmlRenderer;
 use App\Documents\Render\RenderContext;
 use App\Models\Document;
+use App\Models\DocumentStyle;
 use App\Styles\StyleEngine;
+use App\Styles\TokenGuard;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 /**
@@ -86,7 +89,30 @@ class PrintRenderer
             'pageTextX' => round($leftPt, 2),
             'headerPageTextY' => round(max($topPt - 14, 4), 2),
             'footerPageTextYFromBottom' => round(max($bottomPt - 14, 4), 2),
+            'brand' => $this->brand($doc, $style),
         ])->render();
+    }
+
+    /**
+     * The company letterhead (page 1) and disclaimer (the end) for a document that uses its brand (R2-3c), or null.
+     * Plain values: the view escapes them. The logo is a data: URI, since the PDF renderer fetches nothing.
+     *
+     * @return array{logo: string|null, name: string, contact: string, disclaimer: string, colour: string}|null
+     */
+    private function brand(Document $doc, DocumentStyle $style): ?array
+    {
+        $kit = Brand::forDocument($doc);
+        if ($kit === null) {
+            return null;
+        }
+
+        return [
+            'logo' => Brand::logoDataUri($kit),
+            'name' => (string) $kit->name,
+            'contact' => Brand::contactLine($kit),
+            'disclaimer' => trim((string) $kit->disclaimer),
+            'colour' => TokenGuard::colour($style->tokens['colours']['heading'] ?? null, '#1f2023'),
+        ];
     }
 
     public function pdf(Document $doc): string
