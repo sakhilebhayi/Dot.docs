@@ -55,6 +55,14 @@ class DocumentStore
         $this->fill($doc, $json);
         $doc->save();
 
+        // Pictures copied in from another document (a template, a copy) move into this one's own folder, so the
+        // new document's readers see them (R2-1; DocumentMedia::adopt). The uuid only exists once saved.
+        $adopted = DocumentMedia::adopt((string) $doc->uuid, $json, $owner);
+        if ($adopted !== $json) {
+            $this->fill($doc, $adopted);
+            $doc->save();
+        }
+
         $files = app(FilesService::class);
 
         if ($parent === null) {
@@ -125,6 +133,9 @@ class DocumentStore
         if ($errors !== []) {
             throw new InvalidArgumentException(implode('; ', $errors));
         }
+
+        // A picture pasted in from another document moves into this one's folder (R2-1; DocumentMedia::adopt).
+        $json = DocumentMedia::adopt((string) $doc->uuid, $json, $actor);
 
         // The rendering work (numbering, HTML, search text, word count) is
         // done HERE, before the write lock is taken: on SQLite there is one

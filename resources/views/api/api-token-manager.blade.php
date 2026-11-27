@@ -5,7 +5,7 @@
         </x-slot>
 
         <x-slot name="description">
-            {{ __('API tokens allow third-party services to authenticate with our application on your behalf.') }}
+            {{ __('A token lets another service use the Dot.docs API (/api) as you: read gives your company\'s documents, create makes new ones, update changes their text. It never opens the site\'s pages, it lasts :days days, and every use is recorded.', ['days' => intdiv((int) config('sanctum.expiration'), 60 * 24)]) }}
         </x-slot>
 
         <x-slot name="form">
@@ -60,11 +60,12 @@
                         <li class="list-row">
                             <span class="list-key">
                                 {{ $token->name }}
-                                @if ($token->last_used_at)
-                                    <span class="list-sub">{{ __('Last used') }} {{ $token->last_used_at->diffForHumans() }}</span>
-                                @else
-                                    <span class="list-sub">{{ __('Never used') }}</span>
-                                @endif
+                                <span class="list-sub">
+                                    {{ $token->last_used_at ? __('Last used').' '.$token->last_used_at->diffForHumans() : __('Never used') }}
+                                    @if (config('sanctum.expiration'))
+                                        · {{ __('Expires') }} {{ $token->created_at->addMinutes((int) config('sanctum.expiration'))->format('j M Y') }}
+                                    @endif
+                                </span>
                             </span>
 
                             @if (Laravel\Jetstream\Jetstream::hasPermissions())

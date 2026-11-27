@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Documents\DocumentMedia;
 use App\Documents\Render\NumberedRender;
 use App\Documents\Render\RenderContext;
 use App\Models\Document;
@@ -50,6 +51,9 @@ class PublishedDocumentController extends Controller
         if (! $document->isShareAccessible($request->string('password')->toString())) {
             return back()->withErrors(['password' => 'Incorrect password.']);
         }
+
+        // The page's pictures are fetched separately (/media/...): they need to know this visitor unlocked it.
+        $request->session()->put(DocumentMedia::unlockKey((string) $document->uuid), DocumentMedia::unlockStamp($document));
 
         return $this->page($document);
     }

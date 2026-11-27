@@ -167,9 +167,10 @@
                     @error('transferEmail')
                         <p class="field-error" id="set-transfer-error" role="alert">{{ $message }}</p>
                     @enderror
-                    <p class="field-hint">They become the owner; you keep access as an editor.</p>
+                    <p class="field-hint">Someone in {{ $document->team?->name ?? 'this company' }}. They become the owner; you keep editing it.</p>
                 </div>
-                <button type="submit" class="btn">Transfer ownership</button>
+                <button type="submit" class="btn"
+                        wire:confirm="Hand this document to someone else? They become its owner and can delete it.">Transfer ownership</button>
             </form>
         </div>
     </section>

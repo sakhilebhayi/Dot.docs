@@ -44,25 +44,45 @@ class SecurityHeadersTest extends TestCase
         $this->get('/__strict')->assertHeader('X-Frame-Options', 'DENY');
     }
 
-    public function test_the_policy_is_report_only_and_reports_to_the_csp_endpoint(): void
+    /** R2-1 / S-06: the policy is enforced, still reports, and every script tag on the page carries this request's nonce. */
+    public function test_the_policy_is_enforced_with_a_per_request_nonce_and_reports_to_the_csp_endpoint(): void
     {
         $response = $this->get('/');
 
-        $policy = (string) $response->headers->get('Content-Security-Policy-Report-Only');
+        $policy = (string) $response->headers->get('Content-Security-Policy');
+        $this->assertFalse($response->headers->has('Content-Security-Policy-Report-Only'));
         $this->assertStringContainsString("default-src 'self'", $policy);
         $this->assertStringContainsString('report-uri /csp-report', $policy);
         $this->assertStringContainsString("frame-ancestors 'self'", $policy);
         $this->assertStringContainsString("object-src 'none'", $policy);
         $this->assertStringContainsString("base-uri 'self'", $policy);
-        $this->assertFalse($response->headers->has('Content-Security-Policy'), 'report-only: nothing is enforced yet');
+
+        preg_match("/'nonce-([A-Za-z0-9+\/=_-]+)'/", $policy, $m);
+        $this->assertNotEmpty($m[1] ?? null, 'script-src names a nonce');
+        $this->assertNotSame($m[1], $this->get('/')->headers->get('Content-Security-Policy'), 'a fresh nonce per request');
+
+        // Every inline <script> on the page carries it; none would run otherwise.
+        preg_match_all('/<script(?![^>]*\bsrc=)([^>]*)>/', $response->getContent(), $inline);
+        foreach ($inline[1] as $attributes) {
+            $this->assertStringContainsString('nonce="'.$m[1].'"', $attributes);
+        }
+    }
+
+    public function test_the_switch_in_env_puts_the_policy_back_to_report_only(): void
+    {
+        config(['security.csp_enforce' => false]);
+        $response = $this->get('/');
+
+        $this->assertFalse($response->headers->has('Content-Security-Policy'));
+        $this->assertStringContainsString("default-src 'self'", (string) $response->headers->get('Content-Security-Policy-Report-Only'));
     }
 
     public function test_the_policy_allows_the_outside_origins_the_layouts_load(): void
     {
-        $policy = (string) $this->get('/')->headers->get('Content-Security-Policy-Report-Only');
+        $policy = (string) $this->get('/')->headers->get('Content-Security-Policy');
 
         preg_match('/script-src ([^;]+);/', $policy, $script);
-        $this->assertStringContainsString("'unsafe-inline'", $script[1], 'Livewire and Jetstream render inline scripts');
+        $this->assertStringNotContainsString("'unsafe-inline'", $script[1], 'inline scripts run only with the nonce');
         $this->assertStringContainsString("'unsafe-eval'", $script[1], 'Alpine evaluates its expressions with the Function constructor');
 
         $this->assertMatchesRegularExpression('/style-src [^;]*https:\/\/fonts\.googleapis\.com/', $policy);
@@ -70,6 +90,20 @@ class SecurityHeadersTest extends TestCase
         $this->assertMatchesRegularExpression('/img-src [^;]*data: blob:[^;]*https:\/\/images\.unsplash\.com/', $policy);
         $this->assertMatchesRegularExpression('/img-src [^;]*https:\/\/ui-avatars\.com/', $policy, "Jetstream's default avatar");
         $this->assertStringContainsString("connect-src 'self' wss: https:", $policy);
+    }
+
+    /** No view may use an inline event handler: the enforced policy refuses them. */
+    public function test_no_view_uses_an_inline_event_handler(): void
+    {
+        $offenders = [];
+        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(resource_path('views'))) as $file) {
+            if ($file->isFile() && str_ends_with($file->getFilename(), '.blade.php')
+                && preg_match('/<[a-z][^>]*\son(click|submit|change|input|load|error|keydown|keyup|focus|blur)=/i', (string) file_get_contents($file->getPathname()))) {
+                $offenders[] = str_replace(resource_path('views').'/', '', $file->getPathname());
+            }
+        }
+
+        $this->assertSame([], $offenders);
     }
 
     public function test_violation_reports_are_accepted_without_a_session_a_csrf_token_or_a_login(): void

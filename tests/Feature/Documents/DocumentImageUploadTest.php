@@ -32,6 +32,7 @@ class DocumentImageUploadTest extends TestCase
     public function test_an_owner_can_upload_an_image_and_gets_a_url_back(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
         $user = User::factory()->withPersonalTeam()->create();
         $doc = $this->doc($user);
 
@@ -39,9 +40,11 @@ class DocumentImageUploadTest extends TestCase
             'image' => UploadedFile::fake()->image('shot.png', 40, 30),
         ]);
 
+        // R2-1 / S-13: private, under the document, never on the public disk.
         $response->assertOk();
-        $this->assertStringContainsString('/storage/document-images/', $response->json('url'));
-        $this->assertCount(1, Storage::disk('public')->files('document-images'));
+        $this->assertStringStartsWith('/media/'.$doc->uuid.'/', $response->json('url'));
+        $this->assertCount(1, Storage::disk('local')->files('document-media/'.$doc->uuid));
+        $this->assertCount(0, Storage::disk('public')->allFiles());
     }
 
     public function test_a_stranger_cannot_upload_into_someone_elses_document(): void
@@ -56,7 +59,7 @@ class DocumentImageUploadTest extends TestCase
             ])
             ->assertForbidden();
 
-        $this->assertCount(0, Storage::disk('public')->files('document-images'));
+        $this->assertCount(0, Storage::disk('public')->allFiles());
     }
 
     public function test_a_guest_is_not_let_in(): void

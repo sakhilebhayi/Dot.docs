@@ -2,6 +2,7 @@
 
 namespace App\Documents\Export;
 
+use App\Documents\DocumentMedia;
 use App\Documents\Outline\Outline;
 use App\Documents\Schema\DocumentSchema;
 use App\Models\Document;
@@ -90,6 +91,9 @@ class DocxExporter
      * @param  array<string,mixed>  $json  Dot.Doc JSON
      * @return string absolute path to a temporary .docx file — the caller owns it
      */
+    /** The uuid whose /media/ folder this export may read (R2-1; DocumentMedia). */
+    private ?string $mediaOwner = null;
+
     public function export(array $json, Document $doc, DocumentStyle $style): string
     {
         // PhpOffice\PhpWord\Style is a process-wide static registry, so the
@@ -98,6 +102,7 @@ class DocxExporter
         // definition of a name and ignores later ones).
         Style::resetStyles();
 
+        $this->mediaOwner = (string) $doc->uuid ?: null;
         $this->tokens = is_array($style->tokens) ? $style->tokens : [];
         $this->variables = array_map(
             fn (mixed $v): string => is_scalar($v) ? (string) $v : '',
@@ -623,6 +628,17 @@ class DocxExporter
      */
     private function publicDiskPath(string $src): ?string
     {
+        // Pictures on the private disk (R2-1 / S-13): the exporter already
+        // passed the document's own access check, so it reads them directly.
+        // Only this document's own pictures: a src naming another document's
+        // folder is skipped, so pasting another document's address cannot pull
+        // its file into this export.
+        if (str_starts_with($src, DocumentMedia::PREFIX)) {
+            return $this->mediaOwner !== null && str_starts_with($src, DocumentMedia::PREFIX.$this->mediaOwner.'/')
+                ? DocumentMedia::path($src)
+                : null;
+        }
+
         if (preg_match(self::IMAGE_SRC, $src) !== 1) {
             return null;
         }

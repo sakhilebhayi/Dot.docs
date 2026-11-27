@@ -9,6 +9,9 @@
      */
     $engine = app(\App\Styles\StyleEngine::class);
     $styleCss = $engine->css($engine->resolve($document), 'canvas');
+    // Rendered from the stored JSON by the same renderer as the published page (R2-1 / S-06), never the stored
+    // HTML column printed raw: a legacy row's HTML was trusted as it was written.
+    $body = app(\App\Documents\Render\NumberedRender::class)->html($document, \App\Documents\Render\RenderContext::share());
     // Day-first, like the signed-in shell: no cookie means no class and the
     // prefers-color-scheme guard in shell.css decides.
     $cookieTheme = request()->cookie('theme');
@@ -54,7 +57,7 @@
             <span class="micro">{{ $document->owner->name }} · {{ $document->updated_at->format('j M Y') }}</span>
 
             <div class="topbar-actions">
-                <button type="button" class="topbar-action" onclick="window.print()">Print</button>
+                <button type="button" class="topbar-action" data-shell-print>Print</button>
                 <button type="button" class="topbar-action" data-shell-theme-toggle
                         aria-pressed="{{ $theme === 'dark' ? 'true' : 'false' }}">
                     <span data-shell-theme-word>{{ $theme === 'dark' ? 'Night' : 'Day' }}</span>
@@ -68,7 +71,7 @@
             <div class="canvas">
                 <style id="doc-style">{!! $styleCss !!}</style>
                 <article class="paper">
-                    {!! $document->content !!}
+                    {!! $body !!}
                 </article>
             </div>
         </main>

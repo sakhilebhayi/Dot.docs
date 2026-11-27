@@ -95,6 +95,7 @@ class ImportExportTest extends TestCase
     public function test_docx_fixture_imports_headings_lists_table_and_image(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $json = (new DocxImporter)->import(self::FIXTURES.'/sample.docx', 'fixture-uuid');
 
@@ -135,8 +136,9 @@ class ImportExportTest extends TestCase
 
         // The embedded PNG is extracted onto the public disk and referenced by path.
         $src = $json['content'][7]['attrs']['src'];
-        $this->assertStringStartsWith('/storage/documents/fixture-uuid/', $src);
-        Storage::disk('public')->assertExists(ltrim(str_replace('/storage/', '', $src), '/'));
+        // R2-1 / S-13: imported pictures are private, beside their document.
+        $this->assertStringStartsWith('/media/fixture-uuid/', $src);
+        Storage::disk('local')->assertExists('document-media/fixture-uuid/'.basename($src));
     }
 
     public function test_markdown_export_renders_pipe_tables_and_cross_references(): void
@@ -215,6 +217,7 @@ class ImportExportTest extends TestCase
     public function test_docx_export_round_trips_an_image_and_a_numbered_heading(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
         $this->seed(DocumentStyleSeeder::class);
         $user = User::factory()->create();
 
@@ -247,9 +250,8 @@ class ImportExportTest extends TestCase
         $this->assertSame('1 Scope', $this->schemaPlainText($back['content'][0]));
 
         $src = $back['content'][2]['attrs']['src'];
-        $this->assertStringStartsWith('/storage/documents/reimported/', $src);
-        Storage::disk('public')->assertExists(ltrim(str_replace('/storage/', '', $src), '/'));
-        $this->assertSame($png, Storage::disk('public')->get(ltrim(str_replace('/storage/', '', $src), '/')));
+        $this->assertStringStartsWith('/media/reimported/', $src);
+        $this->assertSame($png, Storage::disk('local')->get('document-media/reimported/'.basename($src)));
     }
 
     public function test_docx_export_and_reimport_keeps_a_toc_as_a_toc_node(): void

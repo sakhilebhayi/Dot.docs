@@ -50,7 +50,8 @@ return [
     |
     */
 
-    'expiration' => null,
+    // R2-1 / S-07: a token lasts 90 days (in minutes); expired ones are pruned nightly (routes/console.php).
+    'expiration' => (int) env('SANCTUM_TOKEN_EXPIRATION', 60 * 24 * 90),
 
     /*
     |--------------------------------------------------------------------------

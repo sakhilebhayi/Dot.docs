@@ -1,5 +1,6 @@
 <?php
 
+use App\Documents\DocumentMedia;
 use App\Http\Controllers\Auth\EcosystemAuthController;
 use App\Http\Controllers\CommentEmailPreferenceController;
 use App\Http\Controllers\CspReportController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\FileViewController;
 use App\Http\Controllers\GuardianHealthController;
 use App\Http\Controllers\LandingController;
+use App\Http\Controllers\MediaController;
 use App\Http\Controllers\PublishedDocumentController;
 use App\Http\Controllers\SchedulerProbeController;
 use App\Http\Middleware\AuthenticateGuardian;
@@ -100,6 +102,12 @@ Route::get('/ops/purge-cache', function () {
     return response()->noContent()->header('X-LiteSpeed-Purge', '*');
 })->middleware('signed')->name('ops.purge-cache');
 
+// Pictures inside documents, to whoever may read the document - signed in, or through its live public link
+// (R2-1 / S-13; App\Documents\DocumentMedia). Outside the signed-in group on purpose: published pages show them too.
+Route::get('/media/{uuid}/{file}', MediaController::class)
+    ->where(['uuid' => '[0-9a-fA-F-]{36}', 'file' => DocumentMedia::FILE])
+    ->name('documents.media');
+
 // Public shared document view (with optional password & expiry enforcement)
 
 Route::get('/shared/{uuid}', function (string $uuid) {
@@ -136,6 +144,9 @@ Route::post('/shared/{uuid}', function (string $uuid, Request $request) {
     if (! Hash::check($request->password, $document->share_password)) {
         return back()->withErrors(['password' => 'Incorrect password.']);
     }
+
+    // The page's pictures are fetched separately (/media/...): they need to know this visitor unlocked it.
+    $request->session()->put(DocumentMedia::unlockKey($document->uuid), DocumentMedia::unlockStamp($document));
 
     $document->recordView();
 
