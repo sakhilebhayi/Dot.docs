@@ -8,12 +8,14 @@ use App\Documents\Render\HtmlRenderer;
 use App\Documents\Render\RenderContext;
 use App\Documents\Schema\DocumentSchema;
 use App\Files\FilesService;
+use App\Models\BrandKit;
 use App\Models\Document;
 use App\Models\DocumentStyle;
 use App\Models\DocumentVersion;
 use App\Models\Files\Obj;
 use App\Models\User;
 use App\Services\WebhookService;
+use App\Styles\StyleEngine;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -52,6 +54,18 @@ class DocumentStore
     {
         $json = $this->schema->normalise($this->schema->ensureIds($json ?? DocumentSchema::empty()));
         $doc = new Document(array_merge(['title' => $title, 'owner_id' => $owner->id, 'team_id' => $owner->currentTeam?->id, 'version' => 1, 'style_key' => 'report'], $attrs));
+
+        // A new document in a company with a brand kit uses it, and starts in the kit's default style unless the
+        // caller chose one (R2-3c). Settings switches it off per document.
+        $kit = $doc->team_id !== null && ! array_key_exists('brand_kit_id', $attrs)
+            ? BrandKit::where('team_id', $doc->team_id)->first()
+            : null;
+        if ($kit !== null) {
+            $doc->brand_kit_id = $kit->id;
+            if (! array_key_exists('style_key', $attrs) && filled($kit->default_style_key) && in_array($kit->default_style_key, StyleEngine::systemKeys(), true)) {
+                $doc->style_key = $kit->default_style_key;
+            }
+        }
         $this->fill($doc, $json);
         $doc->save();
 

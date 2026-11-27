@@ -32,13 +32,41 @@
             font-size: 9pt;
             color: var(--doc-muted, #5d5e5a);
         }
+        /* Company letterhead and disclaimer (R2-3c). A table, not flex: the PDF renderer lays tables out reliably. */
+        .brand-letterhead { width: 100%; border-collapse: collapse; margin: 0 0 8mm; border-bottom: 0.5pt solid #d5d1c7; }
+        .brand-letterhead td { vertical-align: middle; padding: 0 0 4mm; }
+        .brand-letterhead .logo { width: 1%; padding-right: 5mm; }
+        .brand-letterhead img { max-height: 16mm; max-width: 50mm; }
+        .brand-letterhead .name { margin: 0; font-size: 14pt; font-weight: 600; }
+        .brand-letterhead .contact { margin: 1mm 0 0; font-size: 8.5pt; color: #5d5e5a; }
+        .brand-disclaimer { margin-top: 10mm; padding-top: 3mm; border-top: 0.5pt solid #d5d1c7; font-size: 8pt; font-style: italic; color: #5d5e5a; }
     </style>
 </head>
 <body>
     <div class="print-header">{!! $headerHtml !!}</div>
 
     <div class="paper">
+        @if ($brand)
+            <table class="brand-letterhead" role="presentation">
+                <tr>
+                    @if ($brand['logo'])
+                        <td class="logo"><img src="{{ $brand['logo'] }}" alt="{{ $brand['name'] }}"></td>
+                    @endif
+                    <td>
+                        <p class="name" style="color: {{ $brand['colour'] }}">{{ $brand['name'] }}</p>
+                        @if ($brand['contact'] !== '')
+                            <p class="contact">{{ $brand['contact'] }}</p>
+                        @endif
+                    </td>
+                </tr>
+            </table>
+        @endif
+
         {!! $body !!}
+
+        @if ($brand && $brand['disclaimer'] !== '')
+            <p class="brand-disclaimer">{{ $brand['disclaimer'] }}</p>
+        @endif
     </div>
 
     <div class="print-footer">{!! $footerHtml !!}</div>

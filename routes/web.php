@@ -3,6 +3,7 @@
 use App\Documents\DocumentMedia;
 use App\Http\Controllers\AccessRequestController;
 use App\Http\Controllers\Auth\EcosystemAuthController;
+use App\Http\Controllers\BrandLogoController;
 use App\Http\Controllers\CommentEmailPreferenceController;
 use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\DocumentAutosaveController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\PublishedDocumentController;
 use App\Http\Controllers\SchedulerProbeController;
 use App\Http\Middleware\AuthenticateGuardian;
 use App\Http\Middleware\EnsureCompanyEntitled;
+use App\Livewire\Company\BrandKitManager;
 use App\Livewire\Documents\Bin;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
@@ -179,6 +181,9 @@ Route::middleware([
     // Documents
     Route::get('/documents', Index::class)->name('documents.index');
     Route::get('/documents/bin', Bin::class)->name('documents.bin');
+    // The company's brand kit (R2-3c): seen by its members, changed by its owner and admins.
+    Route::get('/brand', BrandKitManager::class)->name('brand.index');
+    Route::get('/brand/logo', BrandLogoController::class)->name('brand.logo');
     Route::get('/documents/{uuid}/edit', Editor::class)->name('documents.edit');
     // The destination of an InfoDot deep link: a document, by uuid. Re-authorised by the policy.
     Route::get('/o/{uuid}', DocumentOpenController::class)->name('documents.open');

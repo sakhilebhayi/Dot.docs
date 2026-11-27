@@ -70,6 +70,12 @@
             <span class="rail-item-text">Bin</span>
         </a>
 
+        <a href="{{ route('brand.index') }}"
+           class="rail-item {{ request()->routeIs('brand.index') ? 'is-current' : '' }}"
+           @if (request()->routeIs('brand.index')) aria-current="page" @endif>
+            <span class="rail-item-text">Brand</span>
+        </a>
+
         <a href="{{ route('slash-commands.index') }}"
            class="rail-item {{ request()->routeIs('slash-commands.index') ? 'is-current' : '' }}"
            @if (request()->routeIs('slash-commands.index')) aria-current="page" @endif>

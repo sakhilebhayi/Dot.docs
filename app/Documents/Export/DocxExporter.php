@@ -2,12 +2,15 @@
 
 namespace App\Documents\Export;
 
+use App\Brand\Brand;
 use App\Documents\DocumentMedia;
 use App\Documents\Outline\Outline;
 use App\Documents\Schema\DocumentSchema;
+use App\Models\BrandKit;
 use App\Models\Document;
 use App\Models\DocumentStyle;
 use App\Print\PageSetup;
+use App\Styles\TokenGuard;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpWord\Element\AbstractContainer;
 use PhpOffice\PhpWord\Element\Cell;
@@ -17,6 +20,7 @@ use PhpOffice\PhpWord\Element\Section;
 use PhpOffice\PhpWord\Element\TextRun;
 use PhpOffice\PhpWord\IOFactory;
 use PhpOffice\PhpWord\PhpWord;
+use PhpOffice\PhpWord\Settings;
 use PhpOffice\PhpWord\Shared\Converter;
 use PhpOffice\PhpWord\SimpleType\TblWidth;
 use PhpOffice\PhpWord\Style;
@@ -119,8 +123,18 @@ class DocxExporter
         $section = $word->addSection($this->sectionStyle($setup));
         $this->writeBands($section, $setup, $doc);
 
+        // The company letterhead and disclaimer (R2-3c), when the document uses its brand.
+        $kit = Brand::forDocument($doc);
+        if ($kit !== null) {
+            $this->writeLetterhead($section, $kit);
+        }
+
         $content = $json['content'] ?? [];
         $this->writeBlocks(is_array($content) ? $content : [], $section);
+
+        if ($kit !== null && trim((string) $kit->disclaimer) !== '') {
+            $section->addText($this->escape(trim((string) $kit->disclaimer)), ['size' => 8, 'italic' => true, 'color' => '5D5E5A'], ['spaceBefore' => 400, 'borderTopSize' => 4, 'borderTopColor' => 'D5D1C7']);
+        }
 
         // tempnam() creates the file itself, atomically and only readable by
         // this process — so the document is written to THAT path rather than
@@ -130,6 +144,35 @@ class DocxExporter
         $this->reattachInlineBreaks($path);
 
         return $path;
+    }
+
+    /**
+     * Logo, company name and contact line at the top of page 1, in a borderless two-column table (the logo cell
+     * only when there is a logo). Plain text runs: nothing a kit holds is interpreted.
+     */
+    private function writeLetterhead(Section $section, BrandKit $kit): void
+    {
+        $colour = ltrim(TokenGuard::colour($this->tokens['colours']['heading'] ?? null, '#1f2023'), '#');
+        $table = $section->addTable(['borderSize' => 0, 'cellMargin' => 0, 'width' => 100 * 50, 'unit' => 'pct']);
+        $row = $table->addRow();
+
+        $logo = Brand::logoPath($kit);
+        if ($logo !== null) {
+            try {
+                $row->addCell(2600, ['valign' => 'center'])->addImage($logo, ['height' => 44, 'wrappingStyle' => 'inline']);
+            } catch (Throwable) {
+                // An unreadable logo leaves the name and contact line; the export still goes out.
+            }
+        }
+
+        $cell = $row->addCell(null, ['valign' => 'center']);
+        $cell->addText($this->escape((string) $kit->name), ['size' => 14, 'bold' => true, 'color' => strlen($colour) === 6 ? $colour : '1F2023'], ['spaceAfter' => 40]);
+        $contact = Brand::contactLine($kit);
+        if ($contact !== '') {
+            $cell->addText($this->escape($contact), ['size' => 8.5, 'color' => '5D5E5A'], ['spaceAfter' => 0]);
+        }
+
+        $section->addText('', [], ['spaceAfter' => 240, 'borderBottomSize' => 4, 'borderBottomColor' => 'D5D1C7']);
     }
 
     /**
@@ -162,6 +205,11 @@ class DocxExporter
 
     private function newPhpWord(): PhpWord
     {
+        // PhpWord writes text into document.xml AS GIVEN unless output escaping is on: a paragraph saying
+        // "Smith & Sons" or "a < b" made a file Word refuses to open (found by R2-3c's letterhead test). With it on,
+        // every run - body, headings, links, tables, headers, footers, the letterhead - is escaped in one place.
+        Settings::setOutputEscapingEnabled(true);
+
         $word = new PhpWord;
         $word->setDefaultFontName($this->font('body'));
         $word->setDefaultFontSize($this->size('body', 11.0));

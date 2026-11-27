@@ -2,6 +2,7 @@
 
 namespace App\Styles;
 
+use App\Brand\Brand;
 use App\Models\Document;
 use App\Models\DocumentStyle;
 use Database\Seeders\DocumentStyleSeeder;
@@ -20,9 +21,14 @@ class StyleEngine
      */
     public function resolve(Document $doc): DocumentStyle
     {
-        return DocumentStyle::resolve($doc->style_key, $doc->team_id)
+        $style = DocumentStyle::resolve($doc->style_key, $doc->team_id)
             ?? DocumentStyle::resolve('report')
             ?? $this->unseededReportFallback();
+
+        // The company brand, when the document uses it (R2-3c): colours, fonts and footer over the style.
+        $kit = Brand::forDocument($doc);
+
+        return $kit === null ? $style : Brand::apply($style, $kit);
     }
 
     /**

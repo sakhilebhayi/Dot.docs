@@ -82,6 +82,27 @@
         </div>
     </section>
 
+    @if ($brandName !== null)
+        {{-- The company brand (R2-3c): one switch per document. --}}
+        <section class="panel" aria-labelledby="set-brand">
+            <div class="panel-head">
+                <h2 class="section-title" id="set-brand">Company brand</h2>
+            </div>
+            <div class="panel-body stack">
+                <p class="empty-line">{{ $brandName }}’s colours and fonts, and its letterhead, footer and disclaimer on PDF, print and Word. <a href="{{ route('brand.index') }}">See the brand</a></p>
+                <div class="toolbar">
+                    @if ($usesBrand)
+                        <x-shell.status-word tone="good" word="On" />
+                        <button type="button" class="btn" wire:click="setBrand(false)">Stop using the company brand</button>
+                    @else
+                        <x-shell.status-word word="Off" />
+                        <button type="button" class="btn" wire:click="setBrand(true)">Use the company brand</button>
+                    @endif
+                </div>
+            </div>
+        </section>
+    @endif
+
     <section class="panel" aria-labelledby="set-page">
         <div class="panel-head">
             <h2 class="section-title" id="set-page">Page setup</h2>
