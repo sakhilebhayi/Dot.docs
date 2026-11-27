@@ -30,12 +30,12 @@ Dot.docs is the team document platform in the InfoDot ecosystem. Documents are s
 - **Structured import/export** — round-trips through DOCX, Markdown, and plain text, preserving headings, lists, tables, and marks
 - **Template gallery** — global, team, and personal templates, including a set of South African business starters (monthly production report, safety incident report, board memorandum)
 - **Sharing** — slug-based published pages with optional password and expiry, plus view counters, independent of named per-document collaborator roles
-- **Full-text search** — over title and body, scoped to what the signed-in user is allowed to see (`LIKE` on SQLite, which production runs; `tsvector`/`ts_rank` when run on PostgreSQL)
+- **Full-text search** — over title and body, within the company the person is standing in, then checked against what they may read; SQLite FTS5 ranked by bm25 in production (`LIKE` only as a fallback), `tsvector`/`ts_rank` when run on PostgreSQL
 - **AI assistant** — grammar check, summarise, continue writing, tone rewrite, translate, outline — via `prism-php/prism`, safe-by-default (`AI_PROVIDER=mock`, no network call, no API key needed) with Anthropic as the live primary provider and an OpenAI failover leg
 - **Append-only audit log** — every save, export, share, and AI call recorded as an immutable `AuditLog` row; updates/deletes throw rather than fail silently
 - **Real-time collaboration** — co-editing over plain HTTP polling: presence, paragraph-level merge of simultaneous saves, and conflict choices (production has no websocket server; Reverb code paths stay off unless a build is given a key)
 - **Comments & suggestion mode** — threaded, resolvable comments with @mentions, plus a track-changes-style suggestion pipeline
-- **"Two Inks on a Desk"** — the app's own night/day design system: a mono status line, ledger-style panels, and desk-seam rules instead of cards
+- **Fair Copy** — the app's own day/night design system (`resources/css/shell.css`, `paper.css`): Roboto throughout (the Dot ecosystem face), quiet hairline panels, status said in words, and one shadow in the product — the document paper
 
 ## Domain Models
 
@@ -100,7 +100,7 @@ MIT © [SK Digital / BluPin Incorporated](https://github.com/sakhileb)
 ## Operations
 
 - Deploys run on every merge to `main` (`.github/workflows/deploy.yml`): a verified database backup first, then the tested commit (never an older one) and its migrations; if that step fails the previous release is put back, and if a later step fails the site is at least taken out of maintenance mode.
-- Backups: nightly at 02:35 (`doc:backup-database`, database + uploads, encrypted when `BACKUP_PASSPHRASE` is set); restore with `doc:restore-backup` - see `docs/programme/RESTORE_RUNBOOK.md`.
-- Health: `/up`, `/up/scheduler` (scheduler, queue and backup age; watched from GitHub every 15 minutes), `/guardian/health` (token).
+- Backups: nightly at 02:35 (`doc:backup-database`, database + uploads, encrypted when `BACKUP_PASSPHRASE` is set) and before every deploy; restore with `doc:restore-backup` - see `docs/programme/RESTORE_RUNBOOK.md`. While `DOT_CRON_ESSENTIAL_ONLY` is on (owner decision, 2026-11-27) only mail and notification jobs run, so the nightly backup and every pruning job are paused; `php artisan cron:essential-status` says which mode is on.
+- Health: `/up` (also checks that this PHP can read the search index), `/up/scheduler` (scheduler, queue and backup age, and emails given up on in the last hour; watched from GitHub every 15 minutes, which emails the owner when it fails), `/guardian/health` (token).
 - Security reports: see `SECURITY.md`.
 
