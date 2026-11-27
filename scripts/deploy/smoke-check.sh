@@ -100,6 +100,14 @@ if [ -s "$WORK/unique" ]; then
   else
     echo "No debug page on POST $SITE_URL/up"
   fi
+  # GET /up runs the app's health hooks with the WEB PHP, right after the migrations (R2-5): among them the guard that
+  # takes the full-text triggers out again if this PHP cannot load SQLite's FTS5 (App\Search\FullTextIndex::guard()).
+  UP=$("${CURL[@]}" -o /dev/null -w '%{http_code}' "$SITE_URL/up" || true)
+  case "$UP" in
+    200) echo "200 $SITE_URL/up" ;;
+    5??) echo "::error::GET $SITE_URL/up answered $UP."; BROKEN=1 ;;
+    *) echo "::warning::GET $SITE_URL/up answered ${UP:-nothing}" ;;
+  esac
   for H in x-content-type-options x-frame-options referrer-policy; do
     if grep -qi "^$H:" "$WORK/headers.txt" 2>/dev/null; then echo "Header present: $H"; else echo "::error::$SITE_URL/ answered without the $H header."; BROKEN=1; fi
   done

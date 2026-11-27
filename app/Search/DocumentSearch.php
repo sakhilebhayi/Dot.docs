@@ -15,8 +15,9 @@ use Illuminate\Support\Facades\DB;
  * Two drivers, one access predicate. On PostgreSQL the query runs against
  * `documents.search_vector` - the STORED generated tsvector over title +
  * search_text created in 2026_09_07_000001 - and results come back ranked by
- * ts_rank. On SQLite (the test driver, which has no tsvector) it degrades to
- * LIKE over title and search_text. Both read `search_text`, which
+ * ts_rank. On SQLite (production) it goes through TextMatch: the FTS5 index
+ * over title + search_text, ranked (R2-5 / P-07), with LIKE as the fallback
+ * when the index is missing. Both read `search_text`, which
  * DocumentStore::fill() rewrites on every save, so a search never sees stale
  * body text.
  *
@@ -64,7 +65,7 @@ class DocumentSearch
             ->when($this->usesTsVector(), fn (Builder $q) => $q
                 ->orderByRaw("ts_rank(search_vector, plainto_tsquery('english', ?)) desc", [$query])
                 ->orderByDesc('updated_at'))
-            ->when(! $this->usesTsVector(), fn (Builder $q) => $q->orderByDesc('updated_at'));
+            ->when(! $this->usesTsVector(), fn (Builder $q) => app(TextMatch::class)->orderByRelevance($q, $query));
     }
 
     public function isSearchable(string $query): bool
@@ -97,7 +98,7 @@ class DocumentSearch
         if ($this->usesTsVector()) {
             $q->whereRaw('search_vector @@ plainto_tsquery(?, ?)', ['english', $query]);
         } else {
-            $q->where('title', 'like', $like)->orWhere('search_text', 'like', $like);
+            app(TextMatch::class)->apply($q, $query);
         }
 
         $this->legacyFallback($q, $like);

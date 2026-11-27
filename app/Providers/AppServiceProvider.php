@@ -11,11 +11,13 @@ use App\Models\Files\Obj;
 use App\Observers\DocumentObserver;
 use App\Observers\InfoDotResourceObserver;
 use App\Policies\ObjPolicy;
+use App\Search\FullTextIndex;
 use App\Services\SyncMetrics;
 use App\Support\EssentialCron;
 use App\Support\ShellContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Foundation\Events\DiagnosingHealth;
 use Illuminate\Http\Request;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Mail\Events\MessageSent;
@@ -35,6 +37,8 @@ class AppServiceProvider extends ServiceProvider
         // One resolution of "which document is this page about" per request,
         // shared by the status line, the navigator rail and the dock.
         $this->app->scoped(ShellContext::class);
+        // Whether the full-text index is usable is looked up once per request (R2-5 / P-07).
+        $this->app->scoped(FullTextIndex::class);
     }
 
     public function boot(): void
@@ -51,6 +55,9 @@ class AppServiceProvider extends ServiceProvider
 
         // R-50: Livewire updates from a page in the signed-in area carry that page's entitlement check with them.
         Livewire::addPersistentMiddleware([EnsureCompanyEntitled::class]);
+
+        // R2-5 / P-07: GET /up checks that this (web) PHP can read the full-text index, and stands it down if not.
+        Event::listen(DiagnosingHealth::class, fn () => app(FullTextIndex::class)->guard());
 
         // R2-4 / E-10: each queued email is sent once, and recorded when it goes (App\Mail\Delivery).
         Event::listen(NotificationSending::class, [MailDeliveryListener::class, 'notificationSending']);

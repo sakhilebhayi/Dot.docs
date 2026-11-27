@@ -98,7 +98,8 @@
     <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-ui.min.css') }}">
     <script src="{{ asset('dot-ui/js/dot-theme-boot.min.js') }}"></script>
     @livewireStyles
-    @vite(['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js'])
+    {{-- The editor's code only where there is an editor (R2-5 / P-09). --}}
+    @vite(array_merge(['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js'], $isEditor ? ['resources/js/editor.js'] : []))
     @stack('styles')
 </head>
 <body>
