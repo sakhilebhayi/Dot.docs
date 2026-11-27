@@ -10,8 +10,10 @@ use App\Http\Middleware\EnsureCompanyEntitled;
 use App\Models\User;
 use App\Services\InfoDot\IdentityClient;
 use App\Services\InfoDot\InfoDotUnavailable;
+use App\Support\CentralSignIn;
 use App\Support\EntitlementRefusal;
 use Dot\SsoClient\Support\ClaimService;
+use Dot\SsoClient\Support\Sso;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -35,6 +37,21 @@ class EcosystemAuthController extends Controller
      */
     public function handle(Request $request): Response
     {
+        // While central sign-in is on, signing in is InfoDot's job through /sso, whose session sign-out also ends
+        // here. This older hand-over is not used then: the token is not read, and the person goes to the central
+        // sign-in, landing where the link was heading.
+        if (CentralSignIn::active()) {
+            $target = $this->safeRedirect($request->post('redirect'));
+
+            if ($target !== null) {
+                $request->session()->put('url.intended', $target);
+            }
+
+            Sso::log('legacy_handover_declined', [], 'info');
+
+            return redirect()->to(route('dotsso.login'), 303);
+        }
+
         if ($request->isMethod('post') && ! $this->postedFromInfoDot($request)) {
             return $this->refused();
         }

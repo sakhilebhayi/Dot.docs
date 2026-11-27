@@ -18,6 +18,8 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -204,15 +206,25 @@ class ShareManager extends Component
     /** Shown under the invite form after a share or a role change. */
     public string $inviteNotice = '';
 
+    /**
+     * The answer to every new share, whether or not the address has an account here: the form gives the same reply
+     * either way, so it is not a way to find out who has an account.
+     */
+    public const SHARED_NOTICE = 'Done. If they have a Dot.docs account, they can open it now and have been told by email. If not, ask them to sign in to Dot.docs once, then share it again.';
+
+    /** Share attempts one person may make in an hour, and all of a company's people together. */
+    public const SHARES_PER_USER_PER_HOUR = 40;
+
+    public const SHARES_PER_TEAM_PER_HOUR = 120;
+
     public function invite(): void
     {
         $this->authorize('share', $this->document);
+        $this->inviteNotice = '';
         $this->validate([
-            'inviteEmail' => 'required|email|exists:users,email',
+            'inviteEmail' => 'required|email|max:255',
             'inviteRole' => 'required|in:viewer,editor,admin',
         ], [
-            // R2-9: the default "The selected invite email is invalid." did not say what to do.
-            'inviteEmail.exists' => 'Nobody with that email address has a Dot.docs account yet. Ask them to sign in to Dot.docs once, then invite them.',
             'inviteEmail.email' => 'That does not look like an email address.',
             'inviteEmail.required' => 'Enter the email address of the person to invite.',
         ]);
@@ -223,7 +235,18 @@ class ShareManager extends Component
             $this->authorize('manage', $this->document);
         }
 
-        $user = User::where('email', $this->inviteEmail)->firstOrFail();
+        $this->throttleShares();
+
+        $user = User::where('email', $this->inviteEmail)->first();
+
+        if (! $user instanceof User) {
+            $this->inviteNotice = self::SHARED_NOTICE;
+            $this->inviteEmail = '';
+            $this->inviteRole = 'viewer';
+
+            return;
+        }
+
         $before = DocumentCollaborator::where('document_id', $this->document->id)->where('user_id', $user->id)->value('role');
 
         // Taking the admin role away is the same power as giving it (R2-9): an editor could re-invite an admin as a
@@ -261,12 +284,35 @@ class ShareManager extends Component
             $actor = (string) $this->actor()->name;
             $user->notify(new DocumentSharedBell($this->document, $actor, $changed));
             $user->notify(new DocumentSharedWithYou($this->document, $this->inviteRole, $actor, $changed));
-            $this->inviteNotice = $changed ? 'Access changed. They have been told.' : 'Shared. They have been told by email.';
+            $this->inviteNotice = $changed ? 'Access changed. They have been told.' : self::SHARED_NOTICE;
+        } elseif ($before === null) {
+            $this->inviteNotice = self::SHARED_NOTICE;
         }
 
         $this->inviteEmail = '';
         $this->inviteRole = 'viewer';
         $this->document->load('collaborators.user');
+    }
+
+    /** Bounds share attempts per person and per company, counted before the address is looked up. */
+    private function throttleShares(): void
+    {
+        $keys = [
+            'document-share:user:'.Auth::id() => self::SHARES_PER_USER_PER_HOUR,
+            'document-share:team:'.($this->document->team_id ?? 'owner-'.$this->document->owner_id) => self::SHARES_PER_TEAM_PER_HOUR,
+        ];
+
+        foreach ($keys as $key => $limit) {
+            if (RateLimiter::tooManyAttempts($key, $limit)) {
+                throw ValidationException::withMessages([
+                    'inviteEmail' => 'You have shared a lot in the last hour. Try again later.',
+                ]);
+            }
+        }
+
+        foreach (array_keys($keys) as $key) {
+            RateLimiter::hit($key, 3600);
+        }
     }
 
     public function removeCollaborator(int $collaboratorId): void

@@ -11,7 +11,7 @@ test('sharing with someone lets them open it; removing them takes it away', asyn
     await page.locator('#invite-email').fill(users.outsider);
     await page.locator('#invite-role').selectOption('viewer');
     await page.getByRole('button', { name: 'Send the invitation' }).click();
-    await expect(page.getByText('Shared. They have been told by email.')).toBeVisible();
+    await expect(page.getByText('they can open it now and have been told by email.', { exact: false })).toBeVisible();
 
     const outsider = await as(browser, users.outsider);
     await outsider.goto(editUrl);

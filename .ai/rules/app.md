@@ -44,11 +44,16 @@ A controller that takes a document or folder from the route uses a FormRequest w
 ## One search, one company (R2-7 / Q-02)
 `App\Search\DocumentSearch` is the only document search: the documents page and the header both call it. It reads one company (`CompanyDocuments::scope()`), then checks `DocumentPolicy::view()` row by row. A document another company shared with you is NOT a search result - "Shared with me" is where it is found (owner decision 2026-11-27). See `.ai/rules/search.md` for matching and ranking.
 
-## PHPStan is level 6 (R2-7 / Q-04)
+## PHPStan is level 8 (R2-7 / Q-04, raised to 8 in R2-10)
 New code carries real array value types (`list<string>`, `array<string, mixed>`, the ProseMirror node shapes in app/Documents) and generic relation return types (`@return BelongsTo<Team, $this>`). Jetstream's untyped relations are typed on our models with `@property-read` (`User::$currentTeam`, `$ownedTeams`, `Team::$owner`). There is no baseline any more (R2-7 removed the last 69 entries): a finding fails CI, so fix the code. Only two `@phpstan-ignore`s exist, both on PhpWord docblocks that are wrong (`DocxBandWriter`, `DocxImageWriter`).
 
 ## Local sign-in pages are closed while central sign-in is on (R2-8)
 `App\Http\Middleware\RefuseLocalSignInWhileSso` (web group) refuses every request to `/login`, `/register`, `/forgot-password`, `/reset-password*` and `/two-factor-challenge` while `dotsso.enabled` is on - whatever the request asks for - and logs `local_auth_refused_app_guard`. It honours the package's break-glass switch and `allow_paths`, and acts only for Dot.docs' own `User` model so the package's suite still tests the package as shipped. Do not remove it without checking `CentralSignInRolloutTest`.
+
+The older InfoDot hand-over (`POST /auth/ecosystem`, `EcosystemAuthController`) is not used while central sign-in is active (`CentralSignIn::active()`): it never reads the token, keeps a safe `redirect` as `url.intended` and sends the person to `dotsso.login`, so every session comes from `/sso` and carries the marker back-channel sign-out relies on. With central sign-in off, or under break-glass, it works as before (R2-11).
+
+## Sharing a document answers the same whether or not the address has an account (R2-11)
+`ShareManager::invite()` never says that an address has no account: an unknown address gets `SHARED_NOTICE`, exactly what a new share gets. Attempts are limited per person and per company each hour (`SHARES_PER_USER_PER_HOUR`, `SHARES_PER_TEAM_PER_HOUR`), counted before the address is looked up. Team invitations are limited per inviter and per team (`InviteTeamMember::PER_HOUR`, `PER_TEAM_PER_HOUR`). Keep any new address-taking form to the same rule.
 
 ## Strict models do not depend on APP_ENV (R2-8)
 Lazy loads and silently dropped attributes throw under the test runner, with `APP_DEBUG` on, or with `MODELS_STRICT=true` (the browser suite sets it), and are logged everywhere else. Never key a behaviour that can break a page for a user on `isProduction()`/`isLocal()`: the environment name is a setting, not proof of where the code runs.
