@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Documents\DocumentMedia;
 use App\Models\Document;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Image;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class DocumentImageController extends Controller
@@ -32,10 +32,9 @@ class DocumentImageController extends Controller
         // of the 500 every upload was answering.
         $encoded = Image::fromUpload($request->file('image'))->quality(82)->toWebp()->toBytes();
 
-        Storage::disk('public')->put('document-images/'.$filename, $encoded);
-
+        // Private, under the document, served only to its readers (R2-1 / S-13; DocumentMedia).
         return response()->json([
-            'url' => asset('storage/document-images/'.$filename),
+            'url' => DocumentMedia::put((string) $document->uuid, $filename, $encoded),
         ]);
     }
 }

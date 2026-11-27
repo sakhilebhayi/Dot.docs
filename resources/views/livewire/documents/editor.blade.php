@@ -968,7 +968,7 @@
                         <span class="menu-label">Import</span>
                         <form action="{{ route('documents.import', $document->uuid) }}" method="POST"
                               enctype="multipart/form-data" class="menu-form"
-                              onsubmit="return confirm('Replace this document with the imported file? What is there now is kept in version history.')">
+                              x-on:submit="if (! confirm('Replace this document with the imported file? What is there now is kept in version history.')) $event.preventDefault()">
                             @csrf
                             <label class="field-label" for="doc-import">A .docx, .md or .txt file</label>
                             <input id="doc-import" type="file" name="file" accept=".docx,.md,.markdown,.txt" class="field" />

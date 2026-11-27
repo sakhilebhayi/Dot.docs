@@ -2,14 +2,18 @@
 
 namespace App\Livewire\Documents;
 
+use App\Audit\AuditLogger;
 use App\Files\FilesService;
 use App\Models\Document;
 use App\Models\Files\Obj;
+use App\Models\Team;
 use App\Models\User;
 use App\Print\PageSetup;
 use App\Services\TagRepository;
 use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -236,16 +240,59 @@ class DocumentSettings extends Component
         $this->document->tags()->detach($tagId);
     }
 
+    /**
+     * Hand the document to someone else in its company (R2-1 / S-12).
+     *
+     * Only a member of the document's own team can receive it: before this, any account on the platform could, which
+     * moved a company's document out of the company with no record. One message covers "no such account" and "not in
+     * this company", so the form cannot be used to test which addresses have accounts. The handover is audited, and
+     * the previous owner keeps editing (as a collaborator when their team role alone would not let them), as the form
+     * says.
+     */
     public function transferOwnership(): void
     {
         $this->authorize('delete', $this->document);
-        $this->validate(['transferEmail' => 'required|email|exists:users,email']);
+        $this->validate(['transferEmail' => 'required|email|max:255']);
 
-        $newOwner = User::where('email', $this->transferEmail)->firstOrFail();
-        $this->document->update(['owner_id' => $newOwner->id]);
+        $document = $this->document;
+        $team = $document->team instanceof Team ? $document->team : null;
+        $newOwner = User::where('email', $this->transferEmail)->first();
+
+        if (! $team || ! $newOwner || ! $newOwner->belongsToTeam($team)) {
+            throw ValidationException::withMessages([
+                'transferEmail' => $team
+                    ? 'You can only hand this document to someone in '.$team->name.'. Invite them to the company first.'
+                    : 'This document is not filed in a company, so it cannot be handed over.',
+            ]);
+        }
+
+        if ($newOwner->id === $document->owner_id) {
+            throw ValidationException::withMessages(['transferEmail' => 'They already own this document.']);
+        }
+
+        $from = $document->owner_id;
+        $previousOwner = User::find($from);
+
+        DB::transaction(function () use ($document, $newOwner, $previousOwner, $from) {
+            $document->forceFill(['owner_id' => $newOwner->id])->save();
+
+            // Whoever owned it keeps editing it - also when an admin made the handover for them.
+            if ($previousOwner instanceof User && ! $previousOwner->can('update', $document->fresh())) {
+                $document->collaborators()->updateOrCreate(['user_id' => $previousOwner->id], ['role' => 'editor']);
+            }
+
+            app(AuditLogger::class)->record('document.owner_transferred', $document, [
+                'reason' => 'handed_over',
+                'from_user_id' => $from,
+                'to_user_id' => $newOwner->id,
+            ]);
+        });
+
+        Cache::forget("doc.content.{$document->uuid}");
+        Cache::forget("doc.record.{$document->uuid}");
 
         $this->transferEmail = '';
-        session()->flash('status', 'Ownership transferred.');
+        session()->flash('status', 'Ownership transferred to '.$newOwner->name.'.');
     }
 
     /**

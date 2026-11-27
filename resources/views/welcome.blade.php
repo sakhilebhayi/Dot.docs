@@ -325,7 +325,7 @@
             </div>
         </footer>
 
-        <script>
+        <script nonce="{{ \Illuminate\Support\Facades\Vite::cspNonce() }}">
             // Nav scroll state + mobile menu — plain JS (this page has no Livewire-bundled
             // Alpine runtime available; app.js only starts Alpine via Livewire's own copy).
             (function () {

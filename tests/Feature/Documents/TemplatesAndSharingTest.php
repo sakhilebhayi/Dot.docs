@@ -230,7 +230,8 @@ class TemplatesAndSharingTest extends TestCase
             ->assertSee('class="shell"', false)
             ->assertSee('class="paper"', false)
             ->assertSee('id="doc-style"', false)
-            ->assertSee('window.print()', false)
+            // Print is wired by shell.js, not an inline onclick the enforced CSP would refuse (R2-1).
+            ->assertSee('data-shell-print', false)
             ->assertSee('Made with Dot.docs');
 
         // .ai/rules/views.md: a chrome colour is never a literal in a view.

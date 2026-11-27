@@ -71,3 +71,6 @@ Schedule::call(function () {
 // again; a document nobody reopens kept its rows for ever.
 Schedule::call(fn () => DB::table('document_presences')->where('last_seen_at', '<', now()->subDay())->delete())
     ->dailyAt('03:40')->name('prune-stale-presences')->onOneServer();
+
+// R2-1 / S-07: API tokens expire after config('sanctum.expiration'); their rows go a day later.
+Schedule::command('sanctum:prune-expired --hours=24')->dailyAt('03:50')->onOneServer();

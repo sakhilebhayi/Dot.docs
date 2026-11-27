@@ -8,4 +8,10 @@ return [
     | stable on HTTPS.
     */
     'hsts_seconds' => (int) env('SECURITY_HSTS_SECONDS', 15552000),   // 180 days
+
+    /*
+    | R2-1 / S-06: send the Content-Security-Policy as an enforced header. false sends the same policy as
+    | Content-Security-Policy-Report-Only instead (reports, blocks nothing) - the switch to use if a page breaks.
+    */
+    'csp_enforce' => (bool) env('SECURITY_CSP_ENFORCE', true),
 ];

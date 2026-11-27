@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Vite;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -14,10 +15,13 @@ use Symfony\Component\HttpFoundation\Response;
  * HSTS is max-age only, with no includeSubDomains and no preload: this domain has many sibling subdomains that are not all ready for it.
  * SECURITY_HSTS_SECONDS in .env changes the age, and 0 turns the header off (see config/security.php).
  *
- * The Content-Security-Policy is REPORT-ONLY (Content-Security-Policy-Report-Only): the browser reports what the policy would have blocked to
- * /csp-report (App\Http\Controllers\CspReportController) and blocks nothing. It is written to be compatible with Livewire and Jetstream, which
- * need inline scripts and 'unsafe-eval' (Alpine evaluates its expressions with the Function constructor). The listed outside origins are the ones
- * the Blade layouts actually load; add one only after a layout starts using it. Enforcing the policy is a later step, taken from the reports.
+ * The Content-Security-Policy is ENFORCED (R2-1 / S-06). Scripts run only from this site or with the per-request nonce,
+ * which Laravel's Vite tags, Livewire's own tags and the few inline scripts in the views carry (Vite::cspNonce()); an
+ * injected <script> or inline event handler is refused by the browser. 'unsafe-eval' stays: Alpine and Livewire
+ * evaluate their expressions with the Function constructor, the same limit InfoDot runs with. Styles keep
+ * 'unsafe-inline' (inline style attributes are still common in the views). Violations are still reported to
+ * /csp-report (CspReportController). SECURITY_CSP_ENFORCE=false in .env puts it back to report-only without a deploy.
+ * The listed outside origins are the ones the Blade layouts actually load; add one only after a layout starts using it.
  */
 class SecurityHeaders
 {
@@ -25,14 +29,18 @@ class SecurityHeaders
     // site's own pages to keep the microphone; every other origin, including frames, is refused.
     public function handle(Request $request, Closure $next): Response
     {
+        // Before the response is built: every Vite and Livewire tag rendered for this request carries it.
+        $nonce = Vite::useCspNonce();
+
         $response = $next($request);
+        $cspHeader = config('security.csp_enforce', true) ? 'Content-Security-Policy' : 'Content-Security-Policy-Report-Only';
 
         $headers = [
             'X-Content-Type-Options' => 'nosniff',
             'X-Frame-Options' => 'SAMEORIGIN',
             'Referrer-Policy' => 'strict-origin-when-cross-origin',
             'Permissions-Policy' => 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()',
-            'Content-Security-Policy-Report-Only' => $this->policy(),
+            $cspHeader => $this->policy($nonce),
         ];
 
         $hstsSeconds = (int) config('security.hsts_seconds', 0);
@@ -54,10 +62,10 @@ class SecurityHeaders
      * Outside origins in use: Google Fonts (stylesheet host and font host), Unsplash (landing and sign-in photographs) and ui-avatars.com,
      * which Jetstream's HasProfilePhoto uses for a user's default avatar.
      */
-    private function policy(): string
+    private function policy(string $nonce): string
     {
         return "default-src 'self'; "
-            ."script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            ."script-src 'self' 'nonce-{$nonce}' 'unsafe-eval'; "
             ."style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             ."font-src 'self' data: https://fonts.gstatic.com; "
             ."img-src 'self' data: blob: https://images.unsplash.com https://ui-avatars.com; "

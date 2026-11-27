@@ -2,8 +2,8 @@
 
 namespace App\Documents\Import;
 
+use App\Documents\DocumentMedia;
 use App\Documents\Schema\DocumentSchema;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use PhpOffice\PhpWord\Element\AbstractElement;
 use PhpOffice\PhpWord\Element\Image;
@@ -56,7 +56,7 @@ class DocxImporter
     public const MAX_TOTAL_BYTES = 104_857_600;
 
     /** Directory (relative to the `public` disk) images from THIS import are written to. */
-    private string $mediaDirectory = '';
+    private string $mediaKey = '';
 
     /** Pictures already extracted during THIS import, against $maxImages. */
     private int $imageCount = 0;
@@ -90,7 +90,7 @@ class DocxImporter
 
         $this->guardArchiveSize($path);
 
-        $this->mediaDirectory = 'documents/'.($mediaKey ?? (string) Str::uuid());
+        $this->mediaKey = $mediaKey ?? (string) Str::uuid();
         $this->imageCount = 0;
 
         $content = [];
@@ -559,11 +559,11 @@ class DocxImporter
             return [];
         }
 
-        $relative = $this->mediaDirectory.'/'.sha1($binary).'.'.self::IMAGE_EXTENSIONS[$mime];
-        Storage::disk('public')->put($relative, $binary);
+        $file = sha1($binary).'.'.self::IMAGE_EXTENSIONS[$mime];
         $this->imageCount++;
 
-        return [['type' => 'image', 'attrs' => ['src' => '/storage/'.$relative]]];
+        // Private, beside the document, served to its readers only (R2-1 / S-13; DocumentMedia).
+        return [['type' => 'image', 'attrs' => ['src' => DocumentMedia::put($this->mediaKey, $file, $binary)]]];
     }
 
     private function imageBinary(Image $image): ?string

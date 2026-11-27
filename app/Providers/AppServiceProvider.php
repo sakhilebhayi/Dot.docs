@@ -77,6 +77,11 @@ class AppServiceProvider extends ServiceProvider
         // so SyncMetrics::PER_MINUTE is far more than a real tab sends.
         // Per person AND document, never per IP: colleagues behind one
         // office address look like one IP.
+        // The token API (routes/api.php): 60 calls a minute per person (R2-1 / S-07).
+        RateLimiter::for('api', function (Request $request) {
+            return Limit::perMinute(60)->by($request->user()?->getAuthIdentifier() ?? $request->ip());
+        });
+
         RateLimiter::for('sync-metrics', function (Request $request) {
             return Limit::perMinute(SyncMetrics::PER_MINUTE)->by(($request->user()?->getAuthIdentifier() ?? $request->ip()).'|'.$request->route('uuid'));
         });

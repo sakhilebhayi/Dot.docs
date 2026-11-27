@@ -174,13 +174,17 @@ class CentralSignInRolloutTest extends TestCase
         $this->assertGuest('web');
     }
 
-    public function test_sanctum_api_access_is_untouched_while_sso_is_on(): void
+    /**
+     * R2-1 / S-07: the API answers a bearer token only. A signed-in identity that did not arrive with a token
+     * (here Sanctum's test helper, in life a session) is refused, SSO on or off; the real-token case is below.
+     */
+    public function test_the_api_answers_only_a_bearer_token_while_sso_is_on(): void
     {
         $this->on();
         $user = User::factory()->create();
         Sanctum::actingAs($user, ['*']);
 
-        $this->getJson('/api/user')->assertOk()->assertJsonPath('email', $user->email);
+        $this->getJson('/api/user')->assertUnauthorized();
     }
 
     public function test_a_real_sanctum_bearer_token_works_while_sso_is_on(): void

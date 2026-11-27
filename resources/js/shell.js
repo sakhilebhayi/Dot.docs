@@ -121,6 +121,14 @@ function initNotifPanel() {
 }
 
 function initTheme() {
+    // Print on the published and shared pages: a data attribute, not an inline
+    // onclick, which the enforced Content-Security-Policy refuses (R2-1).
+    document.addEventListener('click', (event) => {
+        if (event.target.closest('[data-shell-print]')) {
+            window.print();
+        }
+    });
+
     document.addEventListener('click', (event) => {
         const button = event.target.closest('[data-shell-theme-toggle]');
         if (!button) return;

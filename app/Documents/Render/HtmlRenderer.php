@@ -162,7 +162,7 @@ class HtmlRenderer
 
     /**
      * A src is valid iff it is an absolute http(s) URL, or a path served by
-     * the app's own upload/asset storage (`/storage/...` or `/images/...`).
+     * the app's own media or asset storage (`/media/...`, legacy `/storage/...`, or `/images/...`).
      * Any other value (relative paths, `javascript:`, `data:`, etc.) is rejected.
      */
     private function isValidImageSrc(mixed $src): bool
@@ -174,7 +174,7 @@ class HtmlRenderer
             return true;
         }
 
-        return str_starts_with($src, '/storage/') || str_starts_with($src, '/images/');
+        return str_starts_with($src, '/media/') || str_starts_with($src, '/storage/') || str_starts_with($src, '/images/');
     }
 
     private function renderImage(array $node): string

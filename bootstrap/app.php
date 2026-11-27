@@ -1,10 +1,13 @@
 <?php
 
+use App\Http\Middleware\RefuseApiTokensOnPages;
 use App\Http\Middleware\SecurityHeaders;
 use App\Services\Guardian\ErrorCounter;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Laravel\Sanctum\Http\Middleware\CheckAbilities;
+use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -19,6 +22,16 @@ return Application::configure(basePath: dirname(__DIR__))
         // read back server-side in layouts/app.blade.php so a day-mode reload
         // never flashes night. An encrypted cookie would come back null there.
         $middleware->encryptCookies(except: ['theme']);
+
+        // API tokens never reach a page or a Livewire action (R2-1 / S-07): on the whole web group, so
+        // /livewire/update is covered too.
+        $middleware->web(append: [RefuseApiTokensOnPages::class]);
+
+        // Sanctum's token-permission checks for routes/api.php (R2-1 / S-07).
+        $middleware->alias([
+            'abilities' => CheckAbilities::class,
+            'ability' => CheckForAnyAbility::class,
+        ]);
 
         // Last in the global stack so it sees every response, including 404s and error pages.
         $middleware->append(SecurityHeaders::class);

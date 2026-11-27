@@ -128,7 +128,8 @@
 
                     <div class="canvas" style="padding:var(--s4) 0">
                         <article class="paper" style="width:100%;min-height:0;padding:var(--s5)">
-                            {!! $previewVersion->content_snapshot !!}
+                            {{-- Old versions' HTML through the sanitiser (R2-1 / S-06): it was stored as written. --}}
+                            {!! app(\App\Services\HtmlSanitizer::class)->clean((string) $previewVersion->content_snapshot) !!}
                         </article>
                     </div>
                 </div>
