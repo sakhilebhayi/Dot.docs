@@ -11,6 +11,7 @@ use App\Observers\DocumentObserver;
 use App\Observers\InfoDotResourceObserver;
 use App\Policies\ObjPolicy;
 use App\Services\SyncMetrics;
+use App\Support\EssentialCron;
 use App\Support\ShellContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -32,6 +33,8 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        EssentialCron::listen();
+
         // New passwords: at least 12 characters; in production also refused
         // when they appear in a known breach (Pwned Passwords range lookup -
         // only the first five characters of the SHA-1 hash leave the server).

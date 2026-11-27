@@ -21,6 +21,7 @@
         </include>
     </source>
     <php>
+        <env name="DOT_CRON_ESSENTIAL_ONLY" value="false"/>
         <env name="APP_ENV" value="testing"/>
         <env name="DOTSSO_ENABLED" value="false" force="true"/>
         <!-- No test may ever reach a real model provider. See App\Ai\Client. -->
