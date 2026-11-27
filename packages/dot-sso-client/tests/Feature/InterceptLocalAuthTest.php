@@ -75,14 +75,25 @@ class InterceptLocalAuthTest extends DotSsoTestCase
         }
     }
 
-    public function test_machine_access_is_untouched(): void
+    public function test_machine_paths_are_untouched(): void
     {
-        $this->getJson('https://platform.test/login')->assertOk();                       // JSON clients are machines
         $this->get('https://platform.test/api/ping')->assertOk()->assertJson(['pong' => true]);
         $this->post('https://platform.test/webhooks/stripe')->assertOk();
         $this->postJson('https://platform.test/api/login', [])->assertOk();
-        $this->withHeader('Authorization', 'Bearer abc')->post('https://platform.test/login')->assertOk();
+        $this->withHeader('Authorization', 'Bearer abc')->get('https://platform.test/api/ping')->assertOk();
         $this->get('https://platform.test/health-extra')->assertOk();
+    }
+
+    public function test_json_or_a_bearer_token_never_reopens_a_sign_in_page(): void
+    {
+        foreach (['/login', '/register', '/forgot-password', '/reset-password'] as $path) {
+            $this->getJson('https://platform.test'.$path)->assertRedirect();
+            $this->postJson('https://platform.test'.$path, ['email' => 'a@b.test', 'password' => 'x'])
+                ->assertStatus(303)->assertRedirect(route('dotsso.login'));
+            $this->withHeader('Authorization', 'Bearer abc')
+                ->post('https://platform.test'.$path, ['email' => 'a@b.test', 'password' => 'x'])
+                ->assertStatus(303)->assertRedirect(route('dotsso.login'));
+        }
     }
 
     public function test_signed_urls_and_public_share_links_are_untouched(): void
