@@ -164,7 +164,9 @@ export function mountPagination(editor, canvasEl, opts = {}) {
     function goToPage(n) {
         currentPageIndex = Math.max(1, Math.min(n, pageCountValue));
         const target = canvasEl.querySelectorAll('.dotdoc-page-boundary')[currentPageIndex - 2];
-        (target || canvasEl.querySelector('.paper'))?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        // No smooth scroll for a reader who asked for less motion (R2-12).
+        const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        (target || canvasEl.querySelector('.paper'))?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
     }
 
     // Triggers, per design spec §2.1:

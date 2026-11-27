@@ -14,9 +14,7 @@
         <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
     @endforeach
 </select>
-@error('style')
-    <span class="field-error" id="doc-style-error" role="alert">{{ $message }}</span>
-@enderror
+<span class="field-error" id="doc-style-error" role="alert">@error('style'){{ $message }}@enderror</span>
 
 <label class="sr-only" for="doc-view-mode">Page view</label>
 <select id="doc-view-mode" class="tool-select"
@@ -48,9 +46,7 @@
     <button type="button" class="tool tool-mono" x-ref="moveTrigger"
             wire:click="$set('showMoveSheet', true)">Move</button>
 @endif
-@error('location')
-    <span class="field-error" role="alert">{{ $message }}</span>
-@enderror
+<span class="field-error" role="alert">@error('location'){{ $message }}@enderror</span>
 
 </div>
 <button type="button" class="tool doc-bar-toolsbtn" aria-controls="doc-bar-tools"

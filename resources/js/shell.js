@@ -530,19 +530,63 @@ export function saveAnnouncement(lastAnnounced, word) {
     return word;
 }
 
-let lastSaveAnnouncement = null;
+/**
+ * How long a save outcome has to stand before it is said (R2-12). An autosave
+ * that fails and succeeds on the next pause (a flaky connection) flips the word
+ * Saved / Not saved / Saved within a second or two; said as it happened, that
+ * was an interruption on every pause in typing. Said once it has settled, the
+ * reader hears one word per real change of state, and nothing for a flip that
+ * came back to where it was.
+ */
+export const SAVE_ANNOUNCE_SETTLE_MS = 1500;
+
+/**
+ * The save announcer: `report(word)` for every word the page shows, `write`
+ * called at most once per settled change. `initial` is the word the server
+ * rendered, so a page that opened Saved (or Read only) does not say it again
+ * on its first autosave. Timers are injectable for the tests.
+ */
+export function createSaveAnnouncer(write, { initial = null, settleMs = SAVE_ANNOUNCE_SETTLE_MS, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+    let lastAnnounced = ANNOUNCED_SAVE_WORDS.includes(initial) ? initial : null;
+    let pending = null;
+    let timer = null;
+
+    return {
+        report(word) {
+            // Editing / Saving / Ready are passing words: they neither speak nor
+            // cancel a settled outcome waiting to be said.
+            if (!ANNOUNCED_SAVE_WORDS.includes(word)) return;
+            if (timer !== null) {
+                clearTimer(timer);
+                timer = null;
+            }
+            pending = saveAnnouncement(lastAnnounced, word);
+            if (pending === null) return;
+            timer = setTimer(() => {
+                timer = null;
+                if (pending === null) return;
+                lastAnnounced = pending;
+                write(pending);
+                pending = null;
+            }, settleMs);
+        },
+    };
+}
+
+let saveAnnouncer = null;
 
 function setSaveState(tone, word) {
     const item = document.getElementById('shell-save');
     if (!item || !item.hasAttribute('data-shell-save-owner')) return;
 
-    // The one live region for save state (WCAG 4.1.3). The visible word above
-    // is not live: it changes on every keystroke pause.
+    // The one live region for save state (WCAG 4.1.3), polite and persistent:
+    // only its text changes. The visible word above is not live: it changes on
+    // every keystroke pause.
     const said = document.getElementById('shell-save-said');
-    const announce = saveAnnouncement(lastSaveAnnouncement, word);
-    if (said && announce) {
-        lastSaveAnnouncement = announce;
-        said.textContent = announce;
+    if (said) {
+        const rendered = item.querySelector('[data-shell-save-word]')?.textContent.trim() ?? null;
+        saveAnnouncer ??= createSaveAnnouncer((text) => { said.textContent = text; }, { initial: rendered });
+        saveAnnouncer.report(word);
     }
 
     // Only the TONE class is swapped. Rewriting className wholesale took
@@ -597,10 +641,11 @@ function collectHeadings() {
 
 /**
  * The rebuild is gated on a serialised key of the heading list (level + text,
- * in order). The list carries aria-live="polite", and rebuilding it on every
- * keystroke - which a MutationObserver over the paper sees - re-announced the
- * whole outline to a screen reader every 400ms while somebody was typing a
- * paragraph that contains no headings at all.
+ * in order). The list is navigation, not news, and since R2-12 it is no longer
+ * a live region: typing inside a heading changed the key on every pause and
+ * re-read the whole outline to a screen reader while the writer typed. The key
+ * still saves the rebuild (and the focus on an outline button) on every
+ * keystroke in a paragraph that contains no headings at all.
  */
 function outlineKey(entries) {
     return entries.map((entry) => `${entry.level}:${entry.text}`).join('\u0000');
@@ -611,7 +656,6 @@ function renderOutline(list) {
     const key = outlineKey(entries);
     if (list.dataset.outlineKey === key) return;
 
-    list.setAttribute('aria-busy', 'true');
     list.dataset.outlineKey = key;
     list.textContent = '';
 
@@ -620,7 +664,6 @@ function renderOutline(list) {
         empty.className = 'rail-outline-empty';
         empty.textContent = 'Headings appear here as you write them.';
         list.appendChild(empty);
-        list.setAttribute('aria-busy', 'false');
 
         return;
     }
@@ -638,8 +681,6 @@ function renderOutline(list) {
         item.appendChild(button);
         list.appendChild(item);
     });
-
-    list.setAttribute('aria-busy', 'false');
 }
 
 function initOutline() {

@@ -82,9 +82,7 @@
                     <label class="field-label" for="share-slug">A shorter address</label>
                     <input id="share-slug" wire:model="slug" type="text" class="field field-mono"
                            placeholder="august-production" @error('slug') aria-invalid="true" aria-describedby="share-slug-error" @enderror />
-                    @error('slug')
-                        <p class="field-error" id="share-slug-error" role="alert">{{ $message }}</p>
-                    @enderror
+                    <p class="field-error" id="share-slug-error" role="alert">@error('slug'){{ $message }}@enderror</p>
                     @if ($publishedLink)
                         <p class="field-hint">
                             {{ $publishedLink }}
@@ -118,17 +116,13 @@
                                 <button type="button" class="link" wire:click="clearPassword">Remove it</button>
                             </p>
                         @endif
-                        @error('sharePassword')
-                            <p class="field-error" id="share-password-error" role="alert">{{ $message }}</p>
-                        @enderror
+                        <p class="field-error" id="share-password-error" role="alert">@error('sharePassword'){{ $message }}@enderror</p>
                     </div>
 
                     <div class="field-row">
                         <label class="field-label" for="share-expiry">Expires at</label>
                         <input id="share-expiry" wire:model="shareExpiresAt" type="datetime-local" class="field field-mono" @error('shareExpiresAt') aria-invalid="true" aria-describedby="share-expiry-error" @enderror />
-                        @error('shareExpiresAt')
-                            <p class="field-error" id="share-expiry-error" role="alert">{{ $message }}</p>
-                        @enderror
+                        <p class="field-error" id="share-expiry-error" role="alert">@error('shareExpiresAt'){{ $message }}@enderror</p>
                         @if ($document->share_expires_at)
                             <p class="field-hint">
                                 @if ($document->share_expires_at->isPast())
@@ -155,9 +149,7 @@
                 <div class="field-row">
                     <label class="field-label" for="invite-email">Email address</label>
                     <input id="invite-email" wire:model="inviteEmail" type="email" class="field" placeholder="name@example.com" @error('inviteEmail') aria-invalid="true" aria-describedby="invite-email-error" @enderror />
-                    @error('inviteEmail')
-                        <p class="field-error" id="invite-email-error" role="alert">{{ $message }}</p>
-                    @enderror
+                    <p class="field-error" id="invite-email-error" role="alert">@error('inviteEmail'){{ $message }}@enderror</p>
                 </div>
                 <div class="field-row">
                     <label class="field-label" for="invite-role">What they may do</label>

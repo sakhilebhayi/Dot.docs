@@ -11,6 +11,24 @@ initOfflineSupport(
 );
 
 /**
+ * A refused form comes back with its summary (<x-validation-errors>, `data-error-summary`): the focus goes there, so a
+ * screen reader reads what went wrong first and a keyboard reader is one Tab from the field it names (R2-12 / A-05).
+ * A field the person already focused (the page was slow to load) keeps the focus.
+ */
+function focusErrorSummary() {
+    const summary = document.querySelector('[data-error-summary]');
+    if (!summary) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && !active.hasAttribute('autofocus')) return;
+    summary.focus();
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', focusErrorSummary, { once: true });
+} else {
+    focusErrorSummary();
+}
+
+/**
  * Voice Typing component (Web Speech API).
  * Injects recognised speech directly into the active TipTap editor.
  * Registered via alpine:init so Livewire's bundled Alpine is used.

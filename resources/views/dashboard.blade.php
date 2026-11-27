@@ -49,7 +49,7 @@
                 <a href="{{ route('documents.index', ['new' => 1]) }}" class="btn btn-primary"
                    data-primary-action>Start a new document</a>
                 <a href="{{ route('documents.index', ['gallery' => 1]) }}" class="link">Start from a template</a>
-                <form class="find" role="search" method="get" action="{{ route('documents.index') }}">
+                <form class="find" role="search" aria-label="Find a document" method="get" action="{{ route('documents.index') }}">
                     <x-dot.filter-search name="q" label="Search titles and text" placeholder="Find a document" />
                 </form>
             </div>

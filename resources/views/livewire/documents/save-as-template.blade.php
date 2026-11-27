@@ -12,9 +12,7 @@
                     <div class="field-row u-mt-0">
                         <label class="field-label" for="tpl-name">Template name</label>
                         <input id="tpl-name" wire:model="name" type="text" class="field" @error('name') aria-invalid="true" aria-describedby="tpl-name-error" @enderror />
-                        @error('name')
-                            <p class="field-error" id="tpl-name-error" role="alert">{{ $message }}</p>
-                        @enderror
+                        <p class="field-error" id="tpl-name-error" role="alert">@error('name'){{ $message }}@enderror</p>
                     </div>
 
                     <div class="field-row">

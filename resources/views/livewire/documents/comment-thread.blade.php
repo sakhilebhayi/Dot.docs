@@ -87,9 +87,7 @@
                                 @endforeach
                             </ul>
                         @endif
-                        @error('replyContent')
-                            <p class="field-error" id="reply-{{ $comment->id }}-error" role="alert">{{ $message }}</p>
-                        @enderror
+                        <p class="field-error" id="reply-{{ $comment->id }}-error" role="alert">@error('replyContent'){{ $message }}@enderror</p>
                         <div class="toolbar u-mt-2">
                             <button type="button" class="btn btn-sm btn-primary" wire:click="postReply">Post the reply</button>
                             <button type="button" class="btn btn-sm" wire:click="cancelReply">Cancel</button>
@@ -119,9 +117,7 @@
             <textarea id="new-comment" x-model="value" @input="handleInput($event)"
                       @keydown.enter.ctrl.prevent="$wire.postComment()" rows="3" class="field"
                       placeholder="Type @ to mention a collaborator" @error('newComment') aria-invalid="true" aria-describedby="new-comment-error" @enderror></textarea>
-            @error('newComment')
-                <p class="field-error" id="new-comment-error" role="alert">{{ $message }}</p>
-            @enderror
+            <p class="field-error" id="new-comment-error" role="alert">@error('newComment'){{ $message }}@enderror</p>
 
             @if ($mentionTarget === 'new' && count($mentionResults) > 0)
                 <ul class="menu-list mention-list-inline" aria-label="People to mention">

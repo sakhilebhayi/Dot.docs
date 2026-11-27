@@ -23,9 +23,7 @@
                 <div class="field-row">
                     <label class="field-label" for="set-title">Title</label>
                     <input id="set-title" wire:model="title" type="text" class="field" @error('title') aria-invalid="true" aria-describedby="set-title-error" @enderror />
-                    @error('title')
-                        <p class="field-error" id="set-title-error" role="alert">{{ $message }}</p>
-                    @enderror
+                    <p class="field-error" id="set-title-error" role="alert">@error('title'){{ $message }}@enderror</p>
                 </div>
 
                 <p class="list-sub">
@@ -54,9 +52,7 @@
                     </select>
                     <button type="button" class="btn" wire:click="moveToFolder">Move it</button>
                 </div>
-                @error('folderId')
-                    <p class="field-error" id="set-folder-error" role="alert">{{ $message }}</p>
-                @enderror
+                <p class="field-error" id="set-folder-error" role="alert">@error('folderId'){{ $message }}@enderror</p>
             </div>
 
             <div class="field-row">
@@ -118,9 +114,7 @@
                             <option value="A3">A3</option>
                             <option value="Letter">Letter</option>
                         </select>
-                        @error('pageSize')
-                            <p class="field-error" id="set-size-error" role="alert">{{ $message }}</p>
-                        @enderror
+                        <p class="field-error" id="set-size-error" role="alert">@error('pageSize'){{ $message }}@enderror</p>
                     </div>
                     <div class="field-row u-mt-0">
                         <label class="field-label" for="set-orientation">Orientation</label>
@@ -128,9 +122,7 @@
                             <option value="portrait">Portrait</option>
                             <option value="landscape">Landscape</option>
                         </select>
-                        @error('orientation')
-                            <p class="field-error" id="set-orientation-error" role="alert">{{ $message }}</p>
-                        @enderror
+                        <p class="field-error" id="set-orientation-error" role="alert">@error('orientation'){{ $message }}@enderror</p>
                     </div>
                 </div>
 
@@ -145,9 +137,7 @@
                             <label class="field-label" for="set-{{ $model }}">{{ $label }}</label>
                             <input id="set-{{ $model }}" wire:model="{{ $model }}" type="text" class="field field-mono"
                                    placeholder="{{ $placeholder }}" @error($model) aria-invalid="true" aria-describedby="set-{{ $model }}-error" @enderror />
-                            @error($model)
-                                <p class="field-error" id="set-{{ $model }}-error" role="alert">{{ $message }}</p>
-                            @enderror
+                            <p class="field-error" id="set-{{ $model }}-error" role="alert">@error($model){{ $message }}@enderror</p>
                         </div>
                     @endforeach
                 </div>
@@ -155,17 +145,13 @@
                 <div class="field-row">
                     <label class="field-label" for="set-header">Running header</label>
                     <input id="set-header" wire:model="header" type="text" class="field field-mono" placeholder="@{{ title }}" @error('header') aria-invalid="true" aria-describedby="set-header-error" @enderror />
-                    @error('header')
-                        <p class="field-error" id="set-header-error" role="alert">{{ $message }}</p>
-                    @enderror
+                    <p class="field-error" id="set-header-error" role="alert">@error('header'){{ $message }}@enderror</p>
                 </div>
 
                 <div class="field-row">
                     <label class="field-label" for="set-footer">Running footer</label>
                     <input id="set-footer" wire:model="footer" type="text" class="field field-mono" placeholder="Page @{{ page }} of @{{ pages }}" @error('footer') aria-invalid="true" aria-describedby="set-footer-error" @enderror />
-                    @error('footer')
-                        <p class="field-error" id="set-footer-error" role="alert">{{ $message }}</p>
-                    @enderror
+                    <p class="field-error" id="set-footer-error" role="alert">@error('footer'){{ $message }}@enderror</p>
                     <p class="field-hint">
                         Takes @{{ title }}, @{{ date }}, @{{ team }}, @{{ page }}, @{{ pages }} and any variable the document defines.
                     </p>
@@ -185,9 +171,7 @@
                 <div class="field-row">
                     <label class="field-label" for="set-transfer">Hand the document to</label>
                     <input id="set-transfer" wire:model="transferEmail" type="email" class="field" placeholder="name@example.com" @error('transferEmail') aria-invalid="true" aria-describedby="set-transfer-error" @enderror />
-                    @error('transferEmail')
-                        <p class="field-error" id="set-transfer-error" role="alert">{{ $message }}</p>
-                    @enderror
+                    <p class="field-error" id="set-transfer-error" role="alert">@error('transferEmail'){{ $message }}@enderror</p>
                     <p class="field-hint">Someone in {{ $document->team?->name ?? 'this company' }}. They become the owner; you keep editing it.</p>
                 </div>
                 <button type="submit" class="btn"

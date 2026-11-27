@@ -1694,6 +1694,27 @@ button.list-row {
     color: var(--danger);
 }
 
+/* A field's message is rendered on every render, empty while there is nothing to say, so the alert is already in the
+   page when its words arrive and a screen reader announces them (R2-12). Empty, it is taken out of the flow (it adds no
+   gap to a flex or grid row and no margin to a stack) but stays in the accessibility tree, and draws no dot. */
+.field-error:empty {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+}
+
+.field-error:empty::before {
+    content: none;
+}
+
+.panel-body-error {
+    margin: 0;
+    padding: var(--s3) var(--s4);
+}
+
 .field-error::before {
     content: '';
     flex: none;
@@ -1811,6 +1832,40 @@ button.list-row {
 
 .note-danger {
     background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+/* A refused field says so by its edge too, not only by the message under it (R2-12). */
+.field[aria-invalid='true'] {
+    border-color: var(--danger);
+}
+
+/* The summary of a refused form (<x-validation-errors>, R2-12 / A-05). It takes the focus on load, so it carries the
+   ring a keyboard reader expects; each message is a link to the field it is about. */
+.error-summary {
+    align-items: flex-start;
+}
+
+.error-summary:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+}
+
+.error-summary-title {
+    margin: 0 0 var(--s2);
+    font-size: var(--t-body);
+    font-weight: 500;
+}
+
+.error-summary-list {
+    margin: 0;
+    padding-left: var(--s4);
+    list-style: disc;
+}
+
+.error-summary-list a {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
 }
 
 /* ── Sheets (modal dialogs) ──────────────────────────────────────────── */
@@ -2076,10 +2131,11 @@ button.list-row {
     line-height: 1.3;
 }
 
+/* Once it shows an edge it is a field, and a field's edge clears 3:1 (--line-control, R2-12). */
 .doc-title-field:hover,
 .doc-title-field:focus {
     background: var(--surface);
-    border-color: var(--line);
+    border-color: var(--line-control);
 }
 
 /* The style picker draws its edge only when you go near it. */
@@ -2097,7 +2153,7 @@ button.list-row {
 
 .tool-select:hover,
 .tool-select:focus {
-    border-color: var(--line);
+    border-color: var(--line-control);
     background: var(--surface);
 }
 
@@ -2780,7 +2836,10 @@ button.list-row {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    * {
+    /* The pseudo-elements too (R2-12): a status dot or a decoration drawn with ::before kept its motion. */
+    *,
+    *::before,
+    *::after {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;

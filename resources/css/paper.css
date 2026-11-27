@@ -263,7 +263,8 @@ html[data-focus-by='keyboard'] .canvas .paper:focus-within {
 .dotdoc-panel-input {
     width: 100%;
     border: none;
-    border-bottom: 1px solid var(--line);
+    /* The field's one edge: --line-control, which clears 3:1 against the panel (WCAG 1.4.11; R2-12). */
+    border-bottom: 1px solid var(--line-control);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -464,7 +465,7 @@ html[data-focus-by='keyboard'] .canvas .paper:focus-within {
 .dotdoc-bubble-input {
     height: 30px;
     min-width: 190px;
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-control);
     border-radius: var(--r-control);
     background: var(--surface);
     color: var(--ink);
@@ -518,7 +519,10 @@ html[data-focus-by='keyboard'] .canvas .paper:focus-within {
 /* ── Motion ──────────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
-    * {
+    /* The pseudo-elements too (R2-12): a status dot or a decoration drawn with ::before kept its motion. */
+    *,
+    *::before,
+    *::after {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;

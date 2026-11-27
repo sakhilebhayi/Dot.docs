@@ -47,7 +47,10 @@ export function scrollToBlock(id) {
         return false;
     }
 
-    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // A reader who asked for less motion is taken there at once (R2-12): CSS scroll-behavior does not reach an
+    // explicit behavior: 'smooth'.
+    const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
 
     return true;
 }

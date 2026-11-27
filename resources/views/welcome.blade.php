@@ -54,16 +54,17 @@
             .press { transition: transform 160ms var(--ease-out); }
             .press:active { transform: scale(0.97); }
 
+            /* R2-12: the page is readable before (and without) any script. A section is held back for its entrance
+               only once the script below has started watching for it (html.reveal-on); a blocked or failed script
+               leaves every section where it is, fully visible. */
             @media (prefers-reduced-motion: no-preference) {
-                .reveal {
-                    opacity: 0;
-                    transform: translateY(14px);
+                html.reveal-on .reveal {
                     transition: opacity 600ms var(--ease-out), transform 600ms var(--ease-out);
                 }
-                .reveal.is-visible { opacity: 1; transform: translateY(0); }
-            }
-            @media (prefers-reduced-motion: reduce) {
-                .reveal { opacity: 1; transform: none; }
+                html.reveal-on .reveal:not(.is-visible) {
+                    opacity: 0;
+                    transform: translateY(14px);
+                }
             }
 
             @media (hover: hover) and (pointer: fine) {
@@ -91,6 +92,22 @@
             #mobile-menu.is-open {
                 display: block;
                 opacity: 1;
+            }
+            @media (prefers-reduced-motion: reduce) {
+                .press, .press:active, .link-underline, #mobile-menu, #site-header { transition: none; transform: none; }
+            }
+            /* The shell's focus ring is drawn in --ink, which this page redefines as its dark ground: on the header and
+               the two dark sections the ring was dark on dark. There it is drawn in the gold (R2-12). */
+            #site-header :focus-visible,
+            .on-dark :focus-visible {
+                outline-color: var(--gold);
+            }
+            /* Without scripts the toggle cannot open the menu, so the menu is simply there. */
+            @media (scripting: none) and (max-width: 767.98px) {
+                #mobile-menu { display: block; opacity: 1; }
+                #mobile-menu-toggle { display: none; }
+                /* An open menu in a fixed header would sit over the hero's heading: the header takes its own room. */
+                #site-header { position: relative; background: var(--ink); }
             }
         </style>
     </head>
@@ -156,7 +173,7 @@
         <main id="main" tabindex="-1">
 
         <!-- Hero -->
-        <section class="relative min-h-[100dvh] flex items-end overflow-hidden bg-[var(--ink)]">
+        <section class="on-dark relative min-h-[100dvh] flex items-end overflow-hidden bg-[var(--ink)]">
             <!-- Photo: hands typing on a laptop, "type type type" by Christin Hume, unsplash.com/photos/mfB1B1s4sMc -->
             <div class="absolute inset-0 bg-cover bg-center" style="background-image: url('https://images.unsplash.com/photo-1515378960530-7c0da6231fb1?q=80&w=2400&auto=format&fit=crop');"></div>
             <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(31,27,20,0.58) 0%, rgba(31,27,20,0.74) 45%, #1f1b14 92%);"></div>
@@ -280,7 +297,7 @@
         </section>
 
         <!-- CTA -->
-        <section class="relative py-28 sm:py-36 px-5 sm:px-8 overflow-hidden bg-[var(--ink)]">
+        <section class="on-dark relative py-28 sm:py-36 px-5 sm:px-8 overflow-hidden bg-[var(--ink)]">
             <!-- Photo: two people reviewing documents at a table, by Olena Kholina, unsplash.com/photos/MhqUBTxQ3Hw -->
             <div class="absolute inset-0 bg-cover bg-center" style="background-image: url('https://images.unsplash.com/photo-1775163024488-e88e4a71179f?q=80&w=2400&auto=format&fit=crop');"></div>
             <div class="absolute inset-0" style="background: linear-gradient(180deg, #1f1b14 0%, rgba(31,27,20,0.82) 50%, #1f1b14 100%);"></div>
@@ -359,6 +376,7 @@
                         }
                     });
                 }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+                document.documentElement.classList.add('reveal-on');
                 document.querySelectorAll('[data-reveal]').forEach((el) => io.observe(el));
             } else {
                 document.querySelectorAll('[data-reveal]').forEach((el) => el.classList.add('is-visible'));
