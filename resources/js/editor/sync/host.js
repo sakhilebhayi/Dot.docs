@@ -67,16 +67,6 @@
  * Every part is a factory over the same `view` and `env`; their functions all
  * go on one object, and a part calls another's through it, looked up when
  * called (./host/late.js), so no part imports another part.
- *
- * The counters' events, by part (tests/js/sync.metrics.test.js reads this
- * file for the list, and every event needs a mapping in metricKey()):
- *   metric('resend'), metric('backoff')          save.js
- *   metric('merge')       liveMerge.js, drafts.js, suggestion.js
- *   metric('echo')        liveMerge.js
- *   metric('conflict')    conflict.js
- *   metric('lost'), metric('lost-action')         lost.js
- *   metric('readonly')    access.js
- *   metric('peers')       engineHost.js
  */
 
 import { createAccess } from './host/access.js';
