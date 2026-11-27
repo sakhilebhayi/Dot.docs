@@ -37,7 +37,9 @@ class EcosystemMembershipController extends Controller
             return response()->json(['error' => 'invalid_request'], 422);
         }
 
-        $apply($change->validated());
+        /** @var array{event: string, team_uuid: string, email?: string|null, role?: string|null} $validated the rules above guarantee this shape */
+        $validated = $change->validated();
+        $apply($validated);
 
         return response()->json(['ok' => true], 202);
     }

@@ -112,7 +112,7 @@ class Benchmark extends Command
         if ($history === null) {
             $history = $store->create($owner, 'Bench history', $this->body(1, 30));
             for ($v = 0; $v < 300; $v++) {
-                $history = $store->save($history->fresh(), $this->body($v + 2, 30), $owner, ['version' => 'named', 'label' => "Bench v{$v}"]);
+                $history = $store->save($history->fresh() ?? $history, $this->body($v + 2, 30), $owner, ['version' => 'named', 'label' => "Bench v{$v}"]);
             }
         }
 
@@ -229,14 +229,15 @@ class Benchmark extends Command
         $this->info("Driving {$url} ({$documents} documents in the Benchmark company).");
 
         foreach ($this->typistCounts() as $k) {
-            $results['typing'][] = $this->typing($url, $writers->take($k)->all());
+            $results['typing'][] = $this->typing($url, array_values($writers->take($k)->all()));
         }
 
-        $results['reads'] = $this->reads($url, $owner, $writers->all());
+        $results['reads'] = $this->reads($url, $owner, array_values($writers->all()));
 
         $this->report($results);
 
-        if ($out = $this->option('out')) {
+        $out = $this->option('out');
+        if (is_string($out) && $out !== '') {
             file_put_contents($out, json_encode($results, JSON_PRETTY_PRINT).PHP_EOL);
             $this->info("Written to {$out}.");
         }
@@ -247,9 +248,11 @@ class Benchmark extends Command
     /** @return list<int> */
     private function typistCounts(): array
     {
-        return collect(explode(',', (string) $this->option('typists')))
+        $typists = $this->option('typists');
+
+        return array_values(collect(explode(',', is_string($typists) ? $typists : ''))
             ->map(fn ($n) => max(1, min(self::WRITERS, (int) trim($n))))
-            ->unique()->values()->all();
+            ->unique()->all());
     }
 
     /**
@@ -391,7 +394,7 @@ class Benchmark extends Command
         // The database handler is shared and remembers that its last row
         // existed: without this, every session after the first is an UPDATE
         // of a row that is not there, and nothing is stored.
-        if (method_exists($handler, 'setExists')) {
+        if (is_object($handler) && method_exists($handler, 'setExists')) {
             $handler->setExists(false);
         }
         $store = new Store(config('session.cookie'), $handler, null, config('session.serialization', 'php'));
@@ -411,7 +414,7 @@ class Benchmark extends Command
         $host = parse_url((string) ($this->option('url') ?: config('app.url')), PHP_URL_HOST);
 
         return $factory
-            ->withCookies([$session['cookie'] => $session['value']], $host)
+            ->withCookies([$session['cookie'] => $session['value']], (string) $host)
             ->withHeaders(['X-CSRF-TOKEN' => $session['token'], 'Accept' => 'application/json, text/html', 'X-Requested-With' => 'XMLHttpRequest'])
             ->timeout(60)
             ->withoutRedirecting();

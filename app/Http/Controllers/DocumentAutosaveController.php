@@ -5,8 +5,8 @@ namespace App\Http\Controllers;
 use App\Documents\DocumentStore;
 use App\Documents\StaleDocumentException;
 use App\Http\Requests\AutosaveRequest;
+use App\Support\SignedIn;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
@@ -26,6 +26,8 @@ use InvalidArgumentException;
  */
 class DocumentAutosaveController extends Controller
 {
+    use SignedIn;
+
     public function store(AutosaveRequest $request, string $uuid, DocumentStore $store): JsonResponse
     {
         // Looked up, authorised (update) and shape-checked by AutosaveRequest, in that order (R2-7 / Q-06).
@@ -45,7 +47,7 @@ class DocumentAutosaveController extends Controller
             'expectedVersion' => $request->integer('base_version'),
         ];
         if ($request->boolean('overwrite')) {
-            $opts['keepReplacedAs'] = DocumentStore::overwriteLabel(Auth::user());
+            $opts['keepReplacedAs'] = DocumentStore::overwriteLabel($this->actor());
         }
 
         try {
@@ -56,7 +58,7 @@ class DocumentAutosaveController extends Controller
             // style and variables reset themselves behind the writer's back.
             // Rules here are a shape check; DocumentSchema::validate(), run
             // inside DocumentStore::save(), is what actually vets the content.
-            $document = $store->save($document, $request->input('content'), Auth::user(), $opts);
+            $document = $store->save($document, $request->input('content'), $this->actor(), $opts);
         } catch (StaleDocumentException $e) {
             // Somebody saved after this page last synced. The page is already
             // gone, so nobody reads this; what matters is that nothing was

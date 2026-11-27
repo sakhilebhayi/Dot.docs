@@ -46,11 +46,12 @@ class CommentPosted implements ShouldBroadcastNow
                 'parent_id' => $this->comment->parent_id,
                 'selection_text' => $this->comment->selection_text,
                 'resolved_at' => $this->comment->resolved_at,
-                'created_at' => $this->comment->created_at->toISOString(),
+                'created_at' => $this->comment->created_at?->toISOString(),
+                // A deleted account's comments stay, shown as "Former member" (EA-2): never read through a null user.
                 'user' => [
-                    'id' => $this->comment->user->id,
-                    'name' => $this->comment->user->name,
-                    'avatar' => $this->comment->user->profile_photo_url,
+                    'id' => $this->comment->user?->id,
+                    'name' => $this->comment->user->name ?? 'Former member',
+                    'avatar' => $this->comment->user?->profile_photo_url,
                 ],
             ],
         ];

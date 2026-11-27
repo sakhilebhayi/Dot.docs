@@ -89,10 +89,10 @@ class PrivatiseDocumentImages extends Command
 
                 // The history keeps showing the same pictures: only their address changes.
                 foreach ($map as $from => $to) {
-                    DB::table('document_versions')->where('document_id', $doc->id)->update([
-                        'content_json' => DB::raw('REPLACE(content_json, '.DB::getPdo()->quote(json_encode($from) ?: '').', '.DB::getPdo()->quote(json_encode($to) ?: '').')'),
-                        'content_snapshot' => DB::raw('REPLACE(content_snapshot, '.DB::getPdo()->quote($from).', '.DB::getPdo()->quote($to).')'),
-                    ]);
+                    DB::update(
+                        'UPDATE document_versions SET content_json = REPLACE(content_json, ?, ?), content_snapshot = REPLACE(content_snapshot, ?, ?) WHERE document_id = ?',
+                        [json_encode($from) ?: '', json_encode($to) ?: '', $from, $to, $doc->id],
+                    );
                 }
             });
 

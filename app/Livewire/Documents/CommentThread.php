@@ -346,10 +346,10 @@ class CommentThread extends Component
     /** @return list<string> participants' names, longest first */
     private function participantNames(): array
     {
-        return $this->participantNamesCache ??= $this->document->participants()
-            ->pluck('name')->filter()->unique()
+        return $this->participantNamesCache ??= array_values($this->document->participants()
+            ->pluck('name')->filter()->map(fn ($name) => (string) $name)->unique()
             ->sortByDesc(fn (string $name) => mb_strlen($name))
-            ->values()->all();
+            ->all());
     }
 
     /** @var list<string>|null */

@@ -4,22 +4,19 @@ namespace App\Livewire\Documents;
 
 use App\Audit\AuditLogger;
 use App\Documents\DocumentStore;
-use App\Documents\Import\HtmlToJson;
 use App\Documents\Outline\EditorOutline;
 use App\Documents\StaleDocumentException;
 use App\Events\DocumentUpdated;
-use App\Files\FilesService;
-use App\Models\AiSuggestion;
+use App\Livewire\Documents\Concerns\FilesTheDocument;
+use App\Livewire\Documents\Concerns\ReviewsSuggestions;
+use App\Livewire\Documents\Concerns\TracksPresence;
 use App\Models\Document;
 use App\Models\DocumentStyle;
-use App\Models\Files\Obj;
-use App\Services\PresenceService;
 use App\Styles\StyleEngine;
+use App\Support\SignedIn;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use InvalidArgumentException;
 use Livewire\Attributes\Computed;
@@ -30,6 +27,10 @@ use Livewire\Component;
 class Editor extends Component
 {
     use AuthorizesRequests;
+    use FilesTheDocument;
+    use ReviewsSuggestions;
+    use SignedIn;
+    use TracksPresence;
 
     public Document $document;
 
@@ -146,11 +147,11 @@ class Editor extends Component
         $opts = ['expectedVersion' => $baseVersion];
         if ($overwrite) {
             // The same label the unload beacon uses for the same choice.
-            $opts['keepReplacedAs'] = DocumentStore::overwriteLabel(Auth::user());
+            $opts['keepReplacedAs'] = DocumentStore::overwriteLabel($this->actor());
         }
 
         try {
-            $this->document = app(DocumentStore::class)->save($this->document, $content, Auth::user(), $opts);
+            $this->document = app(DocumentStore::class)->save($this->document, $content, $this->actor(), $opts);
         } catch (StaleDocumentException $e) {
             $this->saved = false;
 
@@ -164,7 +165,7 @@ class Editor extends Component
         $this->saved = true;
 
         try {
-            DocumentUpdated::dispatch($this->document, Auth::user(), $this->document->content, $this->document->content_json, $this->document->version);
+            DocumentUpdated::dispatch($this->document, $this->actor(), (string) $this->document->content, $this->document->content_json ?? [], $this->document->version);
         } catch (\Throwable $e) {
             // Broadcasting unavailable: the save itself has succeeded, so
             // carry on - but log it. This catch used to be empty, which hid
@@ -269,50 +270,12 @@ class Editor extends Component
      */
     public function canEdit(): bool
     {
-        return Auth::user()->can('update', $this->document);
+        return $this->actor()->can('update', $this->document);
     }
 
     public function toggleCommentSidebar(): void
     {
         $this->commentSidebarOpen = ! $this->commentSidebarOpen;
-    }
-
-    public function acceptSuggestion(int $suggestionId): void
-    {
-        $this->authorize('update', $this->document);
-
-        $suggestion = AiSuggestion::where('document_id', $this->document->id)
-            ->whereNull('accepted_at')
-            ->findOrFail($suggestionId);
-
-        // No base is stated: accepting replaces whatever is stored, which
-        // may be somebody else's save from a moment ago. The store keeps
-        // that first (see DocumentStore::save()).
-        $json = app(HtmlToJson::class)->convert($suggestion->suggestion_text);
-        $this->document = app(DocumentStore::class)->save($this->document, $json, Auth::user(), [
-            'version' => 'named',
-            'label' => 'Accepted suggestion',
-            'keepReplacedAs' => 'Before accepted suggestion',
-        ]);
-        $suggestion->update(['accepted_at' => now()]);
-        $this->loadPendingSuggestions();
-        $this->saved = true;
-
-        // `version` so the page can move its base up: this save came from
-        // the page itself, and its next autosave must not be refused as stale.
-        $this->dispatch('suggestion-accepted', content: $this->document->content_json, version: $this->document->version);
-    }
-
-    public function rejectSuggestion(int $suggestionId): void
-    {
-        $this->authorize('update', $this->document);
-
-        AiSuggestion::where('document_id', $this->document->id)
-            ->whereNull('accepted_at')
-            ->findOrFail($suggestionId)
-            ->delete();
-
-        $this->loadPendingSuggestions();
     }
 
     public function saveTitle(): void
@@ -348,154 +311,6 @@ class Editor extends Component
         $this->document = app(DocumentStore::class)->restyle($this->document, $key);
 
         $this->dispatch('style-changed', css: $engine->css($engine->resolve($this->document), 'canvas'), version: $this->document->version);
-    }
-
-    /**
-     * Where this document is filed, root first - the location chip in the
-     * bench. Empty when the document has no tree node at all, which only a
-     * factory-made account with no team can produce.
-     *
-     * @return list<Obj>
-     */
-    #[Computed]
-    public function locationCrumbs(): array
-    {
-        $node = $this->node();
-
-        if ($node === null) {
-            return [];
-        }
-
-        $parent = $node->parent;
-
-        return $parent === null ? [] : [...$parent->ancestors(), $parent];
-    }
-
-    /**
-     * Folders this document can be moved into, taken from the node's OWN
-     * team - never the session's current team.
-     *
-     * @return list<array{id:int,uuid:string,label:string,depth:int}>
-     */
-    #[Computed]
-    public function folderChoices(): array
-    {
-        $node = $this->node();
-
-        return $node === null ? [] : app(FilesService::class)->folderChoices($node->team_id);
-    }
-
-    /**
-     * File the document somewhere else. The sheet is the SAME APG pattern
-     * the documents index uses for rename - Escape closes it and returns
-     * focus - and it is the only move affordance: no drag-and-drop, so
-     * there is nothing a keyboard cannot reach.
-     */
-    public function moveTo(int $destinationId): void
-    {
-        $this->authorize('update', $this->document);
-
-        $node = $this->node();
-        $destination = Obj::find($destinationId);
-
-        if ($node === null || $destination === null || ! $destination->isFolder() || $destination->team_id !== $node->team_id) {
-            $this->addError('location', 'That folder is not available for this document.');
-
-            return;
-        }
-
-        try {
-            app(FilesService::class)->moveObject($node, $destination, Auth::user());
-        } catch (ValidationException $e) {
-            $this->addError('location', collect($e->errors())->flatten()->first() ?? 'That move is not allowed.');
-
-            return;
-        }
-
-        $this->showMoveSheet = false;
-        unset($this->locationCrumbs, $this->folderChoices);
-
-        // Said in the page's banner, now (R2-9): a session flash from a Livewire action is never shown by that
-        // action's own response and surfaced, stale, on some later page instead.
-        $this->dispatch('banner-message', style: 'success', message: 'Filed in '.$destination->name().'.');
-    }
-
-    /** This document's node in the shared tree, filed at its workspace root if it has none. */
-    private function node(): ?Obj
-    {
-        $node = $this->document->node()->first();
-
-        if ($node !== null) {
-            return $node;
-        }
-
-        $team = $this->document->team ?? $this->document->owner?->personalTeam();
-
-        if ($team === null) {
-            return null;
-        }
-
-        $files = app(FilesService::class);
-
-        return $files->registerDocument($this->document, $files->root($team));
-    }
-
-    /**
-     * Called by tabs opened before the sync poll shipped: their JavaScript
-     * still calls this every 60 seconds. It does nothing now - presence is
-     * recorded by the sync poll - but it must exist, or each of those calls
-     * would be answered with an error page. Remove one release later.
-     */
-    public function heartbeat(): void {}
-
-    /**
-     * Called by tabs opened before the sync poll shipped, when they close.
-     * It does nothing now, for the same reason as heartbeat(). Remove one
-     * release later.
-     */
-    public function leaving(): void {}
-
-    /**
-     * Re-read who is here for the presence strip. The editor's sync poll
-     * calls this when the set of people it is told about changes - presence
-     * itself is recorded by that poll (DocumentSyncController), not here.
-     */
-    public function refreshPresence(): void
-    {
-        $this->authorize('view', $this->document);
-
-        $this->activeUsers = $this->presentMembers();
-    }
-
-    /**
-     * @return list<array{id:int,name:string,avatar:string}>
-     */
-    private function presentMembers(): array
-    {
-        $members = app(PresenceService::class)->members($this->document->id);
-        $me = Auth::user();
-
-        if (! collect($members)->contains('id', $me->id)) {
-            $members[] = ['id' => $me->id, 'name' => $me->name, 'avatar' => $me->profile_photo_url];
-        }
-
-        return $members;
-    }
-
-    private function loadPendingSuggestions(): void
-    {
-        $this->pendingSuggestions = AiSuggestion::where('document_id', $this->document->id)
-            ->whereNull('accepted_at')
-            ->with('user:id,name')
-            ->orderByDesc('created_at')
-            ->get()
-            ->map(fn ($s) => [
-                'id' => $s->id,
-                'user' => $s->user->name,
-                'created_at' => $s->created_at->diffForHumans(),
-                'excerpt' => Str::limit(strip_tags($s->suggestion_text), 80),
-            ])
-            ->toArray();
     }
 
     public function render(): View

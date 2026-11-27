@@ -248,7 +248,8 @@ class ContextualToolbarTest extends TestCase
      */
     public function test_the_palette_search_entry_asks_the_ledger_for_its_search_box(): void
     {
-        $blade = file_get_contents(resource_path('views/livewire/documents/editor.blade.php'));
+        // The page's Alpine component, hostCommand() included, is its own partial.
+        $blade = file_get_contents(resource_path('views/livewire/documents/editor/alpine.blade.php'));
 
         $this->assertStringContainsString('?focus=search', $blade);
     }
@@ -317,7 +318,9 @@ class ContextualToolbarTest extends TestCase
      */
     public function test_every_host_command_the_registry_names_has_a_branch_in_the_page(): void
     {
-        $blade = file_get_contents(resource_path('views/livewire/documents/editor.blade.php'));
+        // hostCommand() lives in the page's Alpine component partial, the style picker it focuses in the tools partial.
+        $blade = file_get_contents(resource_path('views/livewire/documents/editor/alpine.blade.php'))
+            .file_get_contents(resource_path('views/livewire/documents/editor/tools.blade.php'));
 
         foreach ([
             'export.pdf',

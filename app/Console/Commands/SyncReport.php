@@ -127,7 +127,7 @@ class SyncReport extends Command
     {
         $days = array_keys($report['per_day']);
         $shown = count($days) <= 16 ? $days : [];
-        $headers = ['kind', ...array_map(fn ($day) => substr($day, 5), $shown), 'total'];
+        $headers = ['kind', ...array_map(fn ($day) => substr((string) $day, 5), $shown), 'total'];
 
         $rows = [];
         foreach ($report['totals'] as $kind => $total) {

@@ -170,7 +170,7 @@ abstract class CommentEmailNotification extends Notification implements ShouldQu
         return $user->notifications()
             ->where('type', $this->bellNotification())
             ->whereNotNull('read_at')
-            ->where('created_at', '>=', $this->comment->created_at->copy()->subMinute())
+            ->where('created_at', '>=', ($this->comment->created_at ?? now())->copy()->subMinute())
             ->get()
             ->contains(fn (DatabaseNotification $bell) => ($bell->data['comment_id'] ?? null) === $this->comment->id);
     }

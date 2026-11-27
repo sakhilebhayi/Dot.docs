@@ -98,16 +98,15 @@ class PresenceService
 
         $users = User::whereIn('id', $userIds)->get()->keyBy('id');
 
-        return $userIds
+        return array_values($userIds
             ->map(fn ($id) => $users->get($id))
             ->filter()
             ->map(fn (User $user) => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'avatar' => $user->profile_photo_url,
+                'id' => (int) $user->id,
+                'name' => (string) $user->name,
+                'avatar' => (string) $user->profile_photo_url,
             ])
-            ->values()
-            ->all();
+            ->all());
     }
 
     /**

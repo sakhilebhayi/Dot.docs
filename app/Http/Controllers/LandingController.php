@@ -8,6 +8,7 @@ use App\Models\DocumentCollaborator;
 use App\Models\Team;
 use App\Models\User;
 use App\Search\CompanyDocuments;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -28,6 +29,8 @@ use Illuminate\Support\Str;
  */
 class LandingController extends Controller
 {
+    use SignedIn;
+
     /** How much of the newest document the sheet quotes. */
     private const EXCERPT_LENGTH = 320;
 
@@ -36,7 +39,7 @@ class LandingController extends Controller
 
     public function __invoke(Request $request): View
     {
-        $user = $request->user();
+        $user = $this->actor();
         $team = $user->currentTeam instanceof Team ? $user->currentTeam : null;
         $teamId = $team?->id;
 
@@ -128,7 +131,7 @@ class LandingController extends Controller
             $ownerName = $newest->owner instanceof User ? $newest->owner->name : null;
             $by = $ownerName !== null && $newest->owner_id !== $userId ? ' by '.$ownerName : '';
 
-            return ($newest->title ?: 'Untitled').' was edited '.$newest->updated_at->diffForHumans().$by.'.';
+            return ($newest->title ?: 'Untitled').' was edited '.($newest->updated_at?->diffForHumans() ?? 'recently').$by.'.';
         }
 
         return 'Nothing has been written '.($company ? 'in '.$company : 'here').' yet.';

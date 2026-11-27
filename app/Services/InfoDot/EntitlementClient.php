@@ -59,6 +59,7 @@ class EntitlementClient
                 $last = null;
             }
 
+            /** @var array{entitled: bool, status: string, available: bool, message: ?string}|null $answer the shape this class itself remembered */
             $answer = is_array($last) && is_array($last['answer'] ?? null) && time() - (int) ($last['at'] ?? 0) < self::LAST_KNOWN_TTL ? $last['answer'] : null;
             $this->remember($key, ['answer' => $answer], self::FAILURE_TTL);
 

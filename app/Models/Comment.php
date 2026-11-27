@@ -6,6 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property-read User|null $user Null once the author deleted their account: comments stay, shown as "Former member" (EA-2).
+ */
 class Comment extends Model
 {
     protected $fillable = [
