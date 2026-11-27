@@ -9,6 +9,7 @@ use App\Livewire\Files\BrowsesTheTree;
 use App\Models\Document;
 use App\Models\Files\Obj;
 use App\Models\Tag;
+use App\Search\CompanyDocuments;
 use App\Search\DocumentSearch;
 use App\Services\TagRepository;
 use App\Support\SignedIn;
@@ -240,35 +241,40 @@ class Index extends Component
     #[Computed]
     public function availableTags(): Collection
     {
-        return app(TagRepository::class)->availableFor($this->actor(), $this->actor()->currentTeam?->id);
+        // The company the list is scoped to (Document::scopeVisibleTo()), so the tags offered are that company's.
+        return app(TagRepository::class)->availableFor($this->actor(), CompanyDocuments::companyOf($this->actor())?->id);
     }
 
-    /** @return LengthAwarePaginator<int, Document> */
+    /**
+     * The list, the search and the tag filter all start from ONE visibility rule, Document::scopeVisibleTo(): the
+     * company the person is standing in, read through the `team_id` index (R2-11 / R2-12). The rule it replaced -
+     * owner OR collaborator OR team - could not use an index, so SQLite read every document of every company for each
+     * page (51 ms at 60k documents, twice per view), and it disagreed with search about what "your documents" are.
+     *
+     * The one exception is "Shared with me" (`?filter=shared`, the rail link): documents the person collaborates on,
+     * in ANY company and any folder, driven by the `document_collaborators.user_id` index. It is where a document
+     * another company shared is found (owner decision 2026-11-27: it is never a search result), and every row in it
+     * is one DocumentPolicy::view() lets them open. Search and tags inside it still narrow to the company.
+     *
+     * @return LengthAwarePaginator<int, Document>
+     */
     #[Computed]
     public function documents(): LengthAwarePaginator
     {
         $user = $this->actor();
         $search = app(DocumentSearch::class);
         $searching = $search->isSearchable($this->search);
+        $shared = $this->filter === 'shared';
 
         return Document::query()
             // The columns a row shows, not the whole document: `select *`
             // read every listed document's HTML, JSON and search text just to
             // print a title and a date (EA-5 / P-08).
             ->select(['id', 'uuid', 'title', 'owner_id', 'team_id', 'version', 'is_public', 'infodot_reference', 'created_at', 'updated_at'])
-            ->where(function ($q) use ($user) {
-                $q->where('owner_id', $user->id)
-                    ->orWhereHas('collaborators', fn ($q) => $q->where('user_id', $user->id));
-
-                if ($user->currentTeam) {
-                    $q->orWhere('team_id', $user->currentTeam->id);
-                }
-            })
+            ->when($shared, fn ($q) => $q->sharedWith($user), fn ($q) => $q->visibleTo($user))
             // A search of two characters or more goes through DocumentSearch,
-            // which is the tsvector query on pgsql and LIKE over
-            // title/search_text on sqlite. The old inline LIKE searched
-            // `content` - the rendered HTML - so a word split by a tag never
-            // matched and a tag name did. Anything shorter than two
+            // which is the tsvector query on pgsql and FTS5/LIKE on sqlite,
+            // scoped to the same company. Anything shorter than two
             // characters is not treated as a search at all: the list keeps
             // its folder/filter/tag behaviour.
             ->when($searching, fn ($q) => $q->whereIn(
@@ -276,15 +282,18 @@ class Index extends Component
                 $search->search($user, $this->search, self::SEARCH_LIMIT)->pluck('id'),
             ))
             ->when($this->filter === 'mine', fn ($q) => $q->where('owner_id', $user->id))
-            ->when($this->filter === 'shared', fn ($q) => $q->whereHas('collaborators', fn ($q) => $q->where('user_id', $user->id)))
-            ->when($this->filter === 'team', fn ($q) => $user->currentTeam ? $q->where('team_id', $user->currentTeam->id) : $q)
+            // Inside the company, "team" is the company's documents: the rule already is exactly that, so the chip
+            // only narrows away a no-company person's own un-filed documents.
+            ->when($this->filter === 'team', fn ($q) => $q->whereNotNull('team_id'))
             ->when($this->tagId, fn ($q) => $q->whereHas('tags', fn ($q) => $q->where('tags.id', $this->tagId)))
-            // A search or tag filter searches the whole space, not just
-            // the current folder -- otherwise finding something means
-            // already knowing which folder it's in. Otherwise the list is
-            // exactly what the tree says is filed in the open folder.
+            // A search, a tag filter or "Shared with me" covers the whole
+            // space, not just the current folder -- otherwise finding
+            // something means already knowing which folder it's in (and a
+            // shared document is filed in ANOTHER company's tree). Otherwise
+            // the list is exactly what the tree says is filed in the open
+            // folder.
             ->when(
-                ! $searching && ! $this->tagId && $this->currentNode() !== null,
+                ! $searching && ! $this->tagId && ! $shared && $this->currentNode() !== null,
                 fn ($q) => $q->whereHas('node', fn ($q) => $q->where('parent_id', $this->currentNode()?->id)),
             )
             // Newest EDIT first: the rows say "Edited …" (EA-5 / P-08).

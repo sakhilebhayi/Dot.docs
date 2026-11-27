@@ -16,8 +16,12 @@ use Illuminate\Database\Eloquent\Model;
  * another company is read, however public or shared the document is there; DocumentPolicy::view() is then checked row
  * by row on what is left, so the rule can only narrow.
  *
- * The company predicate for search (App\Search\DocumentSearch, both searches since R2-7), the arrival page, the Bin
- * and the API.
+ * The company predicate for search (App\Search\DocumentSearch, both searches since R2-7), the documents list and its
+ * tag filter (through Document::scopeVisibleTo(), R2-12), the arrival page, the Bin and the API.
+ *
+ * Company FIRST is also what keeps these queries fast: `team_id` (and `owner_id` for the no-company case) leads an
+ * index on `documents`, so SQLite reads one company's rows instead of every document on the platform (R2-11, the
+ * documents list scanned 60k rows for one page). tests/Feature/Documents/DocumentVisibilityQueryPlanTest holds it.
  */
 class CompanyDocuments
 {
@@ -31,9 +35,35 @@ class CompanyDocuments
      */
     public static function scope(Builder $query, ?int $teamId, int $userId): Builder
     {
+        // Qualified, so the predicate stays the documents' own when the query joins another table (search's ranking).
         return $teamId === null
-            ? $query->whereNull('team_id')->where('owner_id', $userId)
-            : $query->where('team_id', $teamId);
+            ? $query->whereNull($query->qualifyColumn('team_id'))->where($query->qualifyColumn('owner_id'), $userId)
+            : $query->where($query->qualifyColumn('team_id'), $teamId);
+    }
+
+    /**
+     * The company a person is standing in, for the visibility rule: their current team, but only while they still
+     * belong to it. A stale `current_team_id` (a team they have just been removed from) counts as no company, so the
+     * rule falls back to their own un-filed documents rather than listing a team they can no longer open.
+     */
+    public static function companyOf(User $user): ?Team
+    {
+        $team = $user->currentTeam;
+
+        return $team instanceof Team && $user->belongsToTeam($team) ? $team : null;
+    }
+
+    /**
+     * THE visibility rule for listing and finding documents: the person's company (companyOf()), nothing else.
+     *
+     * @template TModel of Model
+     *
+     * @param  Builder<TModel>  $query
+     * @return Builder<TModel>
+     */
+    public static function visibleTo(Builder $query, User $user): Builder
+    {
+        return self::scope($query, self::companyOf($user)?->id, $user->id);
     }
 
     /**
