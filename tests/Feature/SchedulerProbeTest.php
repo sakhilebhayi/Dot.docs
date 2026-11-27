@@ -57,6 +57,40 @@ class SchedulerProbeTest extends TestCase
         $this->get('/up/scheduler')->assertStatus(503)->assertJsonPath('mail.given_up_last_hour', 1);
     }
 
+    /**
+     * R2-11: while essential-only mode has paused the nightly backup, an old backup does not turn the probe 503 - it
+     * would stay red for good and hide real failures - and the moment the pause ends, or the backup is made essential,
+     * the 26-hour rule is back.
+     */
+    public function test_a_paused_backup_is_reported_as_paused_not_stale(): void
+    {
+        Cache::forever(SchedulerProbeController::SCHEDULER_KEY, now()->subSeconds(40)->toIso8601String());
+        Cache::forever(QueueHeartbeat::KEY, now()->subMinutes(4)->toIso8601String());
+
+        // A real SQLite file and a backup 27 hours old, as production will be tomorrow morning.
+        $db = storage_path('framework/testing/probe-'.getmypid().'.sqlite');
+        @mkdir(dirname($db), 0777, true);
+        touch($db);
+        @mkdir(storage_path('backups'), 0777, true);
+        $old = storage_path('backups/doc-probe-test-'.getmypid().'.sqlite');
+        touch($old, time() - 27 * 3600);
+        config(['database.default' => 'sqlite', 'database.connections.sqlite.database' => $db]);
+
+        try {
+            config(['dot_cron.essential_only' => true, 'dot_cron.essential' => []]);
+            $this->get('/up/scheduler')->assertOk()->assertJsonPath('backup.paused', true);
+
+            config(['dot_cron.essential' => ['backup-database']]);
+            $this->get('/up/scheduler')->assertStatus(503)->assertJsonPath('backup.paused', false);
+
+            config(['dot_cron.essential_only' => false, 'dot_cron.essential' => []]);
+            $this->get('/up/scheduler')->assertStatus(503)->assertJsonPath('backup.paused', false);
+        } finally {
+            @unlink($old);
+            @unlink($db);
+        }
+    }
+
     public function test_probe_needs_no_authentication(): void
     {
         $this->getJson('/up/scheduler')->assertStatus(503);
