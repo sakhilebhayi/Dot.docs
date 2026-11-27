@@ -50,7 +50,7 @@ class StartSession extends BaseStartSession
 
     protected function saveSession($request)
     {
-        if ($request->attributes->get(self::QUIET) === true && $request->hasSession()) {
+        if ($this->isQuiet($request) && $request->hasSession()) {
             $session = $request->session();
             // The id too (R2-9 review): a regenerate() changes only the id, and its new row must be written or the
             // person is signed out by their own next request.
@@ -67,5 +67,17 @@ class StartSession extends BaseStartSession
         }
 
         parent::saveSession($request);
+    }
+
+    /**
+     * A route marked QuietSession, or a Livewire update - the editor's autosave and every other component call
+     * (R2-12). Livewire keeps component state in the page, not the session, so an update that changes nothing in the
+     * session has nothing to write; one that does (a sign-in, a flash, a regenerated id) is still saved by the rules
+     * above.
+     */
+    private function isQuiet(Request $request): bool
+    {
+        return $request->attributes->get(self::QUIET) === true
+            || $request->routeIs('default.livewire.update', 'livewire.update');
     }
 }
