@@ -440,8 +440,24 @@ jobs:
           FAILED=0
           : > "$WORK/assets"
 
+          # The host's edge firewall sometimes answers a GitHub runner with its own block or challenge page
+          # (a 403, or a 200 of ~12 KB with none of the app in it) - seen 2026-11-27 while the site was healthy
+          # for everyone else. So a page is fetched up to four times, 20 s apart, until it is the app; only
+          # an answer that is still not the app after that fails the check (EA-7 follow-up).
+          is_app_page() { grep -qF "$SITE_URL/build/" "$1" 2>/dev/null; }
           for PAGE in "$SITE_URL/" "$SITE_URL/login"; do
-            STATUS=$(curl -s --max-time 30 -o "$WORK/page.html" -w '%{http_code}' "$PAGE" || true)
+            for ATTEMPT in 1 2 3 4; do
+              STATUS=$(curl -s --max-time 30 -o "$WORK/page.html" -D "$WORK/page.headers" -w '%{http_code}' "$PAGE" || true)
+              STATUS="${STATUS:-000}"
+              if [ "$STATUS" = "200" ] && is_app_page "$WORK/page.html"; then break; fi
+              if [ "$PAGE" = "$SITE_URL/login" ] && [ "$STATUS" = "302" ]; then break; fi
+              if [ "$ATTEMPT" -lt 4 ]; then
+                echo "attempt $ATTEMPT: $PAGE answered $STATUS ($(wc -c < "$WORK/page.html" | tr -d ' ') bytes) without the app's assets - possibly the host's firewall refusing this runner; retrying in 20 s"
+                sleep 20
+              fi
+            done
+            # The security headers are checked on the response that proved to be the app, never on a separate fetch.
+            if [ "$PAGE" = "$SITE_URL/" ]; then cp "$WORK/page.headers" "$WORK/headers.txt"; fi
 
             # Central sign-in (R-54, DOTSSO_ENABLED): /login hands over to this app's own /sso/login instead of showing a form. That is a
             # healthy answer. It is accepted only for that exact redirect, and the target must itself answer (a redirect or a page),
@@ -503,7 +519,6 @@ jobs:
           # Security headers (App\Http\Middleware\SecurityHeaders) must reach the
           # browser: a host or cache layer that drops them would otherwise go
           # unnoticed, as it did before EA-1 (none were sent at all).
-          curl -s --max-time 30 -o /dev/null -D "$WORK/headers.txt" "$SITE_URL/" || true
           for H in x-content-type-options x-frame-options referrer-policy content-security-policy-report-only; do
             if grep -qi "^$H:" "$WORK/headers.txt"; then
               echo "Header present: $H"
