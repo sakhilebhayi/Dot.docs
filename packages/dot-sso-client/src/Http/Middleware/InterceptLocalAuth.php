@@ -13,9 +13,10 @@ use Illuminate\Http\Request;
  *
  * Credential POSTs to the same endpoints are refused too, so the old form cannot be used by posting to it directly.
  *
- * Never touched: machine access (bearer or JSON requests, Sanctum, webhooks, broadcasting auth, health checks), signed
- * URLs, the platform's `allow_paths`, and every path outside the fixed list. DOTSSO_ALLOW_LOCAL_LOGIN is the
- * administrator's break-glass: it switches the interception off while it is set.
+ * Never touched: machine paths (API, Sanctum, webhooks, broadcasting auth, health checks), signed URLs, the platform's
+ * `allow_paths`, and every path outside the fixed list. Machine access is decided by PATH only: an Accept header or a
+ * bearer token is chosen by the caller, so neither may turn a sign-in page into a machine endpoint.
+ * DOTSSO_ALLOW_LOCAL_LOGIN is the administrator's break-glass: it switches the interception off while it is set.
  */
 class InterceptLocalAuth
 {
@@ -54,7 +55,7 @@ class InterceptLocalAuth
 
     private function machine(Request $request): bool
     {
-        if ($request->expectsJson() || $request->bearerToken() || $request->is(...self::MACHINE)) {
+        if ($request->is(...self::MACHINE)) {
             return true;
         }
 
