@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\QueueHeartbeat;
+use App\Support\EssentialCron;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -40,6 +41,7 @@ class SchedulerProbeController extends Controller
         $scheduler = $this->age(self::SCHEDULER_KEY);
         $queue = $this->age(QueueHeartbeat::KEY);
         $backup = $this->backupAge();
+        $backupPaused = $this->backupPaused();
 
         $mailFailures = $this->mailGivenUpLastHour();
 
@@ -48,7 +50,7 @@ class SchedulerProbeController extends Controller
         // One hour: a single incident alerts for at most four watchdog runs, then the probe is quiet again.
         $healthy = $scheduler !== null && $scheduler <= self::SCHEDULER_STALE_SECONDS
             && $queue !== null && $queue <= self::QUEUE_STALE_SECONDS
-            && (! $this->backupsExpected() || ($backup !== null && $backup <= self::BACKUP_STALE_SECONDS))
+            && (! $this->backupsExpected() || $backupPaused || ($backup !== null && $backup <= self::BACKUP_STALE_SECONDS))
             && $mailFailures === 0;
 
         return response()->json([
@@ -56,7 +58,7 @@ class SchedulerProbeController extends Controller
             'scheduler' => ['age_seconds' => $scheduler, 'stale_after' => self::SCHEDULER_STALE_SECONDS],
             'queue' => ['age_seconds' => $queue, 'stale_after' => self::QUEUE_STALE_SECONDS],
             // Age only: never a file name, size or path.
-            'backup' => ['age_seconds' => $backup, 'stale_after' => self::BACKUP_STALE_SECONDS],
+            'backup' => ['age_seconds' => $backup, 'stale_after' => self::BACKUP_STALE_SECONDS, 'paused' => $backupPaused],
             'mail' => ['given_up_last_hour' => $mailFailures],
         ], $healthy ? 200 : 503);
     }
@@ -69,6 +71,28 @@ class SchedulerProbeController extends Controller
         } catch (\Throwable) {
             return 0;
         }
+    }
+
+    /**
+     * True while the owner's essential-only scheduler mode skips the nightly backup (config/dot_cron.php - an accepted
+     * risk, 2026-11-27; deploys still take their own backup). A paused job cannot be late: counting it as stale turned
+     * this probe 503 for good about a day after the pause, so the watchdog failed every run and a real scheduler,
+     * queue or mail failure looked like the same noise (R2-11). The age is still reported, and the moment the mode is
+     * off - or the backup is made essential - the 26-hour rule applies again.
+     */
+    private function backupPaused(): bool
+    {
+        if (! config('dot_cron.essential_only')) {
+            return false;
+        }
+
+        foreach (EssentialCron::needles() as $needle) {
+            if (str_contains('doc:backup-database', $needle)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** Only a real SQLite file is backed up (BackupSqliteDatabase); anything else has nothing to be late with. */
