@@ -314,6 +314,7 @@ class DocumentSettings extends Component
             // No workspace to file it in, so there is no tree row either -
             // only reachable for a team-less factory account.
             $this->document->delete();
+            app(AuditLogger::class)->record('document.deleted', $this->document);
         } else {
             app(FilesService::class)->deleteObject($node, auth()->user());
         }

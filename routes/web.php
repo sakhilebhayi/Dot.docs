@@ -20,6 +20,7 @@ use App\Http\Controllers\PublishedDocumentController;
 use App\Http\Controllers\SchedulerProbeController;
 use App\Http\Middleware\AuthenticateGuardian;
 use App\Http\Middleware\EnsureCompanyEntitled;
+use App\Livewire\Documents\Bin;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
 use App\Livewire\Documents\Index;
@@ -176,6 +177,7 @@ Route::middleware([
 
     // Documents
     Route::get('/documents', Index::class)->name('documents.index');
+    Route::get('/documents/bin', Bin::class)->name('documents.bin');
     Route::get('/documents/{uuid}/edit', Editor::class)->name('documents.edit');
     // The destination of an InfoDot deep link: a document, by uuid. Re-authorised by the policy.
     Route::get('/o/{uuid}', DocumentOpenController::class)->name('documents.open');
@@ -233,6 +235,9 @@ Route::middleware([
 
     Route::post('/files/{parent}/upload', [FileUploadController::class, 'store'])
         ->name('files.upload');
+    // Files > Import a document: a new document in that folder, filled from the file (R2-3 / F-05).
+    Route::post('/files/{parent}/import', [DocumentImportController::class, 'intoFolder'])
+        ->name('files.import');
 
     // Import
     Route::post('/documents/{uuid}/import', [DocumentImportController::class, 'store'])

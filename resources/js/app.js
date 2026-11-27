@@ -86,19 +86,18 @@ document.addEventListener('alpine:init', () => {
      * x-data might reference the same way, regardless of when that
      * subcomponent itself first mounts.
      */
+    const MENTION_TAIL = /@([\p{L}\p{N}_'’.-]*(?: [\p{L}\p{N}_'’.-]+){0,2})$/u;
+
     Alpine.data('mentionInput', (valueEntangle, onSearch) => ({
         value: valueEntangle,
+        // Up to three words after the @, so a full name ("@Thandi Mok") keeps narrowing the
+        // list, and letters beyond a-z (apostrophes, accents) count (R2-3 / F-12).
         handleInput(e) {
-            const val = e.target.value;
-            const match = val.match(/@(\w*)$/);
-            if (match) {
-                onSearch(match[1]);
-            } else {
-                onSearch('');
-            }
+            const match = e.target.value.match(MENTION_TAIL);
+            onSearch(match ? match[1] : '');
         },
         insertMention(name) {
-            this.value = this.value.replace(/@\w*$/, '@' + name + ' ');
+            this.value = this.value.replace(MENTION_TAIL, '@' + name + ' ');
             onSearch('');
         }
     }));
