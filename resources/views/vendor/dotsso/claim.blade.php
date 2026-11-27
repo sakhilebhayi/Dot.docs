@@ -24,7 +24,7 @@
                          maxlength="{{ $codeLength }}" required autofocus
                          class="block mt-1 w-full dsso-code" aria-describedby="code-help code-error"
                          :aria-invalid="$errors->has('code') ? 'true' : 'false'" />
-                <p id="code-help" class="mt-1.5 text-xs text-[var(--ink-soft)]">It works for {{ $minutes }} minutes. You have {{ $maxAttempts }} tries.</p>
+                <p id="code-help" class="mt-1.5 text-xs text-[var(--ink-soft)]">It can take up to a minute to arrive. It works for {{ $minutes }} minutes, and you have {{ $maxAttempts }} tries.</p>
                 <p id="code-error" class="mt-1.5 text-sm text-red-700 dsso-err" role="alert">{{ $errors->first('code') }}</p>
             </div>
 

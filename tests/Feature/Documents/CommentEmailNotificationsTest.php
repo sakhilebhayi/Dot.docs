@@ -16,6 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\SendQueuedNotifications;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Symfony\Component\Mime\Email;
@@ -138,11 +139,28 @@ class CommentEmailNotificationsTest extends TestCase
         $comment = $this->commentOn($owner);
         $notification = new CommentPostedEmailNotification($comment->document, $comment);
 
+        // R2-4 / E-10: the check alone uses no slot; an email that went does.
         foreach (range(1, 30) as $n) {
             $this->assertTrue($notification->shouldSend($owner, 'mail'), "Email {$n} should be allowed.");
+            $this->assertTrue($notification->shouldSend($owner, 'mail'), 'checking again changes nothing');
+            $notification->countAgainstCap($owner);
         }
 
         $this->assertFalse($notification->shouldSend($owner, 'mail'));
+    }
+
+    /** R2-4 / E-10: the slot is used by the email that went, through MailDeliveryListener, and a stopped one uses none. */
+    public function test_a_comment_email_that_went_uses_one_slot_and_a_stopped_one_none(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $comment = $this->commentOn($owner);
+
+        $owner->notifyNow(new CommentPostedEmailNotification($comment->document, $comment));
+        $this->assertSame(1, RateLimiter::attempts('comment-email:'.$owner->id));
+
+        $owner->forceFill(['comment_emails' => false])->save();
+        $owner->notifyNow(new CommentPostedEmailNotification($comment->document, $comment));
+        $this->assertSame(1, RateLimiter::attempts('comment-email:'.$owner->id));
     }
 
     /**

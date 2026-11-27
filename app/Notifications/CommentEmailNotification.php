@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use App\Http\Controllers\CommentEmailPreferenceController;
+use App\Mail\Delivery\MailNotDelivered;
 use App\Models\Comment;
 use App\Models\Document;
 use App\Models\User;
@@ -11,7 +12,6 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\HtmlString;
 use Symfony\Component\Mime\Email;
@@ -103,10 +103,26 @@ abstract class CommentEmailNotification extends Notification implements ShouldQu
             });
     }
 
-    /** Last retry failed: logged at error, which the Guardian error-rate check counts (EA-3 / E-02). */
+    /** Last retry failed: reported, so it is logged, counted and a person is mailed (R2-4 / E-02). */
     public function failed(\Throwable $e): void
     {
-        Log::error('Comment email could not be sent.', ['notice' => static::class, 'error' => $e::class]);
+        MailNotDelivered::raise(class_basename(static::class), $e);
+    }
+
+    /**
+     * Called by MailDeliveryListener once the email has gone (R2-4 / E-10): the hourly cap counts emails sent, so a
+     * try that failed, or one stopped by a check, does not use up one of the person's thirty.
+     */
+    public function countAgainstCap(object $notifiable): void
+    {
+        if ($notifiable instanceof User) {
+            RateLimiter::hit(self::capKey($notifiable), 3600);
+        }
+    }
+
+    private static function capKey(User $user): string
+    {
+        return 'comment-email:'.$user->id;
     }
 
     /**
@@ -133,12 +149,8 @@ abstract class CommentEmailNotification extends Notification implements ShouldQu
             return false;
         }
 
-        return RateLimiter::attempt(
-            'comment-email:'.$notifiable->id,
-            self::MAX_PER_RECIPIENT_PER_HOUR,
-            fn () => true,
-            3600,
-        ) === true;
+        // Only looked at here; the slot is used when the email has actually gone (countAgainstCap).
+        return ! RateLimiter::tooManyAttempts(self::capKey($notifiable), self::MAX_PER_RECIPIENT_PER_HOUR);
     }
 
     /**

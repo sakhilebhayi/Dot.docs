@@ -2,10 +2,10 @@
 
 namespace App\Notifications\Account;
 
+use App\Mail\Delivery\MailNotDelivered;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Notification;
-use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -47,12 +47,12 @@ abstract class AccountMail extends Notification implements ShouldQueue
     }
 
     /**
-     * The last retry failed: the job lands in failed_jobs (counted by the
-     * Guardian queue check) and this line reaches the error log, which the
-     * Guardian error-rate check reads. No address, no content (E-02).
+     * The last retry failed: the job lands in failed_jobs (kept 30 days, counted
+     * by the Guardian queue check) and a person is told (R2-4 / E-02): reported,
+     * so it is logged, counted and mailed to OPS_ALERT_EMAIL. No address, no content.
      */
     public function failed(Throwable $e): void
     {
-        Log::error('Account email could not be sent.', ['notice' => static::class, 'error' => $e::class]);
+        MailNotDelivered::raise(class_basename(static::class), $e);
     }
 }

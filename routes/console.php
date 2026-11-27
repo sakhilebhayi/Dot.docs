@@ -32,8 +32,9 @@ Schedule::command('queue:work --queue=mail,default --stop-when-empty --max-time=
     ->withoutOverlapping(2);
 
 // Nothing else ever removes a failed job, and each one carries a full stack
-// trace in the same SQLite file as the documents.
-Schedule::command('queue:prune-failed --hours=168')->daily();
+// trace in the same SQLite file as the documents. Kept 30 days (R2-4 / E-02):
+// an email given up on can still be found and resent after a long weekend.
+Schedule::command('queue:prune-failed --hours=720')->daily();
 
 // The co-editing counters (App\Services\SyncMetrics) are one row per document,
 // person, day and kind: small, but nothing else ever deletes them. 120 days is
@@ -71,6 +72,10 @@ Schedule::call(function () {
 // again; a document nobody reopens kept its rows for ever.
 Schedule::call(fn () => DB::table('document_presences')->where('last_seen_at', '<', now()->subDay())->delete())
     ->dailyAt('03:40')->name('prune-stale-presences')->onOneServer();
+
+// R2-4 / E-10: the sent-mail record only has to outlive any retry; 90 days is plenty to answer "did it go?".
+Schedule::call(fn () => DB::table('sent_mails')->where('sent_at', '<', now()->subDays(90))->delete())
+    ->dailyAt('03:45')->name('prune-sent-mails')->onOneServer();
 
 // R2-1 / S-07: API tokens expire after config('sanctum.expiration'); their rows go a day later.
 Schedule::command('sanctum:prune-expired --hours=24')->dailyAt('03:50')->onOneServer();
