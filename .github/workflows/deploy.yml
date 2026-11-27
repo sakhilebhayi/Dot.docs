@@ -69,23 +69,68 @@ jobs:
       - name: Deploy code and run migrations
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          # The commit CI tested and this run built the assets from (EA-6 / O-11).
+          # `origin/main` at fetch time could be a later merge.
+          DEPLOY_SHA: ${{ github.sha }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
               "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-              DEPLOY_PATH="$DEPLOY_PATH" \
+              DEPLOY_PATH="$DEPLOY_PATH" DEPLOY_SHA="$DEPLOY_SHA" \
               'bash -s' <<'DEPLOY'
           set -euo pipefail
           cd "$DEPLOY_PATH"
           PHP=php
 
+          PREV="$(git rev-parse HEAD)"
           echo "== Current release: $(git rev-parse --short HEAD)"
 
           git fetch origin main
+          git cat-file -e "$DEPLOY_SHA^{commit}" || { echo "::error::commit $DEPLOY_SHA is not on origin/main here"; exit 1; }
+
+          # ---- A verified database copy BEFORE anything changes (EA-6 / O-03).
+          # The SQLite online backup (sqlite3 .backup) is consistent with writers
+          # active and needs none of this release's code. The deploy stops here,
+          # with the site untouched, if the copy cannot be made or fails its
+          # integrity check. The newest five pre-deploy copies are kept.
+          DB_FILE="database/database.sqlite"
+          if [ -f "$DB_FILE" ]; then
+            mkdir -p storage/backups
+            PRE="storage/backups/predeploy-$(date -u +%Y%m%dT%H%M%SZ)-${DEPLOY_SHA:0:9}.sqlite"
+            sqlite3 "$DB_FILE" ".backup '$PRE'" || { echo "::error::pre-deploy backup failed; nothing was changed"; rm -f "$PRE"; exit 1; }
+            # The copy inherits WAL mode; make it one self-contained file (no -wal/-shm beside it).
+            sqlite3 "$PRE" 'PRAGMA journal_mode=DELETE;' > /dev/null
+            CHECK="$(sqlite3 "$PRE" 'PRAGMA integrity_check;' 2>&1 || true)"
+            rm -f "$PRE-shm" "$PRE-wal"
+            if [ "$CHECK" != "ok" ]; then
+              echo "::error::pre-deploy backup failed its integrity check ($CHECK); nothing was changed"; rm -f "$PRE"; exit 1
+            fi
+            ls -1t storage/backups/predeploy-*.sqlite 2>/dev/null | tail -n +6 | xargs -r rm -f
+            echo "== Pre-deploy backup: $PRE ($(wc -c < "$PRE") bytes, integrity ok)"
+          else
+            echo "::warning::no $DB_FILE here; no pre-deploy backup taken"
+          fi
+
+          # If anything from here to the end of this step fails (composer, a
+          # migration, the caches), put the previous release back and take the
+          # site out of maintenance mode instead of leaving it down (EA-6 / O-04).
+          # A migration that ran part-way is NOT undone automatically: the
+          # pre-deploy backup above is the way back (docs/programme/RESTORE_RUNBOOK.md).
+          rollback() {
+            echo "::error::Deploy failed; putting release ${PREV:0:9} back."
+            git reset --hard "$PREV" || true
+            composer install --no-interaction --optimize-autoloader --no-dev || true
+            $PHP artisan config:cache || true
+            $PHP artisan route:cache || true
+            $PHP artisan view:cache || true
+            $PHP artisan up || true
+            echo "::error::Site is up on the previous release. If a migration ran part-way, restore ${PRE:-the newest backup} as the runbook says."
+          }
+          trap 'rollback' ERR
 
           # Maintenance mode only for the risky window (migrations).
           $PHP artisan down --retry=30 || true
 
-          git reset --hard origin/main
+          git reset --hard "$DEPLOY_SHA"
 
           # Document root already moved to <app>/public (the standard layout, S-2e in InfoDot's SECURITY_ASSESSMENT)?
           # Then the tracked root .htaccess (Require all denied, written for the flattened layout where the app folder
@@ -158,6 +203,7 @@ jobs:
             exit 0
           )
           ensure_storage_link || true
+          trap - ERR
           DEPLOY
 
       - name: Transfer public assets to the real docroot

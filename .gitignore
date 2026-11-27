@@ -25,3 +25,7 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 .superpowers/
+
+# Backups and restored copies live only on the host (EA-6); never commit them.
+/storage/backups
+/storage/restore

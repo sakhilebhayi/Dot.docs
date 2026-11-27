@@ -1,0 +1,6 @@
+# Dot.docs vulnerability disclosure (RFC 9116). Same contact and policy as InfoDot, which runs the ecosystem's sign-in.
+Contact: mailto:privacy@infodot.co.za
+Policy: https://infodot.co.za/security
+Expires: 2027-11-01T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://doc.infodot.co.za/.well-known/security.txt

@@ -31,7 +31,10 @@ jobs:
           # (000), a gateway error -- may be transient, so retry before
           # raising an alarm that emails the owner.
           for attempt in 1 2 3; do
-            code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 20 -H "Accept: application/json" "https://$HOST/up/scheduler" || echo 000)
+            # curl prints 000 itself on a failed connection; `|| echo 000` used to
+            # append a second one ("000000", EA-6 / O-15).
+            code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 20 -H "Accept: application/json" "https://$HOST/up/scheduler" 2>/dev/null) || true
+            code="${code:-000}"
             echo "attempt $attempt: GET /up/scheduler -> $code"
             case "$code" in 200|503) break ;; esac
             [ "$attempt" -lt 3 ] && sleep 30
@@ -39,6 +42,6 @@ jobs:
           cat "$body"; echo
           case "$code" in
             200) exit 0 ;;
-            503) echo "::error::The app answered 503: the scheduler or the queue worker has not run recently on $HOST."; exit 1 ;;
+            503) echo "::error::The app answered 503: the scheduler, the queue worker or the nightly backup is overdue on $HOST (see the ages above)."; exit 1 ;;
             *)   echo "::error::Probe unreachable or refused on all 3 attempts (last HTTP $code). 403 = the host's edge firewall blocking GitHub runners; 000/5xx = the site may be down."; exit 1 ;;
           esac

@@ -8,11 +8,11 @@
 
 <br />
 
-![Laravel](https://img.shields.io/badge/Laravel-13-FF2D20?style=flat-square&logo=laravel&logoColor=white) ![PHP](https://img.shields.io/badge/PHP-8.3%2B-777BB4?style=flat-square&logo=php&logoColor=white) ![Livewire](https://img.shields.io/badge/Livewire-3-FB70A9?style=flat-square) ![TipTap](https://img.shields.io/badge/TipTap-3-2563EB?style=flat-square) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-336791?style=flat-square&logo=postgresql&logoColor=white)
+![Laravel](https://img.shields.io/badge/Laravel-13-FF2D20?style=flat-square&logo=laravel&logoColor=white) ![PHP](https://img.shields.io/badge/PHP-8.4%2B-777BB4?style=flat-square&logo=php&logoColor=white) ![Livewire](https://img.shields.io/badge/Livewire-3-FB70A9?style=flat-square) ![TipTap](https://img.shields.io/badge/TipTap-3-2563EB?style=flat-square) ![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?style=flat-square&logo=sqlite&logoColor=white)
 
 <br /><br />
 
-**Part of the [InfoDot Ecosystem](https://github.com/sakhileb/InfoDot)** &nbsp;·&nbsp; `docs.infodot.app`
+**Part of the [InfoDot Ecosystem](https://github.com/sakhileb/InfoDot)** &nbsp;·&nbsp; `doc.infodot.co.za`
 
 </div>
 
@@ -30,10 +30,10 @@ Dot.docs is the team document platform in the InfoDot ecosystem. Documents are s
 - **Structured import/export** — round-trips through DOCX, Markdown, and plain text, preserving headings, lists, tables, and marks
 - **Template gallery** — global, team, and personal templates, including a set of South African business starters (monthly production report, safety incident report, board memorandum)
 - **Sharing** — slug-based published pages with optional password and expiry, plus view counters, independent of named per-document collaborator roles
-- **Full-text search** — PostgreSQL `tsvector`/`ts_rank` over title and body (falls back to `LIKE` on SQLite), scoped to what the signed-in user is allowed to see
+- **Full-text search** — over title and body, scoped to what the signed-in user is allowed to see (`LIKE` on SQLite, which production runs; `tsvector`/`ts_rank` when run on PostgreSQL)
 - **AI assistant** — grammar check, summarise, continue writing, tone rewrite, translate, outline — via `prism-php/prism`, safe-by-default (`AI_PROVIDER=mock`, no network call, no API key needed) with Anthropic as the live primary provider and an OpenAI failover leg
 - **Append-only audit log** — every save, export, share, and AI call recorded as an immutable `AuditLog` row; updates/deletes throw rather than fail silently
-- **Real-time collaboration** — presence, live cursors/avatars, and broadcast content updates via Laravel Reverb
+- **Real-time collaboration** — co-editing over plain HTTP polling: presence, paragraph-level merge of simultaneous saves, and conflict choices (production has no websocket server; Reverb code paths stay off unless a build is given a key)
 - **Comments & suggestion mode** — threaded, resolvable comments with @mentions, plus a track-changes-style suggestion pipeline
 - **"Two Inks on a Desk"** — the app's own night/day design system: a mono status line, ledger-style panels, and desk-seam rules instead of cards
 
@@ -58,12 +58,12 @@ Dot.docs is the team document platform in the InfoDot ecosystem. Documents are s
 | Layer | Technology |
 |---|---|
 | Framework | Laravel 13 |
-| Language | PHP 8.3+ |
+| Language | PHP 8.4+ (CI runs 8.5) |
 | Editor | TipTap 3 on a custom ProseMirror schema — structured JSON (`content_json`) is the canonical document format; HTML is a rendered/legacy view, not the source of truth |
 | Frontend | Livewire 3 · Alpine.js 3 · Tailwind CSS 4 — "Two Inks on a Desk" design system (night/day themes) |
-| Database | PostgreSQL, with a generated `tsvector` column powering full-text search (SQLite in the test suite) |
-| Realtime | Laravel Reverb (presence channels, broadcast events) |
-| Auth | Laravel Sanctum (InfoDot SSO) + Jetstream Teams |
+| Database | SQLite in WAL mode in production (one file, one writer); PostgreSQL supported, with a generated `tsvector` column for search |
+| Realtime | HTTP polling (`/documents/{uuid}/sync`); Laravel Reverb optional, off in production |
+| Auth | Central sign-in through InfoDot (OIDC, `packages/dot-sso-client`) + Jetstream Teams |
 | AI | `prism-php/prism` — mock provider by default (no network call, forced in tests), Anthropic as the live primary, OpenAI as the failover leg (`config/ai.php`) |
 | Styling engine | `App\Styles\StyleEngine` — fourteen document styles, each a token set compiled to CSS (editor/screen) and to DOCX styles (`TokenGuard` sanitises tokens before they reach either surface) |
 | Print / PDF | Server-side via `App\Print\PrintRenderer` + `barryvdh/laravel-dompdf`, page setup resolved from the document's style + per-document overrides |
@@ -85,14 +85,22 @@ php artisan migrate
 php artisan serve
 ```
 
-> **Ecosystem SSO:** Set `DB_*` env vars to the shared InfoDot PostgreSQL instance and `APP_URL=https://docs.infodot.app`. Users authenticated through InfoDot gain access automatically via Sanctum handoff tokens.
+> **Ecosystem SSO:** Set `DOTSSO_ENABLED=true` and the `DOTSSO_*` values from InfoDot; people then sign in at InfoDot (OIDC) and come back signed in. Each platform keeps its own database.
 
 > **AI:** Ships with `AI_PROVIDER=mock` — the assistant works out of the box with no API key and no network call. Set `ANTHROPIC_API_KEY` and `AI_PROVIDER=live` to use the real Anthropic models configured in `config/ai.php`.
 
 ## Ecosystem
 
-**Dot.docs** is one of **21 platforms** in the InfoDot ecosystem, connected via shared PostgreSQL and Sanctum SSO. Visit [InfoDot](https://github.com/sakhileb/InfoDot) to explore the full platform map.
+**Dot.docs** is one of the platforms in the InfoDot ecosystem, connected through InfoDot's central sign-in. Visit [InfoDot](https://github.com/sakhileb/InfoDot) to explore the full platform map.
 
 ## License
 
 MIT © [SK Digital / BluPin Incorporated](https://github.com/sakhileb)
+
+## Operations
+
+- Deploys run on every merge to `main` (`.github/workflows/deploy.yml`): a verified database backup first, the tested commit, migrations, and the previous release put back if any of that fails.
+- Backups: nightly at 02:35 (`doc:backup-database`, database + uploads, encrypted when `BACKUP_PASSPHRASE` is set); restore with `doc:restore-backup` - see `docs/programme/RESTORE_RUNBOOK.md`.
+- Health: `/up`, `/up/scheduler` (scheduler, queue and backup age; watched from GitHub every 15 minutes), `/guardian/health` (token).
+- Security reports: see `SECURITY.md`.
+
