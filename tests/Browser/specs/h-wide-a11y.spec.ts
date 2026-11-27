@@ -29,7 +29,8 @@ test('the editor with the move sheet and then the command palette open has no se
     await expectNoSeriousA11y(page, 'move sheet');
     await page.keyboard.press('Escape');
 
-    await page.locator('.ProseMirror').click();
+    // Into the document's text: in Pages view the middle of the editor can be a gap between pages, outside the editor.
+    await page.locator('.ProseMirror > p').last().click();
     await page.keyboard.press('ControlOrMeta+K');
     await expect(page.locator('.dotdoc-panel-input')).toBeFocused();
     await expectNoSeriousA11y(page, 'command palette');
@@ -111,7 +112,8 @@ test('a keyboard user who tabs onto the page sees it focused, a click does not d
     await openWelcomePack(page);
     const paper = page.locator('.canvas .paper').first();
 
-    await page.locator('.ProseMirror').click();
+    // Into the document's text: in Pages view the middle of the editor can be a gap between pages, outside the editor.
+    await page.locator('.ProseMirror > p').last().click();
     await expect.poll(() => paper.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('none');
 
     await page.locator('.ProseMirror').blur();
