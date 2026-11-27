@@ -6,6 +6,7 @@ use App\Models\Document;
 use App\Services\AiService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
 
@@ -75,6 +76,14 @@ class AiChat extends Component
             $previousHistory = array_slice($this->history, 0, -1);
 
             $reply = $ai->chat($message, $html, $previousHistory);
+
+            // With no model connected the demonstration provider answers with a placeholder such as "[mock:draft] …".
+            // Say so in plain words instead of showing it as if it were an answer (R2-9; the result sheet already
+            // labels its demonstration output the same way, EA-4 / F-03).
+            if (config('ai.provider') === 'mock') {
+                $reply = 'This is a demonstration: no AI model is connected to Dot.docs yet, so there is no real answer to "'
+                    .Str::limit($message, 80).'". Your administrator can connect one.';
+            }
 
             $this->history[] = ['role' => 'assistant', 'content' => $reply];
         } catch (\Throwable $e) {

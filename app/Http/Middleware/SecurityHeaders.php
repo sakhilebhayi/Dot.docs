@@ -62,6 +62,31 @@ class SecurityHeaders
      * Outside origins in use: Google Fonts (stylesheet host and font host), Unsplash (landing and sign-in photographs) and ui-avatars.com,
      * which Jetstream's HasProfilePhoto uses for a user's default avatar.
      */
+    /**
+     * Where the page's own scripts may connect (R2-9): only this origin - Livewire, the sync poll, the unload beacon,
+     * uploads and the service worker are all same-origin, and the shared header makes no request. Plus the Reverb
+     * socket when realtime is actually configured, and the Vite dev server while one is running (the hot file). Not
+     * keyed on APP_ENV: an environment name is a setting, not proof of where the code runs.
+     */
+    private function connectSources(): string
+    {
+        $sources = ["'self'"];
+
+        if (config('broadcasting.default') === 'reverb' && filled(config('broadcasting.connections.reverb.options.host'))) {
+            $secure = config('broadcasting.connections.reverb.options.scheme', 'https') === 'https';
+            $sources[] = ($secure ? 'wss://' : 'ws://').config('broadcasting.connections.reverb.options.host')
+                .':'.config('broadcasting.connections.reverb.options.port', 443);
+        }
+
+        if (Vite::isRunningHot()) {
+            $hot = rtrim((string) @file_get_contents(Vite::hotFile()));
+            $sources[] = $hot;
+            $sources[] = preg_replace('#^http#', 'ws', $hot);
+        }
+
+        return implode(' ', array_filter($sources));
+    }
+
     private function policy(string $nonce): string
     {
         return "default-src 'self'; "
@@ -70,8 +95,7 @@ class SecurityHeaders
             ."font-src 'self' data: https://fonts.gstatic.com; "
             ."img-src 'self' data: blob: https://images.unsplash.com https://ui-avatars.com; "
             ."media-src 'self' blob:; "
-            // Local development talks to Reverb over plaintext ws:; production websockets are wss: only.
-            ."connect-src 'self' wss: https:".(app()->isLocal() ? ' ws:' : '').'; '
+            .'connect-src '.$this->connectSources().'; '
             ."frame-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; "
             .'report-uri /csp-report';
     }

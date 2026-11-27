@@ -31,6 +31,22 @@ class CommentMentionDisplayTest extends TestCase
         $this->assertStringNotContainsString('<script>x</script>', $html);
     }
 
+    /** R2-9: a comment is shown as it was written - escaped once, not twice. */
+    public function test_ampersands_and_angle_brackets_read_as_written(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($owner, 'Plan');
+
+        $html = Livewire::actingAs($owner)->test(CommentThread::class, ['document' => $doc])
+            ->set('newComment', 'Tom & Jerry say 5 < 6 > 4')
+            ->call('postComment')
+            ->html();
+
+        $this->assertStringContainsString('Tom &amp; Jerry say 5 &lt; 6 &gt; 4', $html);
+        $this->assertStringNotContainsString('&amp;amp;', $html);
+        $this->assertStringNotContainsString('&amp;lt;', $html);
+    }
+
     public function test_suggestions_while_replying_show_under_the_reply_not_the_new_comment_box(): void
     {
         $owner = User::factory()->withPersonalTeam()->create();

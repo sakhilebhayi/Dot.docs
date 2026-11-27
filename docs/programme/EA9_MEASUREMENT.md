@@ -143,3 +143,42 @@ folder except reading `vendor/` and `public/build/` from it.
    `rm -rf ~/staging-doc.infodot.co.za`.
 
 No cron entry is added for staging, so it never sends mail, backs up or runs the queue.
+
+## 5. 2026-11-27: the full-text index on every typing save (R2-9)
+
+An independent audit asked whether the SQLite FTS5 index (`documents_fts`, R2-5) costs too much inside the write lock:
+its trigger `documents_fts_au` re-indexes the whole document (delete the old text, add the new) on every save that
+changes the title or `search_text`, which is every save that changes the words.
+
+**Method.** A throwaway script outside the repository, not part of the app: it boots the app against a new file-backed
+SQLite database in WAL mode (journal_mode answered `wal`, the app's own connection settings: busy timeout, IMMEDIATE
+transactions), migrates, seeds the styles, creates 300 filler documents so the index is not empty, and one working
+document of about 25 KB of text (25,190 bytes of `search_text`, 34 KB of JSON). It then times `DocumentStore::save()`
+of that document 300 times, each with different words (so each save rewrites `search_text` and fires the trigger), with
+the triggers, after `FullTextIndex::uninstall()`, and again after `install()`. Each round also times the bare
+`UPDATE documents SET search_text = ?` on its own, which is the part the trigger is added to. 20 warm-up saves first;
+two runs. Laptop: Apple M4, PHP 8.5, SQLite 3.53, local SSD.
+
+| Per save, milliseconds | p50 | p95 |
+| --- | ---: | ---: |
+| `DocumentStore::save()`, with the triggers | 2.64 - 2.67 | 2.88 - 4.24 |
+| `DocumentStore::save()`, without | 2.43 - 2.44 | 2.55 - 2.62 |
+| `DocumentStore::save()`, with again | 2.63 - 2.64 | 2.87 - 3.23 |
+| bare `UPDATE ... search_text`, with the triggers | 0.32 - 0.33 | 0.40 - 0.70 |
+| bare `UPDATE ... search_text`, without | 0.14 | 0.17 - 0.22 |
+
+**Read.** Re-indexing a 25 KB document adds about 0.2 ms to a save at the median and at most about 1.6 ms at p95,
+under the 5 ms the audit set as material. No change made: the index stays trigger-maintained. It already fires only
+when it must: the trigger is `AFTER UPDATE OF title, search_text`, and Eloquent puts a column in the UPDATE only when
+its value changed, so a save that changes formatting but no words (same `search_text`) never re-indexes. Hosts are
+slower than this laptop (section 1); the ratio, not the absolute number, is what carries over.
+
+**Also in R2-9** (no new numbers; behaviour pinned by tests):
+
+- The sync poll no longer writes the session row when it changed nothing in it (`App\Http\Middleware\StartSession`,
+  `QuietSession` on `POST /documents/{uuid}/sync`); it still writes once every 5 minutes to keep the session alive.
+  With database sessions that was one write-lock acquisition per poll per open tab (`SyncQuietSessionTest`).
+- When the document has changed, the outline and canvas CSS a poll returns are built once per state of the document
+  and shared by every co-editor's poll for 60 s (`App\Documents\Outline\SyncDerived`, `SyncDerivedCacheTest`).
+- New SQLite databases are created with incremental auto-vacuum; the existing file is converted by hand
+  (`docs/programme/RESTORE_RUNBOOK.md`, section 5).

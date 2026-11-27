@@ -415,7 +415,9 @@ class Editor extends Component
         $this->showMoveSheet = false;
         unset($this->locationCrumbs, $this->folderChoices);
 
-        session()->flash('status', 'Filed in '.$destination->name().'.');
+        // Said in the page's banner, now (R2-9): a session flash from a Livewire action is never shown by that
+        // action's own response and surfaced, stale, on some later page instead.
+        $this->dispatch('banner-message', style: 'success', message: 'Filed in '.$destination->name().'.');
     }
 
     /** This document's node in the shared tree, filed at its workspace root if it has none. */

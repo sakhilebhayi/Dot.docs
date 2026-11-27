@@ -760,7 +760,7 @@
                  the registry, which this button and the `/` menu both list. --}}
             <button type="button" class="tool tool-mono doc-bar-palette"
                     title="Commands — or type / in the document" aria-keyshortcuts="Meta+K Control+K"
-                    @click="window.DotDoc.openPalette(ed())"><span class="doc-bar-cmd-label">Commands </span>&#8984;K</button>
+                    @click="window.DotDoc.openPalette(ed())"><span class="doc-bar-cmd-label">Commands </span><span data-shortcut="mod+k">Ctrl+K</span></button>
 
             {{-- Where this document is filed in the shared Dot.Files tree.
                  A quiet line of text, not a link: the button beside it is the one
@@ -786,12 +786,13 @@
                             @if (! empty($member['avatar']))
                                 <img src="{{ $member['avatar'] }}" alt="{{ $member['name'] }}" />
                             @else
-                                {{ strtoupper(substr($member['name'], 0, 1)) }}
+                                {{-- The initial is the picture; the person's name is what is read (R2-9). --}}
+                                <span aria-hidden="true">{{ strtoupper(substr($member['name'], 0, 1)) }}</span><span class="sr-only">{{ $member['name'] }}</span>
                             @endif
                         </span>
                     @endforeach
                     @if (count($activeUsers) > 4)
-                        <span class="presence-face">+{{ count($activeUsers) - 4 }}</span>
+                        <span class="presence-face"><span aria-hidden="true">+{{ count($activeUsers) - 4 }}</span><span class="sr-only">and {{ count($activeUsers) - 4 }} more</span></span>
                     @endif
                 </div>
             @endif
@@ -800,8 +801,11 @@
                  has to be visible: the writer keeps typing over content the
                  server never accepted, and the offline draft is deliberately
                  kept as the only remaining copy. The same words go to the
-                 top bar through the `shell:save-state` event. --}}
-            <span class="doc-status" aria-live="polite">
+                 top bar through the `shell:save-state` event, which is also
+                 where a screen reader hears them: this strip is visual only,
+                 so an autosave is not announced twice. Its alerts (a failed
+                 save, an assistant error) speak for themselves. --}}
+            <span class="doc-status">
                 <x-shell.status-word tone="idle" word="Offline" x-show="isOffline"
                                      title="Edits are saved in this browser and sync when you are back online." />
 
@@ -909,7 +913,7 @@
                     <button type="button" data-shell-expand="dock"
                             @click="$dispatch('open-ai-palette'); open = false">
                         Ask the assistant
-                        <span class="micro">Ctrl+Shift+K</span>
+                        <span class="micro" data-shortcut="mod+shift+k">Ctrl+Shift+K</span>
                     </button>
 
                     {{-- "Suggest instead of editing" is hidden until tracked suggestions
@@ -929,11 +933,11 @@
                     @if ($canEdit)
                         <button type="button" @click="ed().chain().focus().undo().run(); open = false">
                             Undo
-                            <span class="micro">&#8984;Z</span>
+                            <span class="micro" data-shortcut="mod+z">Ctrl+Z</span>
                         </button>
                         <button type="button" @click="ed().chain().focus().redo().run(); open = false">
                             Redo
-                            <span class="micro">&#8679;&#8984;Z</span>
+                            <span class="micro" data-shortcut="mod+shift+z">Ctrl+Shift+Z</span>
                         </button>
 
                         <button type="button"
@@ -1232,7 +1236,7 @@
                 <h2 class="section-title" id="pending-suggestions">
                     Waiting for you — <x-shell.figure :value="count($pendingSuggestions)" label="Suggestions waiting" />
                 </h2>
-                <span class="micro">Marker becomes graphite once accepted</span>
+                <span class="micro">Accepted text becomes part of the document</span>
             </div>
             <ul class="list">
                 @foreach ($pendingSuggestions as $suggestion)

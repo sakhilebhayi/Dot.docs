@@ -22,6 +22,7 @@ use App\Http\Controllers\PublishedDocumentController;
 use App\Http\Controllers\SchedulerProbeController;
 use App\Http\Middleware\AuthenticateGuardian;
 use App\Http\Middleware\EnsureCompanyEntitled;
+use App\Http\Middleware\QuietSession;
 use App\Livewire\Company\BrandKitManager;
 use App\Livewire\Documents\Bin;
 use App\Livewire\Documents\DocumentSettings;
@@ -211,7 +212,10 @@ Route::middleware([
     // is here, and the document itself when the caller's copy is behind.
     // No throttle middleware: it is called every second or two by design.
     // See App\Http\Controllers\DocumentSyncController.
+    // QuietSession: a poll that changes nothing in the session does not write it back (see
+    // App\Http\Middleware\StartSession) - one session-row write per poll, inside SQLite's write lock, otherwise.
     Route::post('/documents/{uuid}/sync', [DocumentSyncController::class, 'store'])
+        ->middleware(QuietSession::class)
         ->name('documents.sync');
 
     // The counters of the sync layer (merges, losses, failed saves, who was

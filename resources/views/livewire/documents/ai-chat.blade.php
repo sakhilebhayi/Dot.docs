@@ -15,8 +15,10 @@
          scrolls on new turns, so "Quick passes" above stays put. The
          MutationObserver is the same auto-scroll-to-latest behaviour the
          assistant had as a floating pill, restored here against $refs.turns
-         instead of $refs.messages. --}}
-    <div class="dock-chat-turns" x-data x-ref="turns"
+         instead of $refs.messages.
+         role=log (R2-9): it is always in the page, so a new answer added to
+         it is announced as it arrives. --}}
+    <div class="dock-chat-turns" role="log" aria-labelledby="dock-assistant" x-data x-ref="turns"
          x-init="new MutationObserver(() => {
              $refs.turns.scrollTo({
                  top: $refs.turns.scrollHeight,
@@ -34,11 +36,18 @@
             </div>
         @endforeach
 
-        {{-- wire:loading: $loading was set and cleared in one request, so it never showed (EA-4 / U-01). --}}
-        <p aria-live="polite" wire:loading wire:target="send">
+        {{-- wire:loading: $loading was set and cleared in one request, so it never showed (EA-4 / U-01).
+             Visual only: the thinking state is said by the status line below the thread. --}}
+        <p aria-hidden="true" wire:loading wire:target="send">
             <x-shell.status-word tone="idle" word="Thinking" />
         </p>
     </div>
+
+    {{-- A persistent status region (R2-9): only its words come and go, so "Thinking" is announced when a question
+         is sent. Outside the log, so the two live regions are not nested. --}}
+    <p class="sr-only" role="status" data-assistant-status>
+        <span wire:loading wire:target="send">Thinking</span>
+    </p>
 
     <div class="dock-chat-foot">
         <label class="field-label" for="assistant-message">Your question</label>

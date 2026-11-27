@@ -132,16 +132,17 @@
                             <x-shell.status-word tone="good" word="File" />
                         @endif
 
+                        {{-- Each action names its row (WCAG 2.4.6): read out of context, "Rename" alone says nothing. --}}
                         <button type="button" class="btn btn-quiet btn-sm"
                                 @click="sheetTrigger = $el"
-                                wire:click="startRenaming('{{ $row->uuid }}')">Rename</button>
+                                wire:click="startRenaming('{{ $row->uuid }}')">Rename<span class="sr-only">: {{ $row->name() }}</span></button>
                         <button type="button" class="btn btn-quiet btn-sm"
                                 @click="sheetTrigger = $el"
-                                wire:click="startMoving('{{ $row->uuid }}')">Move</button>
+                                wire:click="startMoving('{{ $row->uuid }}')">Move<span class="sr-only">: {{ $row->name() }}</span></button>
                         <button type="button" class="btn btn-quiet btn-sm"
                                 wire:click="deleteObject('{{ $row->uuid }}')"
                                 wire:confirm="Delete this? A document goes to the Bin with its history, where it can be restored. A file is deleted for good.">
-                            Delete
+                            Delete<span class="sr-only">: {{ $row->name() }}</span>
                         </button>
                     </li>
                 @endforeach

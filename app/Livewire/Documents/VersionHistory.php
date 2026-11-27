@@ -144,7 +144,9 @@ class VersionHistory extends Component
         $this->showDiff = false;
         $this->compareIds = [];
 
-        session()->flash('status', 'Document restored to version '.$version->version_number.'.');
+        // Said in the page's banner, now (R2-9): a session flash from a Livewire action is never shown by that
+        // action's own response and surfaced, stale, on some later page instead.
+        $this->dispatch('banner-message', style: 'success', message: 'Document restored to version '.$version->version_number.'.');
     }
 
     public function render(): View

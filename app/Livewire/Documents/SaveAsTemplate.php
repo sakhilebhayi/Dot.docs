@@ -72,7 +72,9 @@ class SaveAsTemplate extends Component
 
         $this->show = false;
         $this->dispatch('template-saved');
-        session()->flash('status', 'Template saved successfully.');
+        // Said in the page's banner, now (R2-9): a session flash from a Livewire action is never shown by that
+        // action's own response and surfaced, stale, on some later page instead.
+        $this->dispatch('banner-message', style: 'success', message: 'Template saved successfully.');
     }
 
     public function render(): View

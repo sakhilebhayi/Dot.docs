@@ -3,11 +3,13 @@
 use App\Http\Middleware\RefuseApiTokensOnPages;
 use App\Http\Middleware\RefuseLocalSignInWhileSso;
 use App\Http\Middleware\SecurityHeaders;
+use App\Http\Middleware\StartSession;
 use App\Services\Guardian\ErrorAlert;
 use App\Services\Guardian\ErrorCounter;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Session\Middleware\StartSession as LaravelStartSession;
 use Laravel\Sanctum\Http\Middleware\CheckAbilities;
 use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
 
@@ -28,6 +30,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // API tokens never reach a page or a Livewire action (R2-1 / S-07): on the whole web group, so
         // /livewire/update is covered too.
         $middleware->web(append: [RefuseApiTokensOnPages::class, RefuseLocalSignInWhileSso::class]);
+
+        // Laravel's StartSession, except that a route marked QuietSession skips writing an unchanged session back
+        // (EA-9 / R2-9: the editor's sync poll no longer takes SQLite's write lock for its session on every call).
+        $middleware->web(replace: [LaravelStartSession::class => StartSession::class]);
 
         // Sanctum's token-permission checks for routes/api.php (R2-1 / S-07).
         $middleware->alias([
