@@ -3,11 +3,10 @@
 namespace App\Sso;
 
 use App\Actions\Ecosystem\ProvisionUserFromInfoDot;
-use App\Mail\SsoClaimCodeMail;
+use App\Jobs\SendSsoClaimCode;
 use App\Models\User;
 use Dot\SsoClient\Contracts\UserProvisioner;
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Support\Facades\Mail;
 
 /**
  * What the shared sign-in package needs to know about Dot.docs' users table. Matching rules and the claim flow live in the
@@ -64,6 +63,7 @@ class DocsProvisioner implements UserProvisioner
             return;
         }
 
-        Mail::to($user->email)->send(new SsoClaimCodeMail($user->name, $code, $minutes));
+        // Queued, not sent here (R2-4 / E-05): the sign-in page never waits on the mail server.
+        SendSsoClaimCode::dispatch((int) $user->id, (string) $user->email, (string) $user->name, $code, $minutes);
     }
 }
