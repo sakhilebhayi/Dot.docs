@@ -14,6 +14,7 @@ use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
@@ -382,5 +383,47 @@ class FilesServiceTest extends TestCase
 
         $this->expectException(ValidationException::class);
         $this->files->deleteObject($root, $user);
+    }
+
+    /**
+     * EA-9: the documents list asks for a folder's subfolders. They come
+     * from the database as folders only, in name order; the documents in
+     * the folder (thousands, at scale) are never loaded to find them.
+     */
+    public function test_child_folders_are_queried_as_folders_and_never_load_the_documents_beside_them(): void
+    {
+        $user = $this->member();
+        $root = $this->files->root($user->personalTeam());
+        $this->files->createFolder($root, 'zebra', $user);
+        $this->files->createFolder($root, 'Alpha', $user);
+        app(DocumentStore::class)->create($user, 'A document beside them');
+
+        DB::enableQueryLog();
+        $folders = $this->files->childFolders($root->fresh());
+        $sql = collect(DB::getQueryLog())->pluck('query')->join("\n");
+
+        $this->assertSame(['Alpha', 'zebra'], $folders->map->name()->all());
+        $this->assertTrue($folders->every->isFolder());
+        $this->assertStringNotContainsString('"documents"', $sql);
+    }
+
+    /**
+     * EA-9: naming a new thing reads its siblings' names, not their
+     * content - and a document sibling still counts as a taken name.
+     */
+    public function test_unique_name_reads_document_titles_without_their_content(): void
+    {
+        $user = $this->member();
+        $root = $this->files->root($user->personalTeam());
+        app(DocumentStore::class)->create($user, 'Budget');
+
+        DB::enableQueryLog();
+        $name = UniqueName::for($root->fresh(), 'budget');
+        $documentQueries = collect(DB::getQueryLog())->pluck('query')
+            ->filter(fn (string $q) => str_contains($q, 'from "documents"'));
+
+        $this->assertSame('budget (2)', $name);
+        $this->assertCount(1, $documentQueries);
+        $this->assertStringContainsString('select "id", "title" from "documents"', $documentQueries->first());
     }
 }

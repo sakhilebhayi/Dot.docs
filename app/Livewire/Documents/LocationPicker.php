@@ -97,7 +97,7 @@ class LocationPicker extends Component
         /** @var Collection<int, Obj> $folders */
         $folders = $current === null
             ? collect()
-            : app(FilesService::class)->children($current)->filter(fn (Obj $obj) => $obj->isFolder())->values();
+            : app(FilesService::class)->childFolders($current);
 
         return view('livewire.documents.location-picker', [
             'current' => $current,

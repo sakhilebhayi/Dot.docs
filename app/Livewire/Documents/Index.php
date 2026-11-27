@@ -260,10 +260,7 @@ class Index extends Component
             return collect();
         }
 
-        return app(FilesService::class)
-            ->children($node)
-            ->filter(fn (Obj $obj) => $obj->isFolder())
-            ->values();
+        return app(FilesService::class)->childFolders($node);
     }
 
     #[Computed]

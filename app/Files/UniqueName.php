@@ -2,7 +2,10 @@
 
 namespace App\Files;
 
+use App\Models\Document;
 use App\Models\Files\Obj;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Database\Eloquent\Relations\Relation;
 
 /**
  * "Report", then "Report (2)", then "Report (3)".
@@ -21,7 +24,19 @@ class UniqueName
     {
         $taken = [];
 
-        foreach ($parent->children()->with('objectable')->get() as $sibling) {
+        // Names only: a document sibling is loaded with its title and id,
+        // never its content, so a folder of thousands of documents does not
+        // load all of them to name one new thing (EA-9).
+        $siblings = Obj::query()
+            ->where('parent_id', $parent->id)
+            ->with(['objectable' => function (Relation $relation): void {
+                if ($relation instanceof MorphTo) {
+                    $relation->constrain([Document::class => fn ($query) => $query->select('id', 'title')]);
+                }
+            }])
+            ->get();
+
+        foreach ($siblings as $sibling) {
             if ($ignore !== null && $sibling->id === $ignore->id) {
                 continue;
             }
