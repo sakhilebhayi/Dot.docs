@@ -36,4 +36,28 @@ class DeployHandlesStandardLayoutTest extends TestCase
         $this->assertStringContainsString('"$DEST:$REAL_DOCROOT/build/"', $deploy);
         $this->assertStringContainsString('"$DEST:$DEPLOY_PATH/public/build/"', $deploy);
     }
+
+    /** EA-6: a rollback's `git reset --hard` restores the deny-all .htaccess too; it must be moved aside again. */
+    public function test_a_rollback_moves_the_htaccess_aside_again(): void
+    {
+        $deploy = $this->deploy();
+        $rollback = substr($deploy, strpos($deploy, 'rollback() {'), 600);
+
+        $this->assertStringContainsString('git reset --hard "$PREV"', $rollback);
+        $this->assertStringContainsString('apply_layout', $rollback);
+        $this->assertLessThan(strpos($rollback, 'artisan up'), strpos($rollback, 'apply_layout'));
+    }
+
+    /** EA-6: the backup is taken, and an older commit refused, before maintenance mode starts. */
+    public function test_the_backup_and_the_ancestry_check_come_before_maintenance_mode(): void
+    {
+        $deploy = $this->deploy();
+        $down = strpos($deploy, 'artisan down --retry=30');
+
+        $this->assertLessThan($down, strpos($deploy, 'git merge-base --is-ancestor "$PREV" "$DEPLOY_SHA"'));
+        $this->assertLessThan($down, strpos($deploy, 'predeploy-'));
+        $this->assertStringContainsString('git reset --hard "$DEPLOY_SHA"', $deploy);
+        $this->assertStringNotContainsString('git reset --hard origin/main', $deploy);
+        $this->assertStringContainsString('if: failure()', $deploy);
+    }
 }

@@ -28,19 +28,46 @@ class SchedulerProbeController extends Controller
     /** QueueHeartbeat is dispatched every five minutes; fifteen without one is stale. */
     public const QUEUE_STALE_SECONDS = 900;
 
+    /**
+     * The nightly backup (02:35) is overdue after 26 hours (EA-6 / O-05). A
+     * failed backup used to tell nobody; now the watchdog's 503 does.
+     */
+    public const BACKUP_STALE_SECONDS = 26 * 3600;
+
     public function __invoke(): JsonResponse
     {
         $scheduler = $this->age(self::SCHEDULER_KEY);
         $queue = $this->age(QueueHeartbeat::KEY);
+        $backup = $this->backupAge();
 
         $healthy = $scheduler !== null && $scheduler <= self::SCHEDULER_STALE_SECONDS
-            && $queue !== null && $queue <= self::QUEUE_STALE_SECONDS;
+            && $queue !== null && $queue <= self::QUEUE_STALE_SECONDS
+            && (! $this->backupsExpected() || ($backup !== null && $backup <= self::BACKUP_STALE_SECONDS));
 
         return response()->json([
             'status' => $healthy ? 'ok' : 'stale',
             'scheduler' => ['age_seconds' => $scheduler, 'stale_after' => self::SCHEDULER_STALE_SECONDS],
             'queue' => ['age_seconds' => $queue, 'stale_after' => self::QUEUE_STALE_SECONDS],
+            // Age only: never a file name, size or path.
+            'backup' => ['age_seconds' => $backup, 'stale_after' => self::BACKUP_STALE_SECONDS],
         ], $healthy ? 200 : 503);
+    }
+
+    /** Only a real SQLite file is backed up (BackupSqliteDatabase); anything else has nothing to be late with. */
+    private function backupsExpected(): bool
+    {
+        $file = (string) config('database.connections.sqlite.database');
+
+        return config('database.default') === 'sqlite' && $file !== ':memory:' && is_file($file);
+    }
+
+    /** Seconds since the newest database backup was written, or null when there is none. */
+    private function backupAge(): ?int
+    {
+        $files = glob(storage_path('backups/doc-*.sqlite*')) ?: [];
+        $newest = $files === [] ? null : max(array_map('filemtime', $files));
+
+        return $newest === null ? null : max(0, time() - (int) $newest);
     }
 
     private function age(string $key): ?int
