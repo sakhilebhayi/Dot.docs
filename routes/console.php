@@ -73,6 +73,17 @@ Schedule::call(function () {
 Schedule::call(fn () => DB::table('document_presences')->where('last_seen_at', '<', now()->subDay())->delete())
     ->dailyAt('03:40')->name('prune-stale-presences')->onOneServer();
 
+// R2-5 / P-02: old automatic versions thinned (config docs.versions); after the nightly backup, so the last copy
+// before a thinning still has them.
+Schedule::command('documents:thin-versions')->dailyAt('03:20')->onOneServer();
+
+// R2-5 / P-12: view records older than a year go (config docs.audit). Only `document.viewed`: every other audit row is
+// kept. A query, not the model: AuditLog refuses deletes so that nothing in the app can quietly change the record.
+Schedule::call(fn () => DB::table('audit_logs')
+    ->where('action', 'document.viewed')
+    ->where('created_at', '<', now()->subDays(max(30, (int) config('docs.audit.view_record_days', 365))))
+    ->delete())->dailyAt('03:25')->name('prune-view-records')->onOneServer();
+
 // R2-4 / E-10: the sent-mail record only has to outlive any retry; 90 days is plenty to answer "did it go?".
 Schedule::call(fn () => DB::table('sent_mails')->where('sent_at', '<', now()->subDays(90))->delete())
     ->dailyAt('03:45')->name('prune-sent-mails')->onOneServer();

@@ -6,7 +6,7 @@ export default defineConfig({
     plugins: [
         tailwindcss(),
         laravel({
-            input: ['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js'],
+            input: ['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js', 'resources/js/editor.js'],
             refresh: true,
         }),
     ],
@@ -17,7 +17,6 @@ export default defineConfig({
                 manualChunks(id) {
                     if (id.includes('@tiptap/')) return 'vendor-tiptap';
                     if (id.includes('laravel-echo') || id.includes('pusher-js')) return 'vendor-echo';
-                    if (id.includes('alpinejs')) return 'vendor-alpine';
                 },
             },
         },

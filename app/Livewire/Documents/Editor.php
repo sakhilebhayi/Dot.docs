@@ -17,6 +17,7 @@ use App\Services\PresenceService;
 use App\Styles\StyleEngine;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -71,7 +72,12 @@ class Editor extends Component
         // mount() runs once per page load, not on every Livewire round trip,
         // so this is one row per opening of the document rather than one per
         // keystroke. See .ai/rules/audit.md for the action vocabulary.
-        app(AuditLogger::class)->record('document.viewed', $this->document);
+        // R2-5 / P-12: and at most one an hour per person and document - a
+        // reload, or a second tab, says nothing the first row did not.
+        $minutes = (int) config('docs.audit.view_record_minutes', 60);
+        if ($minutes <= 0 || Cache::add('audit:viewed:'.$this->document->id.':'.Auth::id(), 1, now()->addMinutes($minutes))) {
+            app(AuditLogger::class)->record('document.viewed', $this->document);
+        }
     }
 
     /**
