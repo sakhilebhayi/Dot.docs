@@ -49,15 +49,12 @@ class CompanyDocuments
         }
 
         $team = $user->currentTeam instanceof Team ? $user->currentTeam : null;
-        $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($query)).'%';
 
         return self::scope(Document::query(), $team?->id, $user->id)
             ->select(['id', 'uuid', 'title', 'owner_id', 'team_id', 'updated_at', 'is_public'])
-            ->where(function (Builder $q) use ($like) {
-                $q->whereRaw('LOWER(title) LIKE ? ESCAPE \'\\\'', [$like])
-                    ->orWhereRaw('LOWER(search_text) LIKE ? ESCAPE \'\\\'', [$like]);
-            })
-            ->latest('updated_at')
+            // The same matching and ranking as the documents page (R2-5 / P-07).
+            ->where(fn (Builder $q) => app(TextMatch::class)->apply($q, $query))
+            ->tap(fn (Builder $q) => app(TextMatch::class)->orderByRelevance($q, $query))
             ->limit($limit * 3)
             ->get()
             ->filter(fn (Document $document) => $user->can('view', $document))

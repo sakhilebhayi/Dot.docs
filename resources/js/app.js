@@ -1,6 +1,7 @@
 import './bootstrap';
 import './shell';
-import './editor/index';
+// The editor (TipTap/ProseMirror, ~140 KB gzipped) is its own entry, resources/js/editor.js, loaded only on the
+// editor page by layouts/app (R2-5 / P-09): sign-in, shared, published and list pages never download it.
 import { initOfflineSupport } from './offline';
 
 // Register service worker + global online/offline state
