@@ -2,12 +2,13 @@ import { expect, test } from '@playwright/test';
 import { users } from '../support/env';
 import { as, expectNoCriticalA11y, openWelcomePack } from '../support/helpers';
 
-/** axe on every main screen (critical violations fail; serious ones are listed for EA-8). */
+/** axe on every main screen (serious and critical violations fail, since EA-8). */
 for (const [label, path] of [
     ['files', '/files'],
     ['profile', '/user/profile'],
     ['slash commands', '/settings/slash-commands'],
     ['api tokens', '/user/api-tokens'],
+    ['bin', '/documents/bin'],
 ] as const) {
     test(`${label} has no critical accessibility violations`, async ({ browser }) => {
         const page = await as(browser, users.owner);

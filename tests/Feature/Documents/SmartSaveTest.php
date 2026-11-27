@@ -80,7 +80,7 @@ class SmartSaveTest extends TestCase
      * disagree: the node says team B and the document says team A, so team B
      * sees a title in the Navigator it cannot open (children() does not run
      * DocumentPolicy) and the writer loses the document the moment they switch
-     * teams. Navigator::createDocument()/importHere() pass the parent's team
+     * teams. Navigator::createDocument() and DocumentImportController::intoFolder() pass the parent's team
      * for exactly this reason.
      */
     public function test_filing_into_another_of_the_users_teams_takes_that_teams_id(): void

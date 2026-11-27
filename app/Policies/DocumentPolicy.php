@@ -86,7 +86,8 @@ class DocumentPolicy
      */
     public function restore(User $user, Document $document): bool
     {
-        return $document->owner_id === $user->id;
+        // Whoever may delete it may bring it back (R2-3 / F-09): the owner, or an admin of its company.
+        return $this->delete($user, $document);
     }
 
     /**

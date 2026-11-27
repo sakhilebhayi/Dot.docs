@@ -39,7 +39,7 @@
                 </div>
 
                 <p style="margin:var(--s2) 0 0;white-space:pre-line">
-                    {!! preg_replace('/@(\w+)/', '<span class="mention">@$1</span>', e($comment->content)) !!}
+                    {!! $this->highlightMentions($comment->content) !!}
                 </p>
 
                 <div class="toolbar" style="margin-top:var(--s2)">
@@ -64,7 +64,7 @@
                                     <span class="list-sub">{{ $reply->created_at->diffForHumans() }}</span>
                                 </span>
                                 <p style="margin:var(--s1) 0 0;white-space:pre-line">
-                                    {!! preg_replace('/@(\w+)/', '<span class="mention">@$1</span>', e($reply->content)) !!}
+                                    {!! $this->highlightMentions($reply->content) !!}
                                 </p>
                                 @if ($reply->user_id === auth()->id())
                                     <button type="button" class="btn btn-quiet btn-sm" wire:click="delete({{ $reply->id }})"
@@ -76,10 +76,17 @@
                 @endif
 
                 @if ($replyingTo === $comment->id)
-                    <div style="margin-top:var(--s3)">
+                    <div style="margin-top:var(--s3)" x-data="mentionInput(@entangle('replyContent'), (q) => $wire.searchMentions(q, 'reply'))">
                         <label class="sr-only" for="reply-{{ $comment->id }}">Your reply</label>
-                        <textarea id="reply-{{ $comment->id }}" wire:model="replyContent" rows="2" class="field"
+                        <textarea id="reply-{{ $comment->id }}" x-model="value" @input="handleInput($event)" rows="2" class="field"
                                   placeholder="Type @ to mention somebody" @error('replyContent') aria-invalid="true" aria-describedby="reply-{{ $comment->id }}-error" @enderror></textarea>
+                        @if ($mentionTarget === 'reply' && count($mentionResults) > 0)
+                            <ul class="menu-list" style="position:static;margin-top:var(--s2)" aria-label="People to mention">
+                                @foreach ($mentionResults as $u)
+                                    <li><button type="button" x-on:click="insertMention(@js($u['name']))">{{ $u['name'] }}</button></li>
+                                @endforeach
+                            </ul>
+                        @endif
                         @error('replyContent')
                             <p class="field-error" id="reply-{{ $comment->id }}-error" role="alert">{{ $message }}</p>
                         @enderror
@@ -116,8 +123,8 @@
                 <p class="field-error" id="new-comment-error" role="alert">{{ $message }}</p>
             @enderror
 
-            @if (count($mentionResults) > 0)
-                <ul class="menu-list" style="position:static;margin-top:var(--s2)">
+            @if ($mentionTarget === 'new' && count($mentionResults) > 0)
+                <ul class="menu-list" style="position:static;margin-top:var(--s2)" aria-label="People to mention">
                     @foreach ($mentionResults as $u)
                         <li><button type="button" x-on:click="insertMention(@js($u['name']))">{{ $u['name'] }}</button></li>
                     @endforeach

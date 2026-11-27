@@ -8,11 +8,15 @@ use App\Documents\Import\HtmlToJson;
 use App\Documents\Import\MarkdownImporter;
 use App\Documents\Import\PlainTextImporter;
 use App\Models\Document;
+use App\Models\Files\Obj;
+use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Throwable;
@@ -48,6 +52,8 @@ class DocumentImportController extends Controller
      */
     private const RATE_LIMIT = 10;
 
+    private const UNREADABLE = 'That file could not be read, so nothing was imported. Check it opens in Word or a text editor, then try again.';
+
     public function store(
         Request $request,
         string $uuid,
@@ -79,21 +85,9 @@ class DocumentImportController extends Controller
         ]);
 
         $file = $request->file('file');
-        $extension = strtolower($file->getClientOriginalExtension());
-        $path = (string) $file->getRealPath();
 
         try {
-            $json = match ($extension) {
-                // The document's own uuid keys the media directory, so pictures
-                // pulled out of the .docx land beside the document that owns
-                // them (storage/app/public/documents/{uuid}/) rather than in a
-                // directory nothing can attribute later.
-                'docx' => $docx->import($path, $document->uuid),
-                'md', 'markdown' => $markdown->import($this->read($path)),
-                'html', 'htm' => $html->convert($this->read($path)),
-                'txt' => $plainText->import($this->read($path)),
-                default => throw new \InvalidArgumentException('Unsupported file type.'),
-            };
+            $json = $this->parse($file->getRealPath(), strtolower($file->getClientOriginalExtension()), (string) $document->uuid, $docx, $markdown, $html, $plainText);
         } catch (HttpException $e) {
             throw $e;
         } catch (Throwable) {
@@ -107,7 +101,7 @@ class DocumentImportController extends Controller
             if (! $request->expectsJson()) {
                 return redirect()
                     ->route('documents.edit', $document->uuid)
-                    ->withErrors(['file' => 'That file could not be read, so nothing was imported. Check it opens in Word or a text editor, then try again.']);
+                    ->withErrors(['file' => self::UNREADABLE]);
             }
 
             abort(422, 'This file could not be read.');
@@ -125,6 +119,81 @@ class DocumentImportController extends Controller
         return redirect()
             ->route('documents.edit', $document->uuid)
             ->with('status', 'File imported successfully.');
+    }
+
+    /**
+     * Files > Import a document (R2-3 / F-05): a NEW document, filed in that folder, titled after the file, holding
+     * the file's contents. Before this the button made an empty "Imported document" and asked for the file again in
+     * the editor; anyone who stopped there was left with a stray empty document. The document is created and filled
+     * in one transaction, so a file that cannot be read leaves nothing behind.
+     */
+    public function intoFolder(
+        Request $request,
+        string $parent,
+        DocumentStore $store,
+        DocxImporter $docx,
+        MarkdownImporter $markdown,
+        HtmlToJson $html,
+        PlainTextImporter $plainText,
+    ): RedirectResponse {
+        $node = Obj::where('uuid', $parent)->firstOrFail();
+        abort_unless($node->isFolder(), 404);
+        Gate::authorize('create', [Obj::class, $node]);
+
+        $back = redirect()->route('files.index', ['folder' => $node->uuid]);
+
+        $key = 'import:'.Auth::id();
+        if (! RateLimiter::attempt($key, self::RATE_LIMIT, fn () => true, 3600)) {
+            return $back->withErrors(['file' => 'Import limit reached. Try again in '.RateLimiter::availableIn($key).' seconds.'], 'import');
+        }
+
+        $request->validateWithBag('import', [
+            'file' => ['required', 'file', 'max:'.self::MAX_KILOBYTES, 'mimes:'.implode(',', self::EXTENSIONS)],
+        ]);
+
+        $file = $request->file('file');
+        $title = Str::limit(trim((string) pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME)) ?: 'Imported document', 200, '');
+        /** @var User $user */
+        $user = Auth::user();
+
+        $mediaKey = null;
+
+        try {
+            $document = DB::transaction(function () use ($store, $user, $title, $node, $file, $docx, $markdown, $html, $plainText, &$mediaKey) {
+                $document = $store->create($user, $title, null, ['team_id' => $node->team_id, 'is_public' => false], $node);
+                $mediaKey = (string) $document->uuid;
+                $json = $this->parse($file->getRealPath(), strtolower($file->getClientOriginalExtension()), (string) $document->uuid, $docx, $markdown, $html, $plainText);
+
+                return $store->save($document, $json, $user, ['version' => 'named', 'label' => 'Imported '.Str::limit($file->getClientOriginalName(), 100, '')]);
+            });
+        } catch (HttpException $e) {
+            throw $e;
+        } catch (Throwable) {
+            // The rollback took the document away; pictures the .docx importer already wrote for it go too.
+            if ($mediaKey !== null) {
+                Storage::disk('local')->deleteDirectory('document-media/'.$mediaKey);
+            }
+
+            return $back->withErrors(['file' => self::UNREADABLE], 'import');
+        }
+
+        return redirect()->route('documents.edit', $document->uuid)->with('status', 'Imported '.$file->getClientOriginalName().'.');
+    }
+
+    /** The importer for the file's type, keyed (for .docx pictures) by the document they belong to. */
+    private function parse(string|false $path, string $extension, string $mediaKey, DocxImporter $docx, MarkdownImporter $markdown, HtmlToJson $html, PlainTextImporter $plainText): array
+    {
+        $path = (string) $path;
+
+        return match ($extension) {
+            // The document's own uuid keys the media folder, so pictures pulled out of the .docx land beside the
+            // document that owns them (DocumentMedia).
+            'docx' => $docx->import($path, $mediaKey),
+            'md', 'markdown' => $markdown->import($this->read($path)),
+            'html', 'htm' => $html->convert($this->read($path)),
+            'txt' => $plainText->import($this->read($path)),
+            default => throw new \InvalidArgumentException('Unsupported file type.'),
+        };
     }
 
     private function read(string $path): string
