@@ -43,7 +43,7 @@ class StartSession extends BaseStartSession
         $session = parent::startSession($request, $session);
 
         // PHP arrays are copied on write, so holding this costs nothing until the session is changed.
-        $request->attributes->set(self::SNAPSHOT, $session->all());
+        $request->attributes->set(self::SNAPSHOT, [$session->getId(), $session->all()]);
 
         return $session;
     }
@@ -52,7 +52,9 @@ class StartSession extends BaseStartSession
     {
         if ($request->attributes->get(self::QUIET) === true && $request->hasSession()) {
             $session = $request->session();
-            $unchanged = $session->all() === $request->attributes->get(self::SNAPSHOT);
+            // The id too (R2-9 review): a regenerate() changes only the id, and its new row must be written or the
+            // person is signed out by their own next request.
+            $unchanged = [$session->getId(), $session->all()] === $request->attributes->get(self::SNAPSHOT);
             $noFlash = $session->get('_flash.new', []) === [] && $session->get('_flash.old', []) === [];
             $writtenAt = $session->get(self::WRITTEN_AT);
             $fresh = is_int($writtenAt) && now()->getTimestamp() - $writtenAt < self::REFRESH_SECONDS;

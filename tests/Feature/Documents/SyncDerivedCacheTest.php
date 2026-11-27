@@ -14,6 +14,7 @@ use App\Print\HeaderFooterBands;
 use App\Styles\StyleEngine;
 use Database\Seeders\DocumentStyleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -112,11 +113,18 @@ class SyncDerivedCacheTest extends TestCase
         $before = $derived->key($doc->fresh());
         $this->assertSame($before, $derived->key($doc->fresh()), 'The key is not stable for an unchanged document.');
 
-        // The style row changed underneath (a team style edited) with no new document version: a different key.
-        $this->travel(2)->seconds();
-        DocumentStyle::where('key', $doc->style_key)->firstOrFail()->touch();
+        // The style row's tokens changed underneath (a team style edited) with no new document version - in the same
+        // second, which SQLite's whole-second updated_at could not tell apart: a different key (R2-9 review).
+        $row = DocumentStyle::where('key', $doc->style_key)->firstOrFail();
+        $tokens = $row->tokens;
+        $tokens['colours']['heading'] = '#112233';
+        $row->forceFill(['tokens' => $tokens])->saveQuietly();
         $edited = $derived->key($doc->fresh());
         $this->assertNotSame($before, $edited);
+
+        // A touch alone (nothing the CSS reads) does not throw the cached result away.
+        $row->touch();
+        $this->assertSame($edited, $derived->key($doc->fresh()));
 
         // A restyle: a different key, and the poll's CSS is the new style's.
         $restyled = app(DocumentStore::class)->restyle($doc->fresh(), $this->otherStyle($doc->style_key));
@@ -129,6 +137,24 @@ class SyncDerivedCacheTest extends TestCase
         $renamed = $restyled->fresh();
         $renamed->title = 'Renamed';
         $this->assertNotSame($derived->key($restyled->fresh()), $derived->key($renamed));
+    }
+
+    /** R2-9 review: one cache row per document, overwritten - a row per version was never read again and piled up. */
+    public function test_new_versions_reuse_the_documents_one_cache_row(): void
+    {
+        config(['cache.default' => 'database']); // production's store, where rows can pile up
+        $owner = User::factory()->withPersonalTeam()->create();
+        $store = app(DocumentStore::class);
+        $doc = $store->create($owner, 'Busy');
+        $derived = app(SyncDerived::class);
+
+        foreach (range(1, 5) as $n) {
+            $doc = $store->save($doc->fresh(), $this->para('Line '.$n), $owner);
+            $derived->of($doc->fresh());
+        }
+
+        $rows = DB::table('cache')->where('key', 'like', '%sync-derived:%')->count();
+        $this->assertSame(1, $rows);
     }
 
     public function test_two_documents_never_share_a_key_even_with_identical_content(): void
