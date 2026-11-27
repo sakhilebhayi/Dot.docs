@@ -89,7 +89,8 @@ class SecurityHeadersTest extends TestCase
         $this->assertMatchesRegularExpression('/font-src [^;]*https:\/\/fonts\.gstatic\.com/', $policy);
         $this->assertMatchesRegularExpression('/img-src [^;]*data: blob:[^;]*https:\/\/images\.unsplash\.com/', $policy);
         $this->assertMatchesRegularExpression('/img-src [^;]*https:\/\/ui-avatars\.com/', $policy, "Jetstream's default avatar");
-        $this->assertStringContainsString("connect-src 'self' wss: https:", $policy);
+        // R2-9: same-origin only while realtime is off and no Vite dev server runs - never any https: host.
+        $this->assertMatchesRegularExpression("/connect-src 'self';/", $policy);
     }
 
     /** No view may use an inline event handler: the enforced policy refuses them. */
