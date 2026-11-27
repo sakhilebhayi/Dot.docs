@@ -425,6 +425,7 @@ jobs:
             && echo "::warning::The deploy failed; the site was taken out of maintenance mode (see the steps above for what failed)." \
             || echo "::error::Could not take the site out of maintenance mode. Run 'php artisan up' in the app folder by hand."
 
+      - name: Smoke-check the live site
         # Last step, on purpose: a deploy is green only once the live
         # pages have been seen loading their own assets. Runs on the
         # runner with plain curl (no SSH), exactly as a browser would: /
