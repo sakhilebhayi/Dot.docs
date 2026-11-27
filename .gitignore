@@ -29,3 +29,8 @@ Thumbs.db
 # Backups and restored copies live only on the host (EA-6); never commit them.
 /storage/backups
 /storage/restore
+
+# Browser suite output (EA-7)
+/tests/Browser/.data
+/tests/Browser/test-results
+/tests/Browser/playwright-report

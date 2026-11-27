@@ -1,0 +1,58 @@
+import { expect, test } from '@playwright/test';
+import { users } from '../support/env';
+import { as, expectNoCriticalA11y, openWelcomePack, typeAtEnd, waitSaved } from '../support/helpers';
+
+test('a new document is created, typed into, autosaved and still there after a reload', async ({ browser }) => {
+    const page = await as(browser, users.owner);
+    await page.goto('/documents');
+    await expectNoCriticalA11y(page, 'documents index');
+
+    await page.getByRole('button', { name: 'New document' }).first().click();
+    await page.locator('#new-doc-name').fill('Quarterly review');
+    await page.getByRole('button', { name: 'Create the document' }).click();
+    await expect(page).toHaveURL(/\/documents\/[0-9a-f-]+\/edit/);
+    await expect(page.locator('.ProseMirror')).toBeVisible();
+
+    await typeAtEnd(page, 'Revenue grew in every region.');
+    await waitSaved(page);
+    await expectNoCriticalA11y(page, 'editor');
+
+    await page.reload();
+    await expect(page.locator('.ProseMirror')).toContainText('Revenue grew in every region.');
+});
+
+test('the version figure follows saves without a reload', async ({ browser }) => {
+    const page = await as(browser, users.owner);
+    await openWelcomePack(page);
+    const figure = page.locator('[data-doc-version]');
+    const before = Number((await figure.innerText()).replace(/\D/g, ''));
+
+    await typeAtEnd(page, ' One.');
+    await waitSaved(page);
+    await page.waitForTimeout(1500);
+    await typeAtEnd(page, ' Two.');
+    await expect.poll(async () => Number((await figure.innerText()).replace(/\D/g, '')), { timeout: 15_000 }).toBeGreaterThanOrEqual(before + 2);
+});
+
+test('the assistant says it is a demonstration and adds its answer at the end', async ({ browser }) => {
+    const page = await as(browser, users.owner);
+    await openWelcomePack(page);
+    await page.locator('.ProseMirror').click();
+    await page.keyboard.press('ControlOrMeta+Shift+K');
+    await page.locator('#ai-command').fill('/continue');
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('Demonstration answer')).toBeVisible();
+    await page.getByRole('button', { name: 'Add it at the end' }).click();
+    await expect(page.locator('.ProseMirror')).toContainText('Seeded for the browser suite.');
+    await expect(page.locator('.ProseMirror')).toContainText('[mock:');
+});
+
+test('Escape closes the assistant palette', async ({ browser }) => {
+    const page = await as(browser, users.owner);
+    await openWelcomePack(page);
+    await page.locator('.ProseMirror').click();
+    await page.keyboard.press('ControlOrMeta+Shift+K');
+    await expect(page.locator('#ai-command')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#ai-command')).toBeHidden();
+});
