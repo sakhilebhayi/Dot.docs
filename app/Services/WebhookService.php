@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\CoalescedSaveWebhooks;
 use App\Jobs\DeliverDocumentWebhooks;
 use App\Models\Document;
 use App\Models\DocumentWebhook;
@@ -26,11 +27,14 @@ class WebhookService
             return;
         }
 
-        $job = DeliverDocumentWebhooks::dispatch($document->id, $event, $payload);
-
         if ($event === 'on_save') {
-            $job->delay(now()->addSeconds(DeliverDocumentWebhooks::SAVE_DELAY_SECONDS));
+            CoalescedSaveWebhooks::dispatch($document->id, $event, $payload)
+                ->delay(now()->addSeconds(DeliverDocumentWebhooks::SAVE_DELAY_SECONDS));
+
+            return;
         }
+
+        DeliverDocumentWebhooks::dispatch($document->id, $event, $payload);
     }
 
     /**

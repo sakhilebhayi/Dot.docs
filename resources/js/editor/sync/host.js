@@ -47,6 +47,22 @@ import { focusAfterInsert } from './insert.js';
 import { appendLost, blockWord, lostEntry } from './merge.js';
 
 /** How long a save is waited for before it is taken as never answering. */
+/**
+ * The version figure in the status strip ([data-doc-version]). A successful
+ * save no longer re-renders the page (EA-5 / P-03) and the view's fields are
+ * written here without Alpine noticing, so the strip is painted directly every
+ * time the base version moves. No document (the node tests): nothing to do.
+ */
+export function paintVersion(version) {
+    if (typeof document === 'undefined') {
+        return;
+    }
+    const text = 'v' + Number(version).toLocaleString('en');
+    document.querySelectorAll('[data-doc-version]').forEach((el) => {
+        el.textContent = text;
+    });
+}
+
 export const SAVE_EXPIRY_MS = 15000;
 
 /**
@@ -862,6 +878,7 @@ export function createSyncHost(view, env) {
     function saveAnswered(result, snapshot, overwrite) {
         if (result && result.ok) {
             view.baseVersion = result.version;
+            paintVersion(view.baseVersion);
             view.conflict = null;
             view.mergeAttempts = 0;
             markConfirmed(snapshot, result.version);
@@ -1135,6 +1152,7 @@ export function createSyncHost(view, env) {
         const knownIsCurrent = !contentLoaded && view.known !== null && view.known.version === view.baseVersion;
 
         view.baseVersion = version;
+        paintVersion(view.baseVersion);
         env.engine()?.saved(version);
 
         if (knownIsCurrent) {
@@ -1188,6 +1206,7 @@ export function createSyncHost(view, env) {
         }
 
         view.baseVersion = remote.version;
+        paintVersion(view.baseVersion);
         view.unsaved = false;
         // A merge under way is over: the tab was clean after all (it undid
         // everything while the fetch was out), so it follows instead.
@@ -1478,6 +1497,7 @@ export function createSyncHost(view, env) {
         const overwrites = owesOverwrite(result, view.baseVersion, remote.version, remote.json);
         view.merging = null;
         view.baseVersion = remote.version;
+        paintVersion(view.baseVersion);
         view.conflict = null;
         markConfirmed(result.changed ? result.theirs : JSON.stringify(handle.editor.getJSON()), remote.version);
         if (result.changed && overwrites) {
@@ -1997,6 +2017,7 @@ export function createSyncHost(view, env) {
         }
 
         view.baseVersion = Math.max(view.baseVersion, target);
+        paintVersion(view.baseVersion);
         oweOverwrite();
         // `confirmed` is the document of the version this tab was based on
         // BEFORE the base moved. The base now names a version the editor
@@ -2676,6 +2697,7 @@ export function createSyncHost(view, env) {
         view.merging = null;
         view.mergeAttempts = 0;
         view.baseVersion = version;
+        paintVersion(view.baseVersion);
         view.conflict = null;
         markConfirmed(result.changed ? result.theirs : JSON.stringify(handle.editor.getJSON()), version);
         if (result.changed && overwrites) {

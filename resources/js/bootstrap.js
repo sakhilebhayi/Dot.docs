@@ -25,6 +25,8 @@ if (import.meta.env.VITE_REVERB_APP_KEY) {
             });
             window.Echo.connector.pusher.connection.bind('failed', () => {});
             window.Echo.connector.pusher.connection.bind('unavailable', () => {});
+            // Listeners that looked for window.Echo before it existed wait for this.
+            window.dispatchEvent(new CustomEvent('echo:ready'));
         })
         .catch(() => {
             // Real-time features unavailable; app continues in polling-only mode

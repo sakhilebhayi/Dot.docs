@@ -330,7 +330,8 @@ class DocumentStore
         if ($kind !== 'auto') {
             return true;
         }
-        $latest = DocumentVersion::where('document_id', $doc->getKey())->latest('id')->first();
+        // Highest version number: served by the (document_id, version_number) index.
+        $latest = DocumentVersion::where('document_id', $doc->getKey())->orderByDesc('version_number')->first();
         if (! $latest instanceof DocumentVersion) {
             return true;
         }
@@ -348,10 +349,17 @@ class DocumentStore
         $doc->forceFill($this->derive($doc, $json)['values']);
     }
 
-    /** What the derived columns depend on besides the JSON itself. */
+    /**
+     * What the derived columns depend on besides the JSON itself: the style
+     * chosen, the team (whose override row may apply), the variables, and the
+     * style row's own last change (its numbering tokens). A difference only
+     * means the work is redone under the lock - never that it is skipped.
+     */
     private function deriveKey(Document $doc): string
     {
-        return json_encode([$doc->style_key, $doc->team_id, $doc->variables ?? []]) ?: '';
+        $style = $doc->resolvedStyle();
+
+        return json_encode([$doc->style_key, $doc->team_id, $doc->variables ?? [], $style?->getKey(), $style?->updated_at?->toIso8601String()]) ?: '';
     }
 
     /**

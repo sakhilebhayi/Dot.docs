@@ -165,11 +165,42 @@ class Editor extends Component
         // re-render of the page went back to the browser for nothing, every
         // 1.5 s (EA-5 / P-03). A refused save still renders, for its error,
         // and so does the first good save after one, to take the error away.
-        if (! $mustRender) {
+        if (! $mustRender && $this->isTheOnlyCallInThisRequest()) {
             $this->skipRender();
         }
 
         return ['ok' => true, 'conflict' => false, 'version' => $this->document->version];
+    }
+
+    /**
+     * Livewire sends every call made while this component's request is in
+     * flight as ONE commit, and skipRender() covers the whole commit: a
+     * presence refresh, a sidebar toggle or a style error queued behind a slow
+     * save would never be drawn. So a save skips the render only when it is
+     * the commit's sole call and no property changed with it. Outside an HTTP
+     * request (tests call one method at a time) there is nothing to share.
+     */
+    private function isTheOnlyCallInThisRequest(): bool
+    {
+        return self::soleCallIn(request()->input('components'), $this->getId());
+    }
+
+    /** Whether component $id's part of a Livewire update request is one call and no property change. */
+    public static function soleCallIn(mixed $components, string $id): bool
+    {
+        if (! is_array($components)) {
+            return true;
+        }
+
+        foreach ($components as $component) {
+            $snapshot = json_decode((string) ($component['snapshot'] ?? ''), true);
+
+            if (is_array($snapshot) && ($snapshot['memo']['id'] ?? null) === $id) {
+                return count($component['calls'] ?? []) === 1 && ($component['updates'] ?? []) === [];
+            }
+        }
+
+        return false;
     }
 
     /**

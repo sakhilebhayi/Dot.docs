@@ -570,7 +570,11 @@
         },
 
         setupEcho() {
-            if (typeof window.Echo === 'undefined') return;
+            if (typeof window.Echo === 'undefined') {
+                // Loaded after the page when the build has a Reverb key.
+                window.addEventListener('echo:ready', () => this.setupEcho(), { once: true });
+                return;
+            }
 
             this.echo = window.Echo.join('document.{{ $document->id }}')
                 .here((users) => {
@@ -879,8 +883,12 @@
                     @endif
                 </span>
 
-                <span class="micro" title="Last edited {{ $document->updated_at->diffForHumans() }}">
-                    <x-shell.figure :value="$document->version" prefix="v" label="Version" />
+                {{-- The version a steady save answers with: a successful save no longer
+                     re-renders this page (EA-5 / P-03), so the number follows the
+                     page's own baseVersion, which every save and every followed
+                     change moves up. The server's figure is the first paint. --}}
+                <span class="micro">
+                    <span class="numeral"><span data-doc-version wire:ignore>v{{ number_format($document->version) }}</span><span class="sr-only"> Version</span></span>
                 </span>
             </span>
 
