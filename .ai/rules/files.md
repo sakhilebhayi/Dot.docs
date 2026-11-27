@@ -49,7 +49,7 @@ The team root (`parent_id === null`) can be neither moved nor deleted.
 
 The `files` disk is `local`, rooted at `FILES_ROOT` (default `storage/app/files`), `visibility => private`, and is NOT exposed under `public/storage`. Both products point it at ONE directory so a `files.path` row written by either resolves to the same bytes. `FilesService::createFile()` composes the stored path itself — `documents/{team_id}/{40 random chars}.{sanitised extension}` — so nothing a person can type decides where bytes land; only the extension survives.
 
-`FileViewController` is the only way back out, and it needs BOTH gates: the `signed` middleware (10-minute expiry) proves the link was minted here, and the controller then checks the viewer belongs to the FILE's team — a signed link is not a bearer token for anyone who happens to be logged in. The path is resolved with the same `realpath()`-containment discipline `DocxExporter::publicDiskPath()` uses (`.ai/rules/documents-io.md`): a row on a SHARED database was not necessarily written by this app, so what it resolves to is proved to be under the disk root before anything is read.
+`FileViewController` is the only way back out, and it needs BOTH gates: the `signed` middleware (10-minute expiry) proves the link was minted here, and the controller then checks the viewer belongs to the FILE's team — a signed link is not a bearer token for anyone who happens to be logged in. The path is resolved with the same `realpath()`-containment discipline `DocxImageWriter::publicDiskPath()` uses (`.ai/rules/documents-io.md`): a row on a SHARED database was not necessarily written by this app, so what it resolves to is proved to be under the disk root before anything is read.
 
 ## Move is a sheet, not a drag
 
