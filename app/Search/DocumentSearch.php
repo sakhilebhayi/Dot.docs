@@ -37,8 +37,13 @@ class DocumentSearch
             return collect();
         }
 
-        // Three times the limit is read so the row-by-row policy check can drop a few and still fill the list.
-        return $this->constrain(Document::query(), $user, $query)
+        // Three times the limit is read so the row-by-row policy check can drop a few and still fill the list. Only
+        // the columns a result row and the policy need (never the HTML, JSON or search text), and each document's
+        // team loaded with them: DocumentPolicy::view() reads it, and per row that was one query each (and, with
+        // lazy loading prevented, an exception outside production).
+        $columns = array_map(fn (string $c) => 'documents.'.$c, ['id', 'uuid', 'title', 'owner_id', 'team_id', 'version', 'is_public', 'updated_at']);
+
+        return $this->constrain(Document::query()->select($columns)->with('team'), $user, $query)
             ->limit($limit * 3)
             ->get()
             ->filter(fn (Document $document) => $user->can('view', $document))

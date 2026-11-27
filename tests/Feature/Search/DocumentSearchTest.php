@@ -8,6 +8,7 @@ use App\Models\DocumentCollaborator;
 use App\Models\User;
 use App\Search\DocumentSearch;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -73,6 +74,30 @@ class DocumentSearchTest extends TestCase
 
         $this->assertSame([], $ids);
         $this->assertTrue($mate->can('view', $doc), 'they can still open it');
+    }
+
+    /**
+     * R2-7: several of a colleague's team documents match. The policy reads each one's team; it is loaded with the
+     * results, so the search neither lazy-loads (an exception outside production) nor runs a query per row.
+     */
+    public function test_several_team_documents_are_found_without_a_query_per_row(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $mate = User::factory()->withPersonalTeam()->create();
+        $owner->currentTeam->users()->attach($mate, ['role' => 'editor']);
+        $mate->forceFill(['current_team_id' => $owner->currentTeam->id])->save();
+        $store = app(DocumentStore::class);
+        foreach (['One', 'Two', 'Three'] as $title) {
+            $store->save($store->create($owner, $title), $this->para('Quarry blasting schedule'), $owner);
+        }
+
+        DB::enableQueryLog();
+        $found = app(DocumentSearch::class)->search($mate->fresh(), 'quarry');
+        $queries = count(DB::getQueryLog());
+
+        $this->assertCount(3, $found);
+        $this->assertLessThanOrEqual(12, $queries, 'a constant number of queries, not several per result');
+        $this->assertArrayNotHasKey('content_json', $found->first()->getAttributes(), 'result rows carry no document body');
     }
 
     public function test_a_team_mate_can_find_the_team_document(): void
