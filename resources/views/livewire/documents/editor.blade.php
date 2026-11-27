@@ -760,7 +760,7 @@
                  the registry, which this button and the `/` menu both list. --}}
             <button type="button" class="tool tool-mono doc-bar-palette"
                     title="Commands — or type / in the document" aria-keyshortcuts="Meta+K Control+K"
-                    @click="window.DotDoc.openPalette(ed())"><span class="doc-bar-cmd-label">Commands </span>&#8984;K</button>
+                    @click="window.DotDoc.openPalette(ed())"><span class="doc-bar-cmd-label">Commands </span><span data-shortcut="mod+k">Ctrl+K</span></button>
 
             {{-- Where this document is filed in the shared Dot.Files tree.
                  A quiet line of text, not a link: the button beside it is the one
@@ -909,7 +909,7 @@
                     <button type="button" data-shell-expand="dock"
                             @click="$dispatch('open-ai-palette'); open = false">
                         Ask the assistant
-                        <span class="micro">Ctrl+Shift+K</span>
+                        <span class="micro" data-shortcut="mod+shift+k">Ctrl+Shift+K</span>
                     </button>
 
                     {{-- "Suggest instead of editing" is hidden until tracked suggestions
@@ -929,11 +929,11 @@
                     @if ($canEdit)
                         <button type="button" @click="ed().chain().focus().undo().run(); open = false">
                             Undo
-                            <span class="micro">&#8984;Z</span>
+                            <span class="micro" data-shortcut="mod+z">Ctrl+Z</span>
                         </button>
                         <button type="button" @click="ed().chain().focus().redo().run(); open = false">
                             Redo
-                            <span class="micro">&#8679;&#8984;Z</span>
+                            <span class="micro" data-shortcut="mod+shift+z">Ctrl+Shift+Z</span>
                         </button>
 
                         <button type="button"
@@ -1232,7 +1232,7 @@
                 <h2 class="section-title" id="pending-suggestions">
                     Waiting for you — <x-shell.figure :value="count($pendingSuggestions)" label="Suggestions waiting" />
                 </h2>
-                <span class="micro">Marker becomes graphite once accepted</span>
+                <span class="micro">Accepted text becomes part of the document</span>
             </div>
             <ul class="list">
                 @foreach ($pendingSuggestions as $suggestion)
