@@ -14,8 +14,15 @@ test('the command palette keeps Tab inside it and hands the caret back to the do
     const editor = page.locator('.ProseMirror');
     const input = page.locator('.dotdoc-panel-input');
 
-    await page.locator('.ProseMirror p').last().click();
-    await page.keyboard.press('End');
+    // The caret is put at the end of the document through the editor itself. A click is not reliable here: earlier
+    // specs leave this account in Pages view, where the page bands and gaps sit over the text, and a click there can
+    // leave the selection at the start. What this test is about is the palette giving the caret BACK.
+    await page.evaluate(() => {
+        const ed = (document.querySelector('.ProseMirror') as HTMLElement & { editor?: { commands: { focus: (at: string) => boolean } } }).editor;
+        ed?.commands.focus('end');
+    });
+    // TipTap applies the focus on the next frame, and ⌘K is the editor's own key: wait until the editor has it.
+    await expect(editor).toBeFocused();
     // Where the caret is, read off the page's own selection: the document is left as it is for other specs.
     const caret = () =>
         page.evaluate(() => {

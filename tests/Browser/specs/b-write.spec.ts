@@ -37,7 +37,8 @@ test('the version figure follows saves without a reload', async ({ browser }) =>
 test('the assistant says it is a demonstration and adds its answer at the end', async ({ browser }) => {
     const page = await as(browser, users.owner);
     await openWelcomePack(page);
-    await page.locator('.ProseMirror').click();
+    // Into the document's text: in Pages view the middle of the editor can be a gap between pages, outside the editor.
+    await page.locator('.ProseMirror > p').last().click();
     await page.keyboard.press('ControlOrMeta+Shift+K');
     await page.locator('#ai-command').fill('/continue');
     await page.keyboard.press('Enter');
@@ -50,7 +51,8 @@ test('the assistant says it is a demonstration and adds its answer at the end', 
 test('Escape closes the assistant palette', async ({ browser }) => {
     const page = await as(browser, users.owner);
     await openWelcomePack(page);
-    await page.locator('.ProseMirror').click();
+    // Into the document's text: in Pages view the middle of the editor can be a gap between pages, outside the editor.
+    await page.locator('.ProseMirror > p').last().click();
     await page.keyboard.press('ControlOrMeta+Shift+K');
     await expect(page.locator('#ai-command')).toBeVisible();
     await page.keyboard.press('Escape');
@@ -78,7 +80,8 @@ test('the New document sheet keeps focus inside and closes with Escape (EA-8)', 
 test('the command palette tells assistive technology which command is active (EA-8)', async ({ browser }) => {
     const page = await as(browser, users.owner);
     await openWelcomePack(page);
-    await page.locator('.ProseMirror').click();
+    // Into the document's text: in Pages view the middle of the editor can be a gap between pages, outside the editor.
+    await page.locator('.ProseMirror > p').last().click();
     await page.keyboard.press('ControlOrMeta+K');
     const input = page.locator('.dotdoc-panel-input');
     await expect(input).toBeFocused();
