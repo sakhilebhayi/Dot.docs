@@ -73,8 +73,8 @@ jobs:
         # COVERAGE_FLOOR. Raise the floor as coverage grows; never lower it to make a change pass.
         if: matrix.coverage == 'pcov'
         env:
-          # First measured 87.74% (EA-7, run on PR #214).
-          COVERAGE_FLOOR: '87'
+          # First measured 87.74% (EA-7, run on PR #214); raised to 90 in R2-10 (89.54% before its new tests).
+          COVERAGE_FLOOR: '90'
         run: |
           # The report carries colour codes: strip them before reading the figure.
           LINES=$(sed 's/\x1b\[[0-9;]*m//g' coverage.txt | grep -m1 -E 'Lines:' | grep -oE '[0-9]+\.[0-9]+' | head -1)

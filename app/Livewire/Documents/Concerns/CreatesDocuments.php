@@ -9,6 +9,7 @@ use App\Models\Document;
 use App\Models\DocumentTemplate;
 use App\Models\Files\Obj;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 
@@ -85,9 +86,9 @@ trait CreatesDocuments
      * The templates the picker offers - the same visibility rule the gallery
      * uses, asked through the one scope both share.
      */
-    /** @return \Illuminate\Database\Eloquent\Collection<int, DocumentTemplate> */
+    /** @return Collection<int, DocumentTemplate> */
     #[Computed]
-    public function newDocumentTemplates(): \Illuminate\Database\Eloquent\Collection
+    public function newDocumentTemplates(): Collection
     {
         return DocumentTemplate::query()
             ->visibleTo($this->actor())

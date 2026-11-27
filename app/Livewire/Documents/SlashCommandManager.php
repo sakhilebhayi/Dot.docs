@@ -47,6 +47,10 @@ class SlashCommandManager extends Component
 
     public function save(): void
     {
+        // People type the command the way they will use it, "/summarise": the slash and case come off BEFORE the
+        // name is checked (R2-10 - the rule refused the slash, so the clean-up below it never ran).
+        $this->name = strtolower(ltrim(trim($this->name), '/'));
+
         $this->validate([
             'name' => 'required|alpha_dash|max:64',
             'description' => 'nullable|string|max:255',
@@ -58,7 +62,7 @@ class SlashCommandManager extends Component
         $data = [
             'user_id' => $user->id,
             'team_id' => $this->shareWithTeam ? $user->currentTeam?->id : null,
-            'name' => strtolower(ltrim($this->name, '/')),
+            'name' => $this->name,
             'description' => $this->description ?: null,
             'prompt_template' => $this->promptTemplate,
             'share_with_team' => $this->shareWithTeam,
