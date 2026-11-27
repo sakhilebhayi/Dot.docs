@@ -203,12 +203,24 @@ jobs:
       - name: npm audit (high and critical only)
         run: npm audit --audit-level=high
 
+  workflow-lint:
+    name: Workflow lint (actionlint + shellcheck)
+    runs-on: ubuntu-latest
+    # R2-2: a workflow GitHub cannot parse merged once (#212) and deployed nothing. actionlint checks every
+    # workflow's syntax, expressions and (through shellcheck) its shell steps, plus the deploy's host scripts.
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
+      - name: shellcheck the deploy's host scripts
+        run: shellcheck scripts/deploy/*.sh
+
   quality-gate:
     name: Quality gate (all checks must pass)
     runs-on: ubuntu-latest
     # The dependency audits gate too, on high and critical advisories only
     # (EA-1 / S-15): a merge here is a production deploy.
-    needs: [tests, browser, code-style, static-php, composer-audit, npm-audit]
+    needs: [tests, browser, code-style, static-php, composer-audit, npm-audit, workflow-lint]
     if: always()
     steps:
       - name: Evaluate quality gate
@@ -220,6 +232,7 @@ jobs:
           results[static-php]="${{ needs.static-php.result }}"
           results[composer-audit]="${{ needs.composer-audit.result }}"
           results[npm-audit]="${{ needs.npm-audit.result }}"
+          results[workflow-lint]="${{ needs.workflow-lint.result }}"
           failed=0
           for job in "${!results[@]}"; do
             if [ "${results[$job]}" != "success" ]; then

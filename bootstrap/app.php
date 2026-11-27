@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\RefuseApiTokensOnPages;
 use App\Http\Middleware\SecurityHeaders;
+use App\Services\Guardian\ErrorAlert;
 use App\Services\Guardian\ErrorCounter;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -41,5 +42,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // counter swallows its own failures, so this cannot break reporting.
         $exceptions->report(function (Throwable $e): void {
             app(ErrorCounter::class)->record($e);
+            // R2-2 / O-06: and a person hears about it (OPS_ALERT_EMAIL), once per distinct error an hour.
+            app(ErrorAlert::class)->send($e);
         });
     })->create();
