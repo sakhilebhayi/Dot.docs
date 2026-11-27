@@ -67,14 +67,17 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(MessageSending::class, [MailDeliveryListener::class, 'messageSending']);
         Event::listen(MessageSent::class, [MailDeliveryListener::class, 'messageSent']);
 
-        // R2-7 / Q-05: outside production a lazy-loaded relation (the N+1 pattern) and a mass-assigned key the model
-        // would silently drop are exceptions, so tests and local use catch them. In production nothing changes for
-        // the visitor: a lazy load is logged, not thrown. preventAccessingMissingAttributes is deliberately NOT on:
-        // code here asks any model for an optional column on purpose (AuditLogger reads `team_id` off whatever the
-        // subject is), and that is not a defect.
+        // R2-7 / Q-05: under the test runner and with APP_DEBUG on, a lazy-loaded relation (the N+1 pattern) and a
+        // mass-assigned key the model would silently drop are exceptions, so tests and local work catch them. Anywhere
+        // else nothing changes for the visitor: a lazy load is logged, not thrown. Keyed on tests/debug, NOT on
+        // APP_ENV (R2-8): an environment name is a setting, not proof of production, so a missed eager load must never
+        // become an error page because of it. APP_DEBUG is forced off in production by the deploy.
+        // preventAccessingMissingAttributes is deliberately NOT on: code here asks any model for an optional column on purpose (AuditLogger reads `team_id`
+        // off whatever the subject is), and that is not a defect.
+        $strict = $this->app->runningUnitTests() || (bool) config('app.debug') || (bool) config('app.strict_models');
         Model::preventLazyLoading();
-        Model::preventSilentlyDiscardingAttributes(! $this->app->isProduction());
-        if ($this->app->isProduction()) {
+        Model::preventSilentlyDiscardingAttributes($strict);
+        if (! $strict) {
             Model::handleLazyLoadingViolationUsing(fn (Model $model, string $relation) => Log::warning(
                 'Lazy-loaded relation (N+1).', ['model' => $model::class, 'relation' => $relation],
             ));

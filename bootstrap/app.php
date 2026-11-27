@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\RefuseApiTokensOnPages;
+use App\Http\Middleware\RefuseLocalSignInWhileSso;
 use App\Http\Middleware\SecurityHeaders;
 use App\Services\Guardian\ErrorAlert;
 use App\Services\Guardian\ErrorCounter;
@@ -26,7 +27,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // API tokens never reach a page or a Livewire action (R2-1 / S-07): on the whole web group, so
         // /livewire/update is covered too.
-        $middleware->web(append: [RefuseApiTokensOnPages::class]);
+        $middleware->web(append: [RefuseApiTokensOnPages::class, RefuseLocalSignInWhileSso::class]);
 
         // Sanctum's token-permission checks for routes/api.php (R2-1 / S-07).
         $middleware->alias([

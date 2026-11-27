@@ -42,6 +42,12 @@ return [
     'debug' => (bool) env('APP_DEBUG', false),
 
     /*
+    | R2-7/R2-8: Eloquent's lazy-loading and silently-discarded-attribute checks THROW (rather than log) under the test
+    | runner, with APP_DEBUG on, or with MODELS_STRICT=true (the browser suite sets it). Never set it in production.
+    */
+    'strict_models' => (bool) env('MODELS_STRICT', false),
+
+    /*
     |--------------------------------------------------------------------------
     | Application URL
     |--------------------------------------------------------------------------
