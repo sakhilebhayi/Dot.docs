@@ -30,14 +30,17 @@
         </ul>
     </x-dot.bell>
 
-    {{-- Real-time: listen on the private user channel for new notifications. --}}
+    {{-- Real-time: listen on the private user channel for new notifications. window.Echo loads after
+         the page when a build has a Reverb key (resources/js/bootstrap.js), so it waits rather than give up.
+         The script must START with `if` (leading whitespace allowed): Alpine reads anything else, a comment or an indented `const` included, as an expression and the page's next Livewire request fails. --}}
     @script
     <script>
         if (typeof window.Echo !== 'undefined') {
             window.Echo.private('App.Models.User.{{ auth()->id() }}')
-                .notification(() => {
-                    $wire.dispatch('notification-received');
-                });
+                .notification(() => $wire.dispatch('notification-received'));
+        } else {
+            window.addEventListener('echo:ready', () => window.Echo.private('App.Models.User.{{ auth()->id() }}')
+                .notification(() => $wire.dispatch('notification-received')), { once: true });
         }
     </script>
     @endscript

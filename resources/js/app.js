@@ -1,10 +1,7 @@
 import './bootstrap';
 import './shell';
 import './editor/index';
-import _ from 'lodash';
 import { initOfflineSupport } from './offline';
-
-window._ = _;
 
 // Register service worker + global online/offline state
 initOfflineSupport(

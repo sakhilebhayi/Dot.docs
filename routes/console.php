@@ -66,3 +66,8 @@ Schedule::call(function () {
     DB::table('notifications')->whereNotNull('read_at')->where('created_at', '<', now()->subDays(90))->delete();
     DB::table('notifications')->where('created_at', '<', now()->subDays(180))->delete();
 })->dailyAt('03:30')->name('prune-bell-notifications')->onOneServer();
+
+// EA-5 / P-12: a tab's presence row is swept when that document is polled
+// again; a document nobody reopens kept its rows for ever.
+Schedule::call(fn () => DB::table('document_presences')->where('last_seen_at', '<', now()->subDay())->delete())
+    ->dailyAt('03:40')->name('prune-stale-presences')->onOneServer();

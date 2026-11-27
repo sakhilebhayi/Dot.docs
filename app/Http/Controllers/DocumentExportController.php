@@ -68,7 +68,7 @@ class DocumentExportController extends Controller
         app(AuditLogger::class)->record('document.exported', $document, ['format' => $format]);
 
         // Fire on_export webhooks (best-effort, after response is built)
-        app(WebhookService::class)->fire($document, 'on_export', ['format' => $format]);
+        app(WebhookService::class)->queue($document, 'on_export', ['format' => $format]);
 
         return $response;
     }
@@ -154,7 +154,7 @@ class DocumentExportController extends Controller
         $files->createFile($parent, $safeTitle.'.'.$extension, $contents, $mime, auth()->user());
 
         app(AuditLogger::class)->record('document.exported', $document, ['format' => $format, 'to' => 'files']);
-        app(WebhookService::class)->fire($document, 'on_export', ['format' => $format]);
+        app(WebhookService::class)->queue($document, 'on_export', ['format' => $format]);
 
         return back()->with('status', 'Saved to Dot.Files.');
     }

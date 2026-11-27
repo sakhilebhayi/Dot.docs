@@ -34,8 +34,10 @@ class Editor extends Component
 
     public string $title = '';
 
-    /** Current document content as Dot.Doc JSON (see App\Documents\Schema\DocumentSchema) */
-    public array $contentJson = [];
+    // The document's JSON is NOT a public property any more (EA-5 / P-03): as
+    // one it rode in the Livewire snapshot both ways on every request - about
+    // the document's size, twice, every 1.5 s per typing tab. render() hands
+    // it to the view, which only needs it to mount the editor.
 
     public bool $saved = false;
 
@@ -59,7 +61,6 @@ class Editor extends Component
         $this->authorize('view', $this->document);
 
         $this->title = $this->document->title;
-        $this->contentJson = app(DocumentStore::class)->json($this->document);
 
         // The browser registers this tab's presence with its first sync poll
         // (it owns the tab id). Until then, show whoever is already here plus
@@ -107,6 +108,11 @@ class Editor extends Component
     {
         $this->authorize('update', $this->document);
 
+        // `saved` is false from page load and after a refused save: this
+        // save must then render, so the success replaces whatever the strip
+        // says (see skipRender below). A validation error is not carried to
+        // the next request, so the error bag cannot tell; this flag can.
+        $mustRender = ! $this->saved;
         $this->resetErrorBag('content');
 
         if ($baseVersion === null) {
@@ -143,7 +149,6 @@ class Editor extends Component
 
             return ['ok' => false, 'conflict' => false, 'version' => $this->document->version];
         }
-        $this->contentJson = $this->document->content_json;
         $this->saved = true;
 
         try {
@@ -155,7 +160,47 @@ class Editor extends Component
             report($e);
         }
 
+        // A successful save changes nothing the server draws: the editor and
+        // its status line are the browser's (wire:ignore), so the ~140 KB
+        // re-render of the page went back to the browser for nothing, every
+        // 1.5 s (EA-5 / P-03). A refused save still renders, for its error,
+        // and so does the first good save after one, to take the error away.
+        if (! $mustRender && $this->isTheOnlyCallInThisRequest()) {
+            $this->skipRender();
+        }
+
         return ['ok' => true, 'conflict' => false, 'version' => $this->document->version];
+    }
+
+    /**
+     * Livewire sends every call made while this component's request is in
+     * flight as ONE commit, and skipRender() covers the whole commit: a
+     * presence refresh, a sidebar toggle or a style error queued behind a slow
+     * save would never be drawn. So a save skips the render only when it is
+     * the commit's sole call and no property changed with it. Outside an HTTP
+     * request (tests call one method at a time) there is nothing to share.
+     */
+    private function isTheOnlyCallInThisRequest(): bool
+    {
+        return self::soleCallIn(request()->input('components'), $this->getId());
+    }
+
+    /** Whether component $id's part of a Livewire update request is one call and no property change. */
+    public static function soleCallIn(mixed $components, string $id): bool
+    {
+        if (! is_array($components)) {
+            return true;
+        }
+
+        foreach ($components as $component) {
+            $snapshot = json_decode((string) ($component['snapshot'] ?? ''), true);
+
+            if (is_array($snapshot) && ($snapshot['memo']['id'] ?? null) === $id) {
+                return count($component['calls'] ?? []) === 1 && ($component['updates'] ?? []) === [];
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -243,15 +288,13 @@ class Editor extends Component
             'label' => 'Accepted suggestion',
             'keepReplacedAs' => 'Before accepted suggestion',
         ]);
-        $this->contentJson = $this->document->content_json;
-
         $suggestion->update(['accepted_at' => now()]);
         $this->loadPendingSuggestions();
         $this->saved = true;
 
         // `version` so the page can move its base up: this save came from
         // the page itself, and its next autosave must not be refused as stale.
-        $this->dispatch('suggestion-accepted', content: $this->contentJson, version: $this->document->version);
+        $this->dispatch('suggestion-accepted', content: $this->document->content_json, version: $this->document->version);
     }
 
     public function rejectSuggestion(int $suggestionId): void
@@ -297,7 +340,6 @@ class Editor extends Component
         }
 
         $this->document = app(DocumentStore::class)->restyle($this->document, $key);
-        $this->contentJson = $this->document->content_json;
 
         $this->dispatch('style-changed', css: $engine->css($engine->resolve($this->document), 'canvas'), version: $this->document->version);
     }
@@ -455,6 +497,8 @@ class Editor extends Component
 
         return view('livewire.documents.editor', [
             'styleCss' => $styleCss,
+            // Read for the page, never carried in the snapshot (see the class top).
+            'contentJson' => app(DocumentStore::class)->json($this->document),
             // Seeds window.DotDoc.setOutline() at mount. Without it every page
             // load paints its headings unnumbered until the first outline()
             // round trip answers - the TOC and cross-references hide the gap

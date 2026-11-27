@@ -25,7 +25,9 @@ class EditorMountTest extends TestCase
             ->assertOk()
             ->assertSee('id="doc-style"', false)
             ->assertSee('DotDoc.mount', false)
-            ->assertSee('&quot;type&quot;:&quot;doc&quot;', false);
+            // The JSON reaches DotDoc.mount() through @js (EA-5 / P-03: it is
+            // no longer in the Livewire snapshot as well).
+            ->assertSee('\u0022type\u0022:\u0022doc\u0022', false);
     }
 
     public function test_editor_page_seeds_the_outline_so_headings_render_numbered_before_the_first_save(): void

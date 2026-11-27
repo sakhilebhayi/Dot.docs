@@ -280,6 +280,10 @@ class Index extends Component
         $searching = $search->isSearchable($this->search);
 
         return Document::query()
+            // The columns a row shows, not the whole document: `select *`
+            // read every listed document's HTML, JSON and search text just to
+            // print a title and a date (EA-5 / P-08).
+            ->select(['id', 'uuid', 'title', 'owner_id', 'team_id', 'version', 'is_public', 'infodot_reference', 'created_at', 'updated_at'])
             ->where(function ($q) use ($user) {
                 $q->where('owner_id', $user->id)
                     ->orWhereHas('collaborators', fn ($q) => $q->where('user_id', $user->id));
@@ -311,7 +315,8 @@ class Index extends Component
                 ! $searching && ! $this->tagId && $this->currentNode() !== null,
                 fn ($q) => $q->whereHas('node', fn ($q) => $q->where('parent_id', $this->currentNode()->id)),
             )
-            ->latest()
+            // Newest EDIT first: the rows say "Edited …" (EA-5 / P-08).
+            ->latest('updated_at')
             ->paginate($this->perPage);
     }
 

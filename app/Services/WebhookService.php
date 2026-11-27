@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Jobs\CoalescedSaveWebhooks;
+use App\Jobs\DeliverDocumentWebhooks;
 use App\Models\Document;
 use App\Models\DocumentWebhook;
 use App\Support\SsrfGuard;
@@ -11,7 +13,33 @@ use Illuminate\Support\Facades\Log;
 class WebhookService
 {
     /**
-     * Fire all active webhooks for a document and event type.
+     * Queue the document's webhooks for this event, if it has any active
+     * ones (EA-5 / P-06). Callers on a request path use this, never fire():
+     * a document without webhooks queues nothing, so an autosave adds no row.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function queue(Document $document, string $event, array $payload = []): void
+    {
+        $active = DocumentWebhook::where('document_id', $document->id)->where('status', 'active')->exists();
+
+        if (! $active) {
+            return;
+        }
+
+        if ($event === 'on_save') {
+            CoalescedSaveWebhooks::dispatch($document->id, $event, $payload)
+                ->delay(now()->addSeconds(DeliverDocumentWebhooks::SAVE_DELAY_SECONDS));
+
+            return;
+        }
+
+        DeliverDocumentWebhooks::dispatch($document->id, $event, $payload);
+    }
+
+    /**
+     * Fire all active webhooks for a document and event type, now. Runs in
+     * the queue worker (DeliverDocumentWebhooks); request code calls queue().
      *
      * @param  string  $event  'on_save' | 'on_export'
      * @param  array  $payload  Extra data merged into the body

@@ -28,10 +28,11 @@ class EditorStyleRootTest extends TestCase
         $html = $this->actingAs($user)->get(route('documents.edit', $doc->uuid))->getContent();
 
         // The Editor component's own snapshot is identifiable by its
-        // contentJson property — the other Livewire components rendered on
-        // this page (nav, notifications, the AI sidebars) carry unrelated
-        // snapshots that don't have it.
-        $pos = strpos($html, '&quot;contentJson&quot;');
+        // commentSidebarOpen property — the other Livewire components rendered
+        // on this page (nav, notifications, the AI sidebars) carry unrelated
+        // snapshots that don't have it. (It used to be contentJson, which
+        // left the snapshot in EA-5 / P-03.)
+        $pos = strpos($html, '&quot;commentSidebarOpen&quot;');
         $this->assertNotFalse($pos, 'expected to find the Editor component snapshot in the page');
 
         $tagStart = strrpos(substr($html, 0, $pos), '<');
