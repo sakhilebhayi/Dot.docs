@@ -3,6 +3,8 @@
 namespace App\Notifications\Account;
 
 use App\Models\Document;
+use App\Models\DocumentCollaborator;
+use App\Models\User;
 use App\Support\MailText;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Support\HtmlString;
@@ -17,12 +19,22 @@ class DocumentSharedWithYou extends AccountMail
         public readonly bool $roleChanged = false,
     ) {}
 
-    /** A document binned before the worker ran gets no email (SerializesModels restores trashed rows). */
+    /**
+     * Checked when the worker runs, not when the share was made: a document binned before then gets no email
+     * (SerializesModels restores trashed rows), nor does a person whose access was removed or changed again since.
+     * A later change sends its own email.
+     */
     public function shouldSend(object $notifiable, string $channel): bool
     {
         $current = $this->document->fresh();
 
-        return $current !== null && ! $current->trashed();
+        if ($current === null || $current->trashed() || ! $notifiable instanceof User) {
+            return false;
+        }
+
+        return DocumentCollaborator::where('document_id', $current->id)
+            ->where('user_id', $notifiable->id)
+            ->value('role') === $this->role;
     }
 
     public function toMail(object $notifiable): MailMessage
