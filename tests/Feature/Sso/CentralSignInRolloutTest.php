@@ -77,6 +77,23 @@ class CentralSignInRolloutTest extends TestCase
         $this->post('/login', ['email' => 'a@b.test', 'password' => 'x'])->assertRedirect(route('dotsso.login'));
     }
 
+    /** R2-8: while SSO is on, no kind of request to a local sign-in page signs anyone in or creates an account. */
+    public function test_every_kind_of_request_to_a_local_sign_in_page_is_refused_while_sso_is_on(): void
+    {
+        $this->on();
+        $user = User::factory()->create(['email' => 'local@example.test', 'password' => Hash::make('a-local-password-1')]);
+        $credentials = ['email' => $user->email, 'password' => 'a-local-password-1'];
+        $signup = ['name' => 'X', 'email' => 'new@example.test', 'password' => 'a-local-password-1', 'password_confirmation' => 'a-local-password-1'];
+
+        foreach (['/login' => $credentials, '/register' => $signup, '/forgot-password' => ['email' => $user->email]] as $path => $body) {
+            foreach ([[], ['Accept' => 'application/json'], ['Authorization' => 'Bearer x'], ['X-Requested-With' => 'XMLHttpRequest']] as $headers) {
+                $this->withHeaders($headers)->post($path, $body)->assertRedirect(route('dotsso.login'));
+                $this->assertGuest();
+            }
+        }
+        $this->assertSame(1, User::count());
+    }
+
     public function test_the_signed_out_pages_link_straight_to_the_central_sign_in(): void
     {
         $this->on();
