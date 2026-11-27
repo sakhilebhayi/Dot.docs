@@ -33,9 +33,7 @@
                             <textarea id="access-message" name="message" rows="3" maxlength="500" class="field"
                                       placeholder="Who you are and why you need it"
                                       @error('message') aria-invalid="true" aria-describedby="access-message-error" @enderror>{{ old('message') }}</textarea>
-                            @error('message')
-                                <p class="field-error" id="access-message-error" role="alert">{{ $message }}</p>
-                            @enderror
+                            <p class="field-error" id="access-message-error" role="alert">@error('message'){{ $message }}@enderror</p>
                             <p class="field-hint">They see your name and email address with it.</p>
                         </div>
                         <div class="toolbar">

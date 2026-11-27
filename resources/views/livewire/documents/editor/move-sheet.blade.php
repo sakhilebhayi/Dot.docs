@@ -11,9 +11,7 @@
                 <h2 class="h-panel" id="doc-move-title">File this document in</h2>
             </div>
             <div class="sheet-body">
-                @error('location')
-                    <p class="field-error" role="alert">{{ $message }}</p>
-                @enderror
+                <p class="field-error" role="alert">@error('location'){{ $message }}@enderror</p>
                 <ul class="list">
                     @foreach ($this->folderChoices as $choice)
                         <li wire:key="move-{{ $choice['uuid'] }}">

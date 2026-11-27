@@ -10,8 +10,10 @@
     </p>
 
     {{-- Failures of approve / reject / toggle used to go to a `notify` event nothing listened to (EA-4 / F-08). --}}
+    {{-- The alert is always in the page and only its words change (R2-12); the note is what the eye reads. --}}
+    <p class="sr-only" role="alert">@error('webhook'){{ $message }}@enderror</p>
     @error('webhook')
-        <p class="note note-danger" role="alert">
+        <p class="note note-danger" aria-hidden="true">
             <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
             {{ $message }}
         </p>
@@ -111,9 +113,7 @@
             <label class="field-label" for="hook-url">Endpoint URL</label>
             <input id="hook-url" wire:model="newUrl" type="url" class="field field-mono"
                    placeholder="https://example.com/webhook" @error('newUrl') aria-invalid="true" aria-describedby="hook-url-error" @enderror />
-            @error('newUrl')
-                <p class="field-error" id="hook-url-error" role="alert">{{ $message }}</p>
-            @enderror
+            <p class="field-error" id="hook-url-error" role="alert">@error('newUrl'){{ $message }}@enderror</p>
         </div>
 
         <div class="field-row">

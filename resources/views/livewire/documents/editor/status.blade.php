@@ -23,13 +23,17 @@
          rendered by the server, so the morph can skip it
          (.ai/rules/livewire.md). --}}
     {{-- EA-8 (A-05): a real button, so the keyboard can dismiss it too. --}}
+    {{-- The alert is its own element, always in the page (wire:ignore, so the morph leaves its x-text alone), and
+         only its text changes: the button around the visible sentence is shown and hidden, and an alert inside it
+         arrived together with its words, which screen readers do not reliably announce (R2-12). --}}
     <button type="button" class="status-word status-word-danger u-bare-button" wire:ignore x-show="aiError" x-cloak
             @click="aiError = ''" title="Dismiss"
            >
         <span class="status-word-dot" aria-hidden="true"></span>
-        <span role="alert" x-text="aiError"></span>
+        <span x-text="aiError"></span>
         <span class="sr-only">(dismiss)</span>
     </button>
+    <span class="sr-only" role="alert" wire:ignore x-text="aiError" data-ai-error-said></span>
 
     {{-- A newer version was saved elsewhere while this tab held
          unsaved typing, and saving is suspended until the writer
@@ -51,12 +55,16 @@
         @endunless
     </span>
 
+    {{-- Said when it appears (R2-6 / A-03): a save that failed must not be silent to a screen reader. The region is
+         rendered on every render and only its words come and go (R2-12), so the change is announced, and a refusal
+         that repeats on the next autosave with the same words is not said again. Polite, like the top bar's save
+         word: it is an autosave outcome, not an interruption. sr-only (out of the strip's flex row), and the word
+         the eye reads beside it is hidden from screen readers, so the reason is read once. The top bar says Not saved;
+         this says why. --}}
+    <span class="sr-only" role="status" data-content-error>@error('content')The last save was refused: {{ $message }}@enderror</span>
     @error('content')
-        {{-- Announced when it appears (R2-6 / A-03): a save that failed must not be silent to a screen reader. --}}
-        <span role="alert">
-            <x-shell.status-word tone="danger" :title="$message"
-                                 :word="'Not saved — '.\Illuminate\Support\Str::limit($message, 60)" />
-        </span>
+        <x-shell.status-word tone="danger" :title="$message" aria-hidden="true"
+                             :word="'Not saved — '.\Illuminate\Support\Str::limit($message, 60)" />
     @enderror
 
     {{-- The x-show sits on a wrapper that is rendered the same on

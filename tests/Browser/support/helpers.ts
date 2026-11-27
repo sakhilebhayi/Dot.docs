@@ -39,7 +39,9 @@ export async function waitSaved(page: Page): Promise<void> {
 }
 
 /**
- * axe on the current page. Fails on SERIOUS and CRITICAL violations (EA-8; EA-7 failed on critical only).
+ * axe on the current page. Fails on MODERATE, SERIOUS and CRITICAL violations (R2-12; EA-8 failed on serious and
+ * critical, EA-7 on critical only). Only `minor` is let through, and nothing is reported as minor that a reader
+ * would trip over: the moderate rules are the landmark, heading-order and region rules the R2-11 audit found passing.
  *
  * Waits for entrance animations first: axe reads colours with the ancestors' opacity, so a page caught mid
  * fade-in reports text paler than it is.
@@ -51,9 +53,9 @@ export async function waitSaved(page: Page): Promise<void> {
  */
 export async function expectNoSeriousA11y(page: Page, label: string): Promise<void> {
     await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, { timeout: 5_000 }).catch(() => {});
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice']).analyze();
     const failing = results.violations
-        .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+        .filter((v) => v.impact === 'moderate' || v.impact === 'serious' || v.impact === 'critical')
         .map((v) => ({
             ...v,
             nodes: v.nodes.filter((n) => !(v.id === 'label-content-name-mismatch' && n.target.join(' ').includes('.dh-account__btn'))),
@@ -61,9 +63,9 @@ export async function expectNoSeriousA11y(page: Page, label: string): Promise<vo
         .filter((v) => v.nodes.length > 0);
     expect(
         failing.map((v) => `${v.id}: ${v.help} -> ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`),
-        `${label}: serious or critical axe violations`,
+        `${label}: moderate, serious or critical axe violations`,
     ).toEqual([]);
 }
 
-/** @deprecated EA-7 name; same check, now serious and above. */
+/** @deprecated EA-7 name; same check, now moderate and above. */
 export const expectNoCriticalA11y = expectNoSeriousA11y;

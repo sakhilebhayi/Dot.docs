@@ -1,8 +1,14 @@
 <div>
     {{-- Toolbar actions arrive as the ai-action event (handleAction); this is their progress (EA-4 / U-01). --}}
-    <p class="note ai-toast" role="status" wire:loading.flex wire:target="handleAction">
+    {{-- The toast is what the eye sees and comes and goes with the request; the status region beside it is always in
+         the page and only its words change, so a screen reader hears them (R2-12: a region that is added together
+         with its text is often not announced). --}}
+    <p class="note ai-toast" aria-hidden="true" wire:loading.flex wire:target="handleAction">
         <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
         The assistant is working…
+    </p>
+    <p class="sr-only" role="status" data-assistant-action-status>
+        <span wire:loading wire:target="handleAction">The assistant is working…</span>
     </p>
 
     {{-- Command palette --}}
@@ -20,9 +26,14 @@
                            placeholder="/summarize, /grammar, /tone formal, /translate French" />
                     {{-- wire:loading, not $loading: the flag was set and cleared inside one
                          request, so the browser never saw it (EA-4 / U-01). --}}
-                    <span class="toolbar" aria-live="polite" wire:loading.flex wire:target="runCommand">
+                    {{-- Visual only; the words are said by the status region under it, which is in the palette for as
+                         long as the palette is open (R2-12). --}}
+                    <span class="toolbar" aria-hidden="true" wire:loading.flex wire:target="runCommand">
                         <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
                         <span class="micro">Working</span>
+                    </span>
+                    <span class="sr-only" role="status" data-assistant-command-status>
+                        <span wire:loading wire:target="runCommand">Working</span>
                     </span>
                     <button type="button" class="btn btn-primary" wire:click="runCommand" wire:loading.remove wire:target="runCommand">Run</button>
                 </div>

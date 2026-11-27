@@ -25,9 +25,7 @@
                                    placeholder="bullet-list" @error('name') aria-invalid="true" aria-describedby="cmd-name-error" @enderror />
                         </div>
                         <p class="field-hint">No spaces — this is what you type after the slash.</p>
-                        @error('name')
-                            <p class="field-error" id="cmd-name-error" role="alert">{{ $message }}</p>
-                        @enderror
+                        <p class="field-error" id="cmd-name-error" role="alert">@error('name'){{ $message }}@enderror</p>
                     </div>
 
                     <div class="field-row u-mt-0">
@@ -35,9 +33,7 @@
                         <input id="cmd-desc" wire:model="description" type="text" class="field"
                                placeholder="What it does, in a few words" @error('description') aria-invalid="true" aria-describedby="cmd-desc-error" @enderror />
                         <p class="field-hint">Shown beside the command in the palette.</p>
-                        @error('description')
-                            <p class="field-error" id="cmd-desc-error" role="alert">{{ $message }}</p>
-                        @enderror
+                        <p class="field-error" id="cmd-desc-error" role="alert">@error('description'){{ $message }}@enderror</p>
                     </div>
                 </div>
 
@@ -46,9 +42,7 @@
                     <textarea id="cmd-prompt" wire:model="promptTemplate" rows="5" class="field field-mono"
                               placeholder="Rewrite the following as a numbered list, keeping each point short:&#10;&#10;{content}" @error('promptTemplate') aria-invalid="true" aria-describedby="cmd-prompt-error" @enderror></textarea>
                     <p class="field-hint">Use <code class="micro">{content}</code> to drop the document's text into the prompt.</p>
-                    @error('promptTemplate')
-                        <p class="field-error" id="cmd-prompt-error" role="alert">{{ $message }}</p>
-                    @enderror
+                    <p class="field-error" id="cmd-prompt-error" role="alert">@error('promptTemplate'){{ $message }}@enderror</p>
                 </div>
 
                 @if (auth()->user()->currentTeam)

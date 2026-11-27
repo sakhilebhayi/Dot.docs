@@ -81,11 +81,8 @@
             <div class="panel-head">
                 <h2 class="section-title" id="doc-folders">Folders</h2>
             </div>
-            @error('folder')
-                <div class="panel-body">
-                    <p class="field-error" role="alert">{{ $message }}</p>
-                </div>
-            @enderror
+            {{-- Always in the page, only its words change, so the refusal is announced (R2-12). --}}
+            <p class="field-error panel-body-error" role="alert">@error('folder'){{ $message }}@enderror</p>
             <ul class="list">
                 @foreach ($this->subfolders as $folder)
                     <li class="list-row">
@@ -251,9 +248,7 @@
                             <label class="field-label" for="new-doc-name">Title</label>
                             <input id="new-doc-name" wire:model="newDocumentName" type="text" class="field" autofocus
                                    placeholder="What is it about?" @error('newDocumentName') aria-invalid="true" aria-describedby="new-doc-name-error" @enderror />
-                            @error('newDocumentName')
-                                <p class="field-error" id="new-doc-name-error" role="alert">{{ $message }}</p>
-                            @enderror
+                            <p class="field-error" id="new-doc-name-error" role="alert">@error('newDocumentName'){{ $message }}@enderror</p>
                         </div>
 
                         <div class="field-row">
@@ -264,9 +259,7 @@
                                     <option value="{{ $template->id }}">{{ $template->name }}</option>
                                 @endforeach
                             </select>
-                            @error('newDocumentTemplateId')
-                                <p class="field-error" id="new-doc-template-error" role="alert">{{ $message }}</p>
-                            @enderror
+                            <p class="field-error" id="new-doc-template-error" role="alert">@error('newDocumentTemplateId'){{ $message }}@enderror</p>
                         </div>
 
                         {{-- The location field is a component of its own so a
@@ -298,9 +291,7 @@
                         <div class="field-row">
                             <label class="field-label" for="rename-folder-name">Folder name</label>
                             <input id="rename-folder-name" wire:model="renameFolderName" type="text" class="field" autofocus @error('renameFolderName') aria-invalid="true" aria-describedby="rename-folder-name-error" @enderror />
-                            @error('renameFolderName')
-                                <p class="field-error" id="rename-folder-name-error" role="alert">{{ $message }}</p>
-                            @enderror
+                            <p class="field-error" id="rename-folder-name-error" role="alert">@error('renameFolderName'){{ $message }}@enderror</p>
                         </div>
                     </div>
                     <div class="sheet-foot">
@@ -326,9 +317,7 @@
                             <label class="field-label" for="new-folder-name">Folder name</label>
                             <input id="new-folder-name" wire:model="newFolderName" type="text" class="field" autofocus
                                    placeholder="What goes in it?" @error('newFolderName') aria-invalid="true" aria-describedby="new-folder-name-error" @enderror />
-                            @error('newFolderName')
-                                <p class="field-error" id="new-folder-name-error" role="alert">{{ $message }}</p>
-                            @enderror
+                            <p class="field-error" id="new-folder-name-error" role="alert">@error('newFolderName'){{ $message }}@enderror</p>
                         </div>
                     </div>
                     <div class="sheet-foot">

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isRailShortcut, nextPanelState, openingPanelState, panelStateAtWidth, saveAnnouncement, shortcutText, themeChoiceIn, watchOverlayBreakpoints } from '../../resources/js/shell.js';
+import { createSaveAnnouncer, isRailShortcut, nextPanelState, openingPanelState, panelStateAtWidth, saveAnnouncement, shortcutText, themeChoiceIn, watchOverlayBreakpoints } from '../../resources/js/shell.js';
 
 /*
  * The theme toggle's label has to match what is ON SCREEN. With no `theme`
@@ -225,4 +225,65 @@ test('a second autosave that ends Saved again is not announced again', () => {
         }
     }
     assert.deepEqual(said, ['Saved', 'Not saved']);
+});
+
+// R2-12: autosave is quiet. A fake clock stands in for setTimeout.
+function fakeClock() {
+    let now = 0;
+    let next = 1;
+    const timers = new Map();
+    return {
+        setTimer(fn, ms) { const id = next++; timers.set(id, { at: now + ms, fn }); return id; },
+        clearTimer(id) { timers.delete(id); },
+        advance(ms) {
+            now += ms;
+            for (const [id, t] of [...timers].sort((a, b) => a[1].at - b[1].at)) {
+                if (t.at <= now && timers.has(id)) { timers.delete(id); t.fn(); }
+            }
+        },
+    };
+}
+
+test('a settled save outcome is said once, after it has stood for a moment', () => {
+    const clock = fakeClock();
+    const said = [];
+    const announcer = createSaveAnnouncer((t) => said.push(t), { initial: 'Ready', settleMs: 1500, ...clock });
+    for (const word of ['Editing', 'Saving', 'Saved']) announcer.report(word);
+    assert.deepEqual(said, [], 'nothing is said before the outcome has settled');
+    clock.advance(1500);
+    assert.deepEqual(said, ['Saved']);
+    // Every later keystroke and autosave that ends Saved again says nothing.
+    for (let i = 0; i < 5; i++) {
+        for (const word of ['Editing', 'Saving', 'Saved']) announcer.report(word);
+        clock.advance(2000);
+    }
+    assert.deepEqual(said, ['Saved']);
+});
+
+test('a save that fails and succeeds on the next pause is not announced at all', () => {
+    const clock = fakeClock();
+    const said = [];
+    const announcer = createSaveAnnouncer((t) => said.push(t), { initial: 'Saved', settleMs: 1500, ...clock });
+    announcer.report('Not saved');
+    clock.advance(800);
+    announcer.report('Saving');
+    announcer.report('Saved');
+    clock.advance(5000);
+    assert.deepEqual(said, []);
+    // A failure that stands is said, once, however many autosaves repeat it.
+    announcer.report('Not saved');
+    clock.advance(1500);
+    announcer.report('Saving');
+    announcer.report('Not saved');
+    clock.advance(1500);
+    assert.deepEqual(said, ['Not saved']);
+});
+
+test('the word the server rendered is not said again', () => {
+    const clock = fakeClock();
+    const said = [];
+    const announcer = createSaveAnnouncer((t) => said.push(t), { initial: 'Read only', settleMs: 10, ...clock });
+    announcer.report('Read only');
+    clock.advance(100);
+    assert.deepEqual(said, []);
 });
