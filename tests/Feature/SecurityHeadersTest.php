@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
@@ -9,6 +11,8 @@ use Tests\TestCase;
 /** Baseline browser protections are on every response, a route's own stricter header is kept, and the report-only policy reports to /csp-report. */
 class SecurityHeadersTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_every_response_carries_the_baseline_headers(): void
     {
         $response = $this->get('/');
@@ -91,6 +95,22 @@ class SecurityHeadersTest extends TestCase
         $this->assertMatchesRegularExpression('/img-src [^;]*https:\/\/ui-avatars\.com/', $policy, "Jetstream's default avatar");
         // R2-9: same-origin only while realtime is off and no Vite dev server runs - never any https: host.
         $this->assertMatchesRegularExpression("/connect-src 'self';/", $policy);
+    }
+
+    /** R2-9: the page starts realtime only where the server runs it, the same condition that opens connect-src. */
+    public function test_realtime_is_off_on_the_page_and_in_the_policy_unless_reverb_is_configured(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        config(['broadcasting.default' => 'null']);
+        $off = $this->actingAs($user)->get('/documents');
+        $off->assertSee('<meta name="dot-realtime" content="off">', false);
+        $this->assertStringContainsString("connect-src 'self';", (string) $off->headers->get('Content-Security-Policy'));
+
+        config(['broadcasting.default' => 'reverb', 'broadcasting.connections.reverb.options.host' => 'ws.example.test',
+            'broadcasting.connections.reverb.options.port' => 443, 'broadcasting.connections.reverb.options.scheme' => 'https']);
+        $on = $this->actingAs($user)->get('/documents');
+        $on->assertSee('<meta name="dot-realtime" content="on">', false);
+        $this->assertStringContainsString("connect-src 'self' wss://ws.example.test:443;", (string) $on->headers->get('Content-Security-Policy'));
     }
 
     /** No view may use an inline event handler: the enforced policy refuses them. */
