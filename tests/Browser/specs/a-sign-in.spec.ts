@@ -10,7 +10,9 @@ test('an owner signs in through the form and lands on the dashboard', async ({ p
 test('a wrong password is refused with a message', async ({ page }) => {
     await signInThroughTheForm(page, users.colleague, 'not-the-password');
     await expect(page).toHaveURL(/login/);
-    await expect(page.getByText(/credentials|do not match/i)).toBeVisible();
+    // R2-12: said in the summary (which has the focus) and under the field it is about.
+    await expect(page.getByRole('alert')).toContainText(/credentials|do not match/i);
+    await expect(page.locator('#email-error')).toHaveText(/credentials|do not match/i);
 });
 
 test('the dashboard lists the seeded document and has no critical accessibility violations', async ({ browser }) => {

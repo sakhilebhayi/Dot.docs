@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Receives Content-Security-Policy violation reports while the policy is report-only, so an enforcing policy can be designed from what the
- * pages really load instead of guessed. It keeps almost nothing: the directive and the blocked HOST (never the full address, which can carry
+ * Receives Content-Security-Policy violation reports. The policy is enforced (SecurityHeaders); a report says what a page tried to load and
+ * was refused, so a page broken by the policy shows up here. It keeps almost nothing: the directive and the blocked HOST (never the full address, which can carry
  * tokens in its query), logged at most once per pair per day. The body is size-limited and never echoed, and the answer is always 204.
  */
 class CspReportController extends Controller

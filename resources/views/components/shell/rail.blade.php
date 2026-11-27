@@ -99,9 +99,11 @@
 
             @if ($isEditor)
                 {{-- Built from the headings already on the paper by shell.js;
-                     it reads the DOM and never touches the editor bundle. --}}
+                     it reads the DOM and never touches the editor bundle. Not a
+                     live region (R2-12): it changed on every pause while a
+                     heading was typed, and re-read itself each time. --}}
                 <div class="rail-label rail-label-sub">Outline</div>
-                <ol class="rail-outline" data-shell-outline aria-live="polite" aria-busy="false">
+                <ol class="rail-outline" data-shell-outline aria-label="Outline">
                     <li class="rail-outline-empty">Headings appear here as you write them.</li>
                 </ol>
             @endif

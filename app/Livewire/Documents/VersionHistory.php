@@ -10,6 +10,7 @@ use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Jfcherng\Diff\DiffHelper;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -31,7 +32,8 @@ class VersionHistory extends Component
      */
     public array $compareIds = [];
 
-    /** Rendered diff HTML */
+    /** Rendered diff HTML, printed unescaped by the view: only the server sets it. */
+    #[Locked]
     public string $diffHtml = '';
 
     public bool $showDiff = false;

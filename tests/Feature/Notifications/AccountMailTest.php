@@ -186,19 +186,39 @@ class AccountMailTest extends TestCase
 
         Livewire::actingAs($editor)->test(ShareManager::class, ['uuid' => $doc->uuid])
             ->set('inviteEmail', $friend->email)->set('inviteRole', 'editor')->call('invite')
-            ->assertSet('inviteNotice', 'Shared. They have been told by email.')
-            ->assertSee('Shared. They have been told by email.');
+            ->assertSet('inviteNotice', ShareManager::SHARED_NOTICE)
+            ->assertSee('they can open it now and have been told by email.');
     }
 
     public function test_no_share_email_for_a_document_binned_before_the_worker_ran(): void
     {
         $owner = User::factory()->withPersonalTeam()->create();
+        $reader = User::factory()->create();
         $doc = app(DocumentStore::class)->create($owner, 'Binned');
+        DocumentCollaborator::create(['document_id' => $doc->id, 'user_id' => $reader->id, 'role' => 'viewer']);
         $mail = new DocumentSharedWithYou($doc, 'viewer', 'Someone');
 
-        $this->assertTrue($mail->shouldSend($owner, 'mail'));
+        $this->assertTrue($mail->shouldSend($reader, 'mail'));
         $doc->delete();
-        $this->assertFalse($mail->shouldSend($owner, 'mail'));
+        $this->assertFalse($mail->shouldSend($reader, 'mail'));
+    }
+
+    public function test_no_share_email_once_the_access_was_removed_or_changed_before_the_worker_ran(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $reader = User::factory()->create();
+        $doc = app(DocumentStore::class)->create($owner, 'Changed mind');
+        $row = DocumentCollaborator::create(['document_id' => $doc->id, 'user_id' => $reader->id, 'role' => 'editor']);
+        $mail = new DocumentSharedWithYou($doc, 'editor', 'Someone');
+
+        $this->assertTrue($mail->shouldSend($reader, 'mail'));
+
+        $row->update(['role' => 'viewer']);
+        $this->assertFalse($mail->shouldSend($reader, 'mail'), 'a later role change sends its own email');
+
+        $row->delete();
+        $this->assertFalse($mail->shouldSend($reader, 'mail'));
+        $this->assertFalse($mail->shouldSend(new AnonymousNotifiable, 'mail'));
     }
 
     public function test_a_case_only_email_edit_is_not_a_change(): void

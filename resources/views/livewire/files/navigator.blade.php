@@ -66,9 +66,7 @@
                                @error('file', 'import') aria-invalid="true" aria-describedby="files-import-error" @enderror />
                         <button type="submit" class="btn">Import it</button>
                     </div>
-                    @error('file', 'import')
-                        <p class="field-error" id="files-import-error" role="alert">{{ $message }}</p>
-                    @enderror
+                    <p class="field-error" id="files-import-error" role="alert">@error('file', 'import'){{ $message }}@enderror</p>
                 </form>
             </div>
 
@@ -84,14 +82,10 @@
                     <input id="files-upload" type="file" name="file" class="field u-grow-wide" required @error('file') aria-invalid="true" aria-describedby="files-upload-error" @enderror />
                     <button type="submit" class="btn">Upload it</button>
                 </div>
-                @error('file')
-                    <p class="field-error" id="files-upload-error" role="alert">{{ $message }}</p>
-                @enderror
+                <p class="field-error" id="files-upload-error" role="alert">@error('file'){{ $message }}@enderror</p>
             </form>
 
-            @error('object')
-                <p class="field-error" role="alert">{{ $message }}</p>
-            @enderror
+            <p class="field-error" role="alert">@error('object'){{ $message }}@enderror</p>
         </div>
 
         @if ($this->rows->isEmpty())
@@ -164,9 +158,7 @@
                             <label class="field-label" for="files-new-doc">Title</label>
                             <input id="files-new-doc" wire:model="newTitle" type="text" class="field" autofocus
                                    placeholder="What is it about?" @error('newTitle') aria-invalid="true" aria-describedby="files-new-doc-error" @enderror />
-                            @error('newTitle')
-                                <p class="field-error" id="files-new-doc-error" role="alert">{{ $message }}</p>
-                            @enderror
+                            <p class="field-error" id="files-new-doc-error" role="alert">@error('newTitle'){{ $message }}@enderror</p>
                         </div>
                     </div>
                     <div class="sheet-foot">
@@ -192,9 +184,7 @@
                             <label class="field-label" for="files-new-folder">Folder name</label>
                             <input id="files-new-folder" wire:model="newFolderName" type="text" class="field" autofocus
                                    placeholder="What goes in it?" @error('newFolderName') aria-invalid="true" aria-describedby="files-new-folder-error" @enderror />
-                            @error('newFolderName')
-                                <p class="field-error" id="files-new-folder-error" role="alert">{{ $message }}</p>
-                            @enderror
+                            <p class="field-error" id="files-new-folder-error" role="alert">@error('newFolderName'){{ $message }}@enderror</p>
                         </div>
                     </div>
                     <div class="sheet-foot">
@@ -219,9 +209,7 @@
                         <div class="field-row">
                             <label class="field-label" for="files-rename">Name</label>
                             <input id="files-rename" wire:model="renameName" type="text" class="field" autofocus @error('renameName') aria-invalid="true" aria-describedby="files-rename-error" @enderror />
-                            @error('renameName')
-                                <p class="field-error" id="files-rename-error" role="alert">{{ $message }}</p>
-                            @enderror
+                            <p class="field-error" id="files-rename-error" role="alert">@error('renameName'){{ $message }}@enderror</p>
                         </div>
                     </div>
                     <div class="sheet-foot">
@@ -242,9 +230,7 @@
                     <h2 class="h-panel" id="files-move-title">Move it to</h2>
                 </div>
                 <div class="sheet-body">
-                    @error('object')
-                        <p class="field-error" role="alert">{{ $message }}</p>
-                    @enderror
+                    <p class="field-error" role="alert">@error('object'){{ $message }}@enderror</p>
                     <ul class="list">
                         @foreach ($this->folderChoices as $choice)
                             <li wire:key="dest-{{ $choice['uuid'] }}">

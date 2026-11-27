@@ -9,6 +9,7 @@ use App\Models\Document;
 use App\Models\DocumentVersion;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -41,6 +42,17 @@ class VersionHistoryTest extends TestCase
             ->assertSet('showDiff', true)
             ->assertSee('changed')
             ->assertDontSee('These two versions have no textual differences.');
+    }
+
+    public function test_the_rendered_difference_is_set_only_by_the_server(): void
+    {
+        $user = User::factory()->withPersonalTeam()->create();
+        $doc = app(DocumentStore::class)->create($user, 'Locked');
+
+        $this->expectException(CannotUpdateLockedPropertyException::class);
+
+        Livewire::actingAs($user)->test(VersionHistory::class, ['uuid' => $doc->uuid])
+            ->set('diffHtml', '<p>x</p>');
     }
 
     /**

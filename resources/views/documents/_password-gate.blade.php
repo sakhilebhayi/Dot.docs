@@ -46,9 +46,7 @@
                     <div class="field-row" style="margin-top:0">
                         <label class="field-label" for="password">Password</label>
                         <input id="password" type="password" name="password" class="field" autofocus required @error('password') aria-invalid="true" aria-describedby="password-error" @enderror />
-                        @error('password')
-                            <p class="field-error" id="password-error" role="alert">{{ $message }}</p>
-                        @enderror
+                        <p class="field-error" id="password-error" role="alert">@error('password'){{ $message }}@enderror</p>
                     </div>
                     <button type="submit" class="btn btn-primary">Open the document</button>
                 </form>

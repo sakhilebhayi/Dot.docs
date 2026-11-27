@@ -141,6 +141,12 @@ abstract class CommentEmailNotification extends Notification implements ShouldQu
             return false;
         }
 
+        // Moved to the Bin during the delay (SerializesModels restores trashed rows, so this is asked, not assumed).
+        $current = $this->document->fresh();
+        if ($current === null || $current->trashed()) {
+            return false;
+        }
+
         if ($this->alreadySeenInTheBell($notifiable)) {
             return false;
         }

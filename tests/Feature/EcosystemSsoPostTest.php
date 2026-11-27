@@ -71,6 +71,30 @@ class EcosystemSsoPostTest extends TestCase
         $this->assertSame(0, DB::table('personal_access_tokens')->count(), 'the token is single use');
     }
 
+    public function test_while_central_sign_in_is_on_the_older_hand_over_sends_the_person_to_it_and_signs_nobody_in(): void
+    {
+        config(['dotsso.enabled' => true, 'dotsso.allow_local_login' => false]);
+        $user = User::factory()->create();
+        $token = $this->token($user);
+
+        $response = $this->post('/auth/ecosystem', ['token' => $token, 'redirect' => '/documents'], $this->fromInfodot());
+
+        $response->assertStatus(303)->assertRedirect(route('dotsso.login'));
+        $response->assertSessionHas('url.intended', '/documents');
+        $this->assertGuest();
+        $this->assertSame(1, DB::table('personal_access_tokens')->count(), 'the token is not read');
+    }
+
+    public function test_while_central_sign_in_is_on_an_unsafe_target_is_not_remembered(): void
+    {
+        config(['dotsso.enabled' => true, 'dotsso.allow_local_login' => false]);
+
+        $this->post('/auth/ecosystem', ['token' => 'x', 'redirect' => '//elsewhere.example'], $this->fromInfodot())
+            ->assertRedirect(route('dotsso.login'))
+            ->assertSessionMissing('url.intended');
+        $this->assertGuest();
+    }
+
     public function test_a_post_from_another_site_is_refused_and_the_token_is_neither_spent_nor_echoed(): void
     {
         $user = User::factory()->create();

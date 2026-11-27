@@ -1,7 +1,7 @@
 <div class="shell-search">
     <x-dot.search wire="q" name="q" :action="route('documents.index')" label="Search documents"
                   placeholder="Search documents" :hint="$editor ? null : 'Ctrl K'" :hint-key="! $editor"
-                  results-nav escape-clears loading-text="Looking in documents..."
+                  results-nav escape-clears loading-text="Looking in documents..." :form-attributes="['aria-label' => 'Search documents']"
                   :root-attributes="['wire:ignore.self' => '', 'wire:loading.attr' => 'data-dsr-loading', 'wire:target' => 'q']">
         <x-slot:results>
             @if ($searching)

@@ -4,7 +4,9 @@ namespace App\Models;
 
 use App\Models\Files\Folder;
 use App\Models\Files\Obj;
+use App\Search\CompanyDocuments;
 use Database\Factories\DocumentFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -56,6 +58,40 @@ class Document extends Model
         'variables' => 'array',
         'health_checked_at' => 'datetime',
     ];
+
+    /**
+     * The documents a person sees when they list, search or filter by tag: the company they are standing in
+     * (App\Search\CompanyDocuments::visibleTo() - a document belongs to its team; one with no team only to its
+     * owner, and only while they stand in no company). ONE rule for the documents list, its tag filter and both
+     * searches (R2-12 / R2-11 code-quality finding); it starts with the company so SQLite reads one company's rows
+     * through the `team_id` index rather than every document on the platform.
+     *
+     * Documents another company shared with the person are not in it. They are listed only by sharedWith() - the
+     * "Shared with me" view - which is the one place a document from another company appears, and only one the
+     * person is a collaborator on (so DocumentPolicy::view() lets them open it).
+     *
+     * @param  Builder<Document>  $query
+     * @return Builder<Document>
+     */
+    public function scopeVisibleTo(Builder $query, User $user): Builder
+    {
+        return CompanyDocuments::visibleTo($query, $user);
+    }
+
+    /**
+     * Documents the person was added to as a collaborator, in any company: "Shared with me". Driven by the
+     * `document_collaborators.user_id` index, so it reads the person's own rows, never the documents table end to end.
+     *
+     * @param  Builder<Document>  $query
+     * @return Builder<Document>
+     */
+    public function scopeSharedWith(Builder $query, User $user): Builder
+    {
+        return $query->whereIn($query->qualifyColumn('id'), fn ($shared) => $shared
+            ->from('document_collaborators')
+            ->select('document_id')
+            ->where('user_id', $user->id));
+    }
 
     /** @return BelongsTo<User, $this> */
     public function owner(): BelongsTo

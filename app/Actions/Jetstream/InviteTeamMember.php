@@ -28,6 +28,9 @@ class InviteTeamMember implements InvitesTeamMembers
      */
     public const PER_HOUR = 20;
 
+    /** Invitations one team may send in an hour, whoever of its admins sends them. */
+    public const PER_TEAM_PER_HOUR = 60;
+
     /**
      * Invite a new team member to the given team.
      */
@@ -37,11 +40,14 @@ class InviteTeamMember implements InvitesTeamMembers
 
         $this->validate($team, $email, $role);
 
-        if (! RateLimiter::attempt('team-invite:'.$user->id, self::PER_HOUR, fn () => true, 3600)) {
+        if (RateLimiter::tooManyAttempts('team-invite-team:'.$team->id, self::PER_TEAM_PER_HOUR)
+            || ! RateLimiter::attempt('team-invite:'.$user->id, self::PER_HOUR, fn () => true, 3600)) {
             throw ValidationException::withMessages([
                 'email' => __('You have sent a lot of invitations in the last hour. Try again later.'),
             ])->errorBag('addTeamMember');
         }
+
+        RateLimiter::hit('team-invite-team:'.$team->id, 3600);
 
         InvitingTeamMember::dispatch($team, $email, $role);
 

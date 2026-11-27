@@ -20,16 +20,37 @@ class MailText
      * decodes entities when it builds the text/plain part - so both parts
      * show the plain words. (Backslash-escaping would fix the HTML part and
      * leave the backslashes visible in the plain-text one.)
+     *
+     * Bare domains are defanged too (see defang()).
      */
     public static function plain(string $text, ?int $limit = null): string
     {
-        $text = self::clean($text, $limit);
+        $text = self::defang(self::clean($text, $limit));
 
         return (string) preg_replace_callback(
             '/[^\p{L}\p{N} ]/u',
             fn (array $match) => '&#'.mb_ord($match[0]).';',
             $text,
         );
+    }
+
+    /**
+     * For a plain-text mail view, printed raw ({!! !!}): bounded, single-line and defanged. No escaping, because a
+     * text/plain part shows an entity as the literal characters.
+     */
+    public static function text(string $text, ?int $limit = null): string
+    {
+        return self::defang(self::clean($text, $limit));
+    }
+
+    /**
+     * Mail clients turn anything that looks like an address (`example.com`, `name@example.com`) into a live link,
+     * Markdown or not. A zero-width space after each dot that sits between a letter or digit and a letter breaks
+     * that pattern; the reader sees the same words. Numbers such as 3.5 are left alone.
+     */
+    public static function defang(string $text): string
+    {
+        return (string) preg_replace('/(?<=[\p{L}\p{N}])\.(?=\p{L})/u', ".\u{200B}", $text);
     }
 
     /**
