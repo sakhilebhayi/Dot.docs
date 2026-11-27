@@ -21,7 +21,6 @@ test('an outsider asks for access and the owner decides on the Sharing page', as
     await expect(outsider.getByRole('heading', { name: 'You cannot open this document yet' })).toBeVisible();
     await expectNoCriticalA11y(outsider, 'request access');
     await outsider.locator('#access-message').fill('I am on the audit team.');
-    await outsider.screenshot({ path: '/private/tmp/claude-501/-Users-sakhilebhayi-Dot/cfd1ad81-b25a-46ea-8477-2371774319f6/scratchpad/r23bshots/ask.png' });
     await outsider.getByRole('button', { name: 'Ask for access' }).click();
     await expect(outsider.getByText('Asked. The owner has been told')).toBeVisible();
 
@@ -29,7 +28,6 @@ test('an outsider asks for access and the owner decides on the Sharing page', as
     const asks = owner.locator('#access-requests');
     await expect(asks).toContainText('I am on the audit team.');
     await expectNoCriticalA11y(owner, 'share page with a request');
-    await owner.screenshot({ path: '/private/tmp/claude-501/-Users-sakhilebhayi-Dot/cfd1ad81-b25a-46ea-8477-2371774319f6/scratchpad/r23bshots/share-asks.png', fullPage: true });
     await asks.getByRole('button', { name: /Decline/ }).click();
     await expect(owner.getByText('Declined. Nothing was sent')).toBeVisible();
 
