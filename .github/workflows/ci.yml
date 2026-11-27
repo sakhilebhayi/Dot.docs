@@ -38,7 +38,7 @@ jobs:
           BROADCAST_CONNECTION: log
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -104,7 +104,7 @@ jobs:
         run: composer install --no-interaction --no-progress --prefer-dist
         env:
           BROADCAST_CONNECTION: log
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -197,7 +197,7 @@ jobs:
     # Same rule as composer-audit: high and critical block the gate.
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
