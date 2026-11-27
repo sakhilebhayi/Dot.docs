@@ -614,7 +614,8 @@ class EditorSyncWiringTest extends TestCase
         }
         $overflow = $items->item(5);
         $this->assertTrue($overflow->hasAttribute('hidden'));
-        $this->assertCount(1, $overflow->children, 'the sentence is one flex item, not three');
+        // childElementCount, not ->children: Dom\HTMLElement::$children is PHP 8.5+, production runs 8.4 (EA-7).
+        $this->assertSame(1, $overflow->childElementCount, 'the sentence is one flex item, not three');
         $this->assertSame('lost.length <= 5', $overflow->getAttribute('x-bind:hidden'));
         $this->assertSame('lost.length - 5', $overflow->querySelector('span[x-text]')->getAttribute('x-text'));
         $this->assertSame('And more. Put them all back restores every item, these included.', $this->words($overflow), 'the number is written by x-text, so it is empty here');
