@@ -82,7 +82,8 @@ class ContextualToolbarTest extends TestCase
 
         $this->assertStringContainsString('class="doc-bar"', $html);
         $this->assertStringContainsString('id="doc-style-picker"', $html);
-        $this->assertStringContainsString('&#8984;K', $html);
+        // The shortcut is written per platform (R2-9): Ctrl+K from the server, ⌘K on a Mac once shell.js runs.
+        $this->assertStringContainsString('<span data-shortcut="mod+k">Ctrl+K</span>', $html);
         // The save word is the shared component, not a hand-rolled span.
         $this->assertMatchesRegularExpression('/class="status-word status-word-good"/', $html);
         $this->assertMatchesRegularExpression('/class="numeral"[^>]*>v\d/', $html);
