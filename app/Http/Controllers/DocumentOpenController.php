@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AccessRequest;
 use App\Models\Document;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -33,7 +34,11 @@ class DocumentOpenController extends Controller
                 return redirect()->route('documents.shared', $document->uuid);
             }
 
-            return response()->view('documents.request-access', [], 403);
+            // Whether this person already asked (R2-3b): the page then says so instead of offering the form again.
+            $pending = AccessRequest::where('document_id', $document->id)->where('requester_id', $user->id)
+                ->where('status', AccessRequest::PENDING)->latest()->first();
+
+            return response()->view('documents.request-access', ['uuid' => $uuid, 'pending' => $pending], 403);
         }
 
         if ($document->team_id && $user->current_team_id !== $document->team_id && $user->belongsToTeam($document->team)) {

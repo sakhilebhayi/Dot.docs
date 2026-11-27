@@ -3,6 +3,7 @@
 namespace App\Livewire\Documents;
 
 use App\Audit\AuditLogger;
+use App\Models\AccessRequest;
 use App\Models\Document;
 use App\Models\DocumentCollaborator;
 use App\Models\User;
@@ -10,9 +11,12 @@ use App\Notifications\Account\DocumentAccessRemoved;
 use App\Notifications\Account\DocumentPublishedByAnother;
 use App\Notifications\Account\DocumentSharedBell;
 use App\Notifications\Account\DocumentSharedWithYou;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class ShareManager extends Component
@@ -42,6 +46,109 @@ class ShareManager extends Component
     public string $shareExpiresAt = '';
 
     public bool $showPasswordSet = false;
+
+    /** What the last access-request decision said, shown beside the list (R2-3b). */
+    public string $accessNotice = '';
+
+    /**
+     * Open requests for access to this document (R2-3b / U-06), to anyone who may share it. Oldest first: the person
+     * who has waited longest is decided first.
+     *
+     * @return Collection<int, AccessRequest>
+     */
+    #[Computed]
+    public function accessRequests(): Collection
+    {
+        if (! Auth::user()?->can('share', $this->document)) {
+            return new Collection;
+        }
+
+        return AccessRequest::where('document_id', $this->document->id)
+            ->where('status', AccessRequest::PENDING)
+            ->with('requester:id,name,email')
+            ->oldest()
+            ->get();
+    }
+
+    /**
+     * Let them in, as a reader or an editor (the admin role stays a deliberate invitation above). They hear about
+     * it the way any share is told: the bell at once and an email.
+     */
+    public function grantAccess(int $requestId, string $role = 'viewer'): void
+    {
+        $this->authorize('share', $this->document);
+        abort_unless(in_array($role, ['viewer', 'editor'], true), 422);
+
+        $accessRequest = $this->pendingRequest($requestId);
+        $requester = $accessRequest->requester;
+        $actor = Auth::user();
+        $notify = false;
+        $settled = false;
+
+        DB::transaction(function () use ($accessRequest, $requester, $role, &$notify, &$settled) {
+            // Only the decision that closes it acts: a second sharer clicking at the same moment changes nothing.
+            if (! $this->close($accessRequest, AccessRequest::GRANTED, $role)) {
+                return;
+            }
+            $settled = true;
+
+            // Never lower anyone: somebody invited as an editor or admin since they asked keeps that role.
+            $current = DocumentCollaborator::where('document_id', $this->document->id)->where('user_id', $requester->id)->value('role');
+            if ($current === null || self::RANK[$role] > (self::RANK[$current] ?? 0)) {
+                DocumentCollaborator::updateOrCreate(['document_id' => $this->document->id, 'user_id' => $requester->id], ['role' => $role]);
+                $notify = true;
+            }
+            app(AuditLogger::class)->record('document.access_granted', $this->document, ['request_id' => $accessRequest->id, 'user_id' => $requester->id, 'role' => $role]);
+        });
+
+        if ($notify) {
+            $requester->notify(new DocumentSharedBell($this->document, (string) $actor?->name));
+            $requester->notify(new DocumentSharedWithYou($this->document, $role, (string) $actor?->name));
+        }
+
+        $this->document->load('collaborators.user');
+        unset($this->accessRequests);
+        $this->accessNotice = match (true) {
+            ! $settled => 'Somebody else decided on that request a moment ago.',
+            $notify => $requester->name.' can now '.($role === 'editor' ? 'edit' : 'read').' it. They have been told.',
+            default => $requester->name.' already had more access than that; nothing changed.',
+        };
+    }
+
+    /** No: the request is closed and nothing is sent to them. */
+    public function declineAccess(int $requestId): void
+    {
+        $this->authorize('share', $this->document);
+
+        $accessRequest = $this->pendingRequest($requestId);
+        if ($this->close($accessRequest, AccessRequest::DECLINED)) {
+            app(AuditLogger::class)->record('document.access_declined', $this->document, ['request_id' => $accessRequest->id, 'user_id' => $accessRequest->requester_id]);
+        }
+
+        unset($this->accessRequests);
+        $this->accessNotice = 'Declined. Nothing was sent to '.$accessRequest->requester->name.'.';
+    }
+
+    /** Roles in order, so a grant can tell a raise from a cut. */
+    private const RANK = ['viewer' => 1, 'editor' => 2, 'admin' => 3];
+
+    /** Settle the request only if it is still open; true when this call settled it. */
+    private function close(AccessRequest $accessRequest, string $status, ?string $role = null): bool
+    {
+        return AccessRequest::whereKey($accessRequest->id)->where('status', AccessRequest::PENDING)
+            ->update(['status' => $status, 'role' => $role, 'decided_by' => Auth::id(), 'decided_at' => now(), 'updated_at' => now()]) === 1;
+    }
+
+    private function pendingRequest(int $requestId): AccessRequest
+    {
+        $accessRequest = AccessRequest::where('document_id', $this->document->id)
+            ->where('status', AccessRequest::PENDING)
+            ->with('requester')
+            ->find($requestId);
+        abort_if($accessRequest === null, 404);
+
+        return $accessRequest;
+    }
 
     public function mount(string $uuid): void
     {
@@ -113,6 +220,13 @@ class ShareManager extends Component
             ['document_id' => $this->document->id, 'user_id' => $user->id],
             ['role' => $this->inviteRole]
         );
+
+        // Asked for access earlier (R2-3b)? This invitation is the answer: the request is closed, not left open
+        // for a later "Let them read" to undo.
+        AccessRequest::where('document_id', $this->document->id)->where('requester_id', $user->id)
+            ->where('status', AccessRequest::PENDING)
+            ->update(['status' => AccessRequest::GRANTED, 'role' => $this->inviteRole, 'decided_by' => Auth::id(), 'decided_at' => now(), 'updated_at' => now()]);
+        unset($this->accessRequests);
 
         // The person hears about it (EA-3 / E-04, F-11): the bell at once,
         // the email from the queue. Nothing when the role did not change or

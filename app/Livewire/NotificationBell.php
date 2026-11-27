@@ -98,6 +98,7 @@ class NotificationBell extends Component
             'mention' => ($data['mentioner'] ?? 'Someone').' mentioned you in "'.($data['document_title'] ?? 'a document').'"',
             'shared' => ($data['actor'] ?? 'Someone').' shared "'.($data['document_title'] ?? 'a document').'" with you',
             'access_changed' => ($data['actor'] ?? 'Someone').' changed your access to "'.($data['document_title'] ?? 'a document').'"',
+            'access_requested' => ($data['actor'] ?? 'Someone').' asked for access to "'.($data['document_title'] ?? 'a document').'"',
             default => 'You have a new notification',
         };
     }

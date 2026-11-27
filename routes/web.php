@@ -1,6 +1,7 @@
 <?php
 
 use App\Documents\DocumentMedia;
+use App\Http\Controllers\AccessRequestController;
 use App\Http\Controllers\Auth\EcosystemAuthController;
 use App\Http\Controllers\CommentEmailPreferenceController;
 use App\Http\Controllers\CspReportController;
@@ -181,6 +182,8 @@ Route::middleware([
     Route::get('/documents/{uuid}/edit', Editor::class)->name('documents.edit');
     // The destination of an InfoDot deep link: a document, by uuid. Re-authorised by the policy.
     Route::get('/o/{uuid}', DocumentOpenController::class)->name('documents.open');
+    // R2-3b: ask the owner for access to a document a link opened but this person cannot read.
+    Route::post('/o/{uuid}/request-access', [AccessRequestController::class, 'store'])->name('documents.request-access');
     Route::get('/documents/{uuid}/settings', DocumentSettings::class)->name('documents.settings');
     Route::get('/documents/{uuid}/share', ShareManager::class)->name('documents.share');
     Route::get('/documents/{uuid}/history', VersionHistory::class)->name('documents.history');

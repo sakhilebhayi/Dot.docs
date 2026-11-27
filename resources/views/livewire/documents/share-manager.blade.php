@@ -141,6 +141,42 @@
         </div>
     </section>
 
+    {{-- Asking for access (R2-3b): people who opened a link to this document and cannot read it. --}}
+    @if ($this->accessRequests->isNotEmpty() || $accessNotice !== '')
+        <section class="panel" aria-labelledby="access-requests-title" id="access-requests">
+            <div class="panel-head">
+                <h2 class="section-title" id="access-requests-title">Asking for access</h2>
+                <span class="micro"><x-shell.figure :value="$this->accessRequests->count()" label="Waiting" /></span>
+            </div>
+            @if ($accessNotice !== '')
+                <p class="note" role="status" style="margin:var(--s3) var(--s4) 0">
+                    <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
+                    {{ $accessNotice }}
+                </p>
+            @endif
+            <ul class="list">
+                @forelse ($this->accessRequests as $ask)
+                    <li class="list-row" wire:key="ask-{{ $ask->id }}" style="flex-wrap:wrap;row-gap:var(--s2)">
+                        <span class="list-key" style="flex:1 1 16rem">
+                            {{ $ask->requester->name }}
+                            <span class="list-sub">{{ $ask->requester->email }} &middot; asked {{ $ask->created_at->diffForHumans() }}</span>
+                            @if (filled($ask->message))
+                                <span class="list-sub" style="display:block;white-space:pre-line">“{{ $ask->message }}”</span>
+                            @endif
+                        </span>
+                        <span class="toolbar">
+                            <button type="button" class="btn btn-sm" wire:click="grantAccess({{ $ask->id }}, 'viewer')">Let them read<span class="sr-only">: {{ $ask->requester->name }}</span></button>
+                            <button type="button" class="btn btn-sm" wire:click="grantAccess({{ $ask->id }}, 'editor')">Let them edit<span class="sr-only">: {{ $ask->requester->name }}</span></button>
+                            <button type="button" class="btn btn-quiet btn-sm" wire:click="declineAccess({{ $ask->id }})">Decline<span class="sr-only">: {{ $ask->requester->name }}</span></button>
+                        </span>
+                    </li>
+                @empty
+                    <li class="empty"><p class="empty-line">Nobody else is waiting.</p></li>
+                @endforelse
+            </ul>
+        </section>
+    @endif
+
     <section class="panel" aria-labelledby="share-people">
         <div class="panel-head">
             <h2 class="section-title" id="share-people">People with access</h2>
