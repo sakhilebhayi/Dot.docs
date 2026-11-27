@@ -91,10 +91,18 @@ class BackupSqliteDatabase extends Command
 
         $written = [$target];
 
+        $archiveFailed = false;
         if (! $this->option('no-files')) {
-            $archive = $this->archiveUploads($directory);
-            if ($archive !== null) {
-                $written[] = $archive;
+            try {
+                $archive = $this->archiveUploads($directory);
+                if ($archive !== null) {
+                    $written[] = $archive;
+                }
+            } catch (Throwable $e) {
+                // The database copy above is kept; the run still FAILS, so the
+                // scheduler's log and the exit code show it (EA-6 review).
+                $this->error('Uploads archive failed: '.$e->getMessage());
+                $archiveFailed = true;
             }
         }
 
@@ -116,7 +124,8 @@ class BackupSqliteDatabase extends Command
             }
         }
 
-        $keep = max(1, (int) ($this->option('keep') ?: config('backup.keep', 14)));
+        $keep = (int) ($this->option('keep') ?: config('backup.keep')) ?: 14;
+        $keep = max(1, $keep);
         $this->prune($directory, 'doc-*.sqlite*', $keep);
         $this->prune($directory, 'doc-files-*.tar.gz*', $keep);
 
@@ -124,7 +133,7 @@ class BackupSqliteDatabase extends Command
             $this->info('Backup written to '.$file.' ('.number_format((float) filesize($file)).' bytes)');
         }
 
-        return self::SUCCESS;
+        return $archiveFailed ? self::FAILURE : self::SUCCESS;
     }
 
     /** "ok", or what SQLite found wrong with the copy. */
@@ -157,16 +166,20 @@ class BackupSqliteDatabase extends Command
         @unlink($tar);
         @unlink($tar.'.gz');
 
+        // Regular files only: a symlink (public/storage points back into the
+        // app) is skipped rather than followed or failing the archive.
+        $files = new \CallbackFilterIterator(
+            new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($source, \FilesystemIterator::SKIP_DOTS)),
+            fn (\SplFileInfo $file) => $file->isFile() && ! $file->isLink(),
+        );
+
         try {
             $phar = new PharData($tar);
-            $phar->buildFromDirectory($source);
+            $phar->buildFromIterator($files, $source);
             $phar->compress(\Phar::GZ);
             unset($phar);
+        } finally {
             @unlink($tar);
-        } catch (Throwable $e) {
-            $this->warn('Uploads archive skipped: '.$e->getMessage());
-
-            return null;
         }
 
         return is_file($tar.'.gz') ? $tar.'.gz' : null;

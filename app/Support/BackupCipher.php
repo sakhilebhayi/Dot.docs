@@ -32,16 +32,23 @@ class BackupCipher
         }
 
         fwrite($out, self::MAGIC.$salt.$header);
-        $size = (int) filesize($from);
-        $read = 0;
-        do {
-            $chunk = (string) fread($in, self::CHUNK);
-            $read += strlen($chunk);
-            $tag = $read >= $size
-                ? SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_FINAL
-                : SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_MESSAGE;
-            fwrite($out, sodium_crypto_secretstream_xchacha20poly1305_push($state, $chunk, '', $tag));
-        } while ($tag !== SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_FINAL);
+        // Read one chunk ahead, so the last chunk is known by reaching the end
+        // of the file, not by a size taken before reading.
+        $chunk = (string) fread($in, self::CHUNK);
+        while (true) {
+            $next = feof($in) ? '' : (string) fread($in, self::CHUNK);
+            $last = $next === '' && feof($in);
+            fwrite($out, sodium_crypto_secretstream_xchacha20poly1305_push(
+                $state,
+                $chunk,
+                '',
+                $last ? SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_FINAL : SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_MESSAGE,
+            ));
+            if ($last) {
+                break;
+            }
+            $chunk = $next;
+        }
 
         fclose($in);
         fclose($out);

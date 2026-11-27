@@ -72,8 +72,11 @@ class RestoreBackup extends Command
         if (str_ends_with($name, '.sqlite') && class_exists(SQLite3::class)) {
             $db = new SQLite3($to, SQLITE3_OPEN_READONLY);
             $check = (string) $db->querySingle('PRAGMA integrity_check');
-            $documents = (int) $db->querySingle('SELECT count(*) FROM documents');
-            $users = (int) $db->querySingle('SELECT count(*) FROM users');
+            $count = fn (string $table) => (int) $db->querySingle("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '{$table}'")
+                ? (int) $db->querySingle("SELECT count(*) FROM {$table}")
+                : 0;
+            $documents = $count('documents');
+            $users = $count('users');
             $db->close();
 
             if ($check !== 'ok') {

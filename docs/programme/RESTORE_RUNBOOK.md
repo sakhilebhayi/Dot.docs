@@ -22,8 +22,13 @@ fails. `/up/scheduler` answers 503 when the newest database backup is more than 
 watchdog emails the owner.
 
 **Encryption.** With `BACKUP_PASSPHRASE` in `.env` the nightly copies are encrypted (libsodium, Argon2id key) and the
-plain files removed. **Without the passphrase they cannot be restored**: keep it in a password manager. Pre-deploy copies
-are not encrypted (they are made by the deploy with `sqlite3`, outside the app); they stay on the host only.
+plain files removed. **Without the passphrase they cannot be restored**: keep it in a password manager. What encryption
+protects is a copy that leaves this host: the passphrase sits in `.env` on the same host, so someone with access to the
+host can decrypt. The pre-deploy copies are NOT encrypted (the deploy makes them before any of the release's code runs):
+when you copy `storage/backups` off the host, copy only `doc-*.enc` and `doc-files-*.enc`, never `predeploy-*`.
+
+**A new host** answers 503 on `/up/scheduler` until its first nightly backup exists (up to 26 hours): run
+`php artisan doc:backup-database` once right after setting it up.
 
 **Off the host.** All of the above sits on the same disk as the live database. A copy somewhere else is the owner's step
 (owner list in `docs/programme/ENTERPRISE_AUDIT.md`): cPanel's backup to a remote destination, or a bucket.
@@ -61,24 +66,33 @@ rm -rf storage/restore
    php artisan down --retry=60
    ```
 
-3. **Keep the current file**, even if it is damaged:
+3. **Wait a minute** for any queue worker that started before maintenance mode to finish (it runs at most 55 s), then
+   check nothing is left:
+
+   ```bash
+   sleep 60; pgrep -fa "queue:work" | grep -v pgrep || echo "no worker running"
+   ```
+
+4. **Keep the current file**, even if it is damaged:
 
    ```bash
    cp database/database.sqlite "storage/backups/before-restore-$(date -u +%Y%m%dT%H%M%SZ).sqlite"
    ```
 
-4. **Swap it in** and remove SQLite's side files of the old one:
+5. **Swap it in** (copy beside, then rename over, so the live path is never half-written) and remove SQLite's side files
+   of the old one:
 
    ```bash
-   cp storage/restore/<the restored file>.sqlite database/database.sqlite
+   cp storage/restore/<the restored file>.sqlite database/database.sqlite.incoming
+   mv -f database/database.sqlite.incoming database/database.sqlite
    rm -f database/database.sqlite-wal database/database.sqlite-shm
    sqlite3 database/database.sqlite "PRAGMA journal_mode=WAL; PRAGMA integrity_check;"
    ```
 
    Expected: `wal` then `ok`.
-5. **Match the code to the data.** If the backup predates a deploy that added migrations, either deploy the release the
+6. **Match the code to the data.** If the backup predates a deploy that added migrations, either deploy the release the
    backup came from, or run `php artisan migrate --force` to bring it forward (check `php artisan migrate:status` first).
-6. **Go live and check:**
+7. **Go live and check:**
 
    ```bash
    php artisan config:cache && php artisan up
@@ -92,8 +106,9 @@ Anything written between the backup and the restore is lost; say so to the peopl
 ## 3. Restore uploaded files
 
 ```bash
-php artisan doc:restore-backup "$(ls -t storage/backups/doc-files-*.tar.gz* | head -1)"
-mkdir -p storage/restore/files && tar -xzf storage/restore/doc-files-*.tar.gz -C storage/restore/files
+F="$(ls -t storage/backups/doc-files-*.tar.gz* | head -1)"
+php artisan doc:restore-backup "$F"
+mkdir -p storage/restore/files && tar -xzf "storage/restore/$(basename "$F" .enc)" -C storage/restore/files
 ```
 
 Inspect `storage/restore/files`, then copy back only what is missing (for example `cp -n -R storage/restore/files/public/.
@@ -102,8 +117,12 @@ storage/app/public/`). `-n` never overwrites a file that is there.
 ## 4. A deploy failed
 
 - **The deploy put the previous release back itself** (log: "Deploy failed; putting release … back"): the site is up
-  on the old code. If the failure was in a migration, check `php artisan migrate:status`; if a migration ran part-way,
-  restore the `predeploy-…` copy the log names (section 2).
+  on the old code. If the log says the new release's migrations HAD run, the old code is on the newer schema: check
+  the site, and restore the `predeploy-…` copy the log names (section 2) if it misbehaves. If a migration failed
+  part-way, check `php artisan migrate:status` and restore the same copy.
+- **A later step failed** (assets, crontab, going live): the last step, "Never leave the site in maintenance mode",
+  takes the site out of maintenance mode; the new code is live. Read the failed step and redeploy (Actions > Deploy to
+  Production > Run workflow) once it is fixed.
 - **The smoke check failed after going live** (assets or pages broken): roll the code back by hand to the previous
   commit, then redeploy it from GitHub so the assets match:
 

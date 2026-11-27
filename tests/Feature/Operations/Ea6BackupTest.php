@@ -98,4 +98,29 @@ class Ea6BackupTest extends TestCase
 
         $this->getJson('/up/scheduler')->assertStatus(503)->assertJsonPath('status', 'stale');
     }
+
+    public function test_a_symlink_in_the_uploads_is_skipped_not_fatal(): void
+    {
+        symlink($this->dir.'/app/public', $this->dir.'/app/public-link');
+
+        $this->artisan('doc:backup-database')->assertSuccessful();
+
+        $tar = $this->dir.'/backups/doc-files-'.now()->format('Y-m-d').'.tar.gz';
+        $this->assertFileExists($tar);
+        $names = array_map(fn ($f) => $f->getPathname(), iterator_to_array(new \RecursiveIteratorIterator(new \PharData($tar)), false));
+        $this->assertNotEmpty(array_filter($names, fn ($n) => str_ends_with($n, 'public/upload.txt')));
+        $this->assertEmpty(array_filter($names, fn ($n) => str_contains($n, 'public-link')));
+    }
+
+    public function test_an_empty_backup_keep_setting_keeps_fourteen(): void
+    {
+        config()->set('backup.keep', 0);
+        foreach (range(1, 20) as $i) {
+            touch($this->dir.'/backups/doc-2020-01-'.str_pad((string) $i, 2, '0', STR_PAD_LEFT).'.sqlite');
+        }
+
+        $this->artisan('doc:backup-database', ['--no-files' => true])->assertSuccessful();
+
+        $this->assertCount(14, glob($this->dir.'/backups/doc-*.sqlite') ?: []);
+    }
 }

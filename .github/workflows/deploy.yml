@@ -77,7 +77,8 @@ jobs:
               "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
               DEPLOY_PATH="$DEPLOY_PATH" DEPLOY_SHA="$DEPLOY_SHA" \
               'bash -s' <<'DEPLOY'
-          set -euo pipefail
+          # -E: the ERR trap below also fires for failures inside functions.
+          set -Eeuo pipefail
           cd "$DEPLOY_PATH"
           PHP=php
 
@@ -85,24 +86,38 @@ jobs:
           echo "== Current release: $(git rev-parse --short HEAD)"
 
           git fetch origin main
-          git cat-file -e "$DEPLOY_SHA^{commit}" || { echo "::error::commit $DEPLOY_SHA is not on origin/main here"; exit 1; }
+          git cat-file -e "$DEPLOY_SHA^{commit}" || { echo "::error::commit $DEPLOY_SHA was not fetched from origin/main"; exit 1; }
+          # Never deploy an OLDER commit than the one running (EA-6): "Re-run jobs" on
+          # an old workflow run would otherwise put old code on a newer schema. A
+          # redeploy of the same commit, or any newer one, passes.
+          if ! git merge-base --is-ancestor "$PREV" "$DEPLOY_SHA"; then
+            echo "::error::$DEPLOY_SHA is not newer than the running release ${PREV:0:9}. Deploy the current main instead (Actions > Deploy to Production > Run workflow)."
+            exit 1
+          fi
 
           # ---- A verified database copy BEFORE anything changes (EA-6 / O-03).
-          # The SQLite online backup (sqlite3 .backup) is consistent with writers
-          # active and needs none of this release's code. The deploy stops here,
-          # with the site untouched, if the copy cannot be made or fails its
-          # integrity check. The newest five pre-deploy copies are kept.
+          # The SQLite online backup is consistent with writers active and needs
+          # none of this release's code: the sqlite3 tool when the host has it,
+          # PHP's SQLite3::backup otherwise. The deploy stops here, with the site
+          # untouched, if the copy cannot be made or fails its integrity check.
+          # The newest five pre-deploy copies are kept (NOT encrypted: they never
+          # leave this host; see docs/programme/RESTORE_RUNBOOK.md).
           DB_FILE="database/database.sqlite"
+          PRE=""
           if [ -f "$DB_FILE" ]; then
             mkdir -p storage/backups
             PRE="storage/backups/predeploy-$(date -u +%Y%m%dT%H%M%SZ)-${DEPLOY_SHA:0:9}.sqlite"
-            sqlite3 "$DB_FILE" ".backup '$PRE'" || { echo "::error::pre-deploy backup failed; nothing was changed"; rm -f "$PRE"; exit 1; }
-            # The copy inherits WAL mode; make it one self-contained file (no -wal/-shm beside it).
-            sqlite3 "$PRE" 'PRAGMA journal_mode=DELETE;' > /dev/null
-            CHECK="$(sqlite3 "$PRE" 'PRAGMA integrity_check;' 2>&1 || true)"
+            CHECK="$($PHP -r '
+              $from = new SQLite3($argv[1], SQLITE3_OPEN_READONLY);
+              $to = new SQLite3($argv[2]);
+              if (! $from->backup($to)) { echo "backup failed"; exit(1); }
+              $to->exec("PRAGMA journal_mode=DELETE");
+              echo (string) $to->querySingle("PRAGMA integrity_check");
+              $to->close(); $from->close();
+            ' "$DB_FILE" "$PRE" 2>&1 || true)"
             rm -f "$PRE-shm" "$PRE-wal"
             if [ "$CHECK" != "ok" ]; then
-              echo "::error::pre-deploy backup failed its integrity check ($CHECK); nothing was changed"; rm -f "$PRE"; exit 1
+              echo "::error::pre-deploy backup failed ($CHECK); nothing was changed"; rm -f "$PRE"; exit 1
             fi
             ls -1t storage/backups/predeploy-*.sqlite 2>/dev/null | tail -n +6 | xargs -r rm -f
             echo "== Pre-deploy backup: $PRE ($(wc -c < "$PRE") bytes, integrity ok)"
@@ -110,20 +125,46 @@ jobs:
             echo "::warning::no $DB_FILE here; no pre-deploy backup taken"
           fi
 
+          # Document root already moved to <app>/public (the standard layout, S-2e in InfoDot's SECURITY_ASSESSMENT)?
+          # Then the tracked root .htaccess (Require all denied, written for the flattened layout where the app folder
+          # sits INSIDE the web root) would sit in the PARENT of the document root and refuse every request. LiteSpeed
+          # reads .htaccess files of parent folders. Every `git reset --hard` restores it - the release's AND a
+          # rollback's - so this runs after each of them. In the flattened layout nothing changes.
+          apply_layout() {
+            local app_real current_docroot
+            app_real="$(pwd -P)"
+            current_docroot="$(uapi --output=json DomainInfo single_domain_data domain=doc.infodot.co.za 2>/dev/null | sed -n 's/.*"documentroot" *: *"\([^"]*\)".*/\1/p' | head -1 || true)"
+            if [ "$current_docroot" = "$app_real/public" ] || [ -f .docroot-is-public ]; then
+              echo "== document root is $app_real/public (standard layout)"
+              if [ -f .htaccess ]; then
+                mv -f .htaccess .htaccess.docroot-is-public-disabled && echo "== app-folder .htaccess: moved aside (the document root is public/)" || echo "::warning::could not move .htaccess aside"
+              fi
+            else
+              echo "== document root is the app folder's parent (flattened layout): app-folder .htaccess stays"
+            fi
+          }
+
           # If anything from here to the end of this step fails (composer, a
           # migration, the caches), put the previous release back and take the
           # site out of maintenance mode instead of leaving it down (EA-6 / O-04).
-          # A migration that ran part-way is NOT undone automatically: the
-          # pre-deploy backup above is the way back (docs/programme/RESTORE_RUNBOOK.md).
+          # A migration is NOT undone automatically: the pre-deploy backup is the
+          # way back (docs/programme/RESTORE_RUNBOOK.md).
+          MIGRATED=no
           rollback() {
+            trap - ERR
             echo "::error::Deploy failed; putting release ${PREV:0:9} back."
             git reset --hard "$PREV" || true
+            apply_layout || true
             composer install --no-interaction --optimize-autoloader --no-dev || true
             $PHP artisan config:cache || true
             $PHP artisan route:cache || true
             $PHP artisan view:cache || true
             $PHP artisan up || true
-            echo "::error::Site is up on the previous release. If a migration ran part-way, restore ${PRE:-the newest backup} as the runbook says."
+            if [ "$MIGRATED" = "yes" ]; then
+              echo "::error::The new release's migrations HAD run: release ${PREV:0:9} now runs on the newer schema. Check the site; if it misbehaves, restore ${PRE:-the newest backup} as the runbook says."
+            else
+              echo "::error::Site is up on release ${PREV:0:9}. If a migration ran part-way, restore ${PRE:-the newest backup} as the runbook says."
+            fi
           }
           trap 'rollback' ERR
 
@@ -131,22 +172,7 @@ jobs:
           $PHP artisan down --retry=30 || true
 
           git reset --hard "$DEPLOY_SHA"
-
-          # Document root already moved to <app>/public (the standard layout, S-2e in InfoDot's SECURITY_ASSESSMENT)?
-          # Then the tracked root .htaccess (Require all denied, written for the flattened layout where the app folder
-          # sits INSIDE the web root) would sit in the PARENT of the document root and refuse every request. LiteSpeed
-          # reads .htaccess files of parent folders. `git reset --hard` restores it on every deploy, so it is moved
-          # aside here, while the site is still in maintenance mode. In the flattened layout nothing changes.
-          APP_REAL="$(pwd -P)"
-          CURRENT_DOCROOT="$(uapi --output=json DomainInfo single_domain_data domain=doc.infodot.co.za 2>/dev/null | sed -n 's/.*"documentroot" *: *"\([^"]*\)".*/\1/p' | head -1 || true)"
-          if [ "$CURRENT_DOCROOT" = "$APP_REAL/public" ] || [ -f .docroot-is-public ]; then
-            echo "== document root is $APP_REAL/public (standard layout)"
-            if [ -f .htaccess ]; then
-              mv -f .htaccess .htaccess.docroot-is-public-disabled && echo "== app-folder .htaccess: moved aside (the document root is public/)" || echo "::warning::could not move .htaccess aside"
-            fi
-          else
-            echo "== document root is the app folder's parent (flattened layout): app-folder .htaccess stays"
-          fi
+          apply_layout
 
           # Production invariant (ecosystem audit 2026-10-17, defect D9): with
           # APP_DEBUG=true any error, even a harmless 405, answers every
@@ -164,6 +190,7 @@ jobs:
           composer install --no-interaction --optimize-autoloader --no-dev
 
           $PHP artisan migrate --force
+          MIGRATED=yes
 
           $PHP artisan config:cache
           $PHP artisan route:cache
@@ -382,7 +409,22 @@ jobs:
           fi
           RESTART
 
-      - name: Smoke-check the live site
+      - name: Never leave the site in maintenance mode
+        # EA-6 / O-04: the code step puts the site in maintenance mode and the
+        # "go live" step takes it out. If the asset transfer, the crontab or the
+        # go-live step itself fails in between, the site would stay on 503 with
+        # the new code. This runs only after a failure and only takes the site
+        # out of maintenance mode; the run stays red.
+        if: failure()
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              "cd '$DEPLOY_PATH' && php artisan up" \
+            && echo "::warning::The deploy failed; the site was taken out of maintenance mode (see the steps above for what failed)." \
+            || echo "::error::Could not take the site out of maintenance mode. Run 'php artisan up' in the app folder by hand."
+
         # Last step, on purpose: a deploy is green only once the live
         # pages have been seen loading their own assets. Runs on the
         # runner with plain curl (no SSH), exactly as a browser would: /

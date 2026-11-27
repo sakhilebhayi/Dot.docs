@@ -99,7 +99,7 @@ MIT © [SK Digital / BluPin Incorporated](https://github.com/sakhileb)
 
 ## Operations
 
-- Deploys run on every merge to `main` (`.github/workflows/deploy.yml`): a verified database backup first, the tested commit, migrations, and the previous release put back if any of that fails.
+- Deploys run on every merge to `main` (`.github/workflows/deploy.yml`): a verified database backup first, then the tested commit (never an older one) and its migrations; if that step fails the previous release is put back, and if a later step fails the site is at least taken out of maintenance mode.
 - Backups: nightly at 02:35 (`doc:backup-database`, database + uploads, encrypted when `BACKUP_PASSPHRASE` is set); restore with `doc:restore-backup` - see `docs/programme/RESTORE_RUNBOOK.md`.
 - Health: `/up`, `/up/scheduler` (scheduler, queue and backup age; watched from GitHub every 15 minutes), `/guardian/health` (token).
 - Security reports: see `SECURITY.md`.
