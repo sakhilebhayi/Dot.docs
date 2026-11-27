@@ -11,6 +11,7 @@ use App\Models\Files\Obj;
 use App\Models\Tag;
 use App\Search\DocumentSearch;
 use App\Services\TagRepository;
+use App\Support\SignedIn;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -41,6 +42,7 @@ use Livewire\Component;
 class Index extends Component
 {
     use AuthorizesRequests, BrowsesTheTree;
+    use SignedIn;
 
     /**
      * How many search hits the list will consider. DocumentSearch ranks and
@@ -276,14 +278,14 @@ class Index extends Component
     #[Computed]
     public function availableTags(): Collection
     {
-        return app(TagRepository::class)->availableFor(auth()->user(), auth()->user()->currentTeam?->id);
+        return app(TagRepository::class)->availableFor($this->actor(), $this->actor()->currentTeam?->id);
     }
 
     /** @return LengthAwarePaginator<int, Document> */
     #[Computed]
     public function documents(): LengthAwarePaginator
     {
-        $user = auth()->user();
+        $user = $this->actor();
         $search = app(DocumentSearch::class);
         $searching = $search->isSearchable($this->search);
 
@@ -321,7 +323,7 @@ class Index extends Component
             // exactly what the tree says is filed in the open folder.
             ->when(
                 ! $searching && ! $this->tagId && $this->currentNode() !== null,
-                fn ($q) => $q->whereHas('node', fn ($q) => $q->where('parent_id', $this->currentNode()->id)),
+                fn ($q) => $q->whereHas('node', fn ($q) => $q->where('parent_id', $this->currentNode()?->id)),
             )
             // Newest EDIT first: the rows say "Edited …" (EA-5 / P-08).
             ->latest('updated_at')
@@ -370,7 +372,7 @@ class Index extends Component
     public function newDocumentTemplates(): \Illuminate\Database\Eloquent\Collection
     {
         return DocumentTemplate::query()
-            ->visibleTo(auth()->user())
+            ->visibleTo($this->actor())
             ->orderBy('is_global', 'desc')
             ->orderBy('name')
             ->get();
@@ -388,7 +390,7 @@ class Index extends Component
 
         $template = $this->newDocumentTemplateId === null
             ? null
-            : DocumentTemplate::query()->visibleTo(auth()->user())->whereKey($this->newDocumentTemplateId)->firstOrFail();
+            : DocumentTemplate::query()->visibleTo($this->actor())->whereKey($this->newDocumentTemplateId)->firstOrFail();
 
         // The style and page setup travel with the template's content, the
         // same way TemplateGallery::useTemplate() carries them - a proposal on
@@ -411,7 +413,7 @@ class Index extends Component
         }
 
         $document = app(DocumentStore::class)->create(
-            auth()->user(),
+            $this->actor(),
             $this->newDocumentName,
             $template?->contentJson(),
             $attrs,
@@ -438,7 +440,7 @@ class Index extends Component
         }
 
         if (! $this->guarded(fn () => app(FilesService::class)
-            ->createFolder($parent, $this->newFolderName, auth()->user()), 'newFolderName')) {
+            ->createFolder($parent, $this->newFolderName, $this->actor()), 'newFolderName')) {
             return;
         }
 
@@ -486,7 +488,7 @@ class Index extends Component
         }
 
         if (! $this->guarded(fn () => app(FilesService::class)
-            ->renameObject($node, $name, auth()->user()), 'renameFolderName')) {
+            ->renameObject($node, $name, $this->actor()), 'renameFolderName')) {
             return;
         }
 
@@ -506,7 +508,7 @@ class Index extends Component
         $node = $this->folderNode($folderId);
         $this->authorize('delete', $node);
 
-        $this->guarded(fn () => app(FilesService::class)->deleteObject($node, auth()->user()), 'folder');
+        $this->guarded(fn () => app(FilesService::class)->deleteObject($node, $this->actor()), 'folder');
 
         unset($this->subfolders);
     }

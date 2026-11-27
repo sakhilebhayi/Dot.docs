@@ -144,7 +144,8 @@ class BackupSqliteDatabase extends Command
         }
 
         $db = new SQLite3($file, SQLITE3_OPEN_READONLY);
-        $result = (string) $db->querySingle('PRAGMA integrity_check');
+        $result = $db->querySingle('PRAGMA integrity_check');
+        $result = is_string($result) ? $result : '';
         $db->close();
 
         return $result;

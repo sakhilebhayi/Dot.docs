@@ -7,6 +7,7 @@ use App\Documents\Outline\SyncDerived;
 use App\Http\Requests\DocumentSyncRequest;
 use App\Models\Document;
 use App\Services\PresenceService;
+use App\Support\SignedIn;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Gate;
 
@@ -28,6 +29,8 @@ use Illuminate\Support\Facades\Gate;
  */
 class DocumentSyncController extends Controller
 {
+    use SignedIn;
+
     public function store(
         DocumentSyncRequest $request,
         string $uuid,
@@ -46,7 +49,7 @@ class DocumentSyncController extends Controller
         // document stops receiving it on their very next request.
         Gate::authorize('view', $document);
 
-        $user = $request->user();
+        $user = $this->actor();
 
         if ($request->boolean('leaving')) {
             $presence->leave($document->id, $data['tab']);

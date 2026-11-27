@@ -97,7 +97,7 @@ class SsrfGuard
         }
 
         $parts = parse_url($url);
-        $host = trim((string) $parts['host'], '[]');
+        $host = trim((string) ($parts['host'] ?? ''), '[]');
 
         if (filter_var($host, FILTER_VALIDATE_IP)) {
             return [];
@@ -112,7 +112,7 @@ class SsrfGuard
             return null;
         }
 
-        $port = $parts['port'] ?? (strtolower((string) $parts['scheme']) === 'https' ? 443 : 80);
+        $port = $parts['port'] ?? (strtolower((string) ($parts['scheme'] ?? '')) === 'https' ? 443 : 80);
         $address = str_contains($ip, ':') ? '['.$ip.']' : $ip;
 
         return [$host.':'.$port.':'.$address];

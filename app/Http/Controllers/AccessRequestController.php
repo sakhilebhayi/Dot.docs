@@ -64,7 +64,7 @@ class AccessRequestController extends Controller
                 ->latest('decided_at')->first();
             if ($declined !== null) {
                 return redirect()->route('documents.open', $uuid)->withInput()
-                    ->withErrors(['message' => 'The owner has already decided on your request. You can ask again from '.$declined->decided_at->addDays(self::COOLDOWN_DAYS)->format('j M Y').'.']);
+                    ->withErrors(['message' => 'The owner has already decided on your request. You can ask again from '.($declined->decided_at ?? now())->copy()->addDays(self::COOLDOWN_DAYS)->format('j M Y').'.']);
             }
 
             $key = 'access-request:'.$user->id;

@@ -4,6 +4,7 @@ namespace App\Livewire\Files;
 
 use App\Models\Files\Obj;
 use App\Models\Team;
+use App\Support\SignedIn;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -17,6 +18,8 @@ use Illuminate\Validation\ValidationException;
  */
 trait BrowsesTheTree
 {
+    use SignedIn;
+
     /**
      * The workspace to open when no folder was named.
      *
@@ -29,7 +32,7 @@ trait BrowsesTheTree
      */
     protected function workspaceTeam(): ?Team
     {
-        $user = auth()->user();
+        $user = $this->actor();
 
         return $user->currentTeam ?? $user->personalTeam();
     }
@@ -48,7 +51,7 @@ trait BrowsesTheTree
      */
     protected function folderOrRoot(?Obj $node, Obj $root): Obj
     {
-        if ($node === null || ! $node->isFolder() || auth()->user()?->can('view', $node) !== true) {
+        if ($node === null || ! $node->isFolder() || $this->actor()->can('view', $node) !== true) {
             return $root;
         }
 

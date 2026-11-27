@@ -48,7 +48,7 @@ class SyncTeamsFromInfoDot
 
             // Revocation is about companies InfoDot no longer lists at all; a listed company that does not hold
             // this platform keeps whatever membership it has here.
-            $this->revoke($user, $named->keys()->map(fn ($uuid) => (string) $uuid)->all());
+            $this->revoke($user, array_values($named->keys()->map(fn ($uuid) => (string) $uuid)->all()));
             $this->forgetCachedTeams($user);
 
             $active = $identity['current_team_uuid'] ?? null;
@@ -57,7 +57,7 @@ class SyncTeamsFromInfoDot
             if ($team && $user->belongsToTeam($team)) {
                 $user->switchTeam($team);
             } else {
-                $this->leaveRefusedCompany($user, $refused->keys()->all(), $listed->keys()->all());
+                $this->leaveRefusedCompany($user, array_values($refused->keys()->all()), array_values($listed->keys()->all()));
             }
         });
     }

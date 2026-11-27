@@ -71,7 +71,7 @@ class DocumentStore
             ? BrandKit::where('team_id', $doc->team_id)->first()
             : null;
         if ($kit !== null) {
-            $doc->brand_kit_id = $kit->id;
+            $doc->forceFill(['brand_kit_id' => $kit->id]);
             if (! array_key_exists('style_key', $attrs) && filled($kit->default_style_key) && in_array($kit->default_style_key, StyleEngine::systemKeys(), true)) {
                 $doc->style_key = $kit->default_style_key;
             }
@@ -286,7 +286,7 @@ class DocumentStore
      */
     private function lockStored(Document $doc): Document
     {
-        return Document::withTrashed()->lockForUpdate()->findOrFail($doc->getKey());
+        return Document::withTrashed()->lockForUpdate()->whereKey($doc->getKey())->firstOrFail();
     }
 
     /**

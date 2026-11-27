@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Print\PageSetup;
 use App\Services\TagRepository;
 use App\Styles\StyleEngine;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -26,6 +27,7 @@ use Livewire\Component;
 class DocumentSettings extends Component
 {
     use AuthorizesRequests;
+    use SignedIn;
 
     private const MARGIN_REGEX = '/^\d+(\.\d+)?(mm|cm|pt|in)$/';
 
@@ -246,8 +248,8 @@ class DocumentSettings extends Component
         // casts to 0 for a ?int property, not null -- normalize it here so
         // an empty pick means the workspace root rather than object id 0.
         $destination = $this->folderId
-            ? Obj::find($this->folderId)
-            : app(FilesService::class)->root($node->team);
+            ? Obj::query()->whereKey($this->folderId)->first()
+            : ($node->team !== null ? app(FilesService::class)->root($node->team) : null);
 
         if ($destination === null || ! $destination->isFolder() || $destination->team_id !== $node->team_id) {
             $this->addError('folderId', 'That folder is not available for this document.');
@@ -256,7 +258,7 @@ class DocumentSettings extends Component
         }
 
         try {
-            app(FilesService::class)->moveObject($node, $destination, auth()->user());
+            app(FilesService::class)->moveObject($node, $destination, $this->actor());
         } catch (ValidationException $e) {
             $this->addError('folderId', collect($e->errors())->flatten()->first() ?? 'That move is not allowed.');
 
@@ -284,7 +286,7 @@ class DocumentSettings extends Component
             return;
         }
 
-        $tag = app(TagRepository::class)->findOrCreate(auth()->user(), $this->document->team_id, $name);
+        $tag = app(TagRepository::class)->findOrCreate($this->actor(), $this->document->team_id, $name);
         $this->document->tags()->syncWithoutDetaching([$tag->id]);
 
         $this->newTagName = '';
@@ -372,7 +374,7 @@ class DocumentSettings extends Component
             $this->document->delete();
             app(AuditLogger::class)->record('document.deleted', $this->document);
         } else {
-            app(FilesService::class)->deleteObject($node, auth()->user());
+            app(FilesService::class)->deleteObject($node, $this->actor());
         }
 
         $this->redirect(route('documents.index'));

@@ -3,11 +3,14 @@
 namespace App\Livewire\Documents;
 
 use App\Models\DocumentSlashCommand;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Livewire\Component;
 
 class SlashCommandManager extends Component
 {
+    use SignedIn;
+
     // Form fields
     public string $name = '';
 
@@ -50,7 +53,7 @@ class SlashCommandManager extends Component
             'promptTemplate' => 'required|string|max:2000',
         ]);
 
-        $user = auth()->user();
+        $user = $this->actor();
 
         $data = [
             'user_id' => $user->id,
@@ -95,7 +98,7 @@ class SlashCommandManager extends Component
 
     public function render(): View
     {
-        $user = auth()->user();
+        $user = $this->actor();
         $commands = DocumentSlashCommand::where('user_id', $user->id)
             ->orWhere(function ($q) use ($user) {
                 if ($user->currentTeam) {

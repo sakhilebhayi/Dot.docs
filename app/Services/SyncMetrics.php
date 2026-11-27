@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Carbon\CarbonInterface;
+use Illuminate\Database\Query\Expression;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -58,7 +59,7 @@ class SyncMetrics
     {
         static $kinds = null;
 
-        return $kinds ??= json_decode(file_get_contents(resource_path(self::KINDS_FILE)), true, 512, JSON_THROW_ON_ERROR);
+        return $kinds ??= json_decode((string) file_get_contents(resource_path(self::KINDS_FILE)), true, 512, JSON_THROW_ON_ERROR);
     }
 
     /**
@@ -85,13 +86,12 @@ class SyncMetrics
             return;
         }
 
-        $column = DB::getQueryGrammar()->wrap(self::TABLE.'.count');
-        $incoming = DB::getQueryGrammar()->wrap('excluded.count');
-
         DB::table(self::TABLE)->upsert(
             $rows,
             ['document_id', 'user_id', 'day', 'kind'],
-            ['count' => DB::raw("{$column} + {$incoming}")],
+            // Fixed names only (this table's column and the upsert's own `excluded` row), never input; unquoted, which
+            // SQLite and PostgreSQL both read, so the expression is one literal string.
+            ['count' => new Expression(self::TABLE.'.count + excluded.count')],
         );
     }
 

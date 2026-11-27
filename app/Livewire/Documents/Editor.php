@@ -15,6 +15,7 @@ use App\Models\DocumentStyle;
 use App\Models\Files\Obj;
 use App\Services\PresenceService;
 use App\Styles\StyleEngine;
+use App\Support\SignedIn;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -30,6 +31,7 @@ use Livewire\Component;
 class Editor extends Component
 {
     use AuthorizesRequests;
+    use SignedIn;
 
     public Document $document;
 
@@ -146,11 +148,11 @@ class Editor extends Component
         $opts = ['expectedVersion' => $baseVersion];
         if ($overwrite) {
             // The same label the unload beacon uses for the same choice.
-            $opts['keepReplacedAs'] = DocumentStore::overwriteLabel(Auth::user());
+            $opts['keepReplacedAs'] = DocumentStore::overwriteLabel($this->actor());
         }
 
         try {
-            $this->document = app(DocumentStore::class)->save($this->document, $content, Auth::user(), $opts);
+            $this->document = app(DocumentStore::class)->save($this->document, $content, $this->actor(), $opts);
         } catch (StaleDocumentException $e) {
             $this->saved = false;
 
@@ -164,7 +166,7 @@ class Editor extends Component
         $this->saved = true;
 
         try {
-            DocumentUpdated::dispatch($this->document, Auth::user(), $this->document->content, $this->document->content_json, $this->document->version);
+            DocumentUpdated::dispatch($this->document, $this->actor(), (string) $this->document->content, $this->document->content_json ?? [], $this->document->version);
         } catch (\Throwable $e) {
             // Broadcasting unavailable: the save itself has succeeded, so
             // carry on - but log it. This catch used to be empty, which hid
@@ -269,7 +271,7 @@ class Editor extends Component
      */
     public function canEdit(): bool
     {
-        return Auth::user()->can('update', $this->document);
+        return $this->actor()->can('update', $this->document);
     }
 
     public function toggleCommentSidebar(): void
@@ -289,7 +291,7 @@ class Editor extends Component
         // may be somebody else's save from a moment ago. The store keeps
         // that first (see DocumentStore::save()).
         $json = app(HtmlToJson::class)->convert($suggestion->suggestion_text);
-        $this->document = app(DocumentStore::class)->save($this->document, $json, Auth::user(), [
+        $this->document = app(DocumentStore::class)->save($this->document, $json, $this->actor(), [
             'version' => 'named',
             'label' => 'Accepted suggestion',
             'keepReplacedAs' => 'Before accepted suggestion',
@@ -405,7 +407,7 @@ class Editor extends Component
         }
 
         try {
-            app(FilesService::class)->moveObject($node, $destination, Auth::user());
+            app(FilesService::class)->moveObject($node, $destination, $this->actor());
         } catch (ValidationException $e) {
             $this->addError('location', collect($e->errors())->flatten()->first() ?? 'That move is not allowed.');
 
@@ -473,7 +475,7 @@ class Editor extends Component
     private function presentMembers(): array
     {
         $members = app(PresenceService::class)->members($this->document->id);
-        $me = Auth::user();
+        $me = $this->actor();
 
         if (! collect($members)->contains('id', $me->id)) {
             $members[] = ['id' => $me->id, 'name' => $me->name, 'avatar' => $me->profile_photo_url];
@@ -491,7 +493,7 @@ class Editor extends Component
             ->get()
             ->map(fn ($s) => [
                 'id' => $s->id,
-                'user' => $s->user->name,
+                'user' => $s->user->name ?? 'Former member',
                 'created_at' => $s->created_at->diffForHumans(),
                 'excerpt' => Str::limit(strip_tags($s->suggestion_text), 80),
             ])

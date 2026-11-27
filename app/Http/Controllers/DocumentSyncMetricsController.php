@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Document;
 use App\Services\SyncMetrics;
+use App\Support\SignedIn;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
@@ -35,6 +36,8 @@ use Illuminate\Validation\ValidationException;
  */
 class DocumentSyncMetricsController extends Controller
 {
+    use SignedIn;
+
     public function __invoke(Request $request, string $uuid, SyncMetrics $metrics): Response
     {
         // Switched off (config/docs.php): collect nothing, whoever still sends.
@@ -77,7 +80,7 @@ class DocumentSyncMetricsController extends Controller
             'counts.*' => ['required', 'integer:strict', 'min:1', 'max:'.SyncMetrics::MAX_COUNT],
         ])->validate();
 
-        $metrics->record($document->id, (int) $request->user()->getAuthIdentifier(), $data['counts']);
+        $metrics->record($document->id, $this->actor()->id, $data['counts']);
 
         return response()->noContent();
     }

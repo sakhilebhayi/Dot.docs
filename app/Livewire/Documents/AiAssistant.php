@@ -6,9 +6,9 @@ use App\Models\Document;
 use App\Models\DocumentSlashCommand;
 use App\Services\AiService;
 use App\Services\HtmlSanitizer;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -16,6 +16,7 @@ use Livewire\Component;
 class AiAssistant extends Component
 {
     use AuthorizesRequests;
+    use SignedIn;
 
     public Document $document;
 
@@ -86,7 +87,7 @@ class AiAssistant extends Component
         $this->showResult = false;
 
         // Merge custom user/team commands into the suggestion list
-        $user = Auth::user();
+        $user = $this->actor();
         $customs = DocumentSlashCommand::where(function ($q) use ($user) {
             $q->where('user_id', $user->id);
             if ($user->currentTeam) {
@@ -119,7 +120,7 @@ class AiAssistant extends Component
 
         $ai = app(AiService::class);
 
-        if (! $ai->checkRateLimit(Auth::id())) {
+        if (! $ai->checkRateLimit($this->actor()->id)) {
             $this->result = 'Rate limit reached. You can make 20 AI requests per hour.';
             $this->applyMode = null;
             $this->showResult = true;
@@ -168,7 +169,7 @@ class AiAssistant extends Component
         $command = trim($this->command);
 
         // Check if it matches a custom slash command for the current user
-        $user = Auth::user();
+        $user = $this->actor();
         $cmdName = ltrim(explode(' ', $command)[0], '/');
 
         $custom = DocumentSlashCommand::where('name', $cmdName)

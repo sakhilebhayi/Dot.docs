@@ -11,6 +11,7 @@ use App\Notifications\Account\DocumentAccessRemoved;
 use App\Notifications\Account\DocumentPublishedByAnother;
 use App\Notifications\Account\DocumentSharedBell;
 use App\Notifications\Account\DocumentSharedWithYou;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -23,6 +24,7 @@ use Livewire\Component;
 class ShareManager extends Component
 {
     use AuthorizesRequests;
+    use SignedIn;
 
     public Document $document;
 
@@ -60,7 +62,7 @@ class ShareManager extends Component
     #[Computed]
     public function accessRequests(): Collection
     {
-        if (! Auth::user()?->can('share', $this->document)) {
+        if (! $this->actor()->can('share', $this->document)) {
             return new Collection;
         }
 
@@ -82,7 +84,7 @@ class ShareManager extends Component
 
         $accessRequest = $this->pendingRequest($requestId);
         $requester = $accessRequest->requester;
-        $actor = Auth::user();
+        $actor = $this->actor();
         $notify = false;
         $settled = false;
 
@@ -103,8 +105,8 @@ class ShareManager extends Component
         });
 
         if ($notify) {
-            $requester->notify(new DocumentSharedBell($this->document, (string) $actor?->name));
-            $requester->notify(new DocumentSharedWithYou($this->document, $role, (string) $actor?->name));
+            $requester->notify(new DocumentSharedBell($this->document, (string) $actor->name));
+            $requester->notify(new DocumentSharedWithYou($this->document, $role, (string) $actor->name));
         }
 
         $this->document->load('collaborators.user');
@@ -256,7 +258,7 @@ class ShareManager extends Component
         // when somebody adds themselves.
         if ($before !== $this->inviteRole && $user->id !== Auth::id()) {
             $changed = $before !== null;
-            $actor = (string) Auth::user()?->name;
+            $actor = (string) $this->actor()->name;
             $user->notify(new DocumentSharedBell($this->document, $actor, $changed));
             $user->notify(new DocumentSharedWithYou($this->document, $this->inviteRole, $actor, $changed));
             $this->inviteNotice = $changed ? 'Access changed. They have been told.' : 'Shared. They have been told by email.';
@@ -286,7 +288,7 @@ class ShareManager extends Component
 
             $removed = $collaborator->user;
             if ($removed instanceof User && $removed->id !== Auth::id()) {
-                $removed->notify(new DocumentAccessRemoved($this->document->title, (string) Auth::user()?->name));
+                $removed->notify(new DocumentAccessRemoved($this->document->title, (string) $this->actor()->name));
             }
         }
 
@@ -308,7 +310,7 @@ class ShareManager extends Component
         // is told (EA-3 / E-04).
         $owner = $this->document->owner;
         if ($owner instanceof User && $owner->id !== Auth::id()) {
-            $owner->notify(new DocumentPublishedByAnother($this->document, (string) Auth::user()?->name, (bool) $this->document->is_public));
+            $owner->notify(new DocumentPublishedByAnother($this->document, (string) $this->actor()->name, (bool) $this->document->is_public));
         }
     }
 

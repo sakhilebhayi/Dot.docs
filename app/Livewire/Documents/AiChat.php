@@ -4,6 +4,7 @@ namespace App\Livewire\Documents;
 
 use App\Models\Document;
 use App\Services\AiService;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Str;
@@ -13,6 +14,7 @@ use Livewire\Component;
 class AiChat extends Component
 {
     use AuthorizesRequests;
+    use SignedIn;
 
     public Document $document;
 
@@ -55,7 +57,7 @@ class AiChat extends Component
 
         $ai = app(AiService::class);
 
-        if (! $ai->checkRateLimit(auth()->id())) {
+        if (! $ai->checkRateLimit($this->actor()->id)) {
             $this->history[] = [
                 'role' => 'assistant',
                 'content' => 'Rate limit reached. You can make 20 AI requests per hour.',

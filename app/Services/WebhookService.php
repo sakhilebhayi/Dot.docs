@@ -86,7 +86,7 @@ class WebhookService
             $headers = ['Content-Type' => 'application/json'];
 
             if ($webhook->secret) {
-                $sig = hash_hmac('sha256', json_encode($body), $webhook->secret);
+                $sig = hash_hmac('sha256', (string) json_encode($body), $webhook->secret);
                 $headers['X-Dotdocs-Signature'] = "sha256={$sig}";
             }
 

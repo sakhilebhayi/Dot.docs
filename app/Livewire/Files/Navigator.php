@@ -6,6 +6,7 @@ use App\Documents\DocumentStore;
 use App\Files\FilesService;
 use App\Models\Files\Obj;
 use App\Models\Team;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
@@ -35,6 +36,7 @@ use Livewire\Component;
 class Navigator extends Component
 {
     use AuthorizesRequests, BrowsesTheTree;
+    use SignedIn;
 
     #[Url(as: 'folder', except: '')]
     public string $parentUuid = '';
@@ -115,7 +117,7 @@ class Navigator extends Component
         $this->validate(['newFolderName' => 'required|string|max:255']);
 
         $this->guarded(fn () => app(FilesService::class)
-            ->createFolder($this->parent(), $this->newFolderName, auth()->user()), 'newFolderName');
+            ->createFolder($this->parent(), $this->newFolderName, $this->actor()), 'newFolderName');
 
         $this->showFolderSheet = false;
         $this->newFolderName = '';
@@ -129,7 +131,7 @@ class Navigator extends Component
         $parent = $this->parent();
         $this->authorize('create', [Obj::class, $parent]);
 
-        $document = app(DocumentStore::class)->create(auth()->user(), $this->newTitle, null, [
+        $document = app(DocumentStore::class)->create($this->actor(), $this->newTitle, null, [
             'team_id' => $parent->team_id,
             'is_public' => false,
         ], $parent);
@@ -164,7 +166,7 @@ class Navigator extends Component
         $node = $this->node($this->renamingUuid);
 
         if (! $this->guarded(fn () => app(FilesService::class)
-            ->renameObject($node, $this->renameName, auth()->user()), 'renameName')) {
+            ->renameObject($node, $this->renameName, $this->actor()), 'renameName')) {
             return;
         }
 
@@ -196,7 +198,7 @@ class Navigator extends Component
         $destination = $this->node($destinationUuid);
 
         if (! $this->guarded(fn () => app(FilesService::class)
-            ->moveObject($node, $destination, auth()->user()), 'object')) {
+            ->moveObject($node, $destination, $this->actor()), 'object')) {
             return;
         }
 
@@ -208,7 +210,7 @@ class Navigator extends Component
     {
         $node = $this->node($uuid);
 
-        $this->guarded(fn () => app(FilesService::class)->deleteObject($node, auth()->user()), 'object');
+        $this->guarded(fn () => app(FilesService::class)->deleteObject($node, $this->actor()), 'object');
 
         unset($this->rows);
     }

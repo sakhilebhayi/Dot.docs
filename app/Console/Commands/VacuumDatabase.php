@@ -31,7 +31,7 @@ class VacuumDatabase extends Command
 
     public function handle(): int
     {
-        $db = DB::connection($this->option('database') ?: null);
+        $db = DB::connection(is_string($this->option('database')) && $this->option('database') !== '' ? $this->option('database') : null);
 
         if ($db->getDriverName() !== 'sqlite') {
             $this->error('doc:vacuum is for SQLite databases only.');
