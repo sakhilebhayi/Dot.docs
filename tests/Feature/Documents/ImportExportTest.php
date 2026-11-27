@@ -911,4 +911,37 @@ class ImportExportTest extends TestCase
     {
         return trim((new DocumentSchema)->plainText($node));
     }
+
+    /**
+     * "&" and "<" in a document must reach Word escaped: PhpWord wrote them raw, so a paragraph about
+     * "Smith & Sons" made a file Word refuses to open (found in R2-3c). Exported, well-formed, and back intact.
+     */
+    public function test_ampersands_and_angle_brackets_export_to_a_word_file_that_opens_and_reimports(): void
+    {
+        $this->seed(DocumentStyleSeeder::class);
+        $user = User::factory()->create();
+        $json = [
+            'type' => 'doc',
+            'attrs' => ['schema' => DocumentSchema::VERSION, 'style' => 'report', 'vars' => []],
+            'content' => [
+                ['type' => 'heading', 'attrs' => ['level' => 1], 'content' => [['type' => 'text', 'text' => 'R&D <draft>']]],
+                ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Smith & Sons said a < b & "c" > d.']]],
+            ],
+        ];
+        $doc = app(DocumentStore::class)->save(app(DocumentStore::class)->create($user, 'Q&A'), $json, $user);
+
+        $path = (new DocxExporter)->export($doc->content_json, $doc, app(StyleEngine::class)->resolve($doc));
+        $zip = new ZipArchive;
+        $zip->open($path);
+        $xml = (string) $zip->getFromName('word/document.xml');
+        $zip->close();
+
+        $this->assertNotFalse(@simplexml_load_string($xml), 'document.xml is well-formed');
+        $back = (new DocxImporter)->import($path, 'amp-roundtrip');
+        @unlink($path);
+
+        $texts = array_map(fn ($block) => implode('', array_column($block['content'] ?? [], 'text')), $back['content']);
+        $this->assertContains('Smith & Sons said a < b & "c" > d.', $texts);
+        $this->assertTrue((bool) array_filter($texts, fn ($t) => str_contains($t, 'R&D <draft>')));
+    }
 }

@@ -30,17 +30,18 @@ class DocumentSettingsPageSetupTest extends TestCase
             ->set('marginBottom', '30mm')
             ->set('marginLeft', '15mm')
             ->set('header', '{{ title }}')
-            ->set('footer', 'Page {{ page }} of {{ pages }}')
+            ->set('footer', 'Draft - page {{ page }}')
             ->call('savePageSetup')
             ->assertHasNoErrors();
 
+        // The header equals the style's own, so it is not stored (R2-3c: saving the margins must not freeze the
+        // style's or the brand's band into the document); the footer was changed, so it is.
         $doc->refresh();
         $this->assertSame([
             'size' => 'Letter',
             'orientation' => 'landscape',
             'margins' => ['top' => '30mm', 'right' => '15mm', 'bottom' => '30mm', 'left' => '15mm'],
-            'header' => '{{ title }}',
-            'footer' => 'Page {{ page }} of {{ pages }}',
+            'footer' => 'Draft - page {{ page }}',
         ], $doc->page_setup);
 
         // Page setup is not document content: saving it must never bump

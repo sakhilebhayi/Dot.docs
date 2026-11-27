@@ -1,7 +1,9 @@
 <?php
 
 use App\Documents\DocumentMedia;
+use App\Http\Controllers\AccessRequestController;
 use App\Http\Controllers\Auth\EcosystemAuthController;
+use App\Http\Controllers\BrandLogoController;
 use App\Http\Controllers\CommentEmailPreferenceController;
 use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\DocumentAutosaveController;
@@ -20,6 +22,8 @@ use App\Http\Controllers\PublishedDocumentController;
 use App\Http\Controllers\SchedulerProbeController;
 use App\Http\Middleware\AuthenticateGuardian;
 use App\Http\Middleware\EnsureCompanyEntitled;
+use App\Livewire\Company\BrandKitManager;
+use App\Livewire\Documents\Bin;
 use App\Livewire\Documents\DocumentSettings;
 use App\Livewire\Documents\Editor;
 use App\Livewire\Documents\Index;
@@ -176,9 +180,15 @@ Route::middleware([
 
     // Documents
     Route::get('/documents', Index::class)->name('documents.index');
+    Route::get('/documents/bin', Bin::class)->name('documents.bin');
+    // The company's brand kit (R2-3c): seen by its members, changed by its owner and admins.
+    Route::get('/brand', BrandKitManager::class)->name('brand.index');
+    Route::get('/brand/logo', BrandLogoController::class)->name('brand.logo');
     Route::get('/documents/{uuid}/edit', Editor::class)->name('documents.edit');
     // The destination of an InfoDot deep link: a document, by uuid. Re-authorised by the policy.
     Route::get('/o/{uuid}', DocumentOpenController::class)->name('documents.open');
+    // R2-3b: ask the owner for access to a document a link opened but this person cannot read.
+    Route::post('/o/{uuid}/request-access', [AccessRequestController::class, 'store'])->name('documents.request-access');
     Route::get('/documents/{uuid}/settings', DocumentSettings::class)->name('documents.settings');
     Route::get('/documents/{uuid}/share', ShareManager::class)->name('documents.share');
     Route::get('/documents/{uuid}/history', VersionHistory::class)->name('documents.history');
@@ -233,6 +243,9 @@ Route::middleware([
 
     Route::post('/files/{parent}/upload', [FileUploadController::class, 'store'])
         ->name('files.upload');
+    // Files > Import a document: a new document in that folder, filled from the file (R2-3 / F-05).
+    Route::post('/files/{parent}/import', [DocumentImportController::class, 'intoFolder'])
+        ->name('files.import');
 
     // Import
     Route::post('/documents/{uuid}/import', [DocumentImportController::class, 'store'])

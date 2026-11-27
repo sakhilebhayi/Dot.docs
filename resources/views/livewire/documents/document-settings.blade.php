@@ -82,6 +82,27 @@
         </div>
     </section>
 
+    @if ($brandName !== null)
+        {{-- The company brand (R2-3c): one switch per document. --}}
+        <section class="panel" aria-labelledby="set-brand">
+            <div class="panel-head">
+                <h2 class="section-title" id="set-brand">Company brand</h2>
+            </div>
+            <div class="panel-body stack">
+                <p class="empty-line">{{ $brandName }}’s colours and fonts, and its letterhead, footer and disclaimer on PDF, print and Word. <a href="{{ route('brand.index') }}">See the brand</a></p>
+                <div class="toolbar">
+                    @if ($usesBrand)
+                        <x-shell.status-word tone="good" word="On" />
+                        <button type="button" class="btn" wire:click="setBrand(false)">Stop using the company brand</button>
+                    @else
+                        <x-shell.status-word word="Off" />
+                        <button type="button" class="btn" wire:click="setBrand(true)">Use the company brand</button>
+                    @endif
+                </div>
+            </div>
+        </section>
+    @endif
+
     <section class="panel" aria-labelledby="set-page">
         <div class="panel-head">
             <h2 class="section-title" id="set-page">Page setup</h2>
@@ -191,10 +212,10 @@
         </div>
         <div class="panel-body">
             @if (! $showDeleteConfirm)
-                <p class="empty-line">Deleting removes the document and every version of it. There is no undo.</p>
+                <p class="empty-line">Deleting moves the document and every version of it to the <a href="{{ route('documents.bin') }}">Bin</a>, where you or a company admin can restore it.</p>
                 <button type="button" class="btn btn-danger" wire:click="$set('showDeleteConfirm', true)">Delete this document</button>
             @else
-                <p class="empty-line">Delete {{ $document->title }} and all of its history?</p>
+                <p class="empty-line">Move {{ $document->title }} and all of its history to the Bin?</p>
                 <div class="toolbar">
                     <button type="button" class="btn btn-danger" wire:click="delete">
                         <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span> Yes, delete it

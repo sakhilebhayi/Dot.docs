@@ -2,6 +2,7 @@
 
 namespace App\Files;
 
+use App\Audit\AuditLogger;
 use App\Models\Document;
 use App\Models\Files\File;
 use App\Models\Files\Folder;
@@ -338,12 +339,12 @@ class FilesService
             ]);
         }
 
-        DB::transaction(function () use ($obj, $objectable) {
+        DB::transaction(function () use ($obj, $objectable, $actor) {
             if ($objectable instanceof Document) {
-                // Soft delete: the document survives in its own trash, and a
-                // restore re-registers it under the team root (see
-                // FilesService::registerDocument callers).
+                // Soft delete: the document survives in the bin (Documents\Bin),
+                // and a restore re-registers it under the team root.
                 $objectable->delete();
+                app(AuditLogger::class)->record('document.deleted', $objectable, [], $actor);
             } elseif ($objectable instanceof File) {
                 Storage::disk('files')->delete($objectable->path);
                 $objectable->delete();

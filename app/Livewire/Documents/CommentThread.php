@@ -161,9 +161,13 @@ class CommentThread extends Component
         $this->replyContent = '';
     }
 
-    public function searchMentions(string $query): void
+    /** Which box the suggestions belong to: the new comment, or the reply being written (R2-3 / F-12). */
+    public string $mentionTarget = 'new';
+
+    public function searchMentions(string $query, string $target = 'new'): void
     {
         $this->mentionQuery = $query;
+        $this->mentionTarget = $target === 'reply' ? 'reply' : 'new';
 
         if (strlen($query) < 1) {
             $this->mentionResults = [];
@@ -311,6 +315,40 @@ class CommentThread extends Component
     {
         // Re-render triggered automatically when this event is received
     }
+
+    /**
+     * A comment's text, escaped, with each @mention of a participant highlighted - matched by FULL name, longest
+     * first, exactly as mentionedAmong() decides who is notified (R2-3 / F-12). The page used to highlight any
+     * `@word`, so "@Thandi Mokoena" lit up only "@Thandi", and a name that notifies nobody looked like it did.
+     */
+    public function highlightMentions(string $content): string
+    {
+        $html = e($content);
+        $names = $this->participantNames();
+
+        if ($names === []) {
+            return $html;
+        }
+
+        // ONE pass over an alternation, longest name first: a second pass for "Thandi" would otherwise find it again
+        // inside the span already made for "Thandi Mokoena" (and mentionedAmong() does not notify her for it). A
+        // callback, not a replacement string, so a name holding "$1" or a backslash is shown as written.
+        $pattern = '/@('.implode('|', array_map(fn (string $name) => preg_quote(e($name), '/'), $names)).')(?![\p{L}\p{N}_])/u';
+
+        return (string) preg_replace_callback($pattern, fn (array $m) => '<span class="mention">@'.$m[1].'</span>', $html);
+    }
+
+    /** @return list<string> participants' names, longest first */
+    private function participantNames(): array
+    {
+        return $this->participantNamesCache ??= $this->document->participants()
+            ->pluck('name')->filter()->unique()
+            ->sortByDesc(fn (string $name) => mb_strlen($name))
+            ->values()->all();
+    }
+
+    /** @var list<string>|null */
+    private ?array $participantNamesCache = null;
 
     public function render()
     {

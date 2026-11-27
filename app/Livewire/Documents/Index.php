@@ -387,7 +387,7 @@ class Index extends Component
         // and DocumentStore::create() would otherwise default the document to
         // $owner->currentTeam while FilesService::registerDocument() stamps the
         // tree node with $parent->team_id - two rows disagreeing about which
-        // team owns one document. Navigator::createDocument()/importHere() pass
+        // team owns one document. Navigator::createDocument() and DocumentImportController::intoFolder() pass
         // the parent's team for the same reason.
         $attrs = [
             'team_id' => $parent->team_id,

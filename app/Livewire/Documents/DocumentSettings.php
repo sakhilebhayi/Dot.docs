@@ -3,7 +3,9 @@
 namespace App\Livewire\Documents;
 
 use App\Audit\AuditLogger;
+use App\Brand\Brand;
 use App\Files\FilesService;
+use App\Models\BrandKit;
 use App\Models\Document;
 use App\Models\Files\Obj;
 use App\Models\Team;
@@ -60,6 +62,12 @@ class DocumentSettings extends Component
         $this->title = $this->document->title;
         $this->folderId = $this->node()?->parent_id;
 
+        $this->loadPageSetup();
+    }
+
+    /** The page setup form, from the document over its style (and its company brand, when it uses one). */
+    private function loadPageSetup(): void
+    {
         $setup = PageSetup::fromDocument($this->document, app(StyleEngine::class)->resolve($this->document));
         $this->pageSize = $setup->size;
         $this->orientation = $setup->orientation;
@@ -106,12 +114,56 @@ class DocumentSettings extends Component
                     'bottom' => $this->marginBottom,
                     'left' => $this->marginLeft,
                 ],
-                'header' => $this->header,
-                'footer' => $this->footer,
-            ],
+            ] + $this->bandOverrides(),
         ]);
 
         session()->flash('status', 'Page setup saved.');
+    }
+
+    /**
+     * The header and footer are stored only when they differ from what the style (and the company brand) gives:
+     * saving the margins must not freeze the brand's footer into this document, or a later change to the brand
+     * would never reach it (R2-3c).
+     *
+     * @return array<string, string>
+     */
+    private function bandOverrides(): array
+    {
+        $style = app(StyleEngine::class)->resolve($this->document);
+        $page = is_array($style->tokens['page'] ?? null) ? $style->tokens['page'] : [];
+        $overrides = [];
+
+        foreach (['header' => $this->header, 'footer' => $this->footer] as $band => $value) {
+            if ($value !== (string) ($page[$band] ?? '')) {
+                $overrides[$band] = $value;
+            }
+        }
+
+        return $overrides;
+    }
+
+    /** Whether this document uses its company's brand kit (R2-3c). Not an action: protected. */
+    protected function usesBrand(): bool
+    {
+        return Brand::forDocument($this->document) !== null;
+    }
+
+    protected function companyKit(): ?BrandKit
+    {
+        return $this->document->team_id === null ? null : BrandKit::where('team_id', $this->document->team_id)->first();
+    }
+
+    public function setBrand(bool $on): void
+    {
+        $this->authorize('update', $this->document);
+
+        $kit = $this->companyKit();
+        $this->document->forceFill(['brand_kit_id' => $on && $kit !== null ? $kit->id : null])->save();
+        app(AuditLogger::class)->record('document.brand_'.($on && $kit !== null ? 'on' : 'off'), $this->document);
+        // The footer the form shows comes from the brand: show the one that now applies.
+        $this->loadPageSetup();
+
+        session()->flash('status', $on && $kit !== null ? 'This document now uses the company brand.' : 'This document no longer uses the company brand.');
     }
 
     public function save(): void
@@ -314,6 +366,7 @@ class DocumentSettings extends Component
             // No workspace to file it in, so there is no tree row either -
             // only reachable for a team-less factory account.
             $this->document->delete();
+            app(AuditLogger::class)->record('document.deleted', $this->document);
         } else {
             app(FilesService::class)->deleteObject($node, auth()->user());
         }
@@ -323,7 +376,13 @@ class DocumentSettings extends Component
 
     public function render()
     {
-        return view('livewire.documents.document-settings')
+        $kit = $this->companyKit();
+
+        return view('livewire.documents.document-settings', [
+            // Only what the page shows: the kit's name, never the whole record.
+            'brandName' => $kit?->name,
+            'usesBrand' => $kit !== null && $this->usesBrand(),
+        ])
             ->layout('layouts.app')
             ->title('Settings for '.$this->document->title);
     }

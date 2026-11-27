@@ -139,26 +139,6 @@ class Navigator extends Component
         $this->redirect(route('documents.edit', $document->uuid));
     }
 
-    /**
-     * Import reuses the editor's own importer rather than a second upload
-     * path: it opens a new document filed HERE, and the file goes into it
-     * from the editor's Import menu.
-     */
-    public function importHere(): void
-    {
-        $parent = $this->parent();
-        $this->authorize('create', [Obj::class, $parent]);
-
-        $document = app(DocumentStore::class)->create(auth()->user(), 'Imported document', null, [
-            'team_id' => $parent->team_id,
-            'is_public' => false,
-        ], $parent);
-
-        session()->flash('status', 'New document created here. Choose your file from the Import menu to bring its contents in.');
-
-        $this->redirect(route('documents.edit', $document->uuid));
-    }
-
     public function startRenaming(string $uuid): void
     {
         $node = $this->node($uuid);

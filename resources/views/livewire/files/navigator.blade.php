@@ -45,10 +45,31 @@
         </div>
 
         <div class="panel-body">
-            <div class="toolbar" role="group" aria-label="Add to this folder">
+            <div class="toolbar" role="group" aria-label="Add to this folder"
+                 x-data="{ importing: {{ $errors->import->any() ? 'true' : 'false' }} }">
                 <button type="button" class="btn" wire:click="$set('showFolderSheet', true)">New folder</button>
-                <button type="button" class="btn" wire:click="importHere">Import a document</button>
+                <button type="button" class="btn" aria-controls="files-import-form"
+                        x-bind:aria-expanded="importing ? 'true' : 'false'"
+                        @click="importing = ! importing; if (importing) $nextTick(() => document.getElementById('files-import').focus())">Import a document</button>
                 <button type="button" class="btn btn-primary" wire:click="$set('showCreateSheet', true)">New document</button>
+
+                {{-- Import (R2-3 / F-05): a new document in this folder, titled after the file and holding its
+                     contents. A plain form like Upload below, posting to DocumentImportController::intoFolder. --}}
+                <form id="files-import-form" method="POST" action="{{ route('files.import', $this->parent->uuid) }}"
+                      enctype="multipart/form-data" class="field-row" style="flex-basis:100%"
+                      x-show="importing" x-cloak>
+                    @csrf
+                    <label class="field-label" for="files-import">A .docx, .md, .html or .txt file</label>
+                    <div class="toolbar">
+                        <input id="files-import" type="file" name="file" class="field" style="flex:1 1 260px;min-width:0" required
+                               accept=".docx,.md,.markdown,.html,.htm,.txt"
+                               @error('file', 'import') aria-invalid="true" aria-describedby="files-import-error" @enderror />
+                        <button type="submit" class="btn">Import it</button>
+                    </div>
+                    @error('file', 'import')
+                        <p class="field-error" id="files-import-error" role="alert">{{ $message }}</p>
+                    @enderror
+                </form>
             </div>
 
             {{-- Upload is a plain form, not a Livewire action: the file goes
@@ -119,7 +140,7 @@
                                 wire:click="startMoving('{{ $row->uuid }}')">Move</button>
                         <button type="button" class="btn btn-quiet btn-sm"
                                 wire:click="deleteObject('{{ $row->uuid }}')"
-                                wire:confirm="Delete this? A document is deleted with its history, and a file is deleted. This cannot be undone from here.">
+                                wire:confirm="Delete this? A document goes to the Bin with its history, where it can be restored. A file is deleted for good.">
                             Delete
                         </button>
                     </li>
