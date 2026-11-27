@@ -2,6 +2,7 @@
 
 namespace App\Services\Guardian;
 
+use App\Mail\Delivery\MailNotDelivered;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -34,7 +35,9 @@ class ErrorAlert
                 return;
             }
 
-            $fingerprint = sha1($e::class.'|'.$e->getFile().'|'.$e->getLine());
+            // A mail given up on is one alert per kind of email, not one for all of them (R2-4).
+            $kind = $e instanceof MailNotDelivered ? $e->kind : '';
+            $fingerprint = sha1($e::class.'|'.$e->getFile().'|'.$e->getLine().'|'.$kind);
             if (! Cache::add('guardian:alert:'.$fingerprint, 1, now()->addHour())) {
                 return;
             }
@@ -62,7 +65,8 @@ class ErrorAlert
 
     /**
      * The message, minus personal data: a database error's message carries the SQL WITH its bound values (emails,
-     * tokens), so for those only the statement with its placeholders and the driver's error code are sent.
+     * tokens), so for those only the statement with its placeholders and the driver's error code are sent. Any email
+     * address left in a message (a mail server's "550 <someone@example.com> rejected") is masked (R2-4).
      */
     private function message(\Throwable $e): string
     {
@@ -70,7 +74,7 @@ class ErrorAlert
             return 'database error '.(string) ($e->errorInfo[1] ?? $e->getCode()).' on: '.$e->getSql();
         }
 
-        return $e->getMessage();
+        return (string) preg_replace('/[^\s<>"\'@]+@[^\s<>"\'@]+\.[a-z]{2,}/i', '[address]', $e->getMessage());
     }
 
     private function body(\Throwable $e): string

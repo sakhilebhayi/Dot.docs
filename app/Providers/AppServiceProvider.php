@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Http\Middleware\EnsureCompanyEntitled;
+use App\Mail\Delivery\MailDeliveryListener;
 use App\Models\Document;
 use App\Models\Files\File;
 use App\Models\Files\Folder;
@@ -16,6 +17,11 @@ use App\Support\ShellContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
+use Illuminate\Mail\Events\MessageSending;
+use Illuminate\Mail\Events\MessageSent;
+use Illuminate\Notifications\Events\NotificationSending;
+use Illuminate\Notifications\Events\NotificationSent;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -45,6 +51,12 @@ class AppServiceProvider extends ServiceProvider
 
         // R-50: Livewire updates from a page in the signed-in area carry that page's entitlement check with them.
         Livewire::addPersistentMiddleware([EnsureCompanyEntitled::class]);
+
+        // R2-4 / E-10: each queued email is sent once, and recorded when it goes (App\Mail\Delivery).
+        Event::listen(NotificationSending::class, [MailDeliveryListener::class, 'notificationSending']);
+        Event::listen(NotificationSent::class, [MailDeliveryListener::class, 'notificationSent']);
+        Event::listen(MessageSending::class, [MailDeliveryListener::class, 'messageSending']);
+        Event::listen(MessageSent::class, [MailDeliveryListener::class, 'messageSent']);
 
         Document::observe(DocumentObserver::class);
         Document::observe(InfoDotResourceObserver::class);
