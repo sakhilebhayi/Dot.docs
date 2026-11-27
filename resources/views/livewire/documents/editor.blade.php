@@ -786,12 +786,13 @@
                             @if (! empty($member['avatar']))
                                 <img src="{{ $member['avatar'] }}" alt="{{ $member['name'] }}" />
                             @else
-                                {{ strtoupper(substr($member['name'], 0, 1)) }}
+                                {{-- The initial is the picture; the person's name is what is read (R2-9). --}}
+                                <span aria-hidden="true">{{ strtoupper(substr($member['name'], 0, 1)) }}</span><span class="sr-only">{{ $member['name'] }}</span>
                             @endif
                         </span>
                     @endforeach
                     @if (count($activeUsers) > 4)
-                        <span class="presence-face">+{{ count($activeUsers) - 4 }}</span>
+                        <span class="presence-face"><span aria-hidden="true">+{{ count($activeUsers) - 4 }}</span><span class="sr-only">and {{ count($activeUsers) - 4 }} more</span></span>
                     @endif
                 </div>
             @endif
@@ -800,8 +801,11 @@
                  has to be visible: the writer keeps typing over content the
                  server never accepted, and the offline draft is deliberately
                  kept as the only remaining copy. The same words go to the
-                 top bar through the `shell:save-state` event. --}}
-            <span class="doc-status" aria-live="polite">
+                 top bar through the `shell:save-state` event, which is also
+                 where a screen reader hears them: this strip is visual only,
+                 so an autosave is not announced twice. Its alerts (a failed
+                 save, an assistant error) speak for themselves. --}}
+            <span class="doc-status">
                 <x-shell.status-word tone="idle" word="Offline" x-show="isOffline"
                                      title="Edits are saved in this browser and sync when you are back online." />
 

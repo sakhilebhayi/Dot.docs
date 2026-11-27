@@ -27,22 +27,26 @@
                         <span class="field-label" id="add-member-role">{{ __('Role') }}</span>
                         <x-input-error for="role" field="add-member-role" />
 
-                        <ul class="list role-list" role="group" aria-labelledby="add-member-role"@error('role') aria-describedby="add-member-role-error"@enderror>
-                            @foreach ($this->roles as $role)
-                                <li>
-                                    <button type="button" class="list-row"
-                                            aria-pressed="{{ $addTeamMemberForm['role'] === $role->key ? 'true' : 'false' }}"
-                                            wire:click="$set('addTeamMemberForm.role', '{{ $role->key }}')">
-                                        <x-shell.status-word :tone="$addTeamMemberForm['role'] === $role->key ? 'good' : 'idle'"
-                                                      :word="$addTeamMemberForm['role'] === $role->key ? __('Chosen') : __('Not chosen')" />
-                                        <span class="list-key">
-                                            {{ $role->name }}
-                                            <span class="list-sub">{{ $role->description }}</span>
-                                        </span>
-                                    </button>
-                                </li>
-                            @endforeach
-                        </ul>
+                        {{-- The group is a wrapper, not the list itself: a list given role=group stops being a list, and
+                             its items are then orphaned (axe listitem, R2-9). --}}
+                        <div role="group" aria-labelledby="add-member-role"@error('role') aria-describedby="add-member-role-error"@enderror>
+                            <ul class="list role-list">
+                                @foreach ($this->roles as $role)
+                                    <li>
+                                        <button type="button" class="list-row"
+                                                aria-pressed="{{ $addTeamMemberForm['role'] === $role->key ? 'true' : 'false' }}"
+                                                wire:click="$set('addTeamMemberForm.role', '{{ $role->key }}')">
+                                            <x-shell.status-word :tone="$addTeamMemberForm['role'] === $role->key ? 'good' : 'idle'"
+                                                          :word="$addTeamMemberForm['role'] === $role->key ? __('Chosen') : __('Not chosen')" />
+                                            <span class="list-key">
+                                                {{ $role->name }}
+                                                <span class="list-sub">{{ $role->description }}</span>
+                                            </span>
+                                        </button>
+                                    </li>
+                                @endforeach
+                            </ul>
+                        </div>
                     </div>
                 @endif
             </x-slot>

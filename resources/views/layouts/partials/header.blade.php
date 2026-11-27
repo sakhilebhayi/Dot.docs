@@ -64,8 +64,13 @@
                 aria-expanded="{{ $railState === 'expanded' ? 'true' : 'false' }}">
             <span data-shell-rail-word>{{ $railState === 'expanded' ? 'Hide the panel' : 'Show the panel' }}</span>
         </button>
-        <x-shell.status-word tone="idle" word="Ready" id="shell-save" class="topbar-status" aria-live="polite"
+        {{-- The visible word is not a live region: it changes on every pause in typing. The editor's settled outcomes
+             (Saved, Not saved) are said once each through #shell-save-said (resources/js/shell.js). --}}
+        <x-shell.status-word tone="idle" word="Ready" id="shell-save" class="topbar-status"
                              :data-shell-save-owner="$isEditor ? true : null" />
+        @if ($isEditor)
+            <span id="shell-save-said" class="sr-only" role="status"></span>
+        @endif
     </x-slot:status>
 
     <x-slot:search>

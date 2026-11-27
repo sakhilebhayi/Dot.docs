@@ -491,9 +491,35 @@ function initSkipLink() {
  */
 const SAVE_TONES = ['good', 'danger', 'idle'];
 
+/**
+ * The words a screen reader is told about. Editing, Saving and Ready come and
+ * go on every pause in typing; announcing them made each autosave three
+ * interruptions. Only a settled outcome is said, and only when it differs from
+ * the last one said: Saved after Saving after Saved stays silent.
+ */
+const ANNOUNCED_SAVE_WORDS = ['Saved', 'Not saved', 'Offline', 'Read only'];
+
+/** What to announce for `word` given the last announcement, or null for nothing. */
+export function saveAnnouncement(lastAnnounced, word) {
+    if (!ANNOUNCED_SAVE_WORDS.includes(word) || word === lastAnnounced) return null;
+
+    return word;
+}
+
+let lastSaveAnnouncement = null;
+
 function setSaveState(tone, word) {
     const item = document.getElementById('shell-save');
     if (!item || !item.hasAttribute('data-shell-save-owner')) return;
+
+    // The one live region for save state (WCAG 4.1.3). The visible word above
+    // is not live: it changes on every keystroke pause.
+    const said = document.getElementById('shell-save-said');
+    const announce = saveAnnouncement(lastSaveAnnouncement, word);
+    if (said && announce) {
+        lastSaveAnnouncement = announce;
+        said.textContent = announce;
+    }
 
     // Only the TONE class is swapped. Rewriting className wholesale took
     // `topbar-status` with it (and would take anything a later task adds to

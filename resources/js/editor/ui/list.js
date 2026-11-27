@@ -33,11 +33,35 @@ export function fuzzyScore(haystack, needle) {
 }
 
 /**
- * @param {{title?: string, placeholder?: string, items: Array<{key:string,title:string,hint?:string,group?:string}>, onSelect: (item) => void, empty?: string}} config
+ * Where Tab lands inside a trapped overlay. `current` is the index of the
+ * focused element among the `count` focusable ones (-1 when focus is on none
+ * of them); Tab walks forward and wraps, Shift+Tab walks back and wraps.
+ */
+export function trappedFocusIndex(count, current, backwards) {
+    if (count <= 0) {
+        return -1;
+    }
+    if (current < 0) {
+        return backwards ? count - 1 : 0;
+    }
+
+    return backwards ? (current - 1 + count) % count : (current + 1) % count;
+}
+
+const FOCUSABLE = 'input, button, select, textarea, a[href], [tabindex]:not([tabindex="-1"])';
+
+/**
+ * `returnFocus` puts the writer back where they were when the list closes; the
+ * editor's callers pass the editor's own focus command, which restores the
+ * selection it had. Without one, focus returns to whatever held it on open.
+ *
+ * @param {{title?: string, placeholder?: string, items: Array<{key:string,title:string,hint?:string,group?:string}>, onSelect: (item) => void, empty?: string, returnFocus?: () => void}} config
  * @returns {{close: () => void}}
  */
-export function openList({ title = '', placeholder = 'Type to filter…', items, onSelect, empty = 'Nothing matches' }) {
-    closeList();
+export function openList({ title = '', placeholder = 'Type to filter…', items, onSelect, empty = 'Nothing matches', returnFocus = null }) {
+    closeList({ restoreFocus: false });
+
+    const opener = typeof document !== 'undefined' ? document.activeElement : null;
 
     const root = document.createElement('div');
     root.className = 'dotdoc-overlay';
@@ -198,6 +222,19 @@ export function openList({ title = '', placeholder = 'Type to filter…', items,
         }
     };
 
+    // The overlay is aria-modal: Tab and Shift+Tab stay inside it (WCAG 2.4.3).
+    const onTrap = (event) => {
+        if (event.key !== 'Tab') {
+            return;
+        }
+        const focusables = Array.from(root.querySelectorAll(FOCUSABLE)).filter((el) => !el.disabled);
+        const next = trappedFocusIndex(focusables.length, focusables.indexOf(document.activeElement), event.shiftKey);
+        event.preventDefault();
+        if (next >= 0) {
+            focusables[next].focus();
+        }
+    };
+
     const onBackdrop = (event) => {
         if (event.target === root) {
             close();
@@ -206,14 +243,30 @@ export function openList({ title = '', placeholder = 'Type to filter…', items,
 
     input.addEventListener('input', draw);
     input.addEventListener('keydown', onKeyDown);
+    root.addEventListener('keydown', onTrap);
     root.addEventListener('mousedown', onBackdrop);
 
-    function close() {
+    function close({ restoreFocus = true } = {}) {
         if (openOverlay !== handle) {
             return;
         }
         openOverlay = null;
         root.remove();
+        if (restoreFocus) {
+            restore();
+        }
+    }
+
+    function restore() {
+        try {
+            if (returnFocus) {
+                returnFocus();
+            } else if (opener && opener.isConnected && typeof opener.focus === 'function') {
+                opener.focus();
+            }
+        } catch {
+            // The editor may be gone (navigating away); nowhere to return to.
+        }
     }
 
     const handle = { close, root };
@@ -225,10 +278,13 @@ export function openList({ title = '', placeholder = 'Type to filter…', items,
     return handle;
 }
 
-/** Close whatever overlay is open, if any. */
-export function closeList() {
+/**
+ * Close whatever overlay is open, if any. Focus goes back to the writer's
+ * place unless `restoreFocus` is false (the editor tearing itself down).
+ */
+export function closeList({ restoreFocus = true } = {}) {
     if (openOverlay) {
-        openOverlay.close();
+        openOverlay.close({ restoreFocus });
     }
 }
 

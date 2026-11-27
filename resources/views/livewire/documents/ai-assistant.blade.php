@@ -7,13 +7,16 @@
 
     {{-- Command palette --}}
     @if ($showPalette)
+        {{-- Escape closes the palette from anywhere inside it (a suggestion button included), not only from the
+             field (R2-9). --}}
         <div class="scrim sheet-top" x-trap.noscroll="true" role="dialog" aria-modal="true"
-             aria-label="Assistant commands" x-data x-init="$el.querySelector('input').focus()">
+             aria-label="Assistant commands" x-data x-init="$el.querySelector('input').focus()"
+             x-on:keydown.escape.stop="$wire.closePalette()">
             <div class="sheet" wire:click.outside="closePalette">
                 <div class="sheet-head">
                     <label class="sr-only" for="ai-command">Command</label>
                     <input id="ai-command" wire:model="command" wire:keydown.enter="runCommand"
-                           wire:keydown.escape="closePalette" type="text" class="field"
+                           type="text" class="field"
                            placeholder="/summarize, /grammar, /tone formal, /translate French" />
                     {{-- wire:loading, not $loading: the flag was set and cleared inside one
                          request, so the browser never saw it (EA-4 / U-01). --}}

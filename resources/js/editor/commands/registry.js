@@ -216,6 +216,7 @@ export const commands = [
                         .focus()
                         .insertCrossRef({ targetId: item.targetId, kind: item.kind })
                         .run(),
+                returnFocus: () => editor.isDestroyed || editor.commands.focus(),
             });
 
             return true;
@@ -242,6 +243,7 @@ export const commands = [
                 empty: 'This document has no variables',
                 items: keys.map((key) => ({ key, title: key, hint: String(vars[key] ?? '') })),
                 onSelect: (item) => editor.chain().focus().insertVariable(item.key).run(),
+                returnFocus: () => editor.isDestroyed || editor.commands.focus(),
             });
 
             return true;

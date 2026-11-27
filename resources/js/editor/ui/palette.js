@@ -28,6 +28,17 @@ const GROUP_LABELS = {
     system: 'Document',
 };
 
+/**
+ * Put the writer back in the document at the selection they had: the editor's
+ * own focus command restores it (WCAG 2.4.3 - closing the palette must not
+ * drop focus on <body>).
+ */
+export function returnToEditor(editor) {
+    if (editor && !editor.isDestroyed && editor.commands) {
+        editor.commands.focus();
+    }
+}
+
 /** Open the command palette over the given editor. */
 export function openPalette(editor) {
     return openList({
@@ -41,6 +52,7 @@ export function openPalette(editor) {
             group: command.group,
         })),
         onSelect: (item) => run(editor, item.key),
+        returnFocus: () => returnToEditor(editor),
     });
 }
 

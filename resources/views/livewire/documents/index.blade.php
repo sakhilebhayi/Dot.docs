@@ -15,11 +15,17 @@
 
     {{-- Breadcrumbs: where in the tree this listing is standing. --}}
     <nav class="toolbar u-mb-4" aria-label="Folder path">
+        {{-- aria-current marks where the listing stands: the root, or the last crumb. --}}
+        @php
+            $crumbs = $this->breadcrumbs;
+        @endphp
         <button type="button" wire:click="openFolder(null)"
-                class="btn btn-quiet btn-sm {{ ! $folderId ? 'is-current' : '' }}">All documents</button>
-        @foreach ($this->breadcrumbs as $crumb)
+                class="btn btn-quiet btn-sm {{ ! $folderId ? 'is-current' : '' }}"
+                @if (empty($crumbs)) aria-current="page" @endif>All documents</button>
+        @foreach ($crumbs as $crumb)
             <span class="micro" aria-hidden="true">/</span>
-            <button type="button" wire:click="openFolder({{ $crumb->id }})" class="btn btn-quiet btn-sm">{{ $crumb->name() }}</button>
+            <button type="button" wire:click="openFolder({{ $crumb->id }})" class="btn btn-quiet btn-sm"
+                    @if ($loop->last) aria-current="page" @endif>{{ $crumb->name() }}</button>
         @endforeach
     </nav>
 
@@ -87,14 +93,15 @@
                                 class="btn btn-quiet u-grow u-start">
                             {{ $folder->name() }}
                         </button>
+                        {{-- Each action names its folder (WCAG 2.4.6). --}}
                         <button type="button" class="btn btn-quiet btn-sm"
                                 @click="renameTrigger = $el"
                                 wire:click="startRenamingFolder({{ $folder->id }})">
-                            Rename
+                            Rename<span class="sr-only">: {{ $folder->name() }}</span>
                         </button>
                         <button type="button" class="btn btn-quiet btn-sm" wire:click="deleteFolder({{ $folder->id }})"
                                 wire:confirm="Delete this folder? It has to be empty first — nothing inside is ever deleted with it.">
-                            Delete
+                            Delete<span class="sr-only">: {{ $folder->name() }}</span>
                         </button>
                     </li>
                 @endforeach
@@ -105,7 +112,13 @@
     <section class="panel" aria-labelledby="doc-list">
         <div class="panel-head">
             <h2 class="section-title" id="doc-list">Documents</h2>
-            <span wire:loading wire:target="search,filter,filterByTag" class="micro">Filtering</span>
+            <span wire:loading wire:target="search,filter,filterByTag" class="micro" aria-hidden="true">Filtering</span>
+            {{-- The one announcement for the filters (WCAG 4.1.3): always in the page, so a new count or the
+                 Filtering state is said when it changes. --}}
+            <p class="sr-only" role="status" data-documents-status>
+                <span wire:loading wire:target="search,filter,filterByTag">Filtering</span>
+                <span wire:loading.remove wire:target="search,filter,filterByTag">{{ trans_choice(':count document listed|:count documents listed', $this->documents->total(), ['count' => number_format($this->documents->total())]) }}</span>
+            </p>
         </div>
 
         @php

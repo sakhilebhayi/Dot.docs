@@ -860,7 +860,7 @@ function mount(element, opts = {}) {
             flushSave({ beacon: true });
             clearTimeout(saveTimer);
             window.removeEventListener('pagehide', onPageHide);
-            closeList();
+            closeList({ restoreFocus: false });
             teardownPalette();
             teardownBubble();
             pagination.destroy();
