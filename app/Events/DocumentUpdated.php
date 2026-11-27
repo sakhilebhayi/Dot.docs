@@ -4,6 +4,7 @@ namespace App\Events;
 
 use App\Models\Document;
 use App\Models\User;
+use App\Support\LiveBroadcast;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
@@ -40,6 +41,12 @@ class DocumentUpdated implements ShouldBroadcastNow
     public function broadcastAs(): string
     {
         return 'document.updated';
+    }
+
+    /** Skipped when the broadcaster reaches nobody (`null` / `log`); listeners in the app still run. */
+    public function broadcastWhen(): bool
+    {
+        return LiveBroadcast::available();
     }
 
     /** @return array<string, mixed> */

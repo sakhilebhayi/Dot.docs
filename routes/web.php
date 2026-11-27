@@ -46,7 +46,7 @@ use Laravel\Jetstream\Jetstream;
 Route::post('/auth/ecosystem', [EcosystemAuthController::class, 'handle'])
     ->withoutMiddleware(['Illuminate\Foundation\Http\Middleware\PreventRequestForgery', 'Illuminate\Foundation\Http\Middleware\VerifyCsrfToken', 'Illuminate\Foundation\Http\Middleware\ValidateCsrfToken'])->name('auth.ecosystem');
 
-// Browsers POST Content-Security-Policy violation reports here (the policy is report-only, see SecurityHeaders). The browser sends
+// Browsers POST Content-Security-Policy violation reports here (the policy is enforced, see SecurityHeaders). The browser sends
 // no cookie, CSRF token or login, so the route drops the web group's session and CSRF middleware: a report neither starts a
 // session nor needs one. Throttled per IP; the controller keeps only the violated directive and the blocked host.
 Route::post('/csp-report', CspReportController::class)

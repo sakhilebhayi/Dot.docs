@@ -90,3 +90,7 @@ Schedule::call(fn () => DB::table('sent_mails')->where('sent_at', '<', now()->su
 
 // R2-1 / S-07: API tokens expire after config('sanctum.expiration'); their rows go a day later.
 Schedule::command('sanctum:prune-expired --hours=24')->dailyAt('03:50')->onOneServer();
+
+// R2-11: the database cache drops an expired row only when that key is read again; the rest go once a day. Not
+// essential work, so it is paused while DOT_CRON_ESSENTIAL_ONLY is on, like the other pruning above.
+Schedule::command('cache:prune-expired')->dailyAt('03:55')->onOneServer();
