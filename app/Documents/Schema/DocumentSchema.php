@@ -327,11 +327,11 @@ class DocumentSchema
         }
 
         if ($type === 'figure') {
-            return $this->normaliseFigure($node, $children);
+            return $this->normaliseFigure($node, array_values($children));
         }
 
         if ($type === 'columns') {
-            return [$this->normaliseColumns($node, $children)];
+            return [$this->normaliseColumns($node, array_values($children))];
         }
 
         return [$node];

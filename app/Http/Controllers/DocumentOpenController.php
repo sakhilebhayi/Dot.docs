@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AccessRequest;
 use App\Models\Document;
+use App\Support\SignedIn;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
@@ -17,6 +18,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class DocumentOpenController extends Controller
 {
+    use SignedIn;
+
     public function __invoke(Request $request, string $uuid): Response
     {
         abort_unless(Str::isUuid($uuid), 404);
@@ -25,7 +28,7 @@ class DocumentOpenController extends Controller
 
         abort_if($document === null, 404);
 
-        $user = $request->user();
+        $user = $this->actor();
 
         if (! $user->can('view', $document)) {
             // A published document opens on its public page, where the

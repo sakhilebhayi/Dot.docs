@@ -13,8 +13,8 @@ class LinkTeamToInfoDot extends Command
 
     public function handle(): int
     {
-        $team = Team::find($this->argument('team'));
-        $uuid = (string) $this->argument('uuid');
+        $team = Team::query()->whereKey((int) $this->argument('team'))->first();
+        $uuid = is_string($this->argument('uuid')) ? $this->argument('uuid') : '';
 
         if (! $team) {
             $this->error('No such team.');

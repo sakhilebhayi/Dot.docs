@@ -54,6 +54,7 @@ class IdentityClient
             return null;
         }
 
+        /** @var array{user: array<string, mixed>, teams: list<array<string, mixed>>, current_team_id: mixed}|null $data InfoDot's redeem answer, checked below */
         $data = $response->json();
 
         return is_array($data) && isset($data['user']['email']) ? $data : null;

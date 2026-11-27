@@ -13,7 +13,7 @@
         </div>
 
         @if (session('dotsso_status'))
-            <div class="mb-4 font-medium text-sm text-emerald-700" role="status">{{ session('dotsso_status') }}</div>
+            <div class="mb-4 font-medium text-sm text-[var(--accent)]" role="status">{{ session('dotsso_status') }}</div>
         @endif
 
         <form method="POST" action="{{ $verifyUrl }}" novalidate>

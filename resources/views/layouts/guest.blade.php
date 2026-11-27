@@ -23,36 +23,29 @@
     @livewireStyles
 
     <style>
+        /* R2-9: these pages wear Fair Copy (resources/css/shell.css, loaded through app.css): its ground, ink, lines
+           and accent. The names the pages already use for links map onto the accent; nothing here defines a colour of
+           its own any more. */
         :root {
-            --paper: #fbf7ee;
-            --paper-deep: #f1e9d6;
-            --ink: #1f1b14;
-            --ink-soft: #5b5344;
-            --line: rgba(31, 27, 20, 0.12);
-            --line-soft: rgba(31, 27, 20, 0.08);
-            --gold: #f1c62e;
-            --gold-soft: #f6d766;
-            --gold-deep: #c9970f;
-            --blue: #2487d4;
-            --blue-deep: #1a6bae;
+            --blue: var(--accent);
+            --blue-deep: var(--accent);
             --font-display: var(--dot-font-sans);
             --font-body: var(--dot-font-sans);
-            --font-mono: var(--dot-font-mono);
         }
-        html { background: var(--paper); }
-        body { background: var(--paper); font-family: var(--font-body); }
+        html { background: var(--surface); }
+        body { background: var(--surface); color: var(--ink); font-family: var(--font-body); }
         .font-display { font-family: var(--font-display); }
         .font-mono { font-family: var(--font-mono); }
         /* R-54 claim page: the code field, in the same palette */
         .dsso-code { text-align: center; font-size: 1.4rem; font-weight: 600; letter-spacing: 0.3em; font-variant-numeric: tabular-nums; min-height: 48px; }
-        .dsso-code[aria-invalid="true"] { border-color: #b91c1c; }
+        .dsso-code[aria-invalid="true"] { border-color: var(--danger); }
         .dsso-err:empty { display: none; }
     </style>
 </head>
 <body class="antialiased">
-    <div class="font-sans text-[var(--ink)]">
+    <main id="main" class="font-sans text-[var(--ink)]">
         {{ $slot }}
-    </div>
+    </main>
 
     @livewireScripts
 </body>

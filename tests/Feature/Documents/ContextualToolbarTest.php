@@ -82,7 +82,8 @@ class ContextualToolbarTest extends TestCase
 
         $this->assertStringContainsString('class="doc-bar"', $html);
         $this->assertStringContainsString('id="doc-style-picker"', $html);
-        $this->assertStringContainsString('&#8984;K', $html);
+        // The shortcut is written per platform (R2-9): Ctrl+K from the server, ⌘K on a Mac once shell.js runs.
+        $this->assertStringContainsString('<span data-shortcut="mod+k">Ctrl+K</span>', $html);
         // The save word is the shared component, not a hand-rolled span.
         $this->assertMatchesRegularExpression('/class="status-word status-word-good"/', $html);
         $this->assertMatchesRegularExpression('/class="numeral"[^>]*>v\d/', $html);
@@ -247,7 +248,8 @@ class ContextualToolbarTest extends TestCase
      */
     public function test_the_palette_search_entry_asks_the_ledger_for_its_search_box(): void
     {
-        $blade = file_get_contents(resource_path('views/livewire/documents/editor.blade.php'));
+        // The page's Alpine component, hostCommand() included, is its own partial.
+        $blade = file_get_contents(resource_path('views/livewire/documents/editor/alpine.blade.php'));
 
         $this->assertStringContainsString('?focus=search', $blade);
     }
@@ -316,7 +318,9 @@ class ContextualToolbarTest extends TestCase
      */
     public function test_every_host_command_the_registry_names_has_a_branch_in_the_page(): void
     {
-        $blade = file_get_contents(resource_path('views/livewire/documents/editor.blade.php'));
+        // hostCommand() lives in the page's Alpine component partial, the style picker it focuses in the tools partial.
+        $blade = file_get_contents(resource_path('views/livewire/documents/editor/alpine.blade.php'))
+            .file_get_contents(resource_path('views/livewire/documents/editor/tools.blade.php'));
 
         foreach ([
             'export.pdf',

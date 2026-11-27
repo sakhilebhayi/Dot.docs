@@ -88,6 +88,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    {{-- R2-9: realtime is started only where the server runs it (resources/js/bootstrap.js); SecurityHeaders opens
+         connect-src to the socket on the same condition. --}}
+    <meta name="dot-realtime" content="{{ config('broadcasting.default') === 'reverb' && filled(config('broadcasting.connections.reverb.options.host')) ? 'on' : 'off' }}">
     <meta name="color-scheme" content="{{ $theme === 'dark' ? 'dark light' : 'light dark' }}">
     <title>{{ $pageTitle !== '' ? $pageTitle.' · '.config('app.name') : config('app.name') }}</title>
     <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32x32.png') }}">
@@ -103,7 +106,9 @@
     @stack('styles')
 </head>
 <body>
-    <a href="#canvas" class="skip-link">Skip to the document</a>
+    {{-- Named for what is there (R2-9): only the editor has a document to skip to. #canvas is this layout's main landmark,
+         so the target exists on every page. --}}
+    <a href="#canvas" class="skip-link">{{ $isEditor ? 'Skip to the document' : 'Skip to the content' }}</a>
 
     <div class="shell" data-shell data-shell-context="{{ $isEditor ? 'editor' : 'page' }}"@if (request()->routeIs('dashboard')) data-shell-page="dashboard"@endif>
         @include('layouts.partials.header', ['isEditor' => $isEditor, 'railState' => $railState, 'dockState' => $dockState, 'theme' => $theme])

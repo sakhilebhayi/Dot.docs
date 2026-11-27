@@ -6,9 +6,9 @@ use App\Audit\AuditLogger;
 use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\DocumentVersion;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Illuminate\Support\Facades\Auth;
 use Jfcherng\Diff\DiffHelper;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -16,6 +16,7 @@ use Livewire\WithPagination;
 class VersionHistory extends Component
 {
     use AuthorizesRequests;
+    use SignedIn;
     use WithPagination;
 
     public Document $document;
@@ -82,8 +83,8 @@ class VersionHistory extends Component
         }
 
         [$a, $b] = $this->compareIds;
-        $vA = DocumentVersion::where('document_id', $this->document->id)->find($a);
-        $vB = DocumentVersion::where('document_id', $this->document->id)->find($b);
+        $vA = DocumentVersion::where('document_id', $this->document->id)->whereKey((int) $a)->first();
+        $vB = DocumentVersion::where('document_id', $this->document->id)->whereKey((int) $b)->first();
 
         if (! $vA || ! $vB) {
             return;
@@ -131,7 +132,7 @@ class VersionHistory extends Component
         $version = DocumentVersion::where('document_id', $this->document->id)
             ->findOrFail($versionId);
 
-        $this->document = app(DocumentStore::class)->restore($this->document, $version, Auth::user());
+        $this->document = app(DocumentStore::class)->restore($this->document, $version, $this->actor());
 
         app(AuditLogger::class)->record('version.restored', $this->document, [
             'version_number' => $version->version_number,
@@ -144,7 +145,9 @@ class VersionHistory extends Component
         $this->showDiff = false;
         $this->compareIds = [];
 
-        session()->flash('status', 'Document restored to version '.$version->version_number.'.');
+        // Said in the page's banner, now (R2-9): a session flash from a Livewire action is never shown by that
+        // action's own response and surfaced, stale, on some later page instead.
+        $this->dispatch('banner-message', style: 'success', message: 'Document restored to version '.$version->version_number.'.');
     }
 
     public function render(): View

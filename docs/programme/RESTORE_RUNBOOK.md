@@ -135,3 +135,42 @@ storage/app/public/`). `-n` never overwrites a file that is there.
   CI run on GitHub and choose "Re-run failed jobs"; its success starts the deploy.
 - **The outside check is red but the host check passed:** the host's bot protection answered GitHub's runner with its
   own page. The step is advisory; nothing to do.
+
+## 5. Reclaim free space (auto-vacuum, R2-9)
+
+SQLite never gives a deleted row's space back to the disk on its own: the file only grows, and the freed pages are
+reused for new rows. Since R2-9 a **new** database file is created in incremental auto-vacuum mode
+(`config/database.php`, `DB_AUTO_VACUUM`), which lets the freed pages be handed back cheaply. The **existing**
+production file was created before that and stays as it is (connecting with the new setting changes nothing in it)
+until it is converted once, by hand. No deploy, migration or scheduled job ever does this.
+
+See where it stands (reads only):
+
+```bash
+php artisan doc:vacuum
+```
+
+It prints the mode (`none` on the existing file) and how many MB are free inside the file. If the free part is small,
+there is nothing worth doing.
+
+**One-off conversion.** `VACUUM` rewrites the whole file under an exclusive lock: every save and every page waits until
+it ends (seconds for a file of tens of MB), and it needs as much free disk again as the file. At a quiet time:
+
+```bash
+php artisan doc:backup-database          # a fresh, checked copy first
+php artisan down
+php artisan doc:vacuum --convert         # asks first; prints the mode (incremental) and the new size
+php artisan up
+```
+
+If it fails part-way, the file is unchanged (VACUUM is atomic); `php artisan up` and leave it. If anything looks wrong
+afterwards, section 2 puts the backup just taken live.
+
+**After that**, return free pages to the disk whenever `doc:vacuum` shows a lot of free space (no lock worth noticing;
+it only moves the free pages):
+
+```bash
+php artisan doc:vacuum --incremental
+```
+
+It is not scheduled: the cron runs essential jobs only, and the file reuses its free pages anyway.

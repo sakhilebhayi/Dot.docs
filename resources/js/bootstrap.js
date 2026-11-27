@@ -9,7 +9,13 @@ window.axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
 // condition is a build-time constant, so with no key Vite drops the import and
 // the chunk entirely. With a key it loads a moment after the page; the bell and
 // the editor already treat a missing window.Echo as "polling only".
-if (import.meta.env.VITE_REVERB_APP_KEY) {
+// R2-9: and only when the server says realtime is on (<meta name="dot-realtime" content="on">, written by layouts/app
+// when the broadcaster is Reverb - the same condition that opens the CSP's connect-src to the socket). A build that
+// carries a key but runs where no socket server exists (production, the browser suite) no longer tries one on every page.
+const realtimeOn = typeof document !== 'undefined'
+    && document.querySelector('meta[name="dot-realtime"]')?.getAttribute('content') === 'on';
+
+if (import.meta.env.VITE_REVERB_APP_KEY && realtimeOn) {
     Promise.all([import('laravel-echo'), import('pusher-js')])
         .then(([{ default: Echo }, { default: Pusher }]) => {
             window.Pusher = Pusher;

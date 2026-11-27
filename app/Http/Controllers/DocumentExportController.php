@@ -13,6 +13,7 @@ use App\Models\Document;
 use App\Print\PrintRenderer;
 use App\Services\WebhookService;
 use App\Styles\StyleEngine;
+use App\Support\SignedIn;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Response;
@@ -32,6 +33,7 @@ use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 class DocumentExportController extends Controller
 {
     use AuthorizesRequests;
+    use SignedIn;
 
     private const WORD_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -151,7 +153,7 @@ class DocumentExportController extends Controller
 
         $safeTitle = Str::slug($document->title ?: 'document') ?: 'document';
 
-        $files->createFile($parent, $safeTitle.'.'.$extension, $contents, $mime, auth()->user());
+        $files->createFile($parent, $safeTitle.'.'.$extension, $contents, $mime, $this->actor());
 
         app(AuditLogger::class)->record('document.exported', $document, ['format' => $format, 'to' => 'files']);
         app(WebhookService::class)->queue($document, 'on_export', ['format' => $format]);

@@ -97,7 +97,7 @@ class EditorSyncWiringTest extends TestCase
 
         // And the bundle's unload flush asks the module (beaconWanted(), tested in tests/js/sync.host.test.js)
         // and the page's getUnsent, so a document handed over to Livewire whose request failed still goes by beacon.
-        $bundle = file_get_contents(resource_path('js/editor/index.js'));
+        $bundle = implode("\n", array_map('file_get_contents', [resource_path('js/editor/index.js'), ...glob(resource_path('js/editor/mount/*.js'))]));
         $this->assertStringContainsString('beaconWanted({ dirty, changed, unsent, sentAlready: serialised === lastBeaconed })', $bundle);
         $this->assertStringContainsString('const unsent = beacon && hostHoldsUnsent();', $bundle);
         $this->assertStringContainsString("typeof opts.getUnsent === 'function' && opts.getUnsent() === true", $bundle);
@@ -674,7 +674,8 @@ class EditorSyncWiringTest extends TestCase
      */
     public function test_nothing_in_the_notice_bar_depends_on_what_the_server_renders(): void
     {
-        $blade = file_get_contents(resource_path('views/livewire/documents/editor.blade.php'));
+        // The notice bar is its own partial, included by the editor view.
+        $blade = file_get_contents(resource_path('views/livewire/documents/editor/notices.blade.php'));
 
         // From the bar's opening tag to the closing tag at the same indentation.
         $this->assertSame(1, preg_match('/^( *)<div class="doc-notices"[^>]*>.*?^\1<\/div>$/ms', $blade, $bar));

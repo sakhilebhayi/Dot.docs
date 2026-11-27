@@ -14,7 +14,7 @@
         </div>
 
         @if (session('status') == 'verification-link-sent')
-            <div class="mb-4 font-medium text-sm text-emerald-600">
+            <div class="mb-4 font-medium text-sm text-[var(--accent)]">
                 {{ __('A new verification link has been sent to the email address you provided in your profile settings.') }}
             </div>
         @endif

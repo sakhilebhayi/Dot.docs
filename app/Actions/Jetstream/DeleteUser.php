@@ -54,10 +54,11 @@ class DeleteUser implements DeletesUsers
             // check and the delete cannot have its team purged.
             $this->refuseWhileOwningASharedTeam($user);
 
-            $leavingTeamIds = $user->ownedTeams()->pluck('id');
+            /** @var list<int> $leavingTeamIds */
+            $leavingTeamIds = $user->ownedTeams()->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
 
-            $this->handOverCompanyDocuments($user, $leavingTeamIds->all());
-            $this->refileOthersDocumentsFromLeavingTeams($user, $leavingTeamIds->all());
+            $this->handOverCompanyDocuments($user, $leavingTeamIds);
+            $this->refileOthersDocumentsFromLeavingTeams($user, $leavingTeamIds);
             $this->setAsidePersonalDocuments($user);
 
             $this->deleteTeams($user);

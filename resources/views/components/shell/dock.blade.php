@@ -57,12 +57,12 @@
         @if ($isEditor && $document)
             <section class="dock-section">
                 <div class="dock-section-head">
-                    <h2 class="h-panel">Two inks</h2>
+                    <h2 class="h-panel">The assistant</h2>
                 </div>
                 <div class="dock-section-body">
                     <p class="empty-line">
-                        The assistant writes in marker. Its ink stays visibly different until you accept it,
-                        and only then becomes graphite.
+                        What the assistant writes is shown in marker until you accept it. Accepted text reads
+                        like the rest of the document.
                     </p>
                     <div class="toolbar" x-data>
                         {{-- The shortcut inherits the button's ink: a .micro
@@ -70,8 +70,8 @@
                              unreadable — see the inverted-surface block in
                              shell.css. --}}
                         <button type="button" class="btn btn-primary" @click="$dispatch('open-ai-palette')">
-                            Open the command palette
-                            <span class="micro" aria-hidden="true">&#8679;&#8984;K</span>
+                            Ask the assistant
+                            <span class="micro" aria-hidden="true" data-shortcut="mod+shift+k">Ctrl+Shift+K</span>
                         </button>
                     </div>
                 </div>

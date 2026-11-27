@@ -6,6 +6,7 @@ use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\DocumentTemplate;
 use App\Services\HtmlSanitizer;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
@@ -13,6 +14,7 @@ use Livewire\Component;
 class SaveAsTemplate extends Component
 {
     use AuthorizesRequests;
+    use SignedIn;
 
     public Document $document;
 
@@ -66,13 +68,15 @@ class SaveAsTemplate extends Component
             'page_setup' => $this->document->page_setup,
             'content' => $sanitizer->clean($this->document->content ?? ''),
             'is_global' => false,
-            'team_id' => $this->shareWithTeam ? auth()->user()->currentTeam?->id : null,
+            'team_id' => $this->shareWithTeam ? $this->actor()->currentTeam?->id : null,
             'created_by' => auth()->id(),
         ]);
 
         $this->show = false;
         $this->dispatch('template-saved');
-        session()->flash('status', 'Template saved successfully.');
+        // Said in the page's banner, now (R2-9): a session flash from a Livewire action is never shown by that
+        // action's own response and surfaced, stale, on some later page instead.
+        $this->dispatch('banner-message', style: 'success', message: 'Template saved successfully.');
     }
 
     public function render(): View

@@ -2,12 +2,15 @@
 
 namespace App\Livewire;
 
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Livewire\Attributes\On;
 use Livewire\Component;
 
 class NotificationBell extends Component
 {
+    use SignedIn;
+
     public int $unreadCount = 0;
 
     /** @var array<mixed> */
@@ -23,7 +26,7 @@ class NotificationBell extends Component
     #[On('notification-received')]
     public function loadNotifications(): void
     {
-        $user = auth()->user();
+        $user = $this->actor();
         $this->unreadCount = $user->unreadNotifications()->count();
         $this->notifications = $user->notifications()
             ->latest()
@@ -35,20 +38,20 @@ class NotificationBell extends Component
                 'message' => $this->formatMessage($n->data),
                 'url' => $n->data['url'] ?? null,
                 'read' => ! is_null($n->read_at),
-                'time' => $n->created_at->diffForHumans(),
+                'time' => $n->created_at?->diffForHumans() ?? '',
             ])
             ->toArray();
     }
 
     public function markAllRead(): void
     {
-        auth()->user()->unreadNotifications()->update(['read_at' => now()]);
+        $this->actor()->unreadNotifications()->update(['read_at' => now()]);
         $this->loadNotifications();
     }
 
     public function markRead(string $id): void
     {
-        auth()->user()->notifications()->where('id', $id)->update(['read_at' => now()]);
+        $this->actor()->notifications()->where('id', $id)->update(['read_at' => now()]);
         $this->loadNotifications();
     }
 
@@ -61,7 +64,7 @@ class NotificationBell extends Component
      */
     public function openNotice(string $id): void
     {
-        $notification = auth()->user()->notifications()->where('id', $id)->first();
+        $notification = $this->actor()->notifications()->where('id', $id)->first();
 
         if ($notification === null) {
             return;

@@ -11,6 +11,7 @@ use App\Notifications\Account\DocumentAccessRemoved;
 use App\Notifications\Account\DocumentPublishedByAnother;
 use App\Notifications\Account\DocumentSharedBell;
 use App\Notifications\Account\DocumentSharedWithYou;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -23,6 +24,7 @@ use Livewire\Component;
 class ShareManager extends Component
 {
     use AuthorizesRequests;
+    use SignedIn;
 
     public Document $document;
 
@@ -60,7 +62,7 @@ class ShareManager extends Component
     #[Computed]
     public function accessRequests(): Collection
     {
-        if (! Auth::user()?->can('share', $this->document)) {
+        if (! $this->actor()->can('share', $this->document)) {
             return new Collection;
         }
 
@@ -82,7 +84,7 @@ class ShareManager extends Component
 
         $accessRequest = $this->pendingRequest($requestId);
         $requester = $accessRequest->requester;
-        $actor = Auth::user();
+        $actor = $this->actor();
         $notify = false;
         $settled = false;
 
@@ -103,8 +105,8 @@ class ShareManager extends Component
         });
 
         if ($notify) {
-            $requester->notify(new DocumentSharedBell($this->document, (string) $actor?->name));
-            $requester->notify(new DocumentSharedWithYou($this->document, $role, (string) $actor?->name));
+            $requester->notify(new DocumentSharedBell($this->document, (string) $actor->name));
+            $requester->notify(new DocumentSharedWithYou($this->document, $role, (string) $actor->name));
         }
 
         $this->document->load('collaborators.user');
@@ -185,7 +187,9 @@ class ShareManager extends Component
         $this->document->refresh();
         $this->refreshPublishedLink();
         $this->auditShareChange(['slug' => $this->document->slug]);
-        session()->flash('status', $this->document->slug
+        // Said in the page's banner, now (R2-9): a session flash from a Livewire action is never shown by that
+        // action's own response and surfaced, stale, on some later page instead.
+        $this->dispatch('banner-message', style: 'success', message: $this->document->slug
             ? 'The address is saved.'
             : 'The address is cleared.');
     }
@@ -206,6 +210,11 @@ class ShareManager extends Component
         $this->validate([
             'inviteEmail' => 'required|email|exists:users,email',
             'inviteRole' => 'required|in:viewer,editor,admin',
+        ], [
+            // R2-9: the default "The selected invite email is invalid." did not say what to do.
+            'inviteEmail.exists' => 'Nobody with that email address has a Dot.docs account yet. Ask them to sign in to Dot.docs once, then invite them.',
+            'inviteEmail.email' => 'That does not look like an email address.',
+            'inviteEmail.required' => 'Enter the email address of the person to invite.',
         ]);
 
         // Handing out the admin role is a share-settings power: an editor may
@@ -217,10 +226,25 @@ class ShareManager extends Component
         $user = User::where('email', $this->inviteEmail)->firstOrFail();
         $before = DocumentCollaborator::where('document_id', $this->document->id)->where('user_id', $user->id)->value('role');
 
+        // Taking the admin role away is the same power as giving it (R2-9): an editor could re-invite an admin as a
+        // viewer and so demote them.
+        if ($before === 'admin' && $this->inviteRole !== 'admin') {
+            $this->authorize('manage', $this->document);
+        }
+
         DocumentCollaborator::updateOrCreate(
             ['document_id' => $this->document->id, 'user_id' => $user->id],
             ['role' => $this->inviteRole]
         );
+
+        // Who can reach the document is an access fact the audit log answers (R2-9): added, or a role changed.
+        if ($before !== $this->inviteRole) {
+            app(AuditLogger::class)->record(
+                $before === null ? 'collaborator.added' : 'collaborator.role_changed',
+                $this->document,
+                array_filter(['user_id' => $user->id, 'role' => $this->inviteRole, 'previous_role' => $before]),
+            );
+        }
 
         // Asked for access earlier (R2-3b)? This invitation is the answer: the request is closed, not left open
         // for a later "Let them read" to undo.
@@ -234,7 +258,7 @@ class ShareManager extends Component
         // when somebody adds themselves.
         if ($before !== $this->inviteRole && $user->id !== Auth::id()) {
             $changed = $before !== null;
-            $actor = (string) Auth::user()?->name;
+            $actor = (string) $this->actor()->name;
             $user->notify(new DocumentSharedBell($this->document, $actor, $changed));
             $user->notify(new DocumentSharedWithYou($this->document, $this->inviteRole, $actor, $changed));
             $this->inviteNotice = $changed ? 'Access changed. They have been told.' : 'Shared. They have been told by email.';
@@ -254,11 +278,17 @@ class ShareManager extends Component
             ->first();
 
         if ($collaborator !== null) {
+            // Removing an admin is a share-settings power too (R2-9), as giving the role is.
+            if ($collaborator->role === 'admin') {
+                $this->authorize('manage', $this->document);
+            }
+
             $collaborator->delete();
+            app(AuditLogger::class)->record('collaborator.removed', $this->document, ['user_id' => $collaborator->user_id, 'role' => $collaborator->role]);
 
             $removed = $collaborator->user;
             if ($removed instanceof User && $removed->id !== Auth::id()) {
-                $removed->notify(new DocumentAccessRemoved($this->document->title, (string) Auth::user()?->name));
+                $removed->notify(new DocumentAccessRemoved($this->document->title, (string) $this->actor()->name));
             }
         }
 
@@ -280,7 +310,7 @@ class ShareManager extends Component
         // is told (EA-3 / E-04).
         $owner = $this->document->owner;
         if ($owner instanceof User && $owner->id !== Auth::id()) {
-            $owner->notify(new DocumentPublishedByAnother($this->document, (string) Auth::user()?->name, (bool) $this->document->is_public));
+            $owner->notify(new DocumentPublishedByAnother($this->document, (string) $this->actor()->name, (bool) $this->document->is_public));
         }
     }
 
@@ -308,7 +338,7 @@ class ShareManager extends Component
             'expires_at' => $this->document->share_expires_at?->toIso8601String(),
             'password_set' => $this->showPasswordSet,
         ]);
-        session()->flash('status', 'Share settings saved.');
+        $this->dispatch('banner-message', style: 'success', message: 'Share settings saved.');
     }
 
     public function clearPassword(): void
@@ -335,6 +365,10 @@ class ShareManager extends Component
 
     public function render(): View
     {
+        // Each row shows the collaborator's name: loaded with them, also after a Livewire round trip has rehydrated
+        // the document without its relations (R2-9; otherwise one query per row).
+        $this->document->loadMissing('collaborators.user');
+
         return view('livewire.documents.share-manager')
             ->layout('layouts.app')
             ->title('Sharing for '.$this->document->title);

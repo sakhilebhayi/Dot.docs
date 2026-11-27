@@ -14,7 +14,31 @@ const THEME_COOKIE = 'theme';
  * :focus-visible even after a click, so CSS alone cannot tell a writer clicking into the page from a keyboard user
  * Tabbing onto it. Tab (and Shift+Tab) marks keyboard; any pointer press clears it.
  */
+/*
+ * Shortcut text in the platform's own words (R2-9): the server writes the Windows/Linux form ("Ctrl+Shift+K") so it is
+ * right without JavaScript; on a Mac it becomes "⇧⌘K". Every hint carries data-shortcut="mod+shift+k".
+ */
+export function shortcutText(keys, mac) {
+    const parts = keys.split('+');
+    const key = parts.pop().toUpperCase();
+    if (mac) {
+        const glyph = { mod: '\u2318', shift: '\u21E7', alt: '\u2325' };
+        return ['shift', 'alt', 'mod'].filter((p) => parts.includes(p)).map((p) => glyph[p]).join('') + key;
+    }
+    const word = { mod: 'Ctrl', shift: 'Shift', alt: 'Alt' };
+    return [...['mod', 'shift', 'alt'].filter((p) => parts.includes(p)).map((p) => word[p]), key].join('+');
+}
+
+function paintShortcuts(root = document) {
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+    root.querySelectorAll('[data-shortcut]').forEach((el) => {
+        el.textContent = shortcutText(el.dataset.shortcut, mac);
+    });
+}
+
 if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', () => paintShortcuts());
+    document.addEventListener('livewire:navigated', () => paintShortcuts());
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Tab') document.documentElement.dataset.focusBy = 'keyboard';
     }, true);
@@ -491,9 +515,35 @@ function initSkipLink() {
  */
 const SAVE_TONES = ['good', 'danger', 'idle'];
 
+/**
+ * The words a screen reader is told about. Editing, Saving and Ready come and
+ * go on every pause in typing; announcing them made each autosave three
+ * interruptions. Only a settled outcome is said, and only when it differs from
+ * the last one said: Saved after Saving after Saved stays silent.
+ */
+const ANNOUNCED_SAVE_WORDS = ['Saved', 'Not saved', 'Offline', 'Read only'];
+
+/** What to announce for `word` given the last announcement, or null for nothing. */
+export function saveAnnouncement(lastAnnounced, word) {
+    if (!ANNOUNCED_SAVE_WORDS.includes(word) || word === lastAnnounced) return null;
+
+    return word;
+}
+
+let lastSaveAnnouncement = null;
+
 function setSaveState(tone, word) {
     const item = document.getElementById('shell-save');
     if (!item || !item.hasAttribute('data-shell-save-owner')) return;
+
+    // The one live region for save state (WCAG 4.1.3). The visible word above
+    // is not live: it changes on every keystroke pause.
+    const said = document.getElementById('shell-save-said');
+    const announce = saveAnnouncement(lastSaveAnnouncement, word);
+    if (said && announce) {
+        lastSaveAnnouncement = announce;
+        said.textContent = announce;
+    }
 
     // Only the TONE class is swapped. Rewriting className wholesale took
     // `topbar-status` with it (and would take anything a later task adds to

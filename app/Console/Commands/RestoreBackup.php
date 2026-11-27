@@ -24,7 +24,7 @@ class RestoreBackup extends Command
 
     public function handle(): int
     {
-        $file = (string) $this->argument('file');
+        $file = is_string($this->argument('file')) ? $this->argument('file') : '';
         $file = is_file($file) ? $file : storage_path('backups/'.basename($file));
 
         if (! is_file($file)) {
@@ -34,7 +34,7 @@ class RestoreBackup extends Command
         }
 
         $name = basename($file, '.enc');
-        $to = (string) ($this->option('to') ?: storage_path('restore/'.$name));
+        $to = is_string($this->option('to')) && $this->option('to') !== '' ? $this->option('to') : storage_path('restore/'.$name);
         $live = (string) config('database.connections.sqlite.database');
 
         if ($live !== '' && is_file($live) && realpath(dirname($to)) !== false && realpath($to) === realpath($live)) {
@@ -71,7 +71,8 @@ class RestoreBackup extends Command
 
         if (str_ends_with($name, '.sqlite') && class_exists(SQLite3::class)) {
             $db = new SQLite3($to, SQLITE3_OPEN_READONLY);
-            $check = (string) $db->querySingle('PRAGMA integrity_check');
+            $check = $db->querySingle('PRAGMA integrity_check');
+            $check = is_string($check) ? $check : '';
             $count = fn (string $table) => (int) $db->querySingle("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '{$table}'")
                 ? (int) $db->querySingle("SELECT count(*) FROM {$table}")
                 : 0;

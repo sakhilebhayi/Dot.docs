@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Files\FilesService;
 use App\Http\Requests\FileUploadRequest;
+use App\Support\SignedIn;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
 
@@ -23,6 +24,8 @@ use Illuminate\Support\Facades\Gate;
  */
 class FileUploadController extends Controller
 {
+    use SignedIn;
+
     /** The folder is found, the upload authorised and the file checked by FileUploadRequest (R2-7 / Q-06). */
     public function store(FileUploadRequest $request, string $parent): RedirectResponse
     {
@@ -35,7 +38,7 @@ class FileUploadController extends Controller
             (string) $upload->getClientOriginalName(),
             (string) $upload->get(),
             $upload->getMimeType(),
-            $request->user(),
+            $this->actor(),
         );
 
         return back()->with('status', 'The file is filed here now.');

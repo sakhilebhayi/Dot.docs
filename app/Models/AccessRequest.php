@@ -5,7 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-/** A request to read a document, from someone who cannot (R2-3b / U-06). */
+/**
+ * A request to read a document, from someone who cannot (R2-3b / U-06).
+ *
+ * @property-read Document $document Never null: document_id is required and cascades on delete.
+ * @property-read User $requester Never null: requester_id is required and cascades on delete.
+ */
 class AccessRequest extends Model
 {
     public const PENDING = 'pending';

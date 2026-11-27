@@ -10,6 +10,7 @@ use App\Documents\Import\PlainTextImporter;
 use App\Models\Document;
 use App\Models\Files\Obj;
 use App\Models\User;
+use App\Support\SignedIn;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -32,6 +33,8 @@ use Throwable;
  */
 class DocumentImportController extends Controller
 {
+    use SignedIn;
+
     /**
      * Accepted upload extensions. `mimes:` validates the file's sniffed MIME
      * against these, so an .exe renamed to .docx is rejected before any
@@ -110,7 +113,7 @@ class DocumentImportController extends Controller
         // An import states no base and replaces whatever is stored, so the
         // store is told to keep that first (see DocumentStore::save()). The
         // label column holds 120 characters and the name is the uploader's.
-        $store->save($document, $json, Auth::user(), [
+        $store->save($document, $json, $this->actor(), [
             'version' => 'named',
             'label' => 'Imported '.$file->getClientOriginalName(),
             'keepReplacedAs' => 'Before import of '.Str::limit($file->getClientOriginalName(), 100, ''),
@@ -154,7 +157,7 @@ class DocumentImportController extends Controller
         $file = $request->file('file');
         $title = Str::limit(trim((string) pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME)) ?: 'Imported document', 200, '');
         /** @var User $user */
-        $user = Auth::user();
+        $user = $this->actor();
 
         $mediaKey = null;
 

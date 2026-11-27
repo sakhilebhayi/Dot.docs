@@ -4,6 +4,7 @@ namespace App\Livewire\Documents;
 
 use App\Documents\DocumentStore;
 use App\Models\DocumentTemplate;
+use App\Support\SignedIn;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Livewire\Attributes\Computed;
@@ -12,6 +13,8 @@ use Livewire\Component;
 
 class TemplateGallery extends Component
 {
+    use SignedIn;
+
     public bool $show = false;
 
     public string $activeCategory = 'all';
@@ -47,7 +50,7 @@ class TemplateGallery extends Component
     #[Computed]
     public function templates(): Collection
     {
-        $user = auth()->user();
+        $user = $this->actor();
 
         return DocumentTemplate::query()
             ->visibleTo($user)
@@ -59,7 +62,7 @@ class TemplateGallery extends Component
 
     public function useTemplate(int $templateId): void
     {
-        $user = auth()->user();
+        $user = $this->actor();
 
         // Scope to the same visibility rule as the templates() list: global,
         // the user's own team, or authored by the user. Prevents an
