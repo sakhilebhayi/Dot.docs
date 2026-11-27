@@ -4,6 +4,8 @@ namespace App\Livewire\Documents;
 
 use App\Documents\DocumentStore;
 use App\Models\DocumentTemplate;
+use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -34,14 +36,16 @@ class TemplateGallery extends Component
         $this->show = false;
     }
 
+    /** @return array<mixed> */
     #[Computed]
     public function categories(): array
     {
         return ['all', 'resume', 'proposal', 'notes', 'blog', 'general', 'report'];
     }
 
+    /** @return Collection<int, DocumentTemplate> */
     #[Computed]
-    public function templates()
+    public function templates(): Collection
     {
         $user = auth()->user();
 
@@ -78,7 +82,7 @@ class TemplateGallery extends Component
         $this->redirect(route('documents.edit', $document->uuid), navigate: true);
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.documents.template-gallery');
     }

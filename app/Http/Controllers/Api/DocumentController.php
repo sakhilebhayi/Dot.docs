@@ -7,6 +7,8 @@ use App\Documents\Export\MarkdownExporter;
 use App\Documents\Import\MarkdownImporter;
 use App\Documents\StaleDocumentException;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\StoreDocumentRequest;
+use App\Http\Requests\Api\UpdateDocumentRequest;
 use App\Models\Document;
 use App\Models\Team;
 use App\Models\User;
@@ -49,19 +51,17 @@ class DocumentController extends Controller
 
     public function show(Request $request, string $uuid, DocumentStore $store, MarkdownExporter $markdown): JsonResponse
     {
-        $document = $this->inCompany($request, $uuid);
+        /** @var User $user */
+        $user = $request->user();
+        $document = CompanyDocuments::find($user, $uuid);
         Gate::authorize('view', $document);
 
         return response()->json($this->summary($document) + ['markdown' => $markdown->export($store->json($document))]);
     }
 
-    public function store(Request $request, DocumentStore $store, MarkdownImporter $importer): JsonResponse
+    public function store(StoreDocumentRequest $request, DocumentStore $store, MarkdownImporter $importer): JsonResponse
     {
-        Gate::authorize('create', Document::class);
-        $data = $request->validate([
-            'title' => ['required', 'string', 'max:255'],
-            'markdown' => ['present', 'nullable', 'string', 'max:2000000'],
-        ]);
+        $data = $request->validated();
 
         /** @var User $user */
         $user = $request->user();
@@ -70,14 +70,10 @@ class DocumentController extends Controller
         return response()->json($this->summary($document), 201);
     }
 
-    public function update(Request $request, string $uuid, DocumentStore $store, MarkdownImporter $importer): JsonResponse
+    public function update(UpdateDocumentRequest $request, string $uuid, DocumentStore $store, MarkdownImporter $importer): JsonResponse
     {
-        $document = $this->inCompany($request, $uuid);
-        Gate::authorize('update', $document);
-        $data = $request->validate([
-            'markdown' => ['present', 'nullable', 'string', 'max:2000000'],
-            'base_version' => ['required', 'integer', 'min:1'],
-        ]);
+        $document = $request->document();
+        $data = $request->validated();
 
         /** @var User $user */
         $user = $request->user();
@@ -91,19 +87,6 @@ class DocumentController extends Controller
         }
 
         return response()->json($this->summary($document));
-    }
-
-    /**
-     * The document, only if it belongs to the company the token's owner is standing in - the same rule as the list,
-     * so a token never reaches a document of another company (one that may no longer hold Dot.docs). 404 otherwise.
-     */
-    private function inCompany(Request $request, string $uuid): Document
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $team = $user->currentTeam instanceof Team ? $user->currentTeam : null;
-
-        return CompanyDocuments::scope(Document::query(), $team?->id, $user->id)->where('uuid', $uuid)->firstOrFail();
     }
 
     /** @return array{uuid: string, title: string, version: int, updated_at: string|null} */

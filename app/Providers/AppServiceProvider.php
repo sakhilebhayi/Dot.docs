@@ -16,6 +16,7 @@ use App\Services\SyncMetrics;
 use App\Support\EssentialCron;
 use App\Support\ShellContext;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Events\DiagnosingHealth;
 use Illuminate\Http\Request;
@@ -25,6 +26,7 @@ use Illuminate\Notifications\Events\NotificationSending;
 use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
@@ -64,6 +66,19 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(NotificationSent::class, [MailDeliveryListener::class, 'notificationSent']);
         Event::listen(MessageSending::class, [MailDeliveryListener::class, 'messageSending']);
         Event::listen(MessageSent::class, [MailDeliveryListener::class, 'messageSent']);
+
+        // R2-7 / Q-05: outside production a lazy-loaded relation (the N+1 pattern) and a mass-assigned key the model
+        // would silently drop are exceptions, so tests and local use catch them. In production nothing changes for
+        // the visitor: a lazy load is logged, not thrown. preventAccessingMissingAttributes is deliberately NOT on:
+        // code here asks any model for an optional column on purpose (AuditLogger reads `team_id` off whatever the
+        // subject is), and that is not a defect.
+        Model::preventLazyLoading();
+        Model::preventSilentlyDiscardingAttributes(! $this->app->isProduction());
+        if ($this->app->isProduction()) {
+            Model::handleLazyLoadingViolationUsing(fn (Model $model, string $relation) => Log::warning(
+                'Lazy-loaded relation (N+1).', ['model' => $model::class, 'relation' => $relation],
+            ));
+        }
 
         Document::observe(DocumentObserver::class);
         Document::observe(InfoDotResourceObserver::class);

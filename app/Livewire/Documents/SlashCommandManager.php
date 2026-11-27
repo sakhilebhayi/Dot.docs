@@ -3,6 +3,7 @@
 namespace App\Livewire\Documents;
 
 use App\Models\DocumentSlashCommand;
+use Illuminate\Contracts\View\View;
 use Livewire\Component;
 
 class SlashCommandManager extends Component
@@ -92,7 +93,7 @@ class SlashCommandManager extends Component
         $this->showForm = false;
     }
 
-    public function render()
+    public function render(): View
     {
         $user = auth()->user();
         $commands = DocumentSlashCommand::where('user_id', $user->id)

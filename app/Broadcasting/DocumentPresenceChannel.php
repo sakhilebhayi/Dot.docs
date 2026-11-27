@@ -11,6 +11,8 @@ class DocumentPresenceChannel
      * Authenticate the user's access to the channel and return presence data.
      * Returning false denies access; returning an array admits them and
      * provides the member data visible to other channel members.
+     *
+     * @return array<string, mixed>
      */
     public function join(User $user, int $documentId): array|bool
     {
@@ -37,6 +39,7 @@ class DocumentPresenceChannel
         return false;
     }
 
+    /** @return array<string, mixed> */
     private function memberData(User $user): array
     {
         return [

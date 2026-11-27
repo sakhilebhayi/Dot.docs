@@ -175,7 +175,10 @@ class SyncMetricsReport
         ];
     }
 
-    /** @param array<string, int> $totals */
+    /**
+     * @param  array<string, int>  $totals
+     * @return array<mixed>
+     */
     private function merges(array $totals): array
     {
         $bySource = [];

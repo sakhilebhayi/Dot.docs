@@ -11,6 +11,7 @@ use App\Notifications\CommentPostedNotification;
 use App\Notifications\MentionedInCommentEmailNotification;
 use App\Notifications\MentionedInCommentNotification;
 use App\Services\HtmlSanitizer;
+use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Notifications\Notification;
@@ -35,6 +36,7 @@ class CommentThread extends Component
     /** User search for @mentions */
     public string $mentionQuery = '';
 
+    /** @var array<mixed> */
     public array $mentionResults = [];
 
     /** Filter: all | open | resolved */
@@ -350,7 +352,7 @@ class CommentThread extends Component
     /** @var list<string>|null */
     private ?array $participantNamesCache = null;
 
-    public function render()
+    public function render(): View
     {
         $query = Comment::where('document_id', $this->document->id)
             ->whereNull('parent_id')

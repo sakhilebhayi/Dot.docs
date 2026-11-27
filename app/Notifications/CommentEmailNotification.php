@@ -58,6 +58,7 @@ abstract class CommentEmailNotification extends Notification implements ShouldQu
     /** Whether this person may still be sent the comment's text. */
     abstract protected function mayReceive(User $user): bool;
 
+    /** @return list<string> */
     public function via(object $notifiable): array
     {
         return ['mail'];

@@ -7,9 +7,13 @@ use App\Documents\Schema\DocumentSchema;
 /**
  * Renders a Dot.Doc JSON document (see App\Documents\Schema\DocumentSchema)
  * into an HTML string for the editor, share, or print surface.
+ *
+ * @phpstan-import-type PmNode from DocumentSchema
+ * @phpstan-import-type PmMark from DocumentSchema
  */
 class HtmlRenderer
 {
+    /** @param PmNode $doc */
     public function render(array $doc, RenderContext $ctx): string
     {
         $content = $doc['content'] ?? [];
@@ -23,6 +27,7 @@ class HtmlRenderer
         return implode('', array_map(fn (array $n) => $this->renderNode($n, $ctx, $parentId), $nodes));
     }
 
+    /** @param PmNode $node */
     private function renderChildren(array $node, RenderContext $ctx, ?string $parentId = null): string
     {
         $content = $node['content'] ?? [];
@@ -30,6 +35,7 @@ class HtmlRenderer
         return $this->renderNodes(is_array($content) ? $content : [], $ctx, $parentId);
     }
 
+    /** @param PmNode $node */
     private function renderNode(array $node, RenderContext $ctx, ?string $parentId): string
     {
         $type = $node['type'] ?? '';
@@ -71,12 +77,16 @@ class HtmlRenderer
         return htmlspecialchars((string) $v, ENT_QUOTES | ENT_HTML5, 'UTF-8');
     }
 
+    /** @param PmNode $node */
     private function id(array $node): string
     {
         return $this->esc($node['attrs']['id'] ?? '');
     }
 
-    /** @param array<string,string> $extraAttrs */
+    /**
+     * @param  PmNode  $node
+     * @param  array<string,string>  $extraAttrs
+     */
     private function wrapBlock(string $tag, array $node, RenderContext $ctx, string $inner, array $extraAttrs = []): string
     {
         $attrs = ' data-id="'.$this->id($node).'"';
@@ -87,7 +97,10 @@ class HtmlRenderer
         return "<{$tag}{$attrs}>{$inner}</{$tag}>";
     }
 
-    /** @param array<string,string> $extraAttrs */
+    /**
+     * @param  PmNode  $node
+     * @param  array<string,string>  $extraAttrs
+     */
     private function renderVoidBlock(string $tag, array $node, array $extraAttrs = []): string
     {
         $attrs = '';
@@ -106,6 +119,8 @@ class HtmlRenderer
      * anything else would be arbitrary text inside a `style` attribute, and
      * attrs reach this renderer straight from stored JSON (which an API
      * client, an importer, or a legacy document can have written).
+     *
+     * @param  PmNode  $node
      */
     private function alignStyle(array $node): string
     {
@@ -117,11 +132,13 @@ class HtmlRenderer
             : '';
     }
 
+    /** @param PmNode $node */
     private function renderParagraph(array $node, RenderContext $ctx): string
     {
         return '<p data-id="'.$this->id($node).'"'.$this->alignStyle($node).'>'.$this->renderChildren($node, $ctx).'</p>';
     }
 
+    /** @param PmNode $node */
     private function renderHeading(array $node, RenderContext $ctx): string
     {
         $level = max(1, min(6, (int) ($node['attrs']['level'] ?? 1)));
@@ -132,6 +149,7 @@ class HtmlRenderer
         return "<h{$level} data-id=\"{$this->esc($id)}\"{$style}>{$num}".$this->renderChildren($node, $ctx)."</h{$level}>";
     }
 
+    /** @param PmNode $node */
     private function renderOrderedList(array $node, RenderContext $ctx): string
     {
         $start = $node['attrs']['start'] ?? null;
@@ -140,6 +158,7 @@ class HtmlRenderer
         return $this->wrapBlock('ol', $node, $ctx, $this->renderChildren($node, $ctx), $extra);
     }
 
+    /** @param PmNode $node */
     private function renderTaskItem(array $node, RenderContext $ctx): string
     {
         $checked = ($node['attrs']['checked'] ?? false) ? 'true' : 'false';
@@ -147,11 +166,13 @@ class HtmlRenderer
         return $this->wrapBlock('li', $node, $ctx, $this->renderChildren($node, $ctx), ['data-checked' => $checked]);
     }
 
+    /** @param PmNode $node */
     private function renderBlockquote(array $node, RenderContext $ctx): string
     {
         return $this->wrapBlock('blockquote', $node, $ctx, $this->renderChildren($node, $ctx));
     }
 
+    /** @param PmNode $node */
     private function renderCodeBlock(array $node, RenderContext $ctx): string
     {
         $language = $node['attrs']['language'] ?? null;
@@ -177,6 +198,7 @@ class HtmlRenderer
         return str_starts_with($src, '/media/') || str_starts_with($src, '/storage/') || str_starts_with($src, '/images/');
     }
 
+    /** @param PmNode $node */
     private function renderImage(array $node): string
     {
         $attrs = $node['attrs'] ?? [];
@@ -194,6 +216,7 @@ class HtmlRenderer
         return "<img{$html}>";
     }
 
+    /** @param PmNode $node */
     private function renderFigure(array $node, RenderContext $ctx): string
     {
         $id = $node['attrs']['id'] ?? '';
@@ -203,6 +226,7 @@ class HtmlRenderer
         return '<figure data-id="'.$this->esc($id).'" class="figure figure-'.$this->esc($kind).'">'.$inner.'</figure>';
     }
 
+    /** @param PmNode $node */
     private function renderCaption(array $node, RenderContext $ctx, ?string $parentId): string
     {
         $number = $parentId !== null ? ($ctx->numbers[$parentId] ?? null) : null;
@@ -212,6 +236,7 @@ class HtmlRenderer
         return '<figcaption data-id="'.$this->id($node)."\">{$num}".$this->renderChildren($node, $ctx).'</figcaption>';
     }
 
+    /** @param PmNode $node */
     private function renderTable(array $node, RenderContext $ctx): string
     {
         $inner = $this->renderChildren($node, $ctx);
@@ -219,6 +244,7 @@ class HtmlRenderer
         return '<table class="doc-table" data-id="'.$this->id($node).'"><tbody>'.$inner.'</tbody></table>';
     }
 
+    /** @param PmNode $node */
     private function renderTableCell(string $tag, array $node, RenderContext $ctx): string
     {
         $attrs = $node['attrs'] ?? [];
@@ -233,14 +259,15 @@ class HtmlRenderer
         return "<{$tag}{$extra}>".$this->renderChildren($node, $ctx)."</{$tag}>";
     }
 
+    /** @param PmNode $node */
     private function renderToc(array $node, RenderContext $ctx): string
     {
         $depth = $node['attrs']['depth'] ?? 3;
         $items = implode('', array_map(function (array $entry): string {
-            $level = $entry['level'] ?? 1;
-            $href = $this->esc($entry['id'] ?? '');
-            $number = $this->esc($entry['number'] ?? '');
-            $text = $this->esc($entry['text'] ?? '');
+            $level = $entry['level'];
+            $href = $this->esc($entry['id']);
+            $number = $this->esc($entry['number']);
+            $text = $this->esc($entry['text']);
 
             return '<li class="toc-level-'.$this->esc($level)."\"><a href=\"#{$href}\"><span class=\"num\">{$number}</span>{$text}</a></li>";
         }, $ctx->toc));
@@ -248,6 +275,7 @@ class HtmlRenderer
         return '<nav class="toc" data-id="'.$this->id($node).'" data-depth="'.$this->esc($depth)."\"><ol>{$items}</ol></nav>";
     }
 
+    /** @param PmNode $node */
     private function renderSectionBreak(array $node): string
     {
         $attrs = $node['attrs'] ?? [];
@@ -258,6 +286,7 @@ class HtmlRenderer
         return '<div class="section-break" data-id="'.$this->id($node)."\" data-setup='{$json}'></div>";
     }
 
+    /** @param PmNode $node */
     private function renderCallout(array $node, RenderContext $ctx): string
     {
         $tone = $node['attrs']['tone'] ?? 'info';
@@ -265,6 +294,7 @@ class HtmlRenderer
         return $this->wrapBlock('aside', $node, $ctx, $this->renderChildren($node, $ctx), ['class' => 'callout callout-'.$tone]);
     }
 
+    /** @param PmNode $node */
     private function renderColumns(array $node, RenderContext $ctx): string
     {
         $count = $node['attrs']['count'] ?? count($node['content'] ?? []);
@@ -279,6 +309,7 @@ class HtmlRenderer
         return '<div class="columns" data-id="'.$this->id($node).'" style="--cols:'.$count.'">'.$inner.'</div>';
     }
 
+    /** @param PmNode $node */
     private function renderCrossRef(array $node, RenderContext $ctx): string
     {
         $attrs = $node['attrs'] ?? [];
@@ -301,6 +332,7 @@ class HtmlRenderer
         return "<a class=\"xref xref-broken\" href=\"#{$targetId}\">?</a>";
     }
 
+    /** @param PmNode $node */
     private function renderVariable(array $node, RenderContext $ctx): string
     {
         $key = $node['attrs']['key'] ?? '';
@@ -308,6 +340,7 @@ class HtmlRenderer
         return $this->esc($ctx->vars[$key] ?? "{{{$key}}}");
     }
 
+    /** @param PmNode $node */
     private function renderText(array $node): string
     {
         $html = $this->esc($node['text'] ?? '');
@@ -318,6 +351,7 @@ class HtmlRenderer
         return $html;
     }
 
+    /** @param PmMark $mark */
     private function wrapMark(array $mark, string $html): string
     {
         return match ($mark['type'] ?? '') {
@@ -335,6 +369,7 @@ class HtmlRenderer
         };
     }
 
+    /** @param PmMark $mark */
     private function wrapTextStyle(array $mark, string $html): string
     {
         $color = $mark['attrs']['color'] ?? null;
@@ -345,6 +380,7 @@ class HtmlRenderer
         return $html;
     }
 
+    /** @param PmMark $mark */
     private function wrapLink(array $mark, string $html): string
     {
         $href = $mark['attrs']['href'] ?? '';

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -80,7 +80,11 @@ test('the closed list is the one JSON file, with no second copy in the bundle', 
 });
 
 test('every event the host reports is one metricKey() knows, and every name in the list can be reached', () => {
-    const host = readFileSync(new URL('../../resources/js/editor/sync/host.js', import.meta.url), 'utf8');
+    // host.js is split into the modules under sync/host/ (R2-7): read every one of them, so an event added in any part
+    // is caught here, not only one also listed in a comment.
+    const dir = new URL('../../resources/js/editor/sync/host/', import.meta.url);
+    const host = readdirSync(dir).filter((name) => name.endsWith('.js'))
+        .map((name) => readFileSync(new URL(name, dir), 'utf8')).join('\n');
     const events = new Set([...host.matchAll(/\bmetric\('([a-z-]+)'/g)].map((match) => match[1]));
     assert.deepEqual(
         [...events].sort(),

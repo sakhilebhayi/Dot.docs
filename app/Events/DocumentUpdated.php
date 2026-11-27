@@ -21,6 +21,7 @@ class DocumentUpdated implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
+    /** @param array<mixed> $json */
     public function __construct(
         public readonly Document $document,
         public readonly User $editor,
@@ -41,6 +42,7 @@ class DocumentUpdated implements ShouldBroadcastNow
         return 'document.updated';
     }
 
+    /** @return array<string, mixed> */
     public function broadcastWith(): array
     {
         return [

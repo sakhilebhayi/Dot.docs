@@ -42,7 +42,11 @@ class Client
 
     public function __construct(private Usage $usage, private ?Guard $guard = null) {}
 
-    /** Refuse a REAL model call that the kill switch or a daily budget forbids. Never called for the mock provider. */
+    /**
+     * Refuse a REAL model call that the kill switch or a daily budget forbids. Never called for the mock provider.
+     *
+     * @param  array<mixed>  $opts
+     */
     private function guard(array $opts): void
     {
         ($this->guard ?? app(Guard::class))->assertAllowed($opts);

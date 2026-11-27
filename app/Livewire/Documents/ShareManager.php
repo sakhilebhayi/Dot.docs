@@ -11,6 +11,7 @@ use App\Notifications\Account\DocumentAccessRemoved;
 use App\Notifications\Account\DocumentPublishedByAnother;
 use App\Notifications\Account\DocumentSharedBell;
 use App\Notifications\Account\DocumentSharedWithYou;
+use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
@@ -332,7 +333,7 @@ class ShareManager extends Component
         app(AuditLogger::class)->record('share.updated', $this->document, $context);
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.documents.share-manager')
             ->layout('layouts.app')

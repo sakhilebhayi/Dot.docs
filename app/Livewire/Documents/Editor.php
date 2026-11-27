@@ -42,9 +42,14 @@ class Editor extends Component
 
     public bool $saved = false;
 
+    /** @var array<mixed> */
     public array $activeUsers = [];
 
-    /** Pending suggestions (not yet accepted/rejected) */
+    /**
+     * Pending suggestions (not yet accepted/rejected)
+     *
+     * @var array<mixed>
+     */
     public array $pendingSuggestions = [];
 
     /** Whether comment sidebar is open */
@@ -107,6 +112,8 @@ class Editor extends Component
      * `version` onto the next draft as its base. `version` is null in one
      * answer only, the refusal of a save that stated no base (see there).
      *
+     *
+     * @param  array<mixed>  $content
      * @return array{ok:bool,conflict:bool,version:int|null}
      */
     public function saveContent(array $content, ?int $baseVersion = null, bool $overwrite = false): array

@@ -19,7 +19,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  * and never the session's current team.
  *
  * The path is resolved with the same realpath() containment discipline
- * DocxExporter::publicDiskPath() uses (.ai/rules/documents-io.md): the
+ * DocxImageWriter::publicDiskPath() uses (.ai/rules/documents-io.md): the
  * stored `path` is composed by FilesService and is not user input, but a
  * row on a SHARED database was not necessarily written by this app, so what
  * it resolves to is proved to be under the disk root before anything is

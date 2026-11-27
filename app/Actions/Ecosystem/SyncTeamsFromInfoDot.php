@@ -32,7 +32,7 @@ class SyncTeamsFromInfoDot
      */
     public function __invoke(User $user, array $identity): void
     {
-        $named = collect($identity['teams'] ?? [])
+        $named = collect((array) ($identity['teams'] ?? []))
             ->filter(fn ($t) => is_array($t) && filled($t['uuid'] ?? null) && ! ($t['personal'] ?? false))
             ->keyBy('uuid');
 

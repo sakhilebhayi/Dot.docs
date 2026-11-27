@@ -6,6 +6,7 @@ use App\Models\Document;
 use App\Models\DocumentSlashCommand;
 use App\Services\AiService;
 use App\Services\HtmlSanitizer;
+use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Locked;
@@ -49,6 +50,7 @@ class AiAssistant extends Component
 
     public bool $showPalette = false;
 
+    /** @var array<mixed> */
     public array $commandSuggestions = [
         '/summarize' => 'Generate a TL;DR summary',
         '/grammar' => 'Fix grammar & spelling',
@@ -160,6 +162,7 @@ class AiAssistant extends Component
         }
     }
 
+    /** @return array<mixed> */
     private function resolveCommand(AiService $ai, string $html): array
     {
         $command = trim($this->command);
@@ -246,7 +249,7 @@ class AiAssistant extends Component
         $this->applyMode = null;
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.documents.ai-assistant');
     }

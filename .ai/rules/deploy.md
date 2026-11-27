@@ -7,7 +7,14 @@ paths:
 
 # Deployment
 
-## doc.infodot.co.za's real docroot is NOT DEPLOY_PATH/public - it's DEPLOY_PATH's PARENT directory
+**Current layout (since the S-2e move, 2026-10-27):** the document root of doc.infodot.co.za is `<app>/public`, the
+standard Laravel layout; every deploy log says "document root is …/public (standard layout)". Deploys run after CI
+passes on main (workflow_run), take a checked SQLite backup before migrating, check the site from the host
+(`scripts/deploy/smoke-check.sh`, which also GETs /up) and roll back only when that check says unhealthy (R2-2). The
+two sections below on the flattened layout are the HISTORY that explains why `deploy.yml` still handles both layouts;
+read them as such.
+
+## History: before 2026-10-27 the docroot was NOT DEPLOY_PATH/public - it was DEPLOY_PATH's PARENT directory
 Confirmed live via `uapi DomainInfo single_domain_data domain=doc.infodot.co.za` on the server: the configured document root for the domain is `/home/infodotc/doc.infodot.co.za`, and `DEPLOY_PATH` (`/home/infodotc/doc.infodot.co.za/doc`) is a SUBDIRECTORY of it, not the same thing. This is a shared-hosting "flattened" Laravel layout from the original manual deploy: a hand-written `index.php` sits directly at the docroot and boots DEPLOY_PATH's vendor/bootstrap (`require __DIR__.'/doc/vendor/autoload.php'` etc.) - a DIFFERENT relative path than this repo's own `public/index.php` (`__DIR__.'/../vendor/autoload.php'`), which assumes `public/` sits directly inside the Laravel root. Every other static file under `public/` (`build/`, favicons, `robots.txt`, `sw.js`, `images/`) has its OWN separate copy sitting directly at the docroot.
 
 `deploy.yml`'s "Transfer public assets to the real docroot" step rsyncs there (`$(dirname "$DEPLOY_PATH")`), never `index.php` (overwriting it with this repo's version would break every request instantly - wrong relative paths), with `build/` getting its own `--delete`-scoped sync to the docroot AND to `DEPLOY_PATH/public/build/` (the two copies described below: the browser fetches the first, `@vite` reads the second's manifest; old content-hashed files don't accumulate in either) and everything else getting a `--delete`-free sync (the docroot also holds `doc/` itself, an old `Dot.docs.tar.gz`, and `.well-known` for ACME/SSL - none exist under this repo's `public/`, so a `--delete` sync of the whole docroot would wipe all three).

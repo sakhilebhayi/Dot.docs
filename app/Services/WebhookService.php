@@ -43,6 +43,7 @@ class WebhookService
      *
      * @param  string  $event  'on_save' | 'on_export'
      * @param  array  $payload  Extra data merged into the body
+     * @param  array<mixed>  $payload
      */
     public function fire(Document $document, string $event, array $payload = []): void
     {

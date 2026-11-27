@@ -68,7 +68,7 @@ class LandingController extends Controller
 
         // Share and Settings pages authorise `update`; offering them to somebody who would be
         // refused is a dead end. Evaluated for the ONE selected document, never for the twelve rows.
-        $canUpdate = $selected !== null && $user->can('update', $selected);
+        $canUpdate = $selected !== null && $user->can('update', $selected->loadMissing('team'));
 
         $suggestion = AiSuggestion::query()
             ->where('user_id', $user->id)

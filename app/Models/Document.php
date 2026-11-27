@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Files\Folder;
 use App\Models\Files\Obj;
+use Database\Factories\DocumentFactory;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -17,7 +18,9 @@ use Illuminate\Support\Facades\Hash;
 
 class Document extends Model
 {
+    /** @use HasFactory<DocumentFactory> */
     use HasFactory;
+
     use SoftDeletes;
 
     protected $fillable = [
@@ -54,11 +57,13 @@ class Document extends Model
         'health_checked_at' => 'datetime',
     ];
 
+    /** @return BelongsTo<User, $this> */
     public function owner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'owner_id');
     }
 
+    /** @return BelongsTo<Team, $this> */
     public function team(): BelongsTo
     {
         return $this->belongsTo(Team::class);
@@ -69,6 +74,8 @@ class Document extends Model
      *
      * The `objects` row is a POINTER - deleting or moving it never touches
      * the document's own versions, sharing, comments or soft delete.
+     *
+     * @return MorphOne<Obj, $this>
      */
     public function node(): MorphOne
     {
@@ -94,11 +101,13 @@ class Document extends Model
         return $objectable instanceof Folder ? $objectable : null;
     }
 
+    /** @return BelongsToMany<Tag, $this> */
     public function tags(): BelongsToMany
     {
         return $this->belongsToMany(Tag::class);
     }
 
+    /** @return HasMany<DocumentCollaborator, $this> */
     public function collaborators(): HasMany
     {
         return $this->hasMany(DocumentCollaborator::class);
@@ -133,26 +142,31 @@ class Document extends Model
         return $this->participants()->contains('id', $user->id);
     }
 
+    /** @return HasMany<DocumentVersion, $this> */
     public function versions(): HasMany
     {
         return $this->hasMany(DocumentVersion::class);
     }
 
+    /** @return HasMany<Comment, $this> */
     public function comments(): HasMany
     {
         return $this->hasMany(Comment::class);
     }
 
+    /** @return HasMany<AiSuggestion, $this> */
     public function aiSuggestions(): HasMany
     {
         return $this->hasMany(AiSuggestion::class);
     }
 
+    /** @return HasMany<DocumentWebhook, $this> */
     public function webhooks(): HasMany
     {
         return $this->hasMany(DocumentWebhook::class);
     }
 
+    /** @return HasMany<DocumentSuggestion, $this> */
     public function suggestions(): HasMany
     {
         return $this->hasMany(DocumentSuggestion::class);
@@ -163,6 +177,7 @@ class Document extends Model
         return DocumentStyle::resolve($this->style_key, $this->team_id);
     }
 
+    /** @return BelongsTo<BrandKit, $this> */
     public function brandKit(): BelongsTo
     {
         return $this->belongsTo(BrandKit::class);

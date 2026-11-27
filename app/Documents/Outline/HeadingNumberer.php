@@ -15,6 +15,8 @@ use App\Documents\Schema\DocumentSchema;
  * numbers (numbering and TOC listing are orthogonal - an unnumbered
  * "Foreword" is still listed, just without a number, as in Word). Every
  * other heading gets both a computed decimal number and a TOC entry.
+ *
+ * @phpstan-import-type PmNode from DocumentSchema
  */
 class HeadingNumberer
 {
@@ -27,7 +29,10 @@ class HeadingNumberer
         private bool $headingsNone,
     ) {}
 
-    /** @return array{id:string,level:int,text:string,number:string}|null */
+    /**
+     * @param  PmNode  $node
+     * @return array{id:string,level:int,text:string,number:string}|null
+     */
     public function number(array $node, DocumentSchema $schema): ?array
     {
         $level = (int) ($node['attrs']['level'] ?? 1);

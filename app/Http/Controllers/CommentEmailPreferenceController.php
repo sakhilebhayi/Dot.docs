@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\URL;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * The comment-email switch behind the link at the foot of every comment email
@@ -20,7 +22,7 @@ class CommentEmailPreferenceController extends Controller
         return URL::signedRoute('email.comments', ['user' => $user->id]);
     }
 
-    public function show(User $user)
+    public function show(User $user): View
     {
         return view('email.comment-preference', [
             'on' => (bool) $user->comment_emails,
@@ -29,7 +31,7 @@ class CommentEmailPreferenceController extends Controller
         ]);
     }
 
-    public function update(Request $request, User $user)
+    public function update(Request $request, User $user): Response
     {
         $on = $request->input('state') === 'on';
 

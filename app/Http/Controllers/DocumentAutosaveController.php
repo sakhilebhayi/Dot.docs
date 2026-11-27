@@ -4,11 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Documents\DocumentStore;
 use App\Documents\StaleDocumentException;
-use App\Models\Document;
+use App\Http\Requests\AutosaveRequest;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
@@ -28,25 +26,10 @@ use InvalidArgumentException;
  */
 class DocumentAutosaveController extends Controller
 {
-    public function store(Request $request, string $uuid, DocumentStore $store): JsonResponse
+    public function store(AutosaveRequest $request, string $uuid, DocumentStore $store): JsonResponse
     {
-        $document = Document::where('uuid', $uuid)->firstOrFail();
-        Gate::authorize('update', $document);
-
-        $request->validate([
-            'content' => ['required', 'array'],
-            'content.type' => ['required', 'string', 'in:doc'],
-            'content.content' => ['sometimes', 'array'],
-            'content.attrs' => ['sometimes', 'array'],
-            // The version the page's copy was based on. A beacon that states
-            // none comes from a tab running JavaScript from before saves
-            // carried one, and is refused: it would overwrite blind.
-            'base_version' => ['required', 'integer', 'min:1'],
-            // True when the page owes an overwrite: the writer chose "Keep
-            // mine" or "Put it back", so this save replaces a newer version
-            // their base is on, on purpose. See $opts below.
-            'overwrite' => ['sometimes', 'boolean'],
-        ]);
+        // Looked up, authorised (update) and shape-checked by AutosaveRequest, in that order (R2-7 / Q-06).
+        $document = $request->document();
 
         // `version: none` either way: leaving the page is not a point in the
         // document's history. What `overwrite` adds is a version of the

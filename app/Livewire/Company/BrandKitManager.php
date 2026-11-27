@@ -8,6 +8,7 @@ use App\Models\BrandKit;
 use App\Models\Team;
 use App\Models\User;
 use App\Styles\StyleEngine;
+use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -205,7 +206,7 @@ class BrandKitManager extends Component
         }
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.company.brand-kit-manager', [
             'fonts' => Brand::FONTS,

@@ -8,6 +8,7 @@ use App\Models\Document;
 use App\Models\Team;
 use App\Models\User;
 use App\Search\CompanyDocuments;
+use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -85,7 +86,7 @@ class Bin extends Component
             .($wasPublic ? ' Its public link is off; publish it again from Sharing if it should be.' : '');
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.documents.bin')->layout('layouts.app');
     }

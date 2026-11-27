@@ -68,8 +68,8 @@ server administration that should never pass through an AI assistant.
 ## What CI (`.github/workflows/ci.yml`) already covers, separately
 
 Every push to `main` and every pull request runs the full PHP + JS test
-suite, Pint, PHPStan (against `phpstan-baseline.neon` — only *new* static
-analysis findings fail the build, not the pre-existing ones), and a
+suite, Pint, PHPStan (level 6 over `app/`, with no baseline since R2-7: any
+finding fails the build), and a
 `composer audit` / `npm audit` pass. The two audit jobs report known
 advisories but never block the merge gate — upgrading a flagged dependency
 is a deliberate decision to make separately, not something a routine PR

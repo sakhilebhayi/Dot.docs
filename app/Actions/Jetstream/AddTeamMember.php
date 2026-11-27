@@ -55,6 +55,7 @@ class AddTeamMember implements AddsTeamMembers
      * Get the validation rules for adding a team member.
      *
      * @return array<string, Rule|array|string>
+     * @return array<string, mixed>
      */
     protected function rules(): array
     {
