@@ -663,18 +663,43 @@ jobs:
           KEY="$(basename "$DEPLOY_PATH")"
           [ -n "$KEY" ] && [ "$KEY" != "/" ] || { echo "::error::cannot work out the app folder name; the probe did not run"; exit 1; }
           EXPOSED=0
-          UNREACHED=0
-          for P in .env .env.bak-secrets artisan composer.json composer.lock database/database.sqlite storage/logs/laravel.log vendor/autoload.php phpunit.xml; do
-            CODE=$(curl -s -o /dev/null -m 15 -w '%{http_code}' "$SITE_URL/$KEY/$P" || true)
-            case "$CODE" in
-              200) echo "::error::EXPOSED /$KEY/$P answered 200"; EXPOSED=1 ;;
-              000) echo "000 /$KEY/$P (no answer)"; UNREACHED=$((UNREACHED + 1)) ;;
-              *) echo "$CODE /$KEY/$P" ;;
+          UNVERIFIED=0
+          # A 200 alone proves nothing: the host's bot protection answers GitHub's runners with its own 200 page
+          # for ANY address (2026-11-27: every path "answered 200" while each one was 403/404 for everyone else).
+          # A path counts as exposed only when what came back IS that file. Both the app-folder path ($KEY/...)
+          # and the site root are probed: since the document root moved to public/, the app folder is no longer
+          # under the web root at all, so the root paths are the ones that would show a mistake now.
+          signature() {
+            case "$1" in
+              *.env|*.env.bak-secrets) grep -qE '^(APP_KEY|DB_CONNECTION|APP_ENV)=' "$2" ;;
+              *.sqlite) head -c 16 "$2" | grep -q 'SQLite format' ;;
+              *composer.json) grep -q '"require"' "$2" ;;
+              *composer.lock) grep -q '"packages"' "$2" ;;
+              *laravel.log) grep -qE '\] (local|production|staging)\.(ERROR|INFO|WARNING|DEBUG)' "$2" ;;
+              *autoload.php|*artisan) grep -q '<?php' "$2" ;;
+              *phpunit.xml) grep -q '<phpunit' "$2" ;;
+              *) return 1 ;;
             esac
+          }
+          BODY="$(mktemp)"
+          for BASE in "$KEY/" ""; do
+            for P in .env .env.bak-secrets artisan composer.json composer.lock database/database.sqlite storage/logs/laravel.log vendor/autoload.php phpunit.xml; do
+              CODE=$(curl -s -o "$BODY" -m 15 -w '%{http_code}' "$SITE_URL/$BASE$P" || true)
+              if [ "$CODE" = "200" ] && signature "$P" "$BODY"; then
+                echo "::error::EXPOSED /$BASE$P answered 200 with the file itself"; EXPOSED=1
+              elif [ "$CODE" = "200" ]; then
+                echo "200 /$BASE$P - not the file ($(wc -c < "$BODY" | tr -d ' ') bytes; a challenge page?)"; UNVERIFIED=$((UNVERIFIED + 1))
+              elif [ "$CODE" = "000" ]; then
+                echo "000 /$BASE$P (no answer)"; UNVERIFIED=$((UNVERIFIED + 1))
+              else
+                echo "$CODE /$BASE$P"
+              fi
+            done
           done
-          [ "$UNREACHED" -eq 0 ] || echo "::warning::$UNREACHED probe request(s) got no answer; those paths are unverified."
+          rm -f "$BODY"
+          [ "$UNVERIFIED" -eq 0 ] || echo "::warning::$UNVERIFIED probe request(s) were not answered by the site itself; those paths are unverified from here."
           if [ "$EXPOSED" -ne 0 ]; then
-            echo "::error::The application folder is readable over HTTP (database, logs or vendor/ may be downloadable). Run the App Folder Guard workflow in InfoDot (mode apply) or add the deny file by hand, then re-run."
+            echo "::error::Application files are readable over HTTP (database, logs or vendor/ may be downloadable). Run the App Folder Guard workflow in InfoDot (mode apply) or add the deny file by hand, then re-run."
             exit 1
           fi
-          echo "== App-folder probe: no sensitive path answered 200 ($((9 - UNREACHED)) of 9 paths verified)."
+          echo "== App-folder probe: no sensitive file is served ($((18 - UNVERIFIED)) of 18 requests answered by the site)."

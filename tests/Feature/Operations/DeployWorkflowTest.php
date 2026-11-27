@@ -81,4 +81,14 @@ class DeployWorkflowTest extends TestCase
         $this->assertContains('workflow-lint', $ci['jobs']['quality-gate']['needs']);
         $this->assertStringContainsString('results[workflow-lint]', $ci['jobs']['quality-gate']['steps'][0]['run']);
     }
+
+    /** A 200 from the host's bot protection is not a leaked file: only the file itself counts (2026-11-27). */
+    public function test_the_app_folder_probe_counts_only_the_real_file_as_exposed(): void
+    {
+        $probe = $this->step('Probe the application folder from outside')['run'];
+
+        $this->assertStringContainsString('signature "$P" "$BODY"', $probe);
+        $this->assertStringContainsString("grep -qE '^(APP_KEY|DB_CONNECTION|APP_ENV)='", $probe);
+        $this->assertStringContainsString('for BASE in "$KEY/" ""', $probe, 'the site root is probed too');
+    }
 }
