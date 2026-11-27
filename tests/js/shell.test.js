@@ -200,6 +200,8 @@ test('shortcut hints are written in each platform\'s own words (R2-9)', () => {
     assert.equal(shortcutText('mod+k', true), '\u2318K');
     assert.equal(shortcutText('mod+k', false), 'Ctrl+K');
     assert.equal(shortcutText('mod+z', false), 'Ctrl+Z');
+});
+
 // R2-9 (WCAG 4.1.3): one live region for save state, and it speaks only when
 // the settled outcome changes - not on every Editing / Saving tick.
 test('only a settled save outcome is announced', () => {
