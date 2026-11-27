@@ -56,7 +56,9 @@ jobs:
         # reported "955 warnings" and hid what they were (EA-4 / O-08).
         run: |
           if [ "${{ matrix.coverage }}" = "pcov" ]; then
-            php -d memory_limit=-1 vendor/bin/phpunit --display-warnings --display-deprecations --display-phpunit-deprecations --coverage-text=coverage.txt --only-summary-for-coverage-text
+            # The whole per-class table, summary first: the floor step below reads the summary line, and the table
+            # says WHERE coverage is thin when it has to be raised (R2-10).
+            php -d memory_limit=-1 vendor/bin/phpunit --display-warnings --display-deprecations --display-phpunit-deprecations --coverage-text=coverage.txt
             cat coverage.txt
           else
             php -d memory_limit=-1 vendor/bin/phpunit --display-warnings --display-deprecations --display-phpunit-deprecations
