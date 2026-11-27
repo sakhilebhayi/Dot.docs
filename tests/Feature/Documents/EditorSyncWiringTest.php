@@ -635,7 +635,7 @@ class EditorSyncWiringTest extends TestCase
         $this->assertStringNotContainsString('x-for', (string) $bar->innerHTML);
 
         // The five is one number, in the module too.
-        $this->assertMatchesRegularExpression('/^export const LOST_ROWS = 5;$/m', file_get_contents(resource_path('js/editor/sync/host.js')));
+        $this->assertMatchesRegularExpression('/^export const LOST_ROWS = 5;$/m', implode("\n", array_map('file_get_contents', [resource_path('js/editor/sync/host.js'), ...glob(resource_path('js/editor/sync/host/*.js'))])));
 
         // The three delegates hand over to the module.
         $this->assertSame(1, preg_match('/\sx-data="([^"]*docUuid[^"]*)"\s+x-init="init\(\)"/s', $html, $alpine));

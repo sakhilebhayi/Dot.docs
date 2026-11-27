@@ -94,7 +94,7 @@ class Ea5PerformanceTest extends TestCase
 
         $this->actingAs($user)->get(route('documents.edit', $doc->uuid))
             ->assertSee('data-doc-version wire:ignore', false);
-        $this->assertStringContainsString('paintVersion(view.baseVersion);', file_get_contents(resource_path('js/editor/sync/host.js')));
+        $this->assertStringContainsString('paintVersion(view.baseVersion);', implode("\n", array_map('file_get_contents', [resource_path('js/editor/sync/host.js'), ...glob(resource_path('js/editor/sync/host/*.js'))])));
     }
 
     public function test_a_save_sharing_its_request_with_another_call_still_renders(): void
