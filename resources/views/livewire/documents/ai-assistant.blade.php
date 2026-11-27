@@ -1,13 +1,13 @@
 <div>
     {{-- Toolbar actions arrive as the ai-action event (handleAction); this is their progress (EA-4 / U-01). --}}
-    <p class="note" role="status" wire:loading.flex wire:target="handleAction" style="position:fixed;bottom:var(--s4);right:var(--s4);z-index:90;margin:0">
+    <p class="note ai-toast" role="status" wire:loading.flex wire:target="handleAction">
         <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
         The assistant is working…
     </p>
 
     {{-- Command palette --}}
     @if ($showPalette)
-        <div class="scrim" x-trap.noscroll="true" style="align-items:flex-start;padding-top:12vh" role="dialog" aria-modal="true"
+        <div class="scrim sheet-top" x-trap.noscroll="true" role="dialog" aria-modal="true"
              aria-label="Assistant commands" x-data x-init="$el.querySelector('input').focus()">
             <div class="sheet" wire:click.outside="closePalette">
                 <div class="sheet-head">
@@ -24,7 +24,7 @@
                     <button type="button" class="btn btn-primary" wire:click="runCommand" wire:loading.remove wire:target="runCommand">Run</button>
                 </div>
 
-                <ul class="list" style="max-height:46vh;overflow-y:auto">
+                <ul class="list ai-scroll">
                     @foreach ($commandSuggestions as $cmd => $desc)
                         <li>
                             <button type="button" class="list-row" wire:click="$set('command', '{{ $cmd }}')">
@@ -53,7 +53,7 @@
                     <h2 class="h-panel" id="ai-result-title">In marker — {{ ucfirst($action) }}</h2>
                 </div>
                 @if ($this->isDemonstration())
-                    <p class="note" role="note" style="margin:0">
+                    <p class="note u-m-0" role="note">
                         <span class="status-word-dot status-word-dot-idle" aria-hidden="true"></span>
                         Demonstration answer: no AI model is connected to {{ config('app.name') }} yet, so this text is a placeholder.
                     </p>

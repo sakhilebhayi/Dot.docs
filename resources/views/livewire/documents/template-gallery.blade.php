@@ -16,7 +16,7 @@
                     </div>
                 </div>
 
-                <div class="sheet-body" style="padding:0">
+                <div class="sheet-body u-p-0">
                     @if ($this->templates->isEmpty())
                         <div class="empty">
                             <p class="empty-line">Nothing filed under {{ $activeCategory }} yet.</p>

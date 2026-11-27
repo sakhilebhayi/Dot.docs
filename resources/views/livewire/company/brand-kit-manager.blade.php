@@ -71,7 +71,7 @@
             <div class="field-row">
                 <label class="field-label" for="brand-logo">Logo</label>
                 <div class="toolbar">
-                    <input id="brand-logo" type="file" class="field" wire:model="logo" accept="image/png,image/jpeg,image/webp" style="flex:1 1 260px;min-width:0" @error('logo') aria-invalid="true" aria-describedby="brand-logo-error" @enderror>
+                    <input id="brand-logo" type="file" class="field u-grow-wide" wire:model="logo" accept="image/png,image/jpeg,image/webp" @error('logo') aria-invalid="true" aria-describedby="brand-logo-error" @enderror>
                     @if ($hasLogo && $canEdit)
                         <button type="button" class="btn btn-quiet" wire:click="removeLogo" wire:confirm="Remove the logo from the letterhead?">Remove the logo</button>
                     @endif
@@ -91,7 +91,7 @@
                         <label class="field-label" for="brand-{{ $field }}">{{ $label }}</label>
                         <div class="toolbar">
                             <input type="color" class="brand-swatch" wire:model.live="{{ $field }}" aria-label="{{ $label }}: pick a colour">
-                            <input id="brand-{{ $field }}" type="text" class="field" wire:model.blur="{{ $field }}" maxlength="7" style="flex:1 1 6rem;font-family:var(--font-mono)" @error($field) aria-invalid="true" aria-describedby="brand-{{ $field }}-error" @enderror>
+                            <input id="brand-{{ $field }}" type="text" class="field u-grow-sm field-mono" wire:model.blur="{{ $field }}" maxlength="7" @error($field) aria-invalid="true" aria-describedby="brand-{{ $field }}-error" @enderror>
                         </div>
                         @error($field) <p class="field-error" id="brand-{{ $field }}-error" role="alert">{{ $message }}</p> @enderror
                     </div>

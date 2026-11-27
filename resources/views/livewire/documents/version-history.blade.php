@@ -14,7 +14,7 @@
         </p>
     @endif
 
-    <div class="grid-2" style="gap:0;align-items:start">
+    <div class="grid-2 u-gap-0 u-items-start">
         <section class="panel" aria-labelledby="version-list">
             <div class="panel-head">
                 <h2 class="section-title" id="version-list">Versions</h2>
@@ -50,7 +50,7 @@
                                @checked(in_array($version->id, $compareIds)) />
                         <label class="sr-only" for="cmp-{{ $version->id }}">Compare version {{ $version->version_number }}</label>
 
-                        <button type="button" class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start"
+                        <button type="button" class="btn btn-quiet u-grow u-start"
                                 wire:click="preview({{ $version->id }})">
                             <span class="list-key">
                                 <span class="micro">
@@ -84,7 +84,7 @@
             </div>
         </section>
 
-        <section class="panel" aria-labelledby="version-preview" style="border-left:0">
+        <section class="panel u-bl-0" aria-labelledby="version-preview">
             <div class="panel-head">
                 <h2 class="section-title" id="version-preview">
                     {{ $showDiff && $diffHtml ? 'Difference' : 'Preview' }}
@@ -126,8 +126,8 @@
                         @endif
                     </div>
 
-                    <div class="canvas" style="padding:var(--s4) 0">
-                        <article class="paper" style="width:100%;min-height:0;padding:var(--s5)">
+                    <div class="canvas u-py-4">
+                        <article class="paper u-fill-pad">
                             {{-- Old versions' HTML through the sanitiser (R2-1 / S-06): it was stored as written. --}}
                             {!! app(\App\Services\HtmlSanitizer::class)->clean((string) $previewVersion->content_snapshot) !!}
                         </article>

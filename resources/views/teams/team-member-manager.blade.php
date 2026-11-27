@@ -18,16 +18,16 @@
 
                 <div class="field-row">
                     <x-label for="email" value="{{ __('Email') }}" />
-                    <x-input id="email" type="email" wire:model="addTeamMemberForm.email" />
-                    <x-input-error for="email" />
+                    <x-input id="email" error="email" type="email" wire:model="addTeamMemberForm.email" />
+                    <x-input-error for="email" field="email" />
                 </div>
 
                 @if (count($this->roles) > 0)
                     <div class="field-row">
                         <span class="field-label" id="add-member-role">{{ __('Role') }}</span>
-                        <x-input-error for="role" />
+                        <x-input-error for="role" field="add-member-role" />
 
-                        <ul class="list role-list" role="group" aria-labelledby="add-member-role">
+                        <ul class="list role-list" role="group" aria-labelledby="add-member-role"@error('role') aria-describedby="add-member-role-error"@enderror>
                             @foreach ($this->roles as $role)
                                 <li>
                                     <button type="button" class="list-row"
