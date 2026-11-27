@@ -177,7 +177,7 @@ class InfoDotDeepLinkTest extends TestCase
 
         $this->actingAs($this->gina)->get('/o/'.$document->uuid)
             ->assertForbidden()
-            ->assertSee('not in the company that owns this document')
+            ->assertSee('You cannot open this document yet')
             ->assertDontSee('Secret merger memo')
             ->assertDontSee('Acme');
 
