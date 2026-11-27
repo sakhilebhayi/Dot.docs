@@ -1,4 +1,4 @@
-Hello {{ $name }},
+Hello {!! \App\Support\MailText::text($name, 80) !!},
 
 Someone signed in to Dot.docs with your InfoDot account, and an account here already uses this email address. To connect the two, enter this code on the page that is open:
 

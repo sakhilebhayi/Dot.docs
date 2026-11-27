@@ -4,6 +4,7 @@ namespace App\Events;
 
 use App\Models\Comment;
 use App\Models\Document;
+use App\Support\LiveBroadcast;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
@@ -34,6 +35,12 @@ class CommentPosted implements ShouldBroadcastNow
     public function broadcastAs(): string
     {
         return 'comment.posted';
+    }
+
+    /** Skipped when the broadcaster reaches nobody (`null` / `log`); listeners in the app still run. */
+    public function broadcastWhen(): bool
+    {
+        return LiveBroadcast::available();
     }
 
     /** @return array<string, mixed> */

@@ -10,6 +10,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\RateLimiter;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -87,11 +88,43 @@ class CollaboratorRolesTest extends TestCase
         ], $rows);
     }
 
-    public function test_inviting_someone_without_an_account_says_what_to_do(): void
+    public function test_sharing_gives_the_same_answer_whether_or_not_the_address_has_an_account(): void
     {
-        Livewire::actingAs($this->owner)->test(ShareManager::class, ['uuid' => $this->doc->uuid])
+        $known = User::factory()->create(['email' => 'known@example.test']);
+
+        $withAccount = Livewire::actingAs($this->owner)->test(ShareManager::class, ['uuid' => $this->doc->uuid])
+            ->set('inviteEmail', $known->email)->call('invite')
+            ->assertHasNoErrors();
+        $withoutAccount = Livewire::actingAs($this->owner)->test(ShareManager::class, ['uuid' => $this->doc->uuid])
             ->set('inviteEmail', 'nobody@example.test')->call('invite')
-            ->assertHasErrors('inviteEmail')
-            ->assertSee('Ask them to sign in to Dot.docs once, then invite them.');
+            ->assertHasNoErrors();
+
+        $this->assertSame(ShareManager::SHARED_NOTICE, $withAccount->get('inviteNotice'));
+        $this->assertSame(ShareManager::SHARED_NOTICE, $withoutAccount->get('inviteNotice'));
+        $withoutAccount->assertSet('inviteEmail', '');
+        $this->assertSame('viewer', $this->roleOf($known));
+    }
+
+    public function test_sharing_is_limited_per_person_per_hour(): void
+    {
+        $page = Livewire::actingAs($this->owner)->test(ShareManager::class, ['uuid' => $this->doc->uuid]);
+
+        for ($i = 0; $i < ShareManager::SHARES_PER_USER_PER_HOUR; $i++) {
+            $page->set('inviteEmail', "person{$i}@example.test")->call('invite')->assertHasNoErrors();
+        }
+
+        $page->set('inviteEmail', 'one-more@example.test')->call('invite')->assertHasErrors('inviteEmail');
+    }
+
+    public function test_sharing_is_limited_per_company_per_hour(): void
+    {
+        RateLimiter::increment('document-share:team:'.$this->doc->team_id, 3600, ShareManager::SHARES_PER_TEAM_PER_HOUR);
+        $known = User::factory()->create();
+
+        Livewire::actingAs($this->editor)->test(ShareManager::class, ['uuid' => $this->doc->uuid])
+            ->set('inviteEmail', $known->email)->call('invite')
+            ->assertHasErrors('inviteEmail');
+
+        $this->assertNull($this->roleOf($known));
     }
 }

@@ -4,6 +4,7 @@ namespace Tests\Feature\Mail;
 
 use App\Jobs\SendSsoClaimCode;
 use App\Mail\Delivery\MailDeliveryListener;
+use App\Mail\Delivery\MailLedgerWriteFailed;
 use App\Mail\QueuedTeamInvitation;
 use App\Mail\SsoClaimCodeMail;
 use App\Models\User;
@@ -15,8 +16,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Mailer\Exception\TransportException;
 use Symfony\Component\Mime\Email;
 use Tests\TestCase;
@@ -223,5 +226,29 @@ class MailDeliveryTest extends TestCase
 
         $this->assertCount(1, $this->sent);
         $this->assertDatabaseHas('sent_mails', ['ref' => $mail->deliveryRef, 'kind' => QueuedTeamInvitation::class]);
+    }
+
+    public function test_a_sent_mail_record_that_cannot_be_written_is_reported_and_the_email_still_goes(): void
+    {
+        Exceptions::fake();
+        $user = User::factory()->create(['email' => 'reader@example.test']);
+        Schema::drop('sent_mails');
+
+        $notice = new PasswordChanged;
+        $notice->id = 'a5e3b1c8-0000-4000-8000-000000000002';
+        $user->notifyNow($notice);
+
+        $this->assertCount(1, $this->sent);
+        Exceptions::assertReported(fn (MailLedgerWriteFailed $e) => $e->kind === 'PasswordChanged'
+            && ! str_contains($e->getMessage(), 'reader@example.test'));
+    }
+
+    public function test_the_claim_code_mail_prints_the_name_as_plain_unlinkable_text(): void
+    {
+        Mail::to('ada@example.test')->send(new SsoClaimCodeMail("Ada & Co at name-site.example\nSecond line", '913577', 10));
+
+        $body = (string) $this->sent[0]->getTextBody();
+        $this->assertStringContainsString("Hello Ada & Co at name-site.\u{200B}example Second line,", $body);
+        $this->assertStringNotContainsString('&amp;', $body);
     }
 }

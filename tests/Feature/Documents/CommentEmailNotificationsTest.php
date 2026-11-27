@@ -112,6 +112,23 @@ class CommentEmailNotificationsTest extends TestCase
         $this->assertFalse($notification->shouldSend($owner, 'mail'));
     }
 
+    /** A document moved to the Bin during the two-minute delay gets no comment email, as the queue restores it. */
+    public function test_email_is_not_sent_for_a_document_moved_to_the_bin_during_the_delay(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create();
+        $comment = $this->commentOn($owner);
+        $this->seedBellNotification($owner, 'comment', $comment->id, read: false);
+
+        $queued = serialize(new CommentPostedEmailNotification($comment->document, $comment));
+        $mention = new MentionedInCommentEmailNotification($comment->document, $comment);
+        $this->assertTrue(unserialize($queued)->shouldSend($owner, 'mail'));
+
+        $comment->document->delete();
+
+        $this->assertFalse(unserialize($queued)->shouldSend($owner, 'mail'));
+        $this->assertFalse($mention->shouldSend($owner, 'mail'));
+    }
+
     /** Access can be taken away during the two-minute delay. */
     public function test_email_is_not_sent_to_someone_who_lost_access_during_the_delay(): void
     {
@@ -205,6 +222,22 @@ class CommentEmailNotificationsTest extends TestCase
         $html = (string) (new MentionedInCommentEmailNotification($comment->document, $comment))->toMail($owner)->render();
 
         $this->assertStringNotContainsString('href="https://evil.example/phish"', $html);
+    }
+
+    /** A bare domain in the comment, the title or the name is not something a mail client can turn into a link. */
+    public function test_bare_domains_in_user_text_are_defanged_in_the_email(): void
+    {
+        $owner = User::factory()->withPersonalTeam()->create(['name' => 'Owner at owner-site.example']);
+        $comment = $this->commentOn($owner, 'Log in at evil-login.example to see it');
+        $comment->document->forceFill(['title' => 'Notes from title-site.example'])->save();
+
+        $message = (new CommentPostedEmailNotification($comment->document->fresh(), $comment))->toMail($owner);
+        $html = (string) $message->render();
+
+        foreach (['evil-login.example', 'title-site.example'] as $domain) {
+            $this->assertStringNotContainsString($domain, html_entity_decode($html), $domain);
+        }
+        $this->assertStringContainsString("evil-login.\u{200B}example", html_entity_decode($html));
     }
 
     /**
