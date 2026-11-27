@@ -217,18 +217,6 @@ parameters:
 			path: app/Files/FilesService.php
 
 		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Files/UniqueName.php
-
-		-
-			message: '#^Call to an undefined method Illuminate\\Database\\Eloquent\\Model\:\:name\(\)\.$#'
-			identifier: method.notFound
-			count: 1
-			path: app/Files/UniqueName.php
-
-		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$parent\.$#'
 			identifier: property.notFound
 			count: 1

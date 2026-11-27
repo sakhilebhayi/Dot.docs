@@ -112,6 +112,27 @@ class FilesService
     }
 
     /**
+     * The folders directly inside $parent, in name order - asked of the
+     * database, not filtered out of children(). A folder holding thousands
+     * of documents would otherwise load every one of them, with its whole
+     * content, to list its few subfolders (EA-9: 2.4 s for the documents
+     * list at 10,000 documents).
+     *
+     * @return Collection<int, Obj>
+     */
+    public function childFolders(Obj $parent): Collection
+    {
+        return Obj::query()
+            ->where('parent_id', $parent->id)
+            ->where('objectable_type', 'folder')
+            ->with('objectable')
+            ->get()
+            ->reject(fn (Obj $obj) => $obj->objectable === null)
+            ->sortBy(fn (Obj $obj) => mb_strtolower($obj->name()))
+            ->values();
+    }
+
+    /**
      * Every folder node in a team, labelled with its full path, deepest
      * path last - the list a Move picker or a "file it under" <select> is
      * built from. Team comes from the caller's own object, never the
