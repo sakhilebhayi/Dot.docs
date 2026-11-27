@@ -44,7 +44,11 @@ return [
             // job pop fails at once with "database is locked". IMMEDIATE takes
             // the write lock up front, and busy_timeout makes it wait for it.
             'busy_timeout' => 5000,
-            'journal_mode' => null,
+            // WAL lets readers (every page, every poll) carry on while one
+            // save writes. Production was switched to it by hand on
+            // 2026-10-16; set here so a recreated database file gets it too
+            // (EA-5 / P-13). An in-memory test database answers "memory".
+            'journal_mode' => env('DB_JOURNAL_MODE', 'wal'),
             'synchronous' => null,
             'transaction_mode' => 'IMMEDIATE',
         ],

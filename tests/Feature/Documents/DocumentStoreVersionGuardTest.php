@@ -292,7 +292,7 @@ class DocumentStoreVersionGuardTest extends TestCase
         $outerLevel = DB::transactionLevel();
 
         $this->mock(WebhookService::class, function (MockInterface $mock) use ($outerLevel) {
-            $mock->shouldReceive('fire')->once()->andReturnUsing(function () use ($outerLevel) {
+            $mock->shouldReceive('queue')->once()->andReturnUsing(function () use ($outerLevel) {
                 $this->assertSame($outerLevel, DB::transactionLevel(), 'The webhook must fire after the save transaction has closed.');
             });
         });
@@ -305,7 +305,7 @@ class DocumentStoreVersionGuardTest extends TestCase
         $user = User::factory()->withPersonalTeam()->create();
         $doc = $this->doc($user);
 
-        $this->mock(WebhookService::class, fn (MockInterface $mock) => $mock->shouldNotReceive('fire'));
+        $this->mock(WebhookService::class, fn (MockInterface $mock) => $mock->shouldNotReceive('queue'));
 
         $this->expectException(StaleDocumentException::class);
 

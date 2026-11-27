@@ -113,7 +113,7 @@ class DocumentRestyleTest extends TestCase
         $this->assertStringContainsString(self::THEIRS, $stored->search_text, 'The search text must hold the later save.');
 
         // What the page is handed back is the stored document too.
-        $blocks = $editor->get('contentJson')['content'];
+        $blocks = $editor->get('document')->content_json['content'];
         $this->assertSame(self::THEIRS, $blocks[count($blocks) - 1]['content'][0]['text']);
     }
 
@@ -173,7 +173,7 @@ class DocumentRestyleTest extends TestCase
         $outerLevel = DB::transactionLevel();
 
         $this->mock(WebhookService::class, function (MockInterface $mock) use ($outerLevel) {
-            $mock->shouldReceive('fire')->once()->andReturnUsing(function () use ($outerLevel) {
+            $mock->shouldReceive('queue')->once()->andReturnUsing(function () use ($outerLevel) {
                 $this->assertSame($outerLevel, DB::transactionLevel(), 'The webhook must fire after the transaction has closed.');
             });
         });

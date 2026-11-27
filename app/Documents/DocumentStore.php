@@ -22,6 +22,15 @@ class DocumentStore
 {
     public const AUTO_VERSION_WINDOW_SECONDS = 120;
 
+    /**
+     * Two people typing in the same document used to cut a full version on
+     * nearly every save: any change of author cut one. A change of author
+     * now cuts one only when the latest version is at least this old, so
+     * co-editing leaves a version about every half minute, not every 1.5 s
+     * (EA-5 / P-02). One person alone still gets one per window.
+     */
+    public const AUTO_VERSION_AUTHOR_SWITCH_SECONDS = 30;
+
     public function __construct(
         private DocumentSchema $schema,
         private HtmlRenderer $renderer,
@@ -117,7 +126,15 @@ class DocumentStore
             throw new InvalidArgumentException(implode('; ', $errors));
         }
 
-        $doc = DB::transaction(function () use ($doc, $json, $actor, $opts) {
+        // The rendering work (numbering, HTML, search text, word count) is
+        // done HERE, before the write lock is taken: on SQLite there is one
+        // writer for the whole database, so everything held inside the lock
+        // holds every other save, poll and session write too (EA-5 / P-01).
+        // It depends on the style, team and variables, which are compared
+        // again under the lock and redone there only if they changed.
+        $prepared = $this->derive($doc, $json);
+
+        $doc = DB::transaction(function () use ($doc, $json, $actor, $opts, $prepared) {
             $stored = $this->lockStored($doc);
             $current = (int) $stored->version;
 
@@ -140,7 +157,11 @@ class DocumentStore
             }
 
             $this->bringUpTo($doc, $stored);
-            $this->fill($doc, $json);
+            if ($prepared['key'] === $this->deriveKey($doc)) {
+                $doc->forceFill($prepared['values']);
+            } else {
+                $this->fill($doc, $json);
+            }
             $doc->version = $current + 1;
             $doc->save();
 
@@ -155,7 +176,7 @@ class DocumentStore
         // After the commit, not inside it: a webhook is an HTTP call to
         // somebody else's server, and it must neither hold the database's
         // write lock while it waits nor announce a save that then rolls back.
-        app(WebhookService::class)->fire($doc, 'on_save');
+        app(WebhookService::class)->queue($doc, 'on_save');
 
         return $doc;
     }
@@ -208,7 +229,7 @@ class DocumentStore
         });
 
         // After the commit, for the reasons given in save().
-        app(WebhookService::class)->fire($doc, 'on_save');
+        app(WebhookService::class)->queue($doc, 'on_save');
 
         return $doc;
     }
@@ -309,16 +330,36 @@ class DocumentStore
         if ($kind !== 'auto') {
             return true;
         }
-        $latest = $doc->versions()->latest('id')->first();
-        if ($latest === null) {
+        $latest = DocumentVersion::where('document_id', $doc->getKey())->latest('id')->first();
+        if (! $latest instanceof DocumentVersion) {
+            return true;
+        }
+
+        if ($latest->created_at->lt(now()->subSeconds(self::AUTO_VERSION_WINDOW_SECONDS))) {
             return true;
         }
 
         return $latest->created_by !== $actor->id
-            || $latest->created_at->lt(now()->subSeconds(self::AUTO_VERSION_WINDOW_SECONDS));
+            && $latest->created_at->lt(now()->subSeconds(self::AUTO_VERSION_AUTHOR_SWITCH_SECONDS));
     }
 
     private function fill(Document $doc, array $json): void
+    {
+        $doc->forceFill($this->derive($doc, $json)['values']);
+    }
+
+    /** What the derived columns depend on besides the JSON itself. */
+    private function deriveKey(Document $doc): string
+    {
+        return json_encode([$doc->style_key, $doc->team_id, $doc->variables ?? []]) ?: '';
+    }
+
+    /**
+     * The stored JSON (numbered) and the columns derived from it.
+     *
+     * @return array{key: string, values: array<string, mixed>}
+     */
+    private function derive(Document $doc, array $json): array
     {
         $style = $doc->resolvedStyle() ?? DocumentStyle::resolve('report');
         $rules = $style?->tokens['numbering'] ?? [];
@@ -330,10 +371,15 @@ class DocumentStore
         $ctx->toc = $result->toc;
         $ctx->vars = $doc->variables ?? [];
 
-        $doc->content_json = $json;
-        $doc->schema_version = DocumentSchema::VERSION;
-        $doc->content = $this->renderer->render($json, $ctx);
-        $doc->search_text = $this->schema->plainText($json);
-        $doc->word_count = $this->schema->wordCount($json);
+        return [
+            'key' => $this->deriveKey($doc),
+            'values' => [
+                'content_json' => $json,
+                'schema_version' => DocumentSchema::VERSION,
+                'content' => $this->renderer->render($json, $ctx),
+                'search_text' => $this->schema->plainText($json),
+                'word_count' => $this->schema->wordCount($json),
+            ],
+        ];
     }
 }

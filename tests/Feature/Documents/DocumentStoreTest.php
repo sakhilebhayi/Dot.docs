@@ -111,9 +111,15 @@ class DocumentStoreTest extends TestCase
         $store->save($doc, $this->para('abc'), $user);
         $this->assertSame(2, $doc->versions()->count());
 
+        // Another author within half a minute: no new row, so two people
+        // co-editing do not cut one per save (EA-5 / P-02).
         $other = User::factory()->create();
         $store->save($doc, $this->para('abcd'), $other);
-        $this->assertSame(3, $doc->versions()->count());
+        $this->assertSame(2, $doc->versions()->count());
+
+        Carbon::setTestNow(now()->addSeconds(DocumentStore::AUTO_VERSION_AUTHOR_SWITCH_SECONDS + 1));
+        $store->save($doc, $this->para('abcde'), $other);
+        $this->assertSame(3, $doc->versions()->count(), 'after half a minute the other author gets their own version');
         Carbon::setTestNow();
     }
 
