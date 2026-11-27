@@ -97,7 +97,7 @@ class EditorSyncWiringTest extends TestCase
 
         // And the bundle's unload flush asks the module (beaconWanted(), tested in tests/js/sync.host.test.js)
         // and the page's getUnsent, so a document handed over to Livewire whose request failed still goes by beacon.
-        $bundle = file_get_contents(resource_path('js/editor/index.js'));
+        $bundle = implode("\n", array_map('file_get_contents', [resource_path('js/editor/index.js'), ...glob(resource_path('js/editor/mount/*.js'))]));
         $this->assertStringContainsString('beaconWanted({ dirty, changed, unsent, sentAlready: serialised === lastBeaconed })', $bundle);
         $this->assertStringContainsString('const unsent = beacon && hostHoldsUnsent();', $bundle);
         $this->assertStringContainsString("typeof opts.getUnsent === 'function' && opts.getUnsent() === true", $bundle);
