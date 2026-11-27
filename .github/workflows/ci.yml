@@ -7,17 +7,27 @@ on:
 
 jobs:
   tests:
-    name: Test suite (PHP + JS)
+    name: Test suite (PHP ${{ matrix.php }} + JS)
     runs-on: ubuntu-latest
+    # 8.4 is what the production host runs; 8.5 is what development uses (EA-7 / O-09).
+    # Coverage is measured on the 8.5 leg (pcov) and gated (see the step below).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.4'
+            coverage: none
+          - php: '8.5'
+            coverage: pcov
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.5'
-          extensions: pdo_sqlite, sqlite3, bcmath, gd, zip, mbstring, intl, pcntl
-          coverage: none
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, sqlite3, bcmath, gd, zip, mbstring, intl, pcntl, sodium
+          coverage: ${{ matrix.coverage }}
 
       - name: Install composer dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
@@ -44,14 +54,73 @@ jobs:
       - name: Run PHP test suite
         # phpunit directly with the details shown: `artisan test --compact`
         # reported "955 warnings" and hid what they were (EA-4 / O-08).
-        run: php -d memory_limit=-1 vendor/bin/phpunit --display-warnings --display-deprecations --display-phpunit-deprecations
+        run: |
+          if [ "${{ matrix.coverage }}" = "pcov" ]; then
+            php -d memory_limit=-1 vendor/bin/phpunit --display-warnings --display-deprecations --display-phpunit-deprecations --coverage-text=coverage.txt --only-summary-for-coverage-text
+            cat coverage.txt
+          else
+            php -d memory_limit=-1 vendor/bin/phpunit --display-warnings --display-deprecations --display-phpunit-deprecations
+          fi
         env:
           # phpunit.xml already forces sqlite/:memory: and AI_PROVIDER=mock,
           # so no database service container or real API keys are needed here.
           BROADCAST_CONNECTION: log
 
+      - name: Line coverage must not fall below the floor
+        # EA-7 / O-07: measured on every run; the build fails if line coverage of app/ drops below
+        # COVERAGE_FLOOR. Raise the floor as coverage grows; never lower it to make a change pass.
+        if: matrix.coverage == 'pcov'
+        env:
+          COVERAGE_FLOOR: '0'
+        run: |
+          LINES=$(grep -m1 -E '^\s*Lines:' coverage.txt | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          echo "Line coverage: ${LINES}% (floor ${COVERAGE_FLOOR}%)"
+          awk -v l="$LINES" -v f="$COVERAGE_FLOOR" 'BEGIN { exit !(l + 0 >= f + 0) }' || { echo "::error::Line coverage ${LINES}% is below the floor ${COVERAGE_FLOOR}%."; exit 1; }
+
       - name: Run JS test suite
         run: node --test tests/js/*.test.js
+
+  browser:
+    name: Browser suite (Playwright + axe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # EA-7 / O-06: the real journeys in a real browser (sign in, write and autosave, share and remove,
+    # publish behind a password, export, the assistant, keyboard, a phone) and axe on every main screen
+    # (critical violations fail; serious ones are listed in the log). tests/Browser/README in the config.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite, sqlite3, bcmath, gd, zip, mbstring, intl, sodium
+          coverage: none
+      - name: Install composer dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+        env:
+          BROADCAST_CONNECTION: log
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install Node dependencies, build assets, install Chromium
+        run: |
+          npm ci --silent
+          npm run build
+          npx playwright install --with-deps chromium
+      - name: Run the browser suite
+        run: npm run test:browser
+        env:
+          CI: 'true'
+      - name: Keep the report when it fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/Browser/playwright-report
+            tests/Browser/test-results
+          retention-days: 7
 
   code-style:
     name: Pint (code style)
@@ -136,13 +205,14 @@ jobs:
     runs-on: ubuntu-latest
     # The dependency audits gate too, on high and critical advisories only
     # (EA-1 / S-15): a merge here is a production deploy.
-    needs: [tests, code-style, static-php, composer-audit, npm-audit]
+    needs: [tests, browser, code-style, static-php, composer-audit, npm-audit]
     if: always()
     steps:
       - name: Evaluate quality gate
         run: |
           declare -A results
           results[tests]="${{ needs.tests.result }}"
+          results[browser]="${{ needs.browser.result }}"
           results[code-style]="${{ needs.code-style.result }}"
           results[static-php]="${{ needs.static-php.result }}"
           results[composer-audit]="${{ needs.composer-audit.result }}"
