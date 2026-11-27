@@ -28,14 +28,14 @@
 
                 <div class="field-row" x-data="{}" x-on:confirming-delete-user.window="setTimeout(() => $refs.password.focus(), 250)">
                     <x-label for="delete-account-password" value="{{ __('Password') }}" />
-                    <x-input id="delete-account-password"
+                    <x-input id="delete-account-password" error="password"
                              type="password"
                              autocomplete="current-password"
                              x-ref="password"
                              wire:model="password"
                              wire:keydown.enter="deleteUser" />
 
-                    <x-input-error for="password" />
+                    <x-input-error for="password" field="delete-account-password" />
                 </div>
             </x-slot>
 

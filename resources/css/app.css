@@ -191,8 +191,9 @@ body {
     --dsr-filter-bg: var(--surface-raised);
     --dsr-filter-ink: var(--ink);
     --dsr-filter-placeholder: var(--ink-soft);
-    --dsr-filter-border: var(--line);
-    --dsr-filter-border-hover: var(--ink-soft);
+    /* R2-6 / A-02: the filter field's edge clears 3:1 like every other field (--line was about 1.2:1). */
+    --dsr-filter-border: var(--line-control);
+    --dsr-filter-border-hover: var(--ink);
     --dsr-filter-border-focus: var(--ink);
 }
 

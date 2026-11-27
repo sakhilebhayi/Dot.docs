@@ -25,12 +25,12 @@
         <div class="field-row">
             <x-label for="name" value="{{ __('Team Name') }}" />
 
-            <x-input id="name"
+            <x-input id="name" error="name"
                         type="text"
                         wire:model="state.name"
                         :disabled="! Gate::check('update', $team)" />
 
-            <x-input-error for="name" />
+            <x-input-error for="name" field="name" />
         </div>
     </x-slot>
 

@@ -26,7 +26,8 @@ Chrome colour NEVER appears as a literal in a view: every one is a CSS custom pr
 | `--danger` | errors and destructive actions |
 | `--paper` / `--paper-ink` / `--paper-shadow` | the document sheet; these do NOT invert (see below) |
 | `--marker` / `--marker-bg` / `--marker-chrome` | the machine's ink in the document / in the chrome |
-| `--font-display` / `--font-chrome` / `--font-mono` | Fraunces / Work Sans / IBM Plex Mono |
+| `--font-display` / `--font-chrome` / `--font-sheet` / `--font-sheet-head` | Roboto, self-hosted from `public/dot-ui/fonts/roboto` (R-52: one face across the Dot ecosystem) |
+| `--font-mono` | the system monospace stack (`ui-monospace`, SF Mono, Menlo, Consolas), only where figures must line up |
 | `--t-micro|body|lede|title|display` | 12/15/19/25/33px |
 | `--s1..--s6` | 4/8/12/20/32/56px |
 | `--r-control` / `--r-canvas` | 8px on anything you click, 12px on the canvas |
@@ -49,7 +50,9 @@ Night/day is a `theme` cookie (dark|light) read SERVER-SIDE in layouts/app.blade
 | Rails/dock collapse but default open | **Collapsed by default on the editor**, open everywhere else |
 | An empty state is one sentence and one action | One sentence, then up to three actions — and the sentence NAMES what is filtering the list, so every active filter has a way out of it |
 
-Fonts are **Fraunces** (display), **Work Sans** (everything functional) and **IBM Plex Mono** (only where a column of figures genuinely has to line up — never as a motif). Inter, Geist, Space Grotesk, Plus Jakarta Sans and Atkinson Hyperlegible are banned; `FairCopyTest::assertBannedFontsAreAbsent` measures the face in a FONT STACK or a WEBFONT REQUEST, not as a bare substring ("Inter" lives inside `IntersectionObserver`, "Roboto" inside a filename). Fraunces is flagged by Impeccable's `overused-font` detector and carries a **value-scoped** ignore in `.impeccable/config.json`; Inter and the rest still fail, which the canary proves.
+Fonts: **Roboto** for everything - display, chrome and the landing sheet - self-hosted (no external font host), since R-52 made it the one face of every Dot platform; the system monospace stack only where a column of figures genuinely has to line up, never as a motif. Fraunces, Work Sans and IBM Plex Mono were the Fair Copy faces until R-52 and must not come back (`R52TypographyTest`); Inter, Geist, Space Grotesk, Plus Jakarta Sans and Atkinson Hyperlegible are banned as before. `FairCopyTest::assertBannedFontsAreAbsent` measures the face in a FONT STACK or a WEBFONT REQUEST, not as a bare substring ("Inter" lives inside `IntersectionObserver`). A document's own faces come from its DocumentStyle and load on the document only.
+
+**No inline `style=""` in views** (R2-6 / U-07): a one-off layout value is a class in the replacement block at the end of `shell.css` (`.u-*` for token spacing and flex, a named class for anything with a meaning such as `.comment-quote`). The only inline styles left are values computed from data - the brand kit preview's chosen colours and fonts.
 
 Full-page Livewire views still render exactly ONE root element and editor.blade.php keeps `<style id="doc-style">` as its FIRST CHILD — see .ai/rules/livewire.md. Inside `.paper` nothing is styled from here: that belongs to the Document Style CSS (`App\Styles\CssBuilder`).
 

@@ -25,7 +25,7 @@
         </p>
     @endif
 
-    <nav class="toolbar" aria-label="Folder path" style="margin-bottom:var(--s4)">
+    <nav class="toolbar u-mb-4" aria-label="Folder path">
         @foreach ($this->crumbs as $crumb)
             @if (! $loop->first)
                 <span class="micro" aria-hidden="true">/</span>
@@ -56,12 +56,12 @@
                 {{-- Import (R2-3 / F-05): a new document in this folder, titled after the file and holding its
                      contents. A plain form like Upload below, posting to DocumentImportController::intoFolder. --}}
                 <form id="files-import-form" method="POST" action="{{ route('files.import', $this->parent->uuid) }}"
-                      enctype="multipart/form-data" class="field-row" style="flex-basis:100%"
+                      enctype="multipart/form-data" class="field-row u-full-row"
                       x-show="importing" x-cloak>
                     @csrf
                     <label class="field-label" for="files-import">A .docx, .md, .html or .txt file</label>
                     <div class="toolbar">
-                        <input id="files-import" type="file" name="file" class="field" style="flex:1 1 260px;min-width:0" required
+                        <input id="files-import" type="file" name="file" class="field u-grow-wide" required
                                accept=".docx,.md,.markdown,.html,.htm,.txt"
                                @error('file', 'import') aria-invalid="true" aria-describedby="files-import-error" @enderror />
                         <button type="submit" class="btn">Import it</button>
@@ -81,7 +81,7 @@
                 @csrf
                 <label class="field-label" for="files-upload">Upload a file</label>
                 <div class="toolbar">
-                    <input id="files-upload" type="file" name="file" class="field" style="flex:1 1 260px;min-width:0" required @error('file') aria-invalid="true" aria-describedby="files-upload-error" @enderror />
+                    <input id="files-upload" type="file" name="file" class="field u-grow-wide" required @error('file') aria-invalid="true" aria-describedby="files-upload-error" @enderror />
                     <button type="submit" class="btn">Upload it</button>
                 </div>
                 @error('file')
@@ -247,7 +247,7 @@
                     <ul class="list">
                         @foreach ($this->folderChoices as $choice)
                             <li wire:key="dest-{{ $choice['uuid'] }}">
-                                <button type="button" class="list-row" style="width:100%;text-align:left"
+                                <button type="button" class="list-row u-row-button"
                                         wire:click="moveTo('{{ $choice['uuid'] }}')">
                                     <span class="list-key">{{ $choice['label'] }}</span>
                                 </button>

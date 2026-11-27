@@ -3,6 +3,26 @@
         <div>
             <h1 class="page-title">Sharing</h1>
             <p class="page-lede">Who can reach {{ $document->title }}, and on what terms.</p>
+            {{-- Where the document stands, in words, before any form (R2-6 / U-03): the link's state, its terms and
+                 how many people are on it. The panels below change these; this line only reports them. --}}
+            @php
+                $expires = $document->share_expires_at;
+                $expired = $document->is_public && $expires !== null && $expires->isPast();
+                $people = $document->collaborators->count() + 1;
+            @endphp
+            <ul class="share-standing" aria-label="Where this document stands">
+                <li>
+                    <x-shell.status-word :tone="$expired ? 'danger' : ($document->is_public ? 'good' : 'idle')"
+                                         :word="$expired ? 'Link expired' : ($document->is_public ? 'Link published' : 'Private')" />
+                </li>
+                @if ($document->is_public && $document->share_password)
+                    <li><x-shell.status-word tone="good" word="Password required" /></li>
+                @endif
+                @if ($document->is_public && $expires !== null && ! $expired)
+                    <li><x-shell.status-word tone="idle" :word="'Expires '.$expires->diffForHumans()" /></li>
+                @endif
+                <li><x-shell.status-word tone="idle" :word="$people === 1 ? 'Only you' : $people.' people'" /></li>
+            </ul>
         </div>
         <a href="{{ route('documents.edit', $document->uuid) }}" class="btn">Back to the editor</a>
     </div>
@@ -10,14 +30,12 @@
     <section class="panel" aria-labelledby="share-link">
         <div class="panel-head">
             <h2 class="section-title" id="share-link">Public link</h2>
-            <x-shell.status-word :tone="$document->is_public ? 'good' : 'idle'"
-                          :word="$document->is_public ? 'Published' : 'Private'"
-                          />
+            {{-- Its state is said once, in the line under the page title (R2-6 / U-03). --}}
         </div>
 
         <div class="panel-body">
             <div class="split">
-                <p class="page-lede" style="margin:0">
+                <p class="page-lede u-m-0">
                     {{ $document->is_public
                         ? 'Anyone holding the link can read this document.'
                         : 'Only you and the people listed below can reach it.' }}
@@ -33,10 +51,29 @@
             </div>
 
             @if ($document->is_public && $publicLink)
-                <div class="field-row">
+                {{-- R2-6 / U-03: one press copies it. The clipboard API needs a secure page and permission; when it
+                     is refused the field's text is selected instead, so the reader's own copy works, and the button
+                     says which happened. The result is announced (role=status). --}}
+                <div class="field-row" x-data="{
+                        said: '',
+                        async copy() {
+                            try {
+                                await navigator.clipboard.writeText(this.$refs.url.value);
+                                this.said = 'Copied';
+                            } catch (e) {
+                                this.$refs.url.select();
+                                this.said = 'Selected: press Ctrl+C or ⌘C';
+                            }
+                        },
+                    }">
                     <label class="field-label" for="share-url">The link</label>
-                    <input id="share-url" type="text" value="{{ $publicLink }}" readonly class="field field-mono" />
-                    <p class="field-hint">Copy it from the field above; it works for anyone, signed in or not.</p>
+                    <div class="field-with-action">
+                        <input id="share-url" type="text" value="{{ $publicLink }}" readonly class="field field-mono" x-ref="url"
+                               @focus="$event.target.select()" />
+                        <button type="button" class="btn" aria-describedby="share-url-said"
+                                @click="copy()">Copy link</button>
+                    </div>
+                    <p class="field-hint" id="share-url-said" role="status" x-text="said || 'It works for anyone holding it, signed in or not.'">It works for anyone holding it, signed in or not.</p>
                 </div>
             @endif
 
@@ -149,19 +186,19 @@
                 <span class="micro"><x-shell.figure :value="$this->accessRequests->count()" label="Waiting" /></span>
             </div>
             @if ($accessNotice !== '')
-                <p class="note" role="status" style="margin:var(--s3) var(--s4) 0">
+                <p class="note panel-inset" role="status">
                     <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
                     {{ $accessNotice }}
                 </p>
             @endif
             <ul class="list">
                 @forelse ($this->accessRequests as $ask)
-                    <li class="list-row" wire:key="ask-{{ $ask->id }}" style="flex-wrap:wrap;row-gap:var(--s2)">
-                        <span class="list-key" style="flex:1 1 16rem">
+                    <li class="list-row u-wrap-rows" wire:key="ask-{{ $ask->id }}">
+                        <span class="list-key u-grow-md">
                             {{ $ask->requester->name }}
                             <span class="list-sub">{{ $ask->requester->email }} &middot; asked {{ $ask->created_at->diffForHumans() }}</span>
                             @if (filled($ask->message))
-                                <span class="list-sub" style="display:block;white-space:pre-line">“{{ $ask->message }}”</span>
+                                <span class="list-sub u-block u-pre-line">“{{ $ask->message }}”</span>
                             @endif
                         </span>
                         <span class="toolbar">

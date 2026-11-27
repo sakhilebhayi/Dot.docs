@@ -18,7 +18,7 @@
         already has a breadcrumb by that name, and two navigation landmarks with
         the same label are two rows a screen reader cannot tell apart.
     --}}
-    <nav class="toolbar" aria-label="Destination folder path" style="margin-bottom:var(--s2)">
+    <nav class="toolbar u-mb-2" aria-label="Destination folder path">
         @foreach ($trail as $crumb)
             @if (! $loop->first)
                 <span class="micro" aria-hidden="true">/</span>

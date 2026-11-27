@@ -14,7 +14,7 @@
     </div>
 
     {{-- Breadcrumbs: where in the tree this listing is standing. --}}
-    <nav class="toolbar" aria-label="Folder path" style="margin-bottom:var(--s4)">
+    <nav class="toolbar u-mb-4" aria-label="Folder path">
         <button type="button" wire:click="openFolder(null)"
                 class="btn btn-quiet btn-sm {{ ! $folderId ? 'is-current' : '' }}">All documents</button>
         @foreach ($this->breadcrumbs as $crumb)
@@ -84,7 +84,7 @@
                 @foreach ($this->subfolders as $folder)
                     <li class="list-row">
                         <button type="button" wire:click="openFolder({{ $folder->id }})"
-                                class="btn btn-quiet" style="flex:1 1 auto;justify-content:flex-start">
+                                class="btn btn-quiet u-grow u-start">
                             {{ $folder->name() }}
                         </button>
                         <button type="button" class="btn btn-quiet btn-sm"

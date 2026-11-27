@@ -30,7 +30,7 @@
         @foreach ($history as $turn)
             <div class="turn {{ $turn['role'] === 'user' ? 'turn-you' : 'turn-marker' }}">
                 <span class="field-label">{{ $turn['role'] === 'user' ? 'You' : 'Assistant' }}</span>
-                <p style="margin:0">{!! nl2br(e($turn['content'])) !!}</p>
+                <p class="u-m-0">{!! nl2br(e($turn['content'])) !!}</p>
             </div>
         @endforeach
 
@@ -44,7 +44,7 @@
         <label class="field-label" for="assistant-message">Your question</label>
         <div class="toolbar">
             <input id="assistant-message" wire:model="message" wire:keydown.enter="send" type="text"
-                   class="field" style="flex:1 1 auto" placeholder="What should I look at?" />
+                   class="field u-grow" placeholder="What should I look at?" />
             <button type="button" class="btn btn-primary" wire:click="send" wire:loading.attr="disabled" wire:target="send">Send</button>
         </div>
     </div>

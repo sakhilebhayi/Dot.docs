@@ -9,7 +9,7 @@
                 </div>
 
                 <div class="sheet-body">
-                    <div class="field-row" style="margin-top:0">
+                    <div class="field-row u-mt-0">
                         <label class="field-label" for="tpl-name">Template name</label>
                         <input id="tpl-name" wire:model="name" type="text" class="field" @error('name') aria-invalid="true" aria-describedby="tpl-name-error" @enderror />
                         @error('name')
@@ -34,7 +34,7 @@
                     </div>
 
                     @if (auth()->user()->currentTeam)
-                        <label class="field-check" for="tpl-share" style="margin-top:var(--s4)">
+                        <label class="field-check u-mt-4" for="tpl-share">
                             <input id="tpl-share" wire:model="shareWithTeam" type="checkbox" class="field-box" />
                             <span>Share it with {{ auth()->user()->currentTeam->name }}</span>
                         </label>
