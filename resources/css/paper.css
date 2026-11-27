@@ -104,7 +104,9 @@ html[data-focus-by='keyboard'] .canvas .paper:focus-within {
 
 .paper p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);
-    color: color-mix(in srgb, var(--paper-ink) 38%, transparent);
+    /* 64% of the paper's ink is 4.9:1 on --paper (WCAG 1.4.3); the paper stays white at night, so one value holds
+       in both themes. 38% was 2.3:1. */
+    color: color-mix(in srgb, var(--paper-ink) 64%, transparent);
     float: left;
     height: 0;
     pointer-events: none;

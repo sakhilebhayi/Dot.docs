@@ -54,8 +54,11 @@
                          :word="$saveState['word']"
                          id="shell-save"
                          class="topbar-status"
-                         aria-live="polite"
                          :data-shell-save-owner="$saveOwner ? true : null" />
+    {{-- The one live region for save state: settled outcomes only (resources/js/shell.js). --}}
+    @if ($saveOwner)
+        <span id="shell-save-said" class="sr-only" role="status"></span>
+    @endif
 
     <div class="topbar-actions">{{ $actions ?? '' }}</div>
 </header>

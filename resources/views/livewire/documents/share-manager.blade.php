@@ -214,9 +214,13 @@
         </section>
     @endif
 
-    <section class="panel" aria-labelledby="share-people">
+    {{-- R2-9 (WCAG 2.4.3 / 4.1.3): removing somebody takes their row, and the Remove button with it, out of the
+         page. Focus goes to this list's heading and the status line says who was removed, instead of focus
+         falling to the top of the page in silence. The heading is found by id: by the time the save answers, the
+         button that asked is no longer in the page, so it has no refs to look through. --}}
+    <section class="panel" aria-labelledby="share-people" x-data="{ said: '' }">
         <div class="panel-head">
-            <h2 class="section-title" id="share-people">People with access</h2>
+            <h2 class="section-title" id="share-people" tabindex="-1">People with access</h2>
             <span class="micro">
                 <x-shell.figure :value="$document->collaborators->count() + 1" label="People" />
             </span>
@@ -236,11 +240,17 @@
                         <span class="list-sub">{{ $collab->user->email }}</span>
                     </span>
                     <span class="list-val">{{ ucfirst($collab->role) }}</span>
-                    <button type="button" class="btn btn-sm" wire:click="removeCollaborator({{ $collab->id }})"
-                            wire:confirm="Remove {{ $collab->user->name }}? They lose access to this document at once."
+                    <button type="button" class="btn btn-sm"
+                            @click="if (! window.confirm({{ Js::from('Remove '.$collab->user->name.'? They lose access to this document at once.') }})) return;
+                                    $wire.removeCollaborator({{ $collab->id }}).then(() => {
+                                        said = {{ Js::from($collab->user->name.' no longer has access.') }};
+                                        $nextTick(() => document.getElementById('share-people')?.focus());
+                                    })"
                             aria-label="Remove {{ $collab->user->name }}">Remove</button>
                 </li>
             @endforeach
         </ul>
+        {{-- wire:ignore: written by Alpine; a Livewire morph would otherwise empty it (.ai/rules/livewire.md). --}}
+        <p class="sr-only" role="status" wire:ignore x-text="said" data-share-people-said></p>
     </section>
 </div>

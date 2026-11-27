@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isRailShortcut, nextPanelState, openingPanelState, panelStateAtWidth, themeChoiceIn, watchOverlayBreakpoints, shortcutText } from '../../resources/js/shell.js';
+import { isRailShortcut, nextPanelState, openingPanelState, panelStateAtWidth, saveAnnouncement, shortcutText, themeChoiceIn, watchOverlayBreakpoints } from '../../resources/js/shell.js';
 
 /*
  * The theme toggle's label has to match what is ON SCREEN. With no `theme`
@@ -200,4 +200,27 @@ test('shortcut hints are written in each platform\'s own words (R2-9)', () => {
     assert.equal(shortcutText('mod+k', true), '\u2318K');
     assert.equal(shortcutText('mod+k', false), 'Ctrl+K');
     assert.equal(shortcutText('mod+z', false), 'Ctrl+Z');
+// R2-9 (WCAG 4.1.3): one live region for save state, and it speaks only when
+// the settled outcome changes - not on every Editing / Saving tick.
+test('only a settled save outcome is announced', () => {
+    assert.equal(saveAnnouncement(null, 'Editing'), null);
+    assert.equal(saveAnnouncement(null, 'Saving'), null);
+    assert.equal(saveAnnouncement(null, 'Ready'), null);
+    assert.equal(saveAnnouncement(null, 'Saved'), 'Saved');
+    assert.equal(saveAnnouncement('Saved', 'Not saved'), 'Not saved');
+    assert.equal(saveAnnouncement('Not saved', 'Saved'), 'Saved');
+    assert.equal(saveAnnouncement('Saved', 'Offline'), 'Offline');
+});
+
+test('a second autosave that ends Saved again is not announced again', () => {
+    let last = null;
+    const said = [];
+    for (const word of ['Editing', 'Saving', 'Saved', 'Editing', 'Saving', 'Saved', 'Saving', 'Not saved']) {
+        const announce = saveAnnouncement(last, word);
+        if (announce) {
+            last = announce;
+            said.push(announce);
+        }
+    }
+    assert.deepEqual(said, ['Saved', 'Not saved']);
 });

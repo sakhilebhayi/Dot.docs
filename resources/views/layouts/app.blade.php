@@ -103,7 +103,9 @@
     @stack('styles')
 </head>
 <body>
-    <a href="#canvas" class="skip-link">Skip to the document</a>
+    {{-- Named for what is there (R2-9): only the editor has a document to skip to. #canvas is this layout's main landmark,
+         so the target exists on every page. --}}
+    <a href="#canvas" class="skip-link">{{ $isEditor ? 'Skip to the document' : 'Skip to the content' }}</a>
 
     <div class="shell" data-shell data-shell-context="{{ $isEditor ? 'editor' : 'page' }}"@if (request()->routeIs('dashboard')) data-shell-page="dashboard"@endif>
         @include('layouts.partials.header', ['isEditor' => $isEditor, 'railState' => $railState, 'dockState' => $dockState, 'theme' => $theme])
