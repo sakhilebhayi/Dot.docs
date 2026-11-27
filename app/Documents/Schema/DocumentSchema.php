@@ -2,6 +2,24 @@
 
 namespace App\Documents\Schema;
 
+/**
+ * The Dot.Doc JSON schema: ProseMirror's node tree, as stored.
+ *
+ * Shared array types for that tree, imported by every class under
+ * App\Documents with `@phpstan-import-type`. They stay `array<string, mixed>`
+ * on purpose: stored JSON reaches this code from the editor, importers and
+ * the wire, so nothing about a node's keys is guaranteed until it has been
+ * checked.
+ *
+ * - PmNode: one node — the `doc` root, a block or an inline (`type`, and
+ *   optionally `attrs`, `content`, `text`, `marks`).
+ * - PmMark: one mark on a text node (`type`, optionally `attrs`).
+ * - PmPath: a node's position, as the child index at each depth from the root.
+ *
+ * @phpstan-type PmNode array<string, mixed>
+ * @phpstan-type PmMark array<string, mixed>
+ * @phpstan-type PmPath list<array-key>
+ */
 class DocumentSchema
 {
     public const VERSION = 1;
@@ -18,6 +36,7 @@ class DocumentSchema
 
     public const MARKS = ['bold', 'italic', 'underline', 'strike', 'code', 'link', 'highlight', 'subscript', 'superscript', 'textStyle'];
 
+    /** @return PmNode */
     public static function empty(): array
     {
         return ['type' => 'doc', 'attrs' => ['schema' => self::VERSION, 'style' => 'report', 'vars' => []], 'content' => [
@@ -47,6 +66,9 @@ class DocumentSchema
      * carried through array_map() with arrow functions, which capture their
      * variables BY VALUE: every sibling got its own copy, duplicates between
      * siblings survived, and validate() then refused the save.
+     *
+     * @param  PmNode  $doc
+     * @return PmNode
      */
     public function ensureIds(array $doc): array
     {
@@ -67,8 +89,10 @@ class DocumentSchema
     }
 
     /**
+     * @param  PmNode  $node
      * @param  array<array-key, int>  $seen  how many blocks so far hold each id, shared by reference, in document order
      * @param  array<string, true>  $taken  every valid id anywhere in the document
+     * @return PmNode
      *
      * @param-out  array<array-key, int>  $seen
      */
@@ -182,6 +206,9 @@ class DocumentSchema
      * `enableContentCheck: true` — so a legacy document containing one of
      * those opens READ-ONLY. Repairing here (on every create, save and read)
      * is what keeps such a document editable.
+     *
+     * @param  PmNode  $doc
+     * @return PmNode
      */
     public function normalise(array $doc): array
     {
@@ -204,7 +231,7 @@ class DocumentSchema
      * list), keep it, or — as normaliseFigure() does — return the repaired
      * node followed by the children it had to lift out of it.
      *
-     * @return list<array>
+     * @return list<PmNode>
      */
     private function normaliseChildren(mixed $content): array
     {
@@ -221,6 +248,7 @@ class DocumentSchema
         return $out;
     }
 
+    /** @return PmNode */
     private function emptyParagraph(): array
     {
         return ['type' => 'paragraph', 'attrs' => ['id' => BlockId::generate()], 'content' => []];
@@ -244,9 +272,10 @@ class DocumentSchema
     }
 
     /**
-     * @return list<array> the node's replacement: empty when it must be
-     *                     dropped, one node normally, or the node followed by
-     *                     children lifted out of it (see normaliseFigure()).
+     * @param  PmNode  $node
+     * @return list<PmNode> the node's replacement: empty when it must be
+     *                      dropped, one node normally, or the node followed by
+     *                      children lifted out of it (see normaliseFigure()).
      */
     private function normaliseNode(array $node): array
     {
@@ -325,8 +354,9 @@ class DocumentSchema
      * media at all is not a figure — it is replaced by whatever it was
      * holding, rather than deleted with its contents.
      *
-     * @param  list<array>  $children
-     * @return list<array> the figure (when it survives) followed by the lifted siblings
+     * @param  PmNode  $node
+     * @param  list<PmNode>  $children
+     * @return list<PmNode> the figure (when it survives) followed by the lifted siblings
      */
     private function normaliseFigure(array $node, array $children): array
     {
@@ -365,7 +395,8 @@ class DocumentSchema
      * document-unique before normalise() runs, so reusing it cannot create a
      * duplicate.
      *
-     * @return list<array>
+     * @param  PmNode  $node
+     * @return list<PmNode>
      */
     private function liftToBlock(array $node): array
     {
@@ -387,7 +418,9 @@ class DocumentSchema
      * one kept (never dropped — they hold the writer's blocks); a short
      * document is padded with empty columns.
      *
-     * @param  list<array>  $children
+     * @param  PmNode  $node
+     * @param  list<PmNode>  $children
+     * @return PmNode
      */
     private function normaliseColumns(array $node, array $children): array
     {
@@ -437,7 +470,10 @@ class DocumentSchema
         return $node;
     }
 
-    /** @return list<string> */
+    /**
+     * @param  PmNode  $doc
+     * @return list<string>
+     */
     public function validate(array $doc): array
     {
         $errors = [];
@@ -474,7 +510,11 @@ class DocumentSchema
         return array_values(array_unique($errors));
     }
 
-    /** @param callable(array $node, array $path): void $fn */
+    /**
+     * @param  PmNode  $node
+     * @param  callable(PmNode, PmPath): void  $fn
+     * @param  PmPath  $path
+     */
     public function walk(array $node, callable $fn, array $path = []): void
     {
         $fn($node, $path);
@@ -484,7 +524,10 @@ class DocumentSchema
         }
     }
 
-    /** @return list<array{id:string,type:string,node:array,path:array}> */
+    /**
+     * @param  PmNode  $doc
+     * @return list<array{id: string, type: string, node: PmNode, path: PmPath}>
+     */
     public function blocks(array $doc): array
     {
         $out = [];
@@ -497,6 +540,7 @@ class DocumentSchema
         return $out;
     }
 
+    /** @param PmNode $node */
     public function plainText(array $node): string
     {
         $type = $node['type'] ?? '';
@@ -519,6 +563,7 @@ class DocumentSchema
         return $joined;
     }
 
+    /** @param PmNode $node */
     private function hasBlockChildren(array $node): bool
     {
         foreach ($node['content'] ?? [] as $c) {
@@ -530,6 +575,7 @@ class DocumentSchema
         return false;
     }
 
+    /** @param PmNode $doc */
     public function wordCount(array $doc): int
     {
         preg_match_all('/[\p{L}\p{N}][\p{L}\p{N}\'’\-]*/u', $this->plainText($doc), $matches);

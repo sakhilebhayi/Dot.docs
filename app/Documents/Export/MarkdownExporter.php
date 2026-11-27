@@ -14,6 +14,8 @@ use App\Documents\Schema\DocumentSchema;
  * could recognise either. Walking the JSON is also the only way to keep
  * block order stable, which matters because the export is a round-trip
  * partner for MarkdownImporter.
+ *
+ * @phpstan-import-type PmNode from DocumentSchema
  */
 class MarkdownExporter
 {
@@ -67,6 +69,7 @@ class MarkdownExporter
         return $out;
     }
 
+    /** @param PmNode $node */
     private function block(array $node): ?string
     {
         return match ($node['type'] ?? '') {
@@ -91,6 +94,7 @@ class MarkdownExporter
         };
     }
 
+    /** @param PmNode $node */
     private function heading(array $node): string
     {
         $level = max(1, min(6, (int) ($node['attrs']['level'] ?? 1)));
@@ -160,6 +164,7 @@ class MarkdownExporter
             : $url;
     }
 
+    /** @param PmNode $node */
     private function codeBlock(array $node): string
     {
         $language = $node['attrs']['language'] ?? '';
@@ -168,6 +173,7 @@ class MarkdownExporter
         return '```'.$language."\n".$this->schema->plainText($node)."\n".'```';
     }
 
+    /** @param PmNode $node */
     private function image(array $node): string
     {
         $attrs = $node['attrs'] ?? [];
@@ -177,6 +183,7 @@ class MarkdownExporter
         return $src === '' ? '' : '!['.$this->escapeInline($alt).']('.$this->url($src).')';
     }
 
+    /** @param PmNode $node */
     private function list(array $node, bool $ordered): string
     {
         $start = (int) ($node['attrs']['start'] ?? 1);
@@ -194,6 +201,7 @@ class MarkdownExporter
         return implode("\n", $lines);
     }
 
+    /** @param PmNode $node */
     private function taskList(array $node): string
     {
         $lines = [];
@@ -216,6 +224,8 @@ class MarkdownExporter
      * They are separated by a BLANK line as well as indented: without one,
      * CommonMark's lazy continuation reads the second paragraph as more of
      * the first and the two collapse into a single paragraph on re-import.
+     *
+     * @param  PmNode  $item
      */
     private function listItem(array $item, string $marker): string
     {
@@ -247,6 +257,8 @@ class MarkdownExporter
      * always the header, so a table whose first row is not marked as one is
      * still promoted to the header row rather than losing that row to a
      * synthetic blank one.
+     *
+     * @param  PmNode  $node
      */
     private function table(array $node): string
     {
@@ -288,6 +300,8 @@ class MarkdownExporter
      * A cell collapses to one line: a pipe table row cannot contain one. The
      * pipes inside the cell's own text are already escaped by
      * escapeInline() — escaping them again here would store `\\|`.
+     *
+     * @param  PmNode  $cell
      */
     private function cellText(array $cell): string
     {
@@ -319,6 +333,7 @@ class MarkdownExporter
         return $out;
     }
 
+    /** @param PmNode $node */
     private function marked(array $node): string
     {
         $text = (string) ($node['text'] ?? '');
