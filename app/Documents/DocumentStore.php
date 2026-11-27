@@ -13,6 +13,7 @@ use App\Models\Document;
 use App\Models\DocumentStyle;
 use App\Models\DocumentVersion;
 use App\Models\Files\Obj;
+use App\Models\Team;
 use App\Models\User;
 use App\Services\WebhookService;
 use App\Styles\StyleEngine;
@@ -20,6 +21,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
+/**
+ * @phpstan-import-type PmNode from DocumentSchema
+ */
 class DocumentStore
 {
     public const AUTO_VERSION_WINDOW_SECONDS = 120;
@@ -49,11 +53,17 @@ class DocumentStore
      * navigator shows a document nobody chose a folder for. The only case
      * that skips registration is a user with no team at all - impossible
      * through Jetstream's CreateNewUser, reachable only from a factory.
+     *
+     * @param  PmNode|null  $json
+     * @param  array<string, mixed>  $attrs
      */
     public function create(User $owner, string $title, ?array $json = null, array $attrs = [], ?Obj $parent = null): Document
     {
         $json = $this->schema->normalise($this->schema->ensureIds($json ?? DocumentSchema::empty()));
-        $doc = new Document(array_merge(['title' => $title, 'owner_id' => $owner->id, 'team_id' => $owner->currentTeam?->id, 'version' => 1, 'style_key' => 'report'], $attrs));
+        // Jetstream's currentTeam relation is untyped (a plain Model), so the team is narrowed here.
+        $currentTeam = $owner->currentTeam;
+        $currentTeam = $currentTeam instanceof Team ? $currentTeam : null;
+        $doc = new Document(array_merge(['title' => $title, 'owner_id' => $owner->id, 'team_id' => $currentTeam?->id, 'version' => 1, 'style_key' => 'report'], $attrs));
 
         // A new document in a company with a brand kit uses it, and starts in the kit's default style unless the
         // caller chose one (R2-3c). Settings switches it off per document.
@@ -80,8 +90,10 @@ class DocumentStore
         $files = app(FilesService::class);
 
         if ($parent === null) {
-            $team = $owner->currentTeam ?? $owner->personalTeam();
-            $parent = $team === null ? null : $files->root($team);
+            // Jetstream's personalTeam(), read directly: that method is documented as always returning a Team, but
+            // a user with no teams has none.
+            $team = $currentTeam ?? $owner->ownedTeams->firstWhere('personal_team', true);
+            $parent = $team instanceof Team ? $files->root($team) : null;
         }
 
         if ($parent !== null) {
@@ -97,6 +109,8 @@ class DocumentStore
      * See App\Documents\Import\HtmlToJson::fromStored() for the JSON-or-
      * legacy-HTML fallback and why normalise() runs on both branches -
      * DocumentTemplate::contentJson() shares the same helper.
+     *
+     * @return PmNode
      */
     public function json(Document $doc): array
     {
@@ -133,6 +147,7 @@ class DocumentStore
      * in the history already and nothing more is cut. A save that is
      * refused, or whose content the schema rejects, keeps nothing.
      *
+     * @param  PmNode  $json
      * @param  array{version?:string,label?:string|null,expectedVersion?:int,keepReplacedAs?:string}  $opts
      *
      * @throws StaleDocumentException
@@ -331,6 +346,8 @@ class DocumentStore
      * Fill and persist a document's rendered/derived fields from JSON
      * without cutting a version or firing events. Used by the backfill
      * command to migrate legacy HTML documents onto the JSON pipeline.
+     *
+     * @param  PmNode  $json
      */
     public function refill(Document $doc, array $json): void
     {
@@ -369,6 +386,7 @@ class DocumentStore
             && $latest->created_at->lt(now()->subSeconds(self::AUTO_VERSION_AUTHOR_SWITCH_SECONDS));
     }
 
+    /** @param PmNode $json */
     private function fill(Document $doc, array $json): void
     {
         $doc->forceFill($this->derive($doc, $json)['values']);
@@ -390,6 +408,7 @@ class DocumentStore
     /**
      * The stored JSON (numbered) and the columns derived from it.
      *
+     * @param  PmNode  $json
      * @return array{key: string, values: array<string, mixed>}
      */
     private function derive(Document $doc, array $json): array

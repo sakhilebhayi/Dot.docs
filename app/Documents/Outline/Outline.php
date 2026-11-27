@@ -22,6 +22,8 @@ use App\Documents\Schema\DocumentSchema;
  *   running counters; 'byChapter' prefixes the current top-level (level 1)
  *   heading's number and resets each counter when the chapter changes. Before
  *   the first heading, byChapter falls back to a plain running sequence.
+ *
+ * @phpstan-import-type PmNode from DocumentSchema
  */
 class Outline
 {
@@ -32,6 +34,10 @@ class Outline
         'figures' => 'sequential',
     ];
 
+    /**
+     * @param  PmNode  $doc
+     * @param  array<string, mixed>  $rules
+     */
     public function build(array $doc, array $rules = []): OutlineResult
     {
         $rules = array_merge(self::DEFAULT_RULES, $rules);
@@ -103,7 +109,11 @@ class Outline
         return $result;
     }
 
-    /** The caption text of a figure node, or '' when it has none yet. */
+    /**
+     * The caption text of a figure node, or '' when it has none yet.
+     *
+     * @param  PmNode  $figure
+     */
     private function captionText(array $figure, DocumentSchema $schema): string
     {
         foreach ($figure['content'] ?? [] as $child) {
@@ -115,11 +125,19 @@ class Outline
         return '';
     }
 
+    /**
+     * @param  PmNode  $doc
+     * @return PmNode
+     */
     public function apply(array $doc, OutlineResult $result): array
     {
         return $this->applyNode($doc, $result);
     }
 
+    /**
+     * @param  PmNode  $node
+     * @return PmNode
+     */
     private function applyNode(array $node, OutlineResult $result): array
     {
         $type = $node['type'] ?? '';

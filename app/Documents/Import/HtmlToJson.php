@@ -11,6 +11,9 @@ use DOMText;
 /**
  * Converts a legacy HTML document blob into Dot.Doc JSON
  * (see App\Documents\Schema\DocumentSchema).
+ *
+ * @phpstan-import-type PmNode from DocumentSchema
+ * @phpstan-import-type PmMark from DocumentSchema
  */
 class HtmlToJson
 {
@@ -28,6 +31,7 @@ class HtmlToJson
     /** Schemes an `<img src>` may carry; `/`-relative paths are also allowed. */
     private const IMAGE_SCHEMES = ['http', 'https'];
 
+    /** @return PmNode */
     public function convert(string $html): array
     {
         $dom = new DOMDocument;
@@ -83,6 +87,7 @@ class HtmlToJson
         return $schema->normalise($this->convert($legacyHtml ?? ''));
     }
 
+    /** @return PmNode|null */
     private function convertBlockNode(DOMNode $node): ?array
     {
         if ($node instanceof DOMText) {
@@ -118,6 +123,7 @@ class HtmlToJson
         };
     }
 
+    /** @return PmNode|null */
     private function convertUnknownBlock(DOMElement $node): ?array
     {
         $text = trim($node->textContent);
@@ -166,7 +172,7 @@ class HtmlToJson
     private function taskState(DOMElement $item): ?bool
     {
         foreach ($item->getElementsByTagName('input') as $input) {
-            if ($input instanceof DOMElement && strtolower($input->getAttribute('type')) === 'checkbox') {
+            if (strtolower($input->getAttribute('type')) === 'checkbox') {
                 return $input->hasAttribute('checked');
             }
         }
@@ -211,6 +217,7 @@ class HtmlToJson
     private function convertBlockChildrenWrapped(DOMElement $node): array
     {
         $out = [];
+        /** @var list<PmNode> $pendingInline */
         $pendingInline = [];
 
         $flush = function () use (&$pendingInline, &$out): void {
@@ -254,9 +261,6 @@ class HtmlToJson
     {
         $rows = [];
         foreach ($table->getElementsByTagName('tr') as $tr) {
-            if (! $tr instanceof DOMElement) {
-                continue;
-            }
             $cells = [];
             foreach ($tr->childNodes as $cell) {
                 if (! $cell instanceof DOMElement) {
@@ -310,7 +314,10 @@ class HtmlToJson
         return $out;
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * @param  list<PmMark>  $marks
+     * @return list<array<string,mixed>>
+     */
     private function convertInlineNode(DOMNode $node, array $marks = []): array
     {
         if ($node instanceof DOMText) {
