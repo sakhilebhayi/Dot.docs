@@ -36,6 +36,7 @@ class CommentPosted implements ShouldBroadcastNow
         return 'comment.posted';
     }
 
+    /** @return array<string, mixed> */
     public function broadcastWith(): array
     {
         return [

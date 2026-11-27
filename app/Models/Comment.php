@@ -23,6 +23,7 @@ class Comment extends Model
         'resolved_at' => 'datetime',
     ];
 
+    /** @return BelongsTo<Document, $this> */
     public function document(): BelongsTo
     {
         return $this->belongsTo(Document::class);
@@ -34,11 +35,13 @@ class Comment extends Model
         return $this->belongsTo(User::class);
     }
 
+    /** @return BelongsTo<Comment, $this> */
     public function parent(): BelongsTo
     {
         return $this->belongsTo(self::class, 'parent_id');
     }
 
+    /** @return HasMany<Comment, $this> */
     public function replies(): HasMany
     {
         return $this->hasMany(self::class, 'parent_id')->with('user:id,name,profile_photo_path')->orderBy('created_at');

@@ -3,15 +3,16 @@
 namespace Tests\Feature\Performance;
 
 use App\Documents\DocumentStore;
+use App\Livewire\HeaderSearch;
 use App\Models\Document;
 use App\Models\User;
-use App\Search\CompanyDocuments;
 use App\Search\DocumentSearch;
 use App\Search\FullTextIndex;
 use Database\Seeders\DocumentStyleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Vite;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /** R2-5 / P-07: SQLite full-text search; P-09: the editor's code only on the editor page. */
@@ -148,7 +149,8 @@ class FullTextSearchTest extends TestCase
     {
         $this->doc('Board minutes', 'resolution on dividends');
 
-        $found = app(CompanyDocuments::class)->search($this->user, 'dividend')->pluck('title')->all();
+        $found = Livewire::actingAs($this->user)->test(HeaderSearch::class)
+            ->set('q', 'dividend')->get('results')->pluck('title')->all();
 
         $this->assertSame(['Board minutes'], $found);
     }

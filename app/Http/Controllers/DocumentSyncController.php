@@ -4,11 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Documents\DocumentStore;
 use App\Documents\Outline\EditorOutline;
+use App\Http\Requests\DocumentSyncRequest;
 use App\Models\Document;
 use App\Services\PresenceService;
 use App\Styles\StyleEngine;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
 /**
@@ -30,25 +30,14 @@ use Illuminate\Support\Facades\Gate;
 class DocumentSyncController extends Controller
 {
     public function store(
-        Request $request,
+        DocumentSyncRequest $request,
         string $uuid,
         DocumentStore $store,
         PresenceService $presence,
         EditorOutline $outline,
         StyleEngine $styles,
     ): JsonResponse {
-        $data = $request->validate([
-            'version' => ['required', 'integer', 'min:0'],
-            // \A...\z, not ^...$: in PCRE `$` also matches before a trailing
-            // newline, so "tab-a\n" passed and only the TrimStrings
-            // middleware was saving the rule. The column is 64 wide.
-            'tab' => ['required', 'string', 'max:64', 'regex:/\A[A-Za-z0-9-]+\z/'],
-            'leaving' => ['sometimes', 'boolean'],
-            // Which version of this request format the caller speaks. Not
-            // acted on yet: it is accepted now so that a later phase can
-            // tell a tab still running old JavaScript to reload.
-            'protocol' => ['sometimes', 'integer'],
-        ]);
+        $data = $request->validated();
 
         $document = Document::query()
             ->select(['id', 'uuid', 'owner_id', 'team_id', 'is_public', 'version'])

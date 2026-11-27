@@ -52,7 +52,11 @@ class DocumentSearchTest extends TestCase
         $this->assertSame([$doc->id], $ids);
     }
 
-    public function test_a_named_collaborator_can_find_the_document(): void
+    /**
+     * R2-7 / Q-02, owner decision 2026-11-27: search reads one company. A document another company shared with you is
+     * reached through "Shared with me", not found by searching from your own company.
+     */
+    public function test_a_document_shared_from_another_company_is_not_a_search_result(): void
     {
         $owner = User::factory()->withPersonalTeam()->create();
         $mate = User::factory()->withPersonalTeam()->create();
@@ -67,7 +71,8 @@ class DocumentSearchTest extends TestCase
 
         $ids = app(DocumentSearch::class)->search($mate, 'Klipfontein')->pluck('id')->all();
 
-        $this->assertSame([$doc->id], $ids);
+        $this->assertSame([], $ids);
+        $this->assertTrue($mate->can('view', $doc), 'they can still open it');
     }
 
     public function test_a_team_mate_can_find_the_team_document(): void

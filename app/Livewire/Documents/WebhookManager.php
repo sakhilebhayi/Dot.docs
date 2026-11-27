@@ -4,6 +4,7 @@ namespace App\Livewire\Documents;
 
 use App\Models\Document;
 use App\Models\DocumentWebhook;
+use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Locked;
@@ -18,6 +19,7 @@ class WebhookManager extends Component
     // New webhook form
     public string $newUrl = '';
 
+    /** @var array<mixed> */
     public array $newEvents = ['on_save', 'on_export'];
 
     public bool $generateSecret = true;
@@ -157,7 +159,7 @@ class WebhookManager extends Component
         $this->rejectReason = '';
     }
 
-    public function render()
+    public function render(): View
     {
         $webhooks = DocumentWebhook::where('document_id', $this->document->id)->latest()->get();
 

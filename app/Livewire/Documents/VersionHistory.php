@@ -6,6 +6,7 @@ use App\Audit\AuditLogger;
 use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\DocumentVersion;
+use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Auth;
 use Jfcherng\Diff\DiffHelper;
@@ -22,7 +23,11 @@ class VersionHistory extends Component
     /** ID of the version being previewed */
     public ?int $previewId = null;
 
-    /** IDs selected for comparison (max 2) */
+    /**
+     * IDs selected for comparison (max 2)
+     *
+     * @var array<mixed>
+     */
     public array $compareIds = [];
 
     /** Rendered diff HTML */
@@ -142,7 +147,7 @@ class VersionHistory extends Component
         session()->flash('status', 'Document restored to version '.$version->version_number.'.');
     }
 
-    public function render()
+    public function render(): View
     {
         $versions = DocumentVersion::where('document_id', $this->document->id)
             ->with('author:id,name,profile_photo_path')

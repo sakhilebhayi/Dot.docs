@@ -3,9 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Files\FilesService;
-use App\Models\Files\Obj;
+use App\Http\Requests\FileUploadRequest;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
 /**
@@ -24,40 +23,10 @@ use Illuminate\Support\Facades\Gate;
  */
 class FileUploadController extends Controller
 {
-    /** 20 MB, the same ceiling DocumentImportController accepts. */
-    private const MAX_KILOBYTES = 20480;
-
-    public function store(Request $request, string $parent): RedirectResponse
+    /** The folder is found, the upload authorised and the file checked by FileUploadRequest (R2-7 / Q-06). */
+    public function store(FileUploadRequest $request, string $parent): RedirectResponse
     {
-        $node = Obj::where('uuid', $parent)->firstOrFail();
-
-        abort_unless($node->isFolder(), 404);
-        Gate::authorize('create', [Obj::class, $node]);
-
-        $request->validate([
-            'file' => [
-                'required',
-                'file',
-                'max:'.self::MAX_KILOBYTES,
-                'mimetypes:'.implode(',', [
-                    // NO image/svg+xml. An SVG is a script that renders as a
-                    // picture, and FileViewController serves stored bytes
-                    // back: one carrying a <script> would execute in the
-                    // Dot.Doc origin with the session of whichever team
-                    // member opened it. DocumentImageController escapes this
-                    // by re-encoding every image to raster WebP; this
-                    // controller stores bytes verbatim, so the type is
-                    // refused at the door instead. See .ai/rules/files.md.
-                    'image/png', 'image/jpeg', 'image/gif', 'image/webp',
-                    'application/pdf',
-                    'text/plain', 'text/markdown', 'text/csv',
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                    'application/zip',
-                ]),
-            ],
-        ]);
+        $node = $request->folder();
 
         $upload = $request->file('file');
 

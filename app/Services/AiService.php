@@ -127,6 +127,8 @@ class AiService
     /**
      * AI command — resolves a slash command against the document.
      * Supports: /summarize, /grammar, /continue, /tone [style], /translate [lang], /outline
+     *
+     * @return array<mixed>
      */
     public function runCommand(string $command, string $html): array
     {
@@ -203,6 +205,8 @@ class AiService
      * than sent as separate messages. The model sees the same conversation;
      * what it does not see is any turn whose role is not user/assistant,
      * which is the same filter the message-array version applied.
+     *
+     * @param  array<mixed>  $history
      */
     public function chat(string $message, string $documentHtml, array $history = []): string
     {
@@ -236,6 +240,8 @@ class AiService
     /**
      * Execute a user-defined custom slash command.
      * Replaces {content} in the prompt template with the document plain text.
+     *
+     * @return array<mixed>
      */
     public function customCommand(string $promptTemplate, string $html): array
     {

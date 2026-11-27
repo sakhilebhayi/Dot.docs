@@ -4,7 +4,6 @@ namespace App\Models\Files;
 
 use App\Models\Team;
 use App\Models\User;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
@@ -16,8 +15,6 @@ use Illuminate\Support\Str;
  */
 class File extends Model
 {
-    use HasFactory;
-
     protected $fillable = ['uuid', 'name', 'size', 'path', 'mime_type', 'owner_id', 'team_id'];
 
     protected $casts = ['size' => 'integer'];
@@ -29,16 +26,19 @@ class File extends Model
         });
     }
 
+    /** @return MorphOne<Obj, $this> */
     public function node(): MorphOne
     {
         return $this->morphOne(Obj::class, 'objectable');
     }
 
+    /** @return BelongsTo<Team, $this> */
     public function team(): BelongsTo
     {
         return $this->belongsTo(Team::class);
     }
 
+    /** @return BelongsTo<User, $this> */
     public function owner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'owner_id');

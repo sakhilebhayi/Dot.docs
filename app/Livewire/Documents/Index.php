@@ -8,8 +8,11 @@ use App\Livewire\Files\BrowsesTheTree;
 use App\Models\Document;
 use App\Models\DocumentTemplate;
 use App\Models\Files\Obj;
+use App\Models\Tag;
 use App\Search\DocumentSearch;
 use App\Services\TagRepository;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
@@ -54,7 +57,7 @@ class Index extends Component
     #[Url(as: 'q', except: '')]
     public string $search = '';
 
-    /*
+    /**
      * The scope and the tag are `#[Url]` for the same reason the search is: a
      * list somebody has narrowed is a list they SHARE, and without these two
      * the link arrived at the whole ledger with the filter silently dropped.
@@ -74,6 +77,8 @@ class Index extends Component
      * 500 on a hand-edited URL, where the old read-once code answered the
      * default. mount() narrows both immediately and nothing else ever writes
      * anything but an int|null / one of self::FILTERS.
+     *
+     * @var array<mixed>|string
      */
     #[Url(as: 'filter', except: 'all')]
     public array|string $filter = 'all'; // all | mine | shared | team
@@ -81,7 +86,11 @@ class Index extends Component
     /** The open folder's `objects` row id, or null for the workspace root. */
     public ?int $folderId = null;
 
-    /** The tag the ledger is narrowed to. Widened for the reason above. */
+    /**
+     * The tag the ledger is narrowed to. Widened for the reason above.
+     *
+     * @var array<mixed>|int|string|null
+     */
     #[Url(as: 'tag', except: null)]
     public array|int|string|null $tagId = null;
 
@@ -263,14 +272,16 @@ class Index extends Component
         return app(FilesService::class)->childFolders($node);
     }
 
+    /** @return Collection<int, Tag> */
     #[Computed]
-    public function availableTags()
+    public function availableTags(): Collection
     {
         return app(TagRepository::class)->availableFor(auth()->user(), auth()->user()->currentTeam?->id);
     }
 
+    /** @return LengthAwarePaginator<int, Document> */
     #[Computed]
-    public function documents()
+    public function documents(): LengthAwarePaginator
     {
         $user = auth()->user();
         $search = app(DocumentSearch::class);
@@ -354,8 +365,9 @@ class Index extends Component
      * The templates the picker offers - the same visibility rule the gallery
      * uses, asked through the one scope both share.
      */
+    /** @return \Illuminate\Database\Eloquent\Collection<int, DocumentTemplate> */
     #[Computed]
-    public function newDocumentTemplates()
+    public function newDocumentTemplates(): \Illuminate\Database\Eloquent\Collection
     {
         return DocumentTemplate::query()
             ->visibleTo(auth()->user())
@@ -499,7 +511,7 @@ class Index extends Component
         unset($this->subfolders);
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.documents.index')
             ->layout('layouts.app')

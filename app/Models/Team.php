@@ -9,6 +9,9 @@ use Laravel\Jetstream\Events\TeamDeleted;
 use Laravel\Jetstream\Events\TeamUpdated;
 use Laravel\Jetstream\Team as JetstreamTeam;
 
+/**
+ * @property-read User $owner Jetstream's owner relation (its base class declares it without types).
+ */
 class Team extends JetstreamTeam
 {
     /** @use HasFactory<TeamFactory> */
@@ -17,7 +20,7 @@ class Team extends JetstreamTeam
     /**
      * The attributes that are mass assignable.
      *
-     * @var array<int, string>
+     * @var list<string>
      */
     protected $fillable = [
         'name',

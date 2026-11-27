@@ -68,11 +68,13 @@ class DocumentTemplate extends Model
         return app(HtmlToJson::class)->fromStored($this->content_json, $this->content, app(DocumentSchema::class));
     }
 
+    /** @return BelongsTo<User, $this> */
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    /** @return BelongsTo<Team, $this> */
     public function team(): BelongsTo
     {
         return $this->belongsTo(Team::class);

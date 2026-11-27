@@ -3,7 +3,6 @@
 namespace App\Models\Files;
 
 use App\Models\Team;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -27,8 +26,6 @@ use Illuminate\Support\Str;
  */
 class Obj extends Model
 {
-    use HasFactory;
-
     protected $table = 'objects';
 
     protected $fillable = ['uuid', 'objectable_type', 'objectable_id', 'parent_id', 'team_id'];
@@ -40,21 +37,25 @@ class Obj extends Model
         });
     }
 
+    /** @return MorphTo<Model, $this> */
     public function objectable(): MorphTo
     {
         return $this->morphTo();
     }
 
+    /** @return BelongsTo<Obj, $this> */
     public function parent(): BelongsTo
     {
         return $this->belongsTo(self::class, 'parent_id');
     }
 
+    /** @return HasMany<Obj, $this> */
     public function children(): HasMany
     {
         return $this->hasMany(self::class, 'parent_id');
     }
 
+    /** @return BelongsTo<Team, $this> */
     public function team(): BelongsTo
     {
         return $this->belongsTo(Team::class);

@@ -63,7 +63,7 @@ class PrintRenderer
         $vars = array_merge($doc->variables ?? [], [
             'title' => $doc->title,
             'date' => now()->format('Y-m-d'),
-            'team' => $doc->team?->name ?? '',
+            'team' => (string) $doc->team?->name,
         ]);
 
         $header = $this->band($setup->header, $vars);

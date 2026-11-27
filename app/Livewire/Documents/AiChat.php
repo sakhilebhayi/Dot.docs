@@ -4,6 +4,7 @@ namespace App\Livewire\Documents;
 
 use App\Models\Document;
 use App\Services\AiService;
+use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -20,6 +21,8 @@ class AiChat extends Component
      * The conversation so far. Locked: the browser may read it but never
      * write it, so a page cannot stuff the transcript sent to the model
      * past the token budget the AI guard checks (EA-1 / S-14).
+     *
+     * @var array<mixed>
      */
     #[Locked]
     public array $history = [];
@@ -95,7 +98,7 @@ class AiChat extends Component
         $this->history = [];
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.documents.ai-chat');
     }

@@ -180,7 +180,11 @@ class DocumentImportController extends Controller
         return redirect()->route('documents.edit', $document->uuid)->with('status', 'Imported '.$file->getClientOriginalName().'.');
     }
 
-    /** The importer for the file's type, keyed (for .docx pictures) by the document they belong to. */
+    /**
+     * The importer for the file's type, keyed (for .docx pictures) by the document they belong to.
+     *
+     * @return array<mixed>
+     */
     private function parse(string|false $path, string $extension, string $mediaKey, DocxImporter $docx, MarkdownImporter $markdown, HtmlToJson $html, PlainTextImporter $plainText): array
     {
         $path = (string) $path;

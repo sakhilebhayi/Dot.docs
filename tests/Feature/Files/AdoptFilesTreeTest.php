@@ -120,10 +120,10 @@ class AdoptFilesTreeTest extends TestCase
         // ...and everything that was in it is in the tree, nesting intact.
         $root = Obj::whereNull('parent_id')->where('team_id', $team->id)->firstOrFail();
 
-        $reportsNode = $root->children()->get()->first(fn (Obj $o) => $o->name() === 'Reports');
+        $reportsNode = $root->children()->with('objectable')->get()->first(fn (Obj $o) => $o->name() === 'Reports');
         $this->assertNotNull($reportsNode);
 
-        $twentySixNode = $reportsNode->children()->get()->first(fn (Obj $o) => $o->name() === '2026');
+        $twentySixNode = $reportsNode->children()->with('objectable')->get()->first(fn (Obj $o) => $o->name() === '2026');
         $this->assertNotNull($twentySixNode);
 
         $this->assertSame($twentySixNode->id, $nested->fresh()->node->parent_id);
@@ -165,7 +165,7 @@ class AdoptFilesTreeTest extends TestCase
         $this->rename();
         $this->adoptAndDrop();
 
-        $names = Obj::whereNotNull('parent_id')->get()->map(fn (Obj $obj) => $obj->name())->all();
+        $names = Obj::whereNotNull('parent_id')->with('objectable')->get()->map(fn (Obj $obj) => $obj->name())->all();
 
         $this->assertContains('Reports 2026 Q1', $names);
         $this->assertContains('Folder', $names, 'an unusable name falls back rather than being adopted as-is');

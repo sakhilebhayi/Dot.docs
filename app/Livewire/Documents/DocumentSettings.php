@@ -8,11 +8,14 @@ use App\Files\FilesService;
 use App\Models\BrandKit;
 use App\Models\Document;
 use App\Models\Files\Obj;
+use App\Models\Tag;
 use App\Models\Team;
 use App\Models\User;
 use App\Print\PageSetup;
 use App\Services\TagRepository;
 use App\Styles\StyleEngine;
+use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -265,8 +268,9 @@ class DocumentSettings extends Component
         session()->flash('status', 'Document moved.');
     }
 
+    /** @return Collection<int, Tag> */
     #[Computed]
-    public function tags()
+    public function tags(): Collection
     {
         return $this->document->tags()->orderBy('name')->get();
     }
@@ -374,7 +378,7 @@ class DocumentSettings extends Component
         $this->redirect(route('documents.index'));
     }
 
-    public function render()
+    public function render(): View
     {
         $kit = $this->companyKit();
 

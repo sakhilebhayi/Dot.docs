@@ -6,6 +6,7 @@ use App\Documents\DocumentStore;
 use App\Models\Document;
 use App\Models\DocumentTemplate;
 use App\Services\HtmlSanitizer;
+use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
 
@@ -25,6 +26,7 @@ class SaveAsTemplate extends Component
 
     public bool $shareWithTeam = false;
 
+    /** @var array<mixed> */
     public array $categories = ['general', 'resume', 'proposal', 'notes', 'blog', 'report'];
 
     public function mount(Document $document): void
@@ -73,7 +75,7 @@ class SaveAsTemplate extends Component
         session()->flash('status', 'Template saved successfully.');
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.documents.save-as-template');
     }

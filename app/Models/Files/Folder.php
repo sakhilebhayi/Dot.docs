@@ -3,7 +3,6 @@
 namespace App\Models\Files;
 
 use App\Models\Team;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
@@ -23,8 +22,6 @@ use Illuminate\Support\Str;
  */
 class Folder extends Model
 {
-    use HasFactory;
-
     protected $table = 'folders';
 
     protected $fillable = ['uuid', 'name', 'team_id'];
@@ -36,11 +33,13 @@ class Folder extends Model
         });
     }
 
+    /** @return MorphOne<Obj, $this> */
     public function node(): MorphOne
     {
         return $this->morphOne(Obj::class, 'objectable');
     }
 
+    /** @return BelongsTo<Team, $this> */
     public function team(): BelongsTo
     {
         return $this->belongsTo(Team::class);

@@ -9,6 +9,8 @@ use App\Models\User;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Console\Command;
 use Illuminate\Cookie\CookieValuePrefix;
+use Illuminate\Http\Client\Factory;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Session\Store;
@@ -164,7 +166,11 @@ class Benchmark extends Command
         return [$owner, $team, $writers];
     }
 
-    /** A deterministic document of $paragraphs paragraphs; every 100th one carries the search keyword. */
+    /**
+     * A deterministic document of $paragraphs paragraphs; every 100th one carries the search keyword.
+     *
+     * @return array<mixed>
+     */
     private function body(int $seed, int $paragraphs): array
     {
         $blocks = [['type' => 'heading', 'attrs' => ['level' => 1], 'content' => [['type' => 'text', 'text' => 'Report '.$this->words($seed, 3)]]]];
@@ -253,6 +259,7 @@ class Benchmark extends Command
      * so each one is a real write under SQLite's single write lock.
      *
      * @param  list<User>  $writers
+     * @return array<mixed>
      */
     private function typing(string $url, array $writers): array
     {
@@ -324,6 +331,7 @@ class Benchmark extends Command
      * per person per hour, so each format is spread over the writers.
      *
      * @param  list<User>  $writers
+     * @return array<mixed>
      */
     private function reads(string $url, User $owner, array $writers): array
     {
@@ -397,7 +405,8 @@ class Benchmark extends Command
         return ['cookie' => $name, 'value' => $value, 'token' => $store->token()];
     }
 
-    private function client($factory, array $session)
+    /** @param array<mixed> $session */
+    private function client(Factory|PendingRequest $factory, array $session): PendingRequest
     {
         $host = parse_url((string) ($this->option('url') ?: config('app.url')), PHP_URL_HOST);
 
@@ -428,7 +437,10 @@ class Benchmark extends Command
         return $ok ? (string) $response->status() : 'bad';
     }
 
-    /** @param  list<float>  $ms */
+    /**
+     * @param  list<float>  $ms
+     * @return array<mixed>
+     */
     private function percentiles(array $ms): array
     {
         if ($ms === []) {
@@ -440,22 +452,23 @@ class Benchmark extends Command
         return ['n' => count($ms), 'p50' => $at(0.50), 'p95' => $at(0.95), 'p99' => $at(0.99), 'max' => round(end($ms), 1)];
     }
 
+    /** @param array<mixed> $results */
     private function report(array $results): void
     {
         $this->newLine();
         $this->table(
             ['writers', 'save p50', 'p95', 'p99', 'max', 'poll p50', 'p95', 'p99', 'responses'],
-            collect($results['typing'])->map(fn ($t) => [
+            collect((array) $results['typing'])->map(fn ($t) => [
                 $t['writers'], $t['save_ms']['p50'] ?? '-', $t['save_ms']['p95'] ?? '-', $t['save_ms']['p99'] ?? '-', $t['save_ms']['max'] ?? '-',
                 $t['poll_ms']['p50'] ?? '-', $t['poll_ms']['p95'] ?? '-', $t['poll_ms']['p99'] ?? '-',
-                collect($t['statuses'])->map(fn ($n, $k) => "{$k}×{$n}")->join(', '),
+                collect((array) $t['statuses'])->map(fn ($n, $k) => "{$k}×{$n}")->join(', '),
             ])->all(),
         );
         $this->table(
             ['read', 'n', 'p50 ms', 'p95 ms', 'max ms', 'responses'],
-            collect($results['reads'])->map(fn ($r, $name) => [
+            collect((array) $results['reads'])->map(fn ($r, $name) => [
                 $name, $r['n'], $r['p50'] ?? '-', $r['p95'] ?? '-', $r['max'] ?? '-',
-                collect($r['statuses'] ?? [])->map(fn ($n, $k) => "{$k}×{$n}")->join(', '),
+                collect((array) ($r['statuses'] ?? []))->map(fn ($n, $k) => "{$k}×{$n}")->join(', '),
             ])->values()->all(),
         );
     }

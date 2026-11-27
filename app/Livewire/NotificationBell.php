@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use Illuminate\Contracts\View\View;
 use Livewire\Attributes\On;
 use Livewire\Component;
 
@@ -9,6 +10,7 @@ class NotificationBell extends Component
 {
     public int $unreadCount = 0;
 
+    /** @var array<mixed> */
     public array $notifications = [];
 
     public bool $open = false;
@@ -91,6 +93,7 @@ class NotificationBell extends Component
         }
     }
 
+    /** @param array<mixed> $data */
     private function formatMessage(array $data): string
     {
         return match ($data['type'] ?? '') {
@@ -103,7 +106,7 @@ class NotificationBell extends Component
         };
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.notification-bell');
     }

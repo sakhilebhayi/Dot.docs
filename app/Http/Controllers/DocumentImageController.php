@@ -3,27 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Documents\DocumentMedia;
-use App\Models\Document;
+use App\Http\Requests\DocumentImageRequest;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Image;
 use Illuminate\Support\Str;
 
 class DocumentImageController extends Controller
 {
-    public function store(Request $request, string $uuid): JsonResponse
+    public function store(DocumentImageRequest $request, string $uuid): JsonResponse
     {
-        $document = Document::where('uuid', $uuid)->firstOrFail();
-        // Gate::authorize(), not $this->authorize(): the base Controller in
-        // this application has no AuthorizesRequests trait, so $this->authorize()
-        // is an undefined method and EVERY image upload 500'd. Same shape as
-        // DocumentAutosaveController and DocumentImportController.
-        Gate::authorize('update', $document);
-
-        $request->validate([
-            'image' => 'required|image|max:4096',
-        ]);
+        // Looked up, authorised (update) and checked by DocumentImageRequest, in that order (R2-7 / Q-06).
+        $document = $request->document();
 
         $filename = Str::uuid().'.webp';
         // The framework's own image manager. Intervention's facade binds the

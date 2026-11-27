@@ -7,7 +7,6 @@ use App\Models\Team;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Collection;
 
 /**
  * Documents of ONE company, the one the person is standing in.
@@ -17,13 +16,11 @@ use Illuminate\Support\Collection;
  * another company is read, however public or shared the document is there; DocumentPolicy::view() is then checked row
  * by row on what is left, so the rule can only narrow.
  *
- * Used by the header search. The documents page keeps its own search (App\Search\DocumentSearch) untouched.
+ * The company predicate for search (App\Search\DocumentSearch, both searches since R2-7), the arrival page, the Bin
+ * and the API.
  */
 class CompanyDocuments
 {
-    /** Shorter than this is noise, not a search. */
-    public const MIN_LENGTH = 2;
-
     /**
      * Narrow a document query to a company (or, with none, to the owner's un-filed documents).
      *
@@ -39,26 +36,14 @@ class CompanyDocuments
             : $query->where('team_id', $teamId);
     }
 
-    /** @return Collection<int, Document> */
-    public function search(User $user, string $query, int $limit = 8): Collection
+    /**
+     * One document by uuid, only if it belongs to the company the person is standing in; 404 otherwise. A uuid from
+     * another company is never confirmed to exist.
+     */
+    public static function find(User $user, string $uuid): Document
     {
-        $query = trim($query);
-
-        if (mb_strlen($query) < self::MIN_LENGTH) {
-            return collect();
-        }
-
         $team = $user->currentTeam instanceof Team ? $user->currentTeam : null;
 
-        return self::scope(Document::query(), $team?->id, $user->id)
-            ->select(['id', 'uuid', 'title', 'owner_id', 'team_id', 'updated_at', 'is_public'])
-            // The same matching and ranking as the documents page (R2-5 / P-07).
-            ->where(fn (Builder $q) => app(TextMatch::class)->apply($q, $query))
-            ->tap(fn (Builder $q) => app(TextMatch::class)->orderByRelevance($q, $query))
-            ->limit($limit * 3)
-            ->get()
-            ->filter(fn (Document $document) => $user->can('view', $document))
-            ->take($limit)
-            ->values();
+        return self::scope(Document::query(), $team?->id, $user->id)->where('uuid', $uuid)->firstOrFail();
     }
 }

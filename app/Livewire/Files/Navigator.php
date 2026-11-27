@@ -6,6 +6,7 @@ use App\Documents\DocumentStore;
 use App\Files\FilesService;
 use App\Models\Files\Obj;
 use App\Models\Team;
+use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\URL as UrlGenerator;
@@ -216,11 +217,11 @@ class Navigator extends Component
     public function fileUrl(Obj $node): string
     {
         return UrlGenerator::temporarySignedRoute('files.view', now()->addMinutes(10), [
-            'file' => $node->objectable?->uuid,
+            'file' => $node->objectable?->getAttribute('uuid'),
         ]);
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.files.navigator')
             ->layout('layouts.app')

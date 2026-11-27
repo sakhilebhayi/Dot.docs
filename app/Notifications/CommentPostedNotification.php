@@ -21,11 +21,13 @@ class CommentPostedNotification extends Notification
         public readonly Comment $comment,
     ) {}
 
+    /** @return list<string> */
     public function via(object $notifiable): array
     {
         return ['database', 'broadcast'];
     }
 
+    /** @return array<string, mixed> */
     public function toArray(object $notifiable): array
     {
         return [

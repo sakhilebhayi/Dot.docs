@@ -107,6 +107,7 @@ class DocumentFoldersAndTagsTest extends TestCase
 
         $folder = Obj::where('team_id', $user->personalTeam()->id)
             ->where('objectable_type', 'folder')
+            ->with('objectable')
             ->get()
             ->first(fn (Obj $obj) => $obj->name() === 'Reports');
 
@@ -117,7 +118,7 @@ class DocumentFoldersAndTagsTest extends TestCase
             ->set('newFolderName', '2026')
             ->call('createFolder');
 
-        $subfolder = Obj::where('objectable_type', 'folder')->get()->first(fn (Obj $obj) => $obj->name() === '2026');
+        $subfolder = Obj::where('objectable_type', 'folder')->with('objectable')->get()->first(fn (Obj $obj) => $obj->name() === '2026');
         $this->assertSame($folder->id, $subfolder->parent_id);
     }
 

@@ -6,6 +6,7 @@ use App\Models\AccessRequest;
 use App\Models\Document;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * The destination of an InfoDot deep link: /o/{document uuid}. InfoDot already checked the
@@ -16,7 +17,7 @@ use Illuminate\Support\Str;
  */
 class DocumentOpenController extends Controller
 {
-    public function __invoke(Request $request, string $uuid)
+    public function __invoke(Request $request, string $uuid): Response
     {
         abort_unless(Str::isUuid($uuid), 404);
 

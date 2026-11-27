@@ -377,9 +377,3 @@ parameters:
 			identifier: nullsafe.neverNull
 			count: 1
 			path: app/Print/PrintRenderer.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Search/DocumentSearch.php

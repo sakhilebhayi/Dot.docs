@@ -5,6 +5,7 @@ namespace App\Livewire\Documents;
 use App\Files\FilesService;
 use App\Livewire\Files\BrowsesTheTree;
 use App\Models\Files\Obj;
+use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
 use Livewire\Component;
@@ -90,7 +91,7 @@ class LocationPicker extends Component
         return $obj;
     }
 
-    public function render()
+    public function render(): View
     {
         $current = $this->openFolder();
 

@@ -87,7 +87,11 @@ class Brand
         ]);
     }
 
-    /** One Google Fonts stylesheet for these families. Only names from FONTS (and the mono) ever reach the URL. */
+    /**
+     * One Google Fonts stylesheet for these families. Only names from FONTS (and the mono) ever reach the URL.
+     *
+     * @param  array<mixed>  $families
+     */
     public static function fontImport(array $families): string
     {
         $parts = [];
