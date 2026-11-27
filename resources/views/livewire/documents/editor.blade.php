@@ -732,13 +732,13 @@
                 </div>
             <label class="sr-only" for="doc-style-picker">Document style</label>
             <select id="doc-style-picker" wire:change="setStyle($event.target.value)" class="tool-select"
-                    @disabled(! $canEdit)>
+                    @disabled(! $canEdit) @error('style') aria-invalid="true" aria-describedby="doc-style-error" @enderror>
                 @foreach (\App\Styles\StyleEngine::systemKeys() as $styleKey)
                     <option value="{{ $styleKey }}" @selected($document->style_key === $styleKey)>{{ ucfirst($styleKey) }}</option>
                 @endforeach
             </select>
             @error('style')
-                <span class="field-error" role="alert">{{ $message }}</span>
+                <span class="field-error" id="doc-style-error" role="alert">{{ $message }}</span>
             @enderror
 
             <label class="sr-only" for="doc-view-mode">Page view</label>
@@ -818,9 +818,9 @@
                      rendered by the server, so the morph can skip it
                      (.ai/rules/livewire.md). --}}
                 {{-- EA-8 (A-05): a real button, so the keyboard can dismiss it too. --}}
-                <button type="button" class="status-word status-word-danger" wire:ignore x-show="aiError" x-cloak
+                <button type="button" class="status-word status-word-danger u-bare-button" wire:ignore x-show="aiError" x-cloak
                         @click="aiError = ''" title="Dismiss"
-                        style="cursor:pointer;background:none;border:0;padding:0;font:inherit;color:inherit">
+                       >
                     <span class="status-word-dot" aria-hidden="true"></span>
                     <span role="alert" x-text="aiError"></span>
                     <span class="sr-only">(dismiss)</span>
@@ -847,8 +847,11 @@
                 </span>
 
                 @error('content')
-                    <x-shell.status-word tone="danger" :title="$message"
-                                         :word="'Not saved — '.\Illuminate\Support\Str::limit($message, 60)" />
+                    {{-- Announced when it appears (R2-6 / A-03): a save that failed must not be silent to a screen reader. --}}
+                    <span role="alert">
+                        <x-shell.status-word tone="danger" :title="$message"
+                                             :word="'Not saved — '.\Illuminate\Support\Str::limit($message, 60)" />
+                    </span>
                 @enderror
 
                 {{-- The x-show sits on a wrapper that is rendered the same on
@@ -1224,7 +1227,7 @@
 
     {{-- Pending suggestions: the assistant's ink, still in marker. --}}
     @if (count($pendingSuggestions) > 0)
-        <section class="panel" aria-labelledby="pending-suggestions" style="border-radius:0">
+        <section class="panel u-square" aria-labelledby="pending-suggestions">
             <div class="panel-head">
                 <h2 class="section-title" id="pending-suggestions">
                     Waiting for you — <x-shell.figure :value="count($pendingSuggestions)" label="Suggestions waiting" />
@@ -1299,7 +1302,7 @@
                     <ul class="list">
                         @foreach ($this->folderChoices as $choice)
                             <li wire:key="move-{{ $choice['uuid'] }}">
-                                <button type="button" class="list-row" style="width:100%;text-align:left"
+                                <button type="button" class="list-row u-row-button"
                                         wire:click="moveTo({{ $choice['id'] }})">
                                     <span class="list-key">{{ $choice['label'] }}</span>
                                 </button>

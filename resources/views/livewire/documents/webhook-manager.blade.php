@@ -4,7 +4,7 @@
         $reviewedWebhooks = $webhooks->whereIn('status', ['active', 'inactive', 'rejected']);
     @endphp
 
-    <p class="page-lede" style="margin:0">
+    <p class="page-lede u-m-0">
         An endpoint here receives an HTTP POST when this document is saved or exported. A new one sends nothing
         until you approve it.
     </p>
@@ -20,9 +20,9 @@
     @if ($revealedSecret)
         <div class="note" role="status">
             <span class="status-word-dot status-word-dot-good" aria-hidden="true"></span>
-            <span style="flex:1 1 auto">
+            <span class="u-grow">
                 Signing secret for the new endpoint. Copy it into the receiver now: it is not shown in full again.
-                <code class="micro" style="display:block;user-select:all;word-break:break-all;margin-top:var(--s1)">{{ $revealedSecret }}</code>
+                <code class="micro secret-reveal">{{ $revealedSecret }}</code>
             </span>
             <button type="button" class="btn btn-quiet btn-sm" wire:click="forgetSecret">I have copied it</button>
         </div>
@@ -33,7 +33,7 @@
             <h3 class="section-title" id="hook-pending">Waiting for your approval</h3>
             <ul class="list">
                 @foreach ($pendingWebhooks as $webhook)
-                    <li class="list-row" style="display:block">
+                    <li class="list-row u-block">
                         <div class="split">
                             <span class="list-key">
                                 <span class="micro">{{ $webhook->url }}</span>
@@ -49,12 +49,12 @@
                                 <label class="field-label" for="hook-reason-{{ $webhook->id }}">Why are you rejecting it?</label>
                                 <input id="hook-reason-{{ $webhook->id }}" wire:model="rejectReason" type="text" class="field" />
                             </div>
-                            <div class="toolbar" style="margin-top:var(--s3)">
+                            <div class="toolbar u-mt-3">
                                 <button type="button" class="btn btn-danger" wire:click="confirmReject">Reject it</button>
                                 <button type="button" class="btn" wire:click="cancelReject">Cancel</button>
                             </div>
                         @else
-                            <div class="toolbar" style="margin-top:var(--s3)">
+                            <div class="toolbar u-mt-3">
                                 <button type="button" class="btn btn-primary" wire:click="approveWebhook({{ $webhook->id }})">Approve it</button>
                                 <button type="button" class="btn" wire:click="promptReject({{ $webhook->id }})">Reject it</button>
                             </div>
@@ -68,7 +68,7 @@
     @if ($reviewedWebhooks->isEmpty() && $pendingWebhooks->isEmpty())
         {{-- One sentence and one action: the action jumps to the form below,
              which is the only thing you can do from here. --}}
-        <div class="empty" style="padding:var(--s4) 0">
+        <div class="empty u-py-4">
             <p class="empty-line">No endpoint is listening to this document.</p>
             <a href="#hook-url" class="btn btn-primary">Add an endpoint</a>
         </div>
@@ -130,7 +130,7 @@
             </div>
         </div>
 
-        <label class="field-check" for="hook-secret" style="margin-top:var(--s4)">
+        <label class="field-check u-mt-4" for="hook-secret">
             <input id="hook-secret" type="checkbox" wire:model="generateSecret" class="field-box" />
             <span>
                 Generate an HMAC signing secret
@@ -138,7 +138,7 @@
             </span>
         </label>
 
-        <button type="button" class="btn btn-primary" style="margin-top:var(--s4)"
+        <button type="button" class="btn btn-primary u-mt-4"
                 wire:click="addWebhook" wire:loading.attr="disabled">Add the endpoint</button>
     </section>
 </div>

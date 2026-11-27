@@ -8,6 +8,20 @@
  */
 
 const THEME_COOKIE = 'theme';
+
+/*
+ * How focus last arrived, for the editor paper's focus ring (paper.css, R2-6 / A-08): an editable area matches
+ * :focus-visible even after a click, so CSS alone cannot tell a writer clicking into the page from a keyboard user
+ * Tabbing onto it. Tab (and Shift+Tab) marks keyboard; any pointer press clears it.
+ */
+if (typeof document !== 'undefined') {
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Tab') document.documentElement.dataset.focusBy = 'keyboard';
+    }, true);
+    document.addEventListener('pointerdown', () => {
+        delete document.documentElement.dataset.focusBy;
+    }, true);
+}
 const PANEL_PREFIX = 'dotdoc.panel';
 const YEAR = 60 * 60 * 24 * 365;
 

@@ -46,7 +46,7 @@
             <div class="field-row">
                 <label class="field-label" for="set-folder">Folder</label>
                 <div class="toolbar">
-                    <select id="set-folder" wire:model="folderId" class="field" style="flex:1 1 auto" @error('folderId') aria-invalid="true" aria-describedby="set-folder-error" @enderror>
+                    <select id="set-folder" wire:model="folderId" class="field u-grow" @error('folderId') aria-invalid="true" aria-describedby="set-folder-error" @enderror>
                         <option value="">The root of this workspace</option>
                         @foreach ($this->availableFolders as $folder)
                             <option value="{{ $folder['id'] }}">{{ $folder['label'] }}</option>
@@ -61,7 +61,7 @@
 
             <div class="field-row">
                 <span class="field-label" id="set-tags-label">Tags</span>
-                <div class="toolbar" role="group" aria-labelledby="set-tags-label" style="margin-bottom:var(--s3)">
+                <div class="toolbar u-mb-3" role="group" aria-labelledby="set-tags-label">
                     @forelse ($this->tags as $tag)
                         <span class="tag">
                             {{ $tag->name }}
@@ -74,7 +74,7 @@
                 </div>
                 <form wire:submit="addTag" class="toolbar">
                     <label class="sr-only" for="set-new-tag">New tag</label>
-                    <input id="set-new-tag" wire:model="newTagName" type="text" class="field" style="flex:1 1 auto"
+                    <input id="set-new-tag" wire:model="newTagName" type="text" class="field u-grow"
                            placeholder="A word you will search for later" />
                     <button type="submit" class="btn">Add the tag</button>
                 </form>
@@ -111,7 +111,7 @@
         <div class="panel-body">
             <form wire:submit="savePageSetup" class="stack">
                 <div class="grid-2">
-                    <div class="field-row" style="margin-top:0">
+                    <div class="field-row u-mt-0">
                         <label class="field-label" for="set-size">Paper size</label>
                         <select id="set-size" wire:model="pageSize" class="field" @error('pageSize') aria-invalid="true" aria-describedby="set-size-error" @enderror>
                             <option value="A4">A4</option>
@@ -122,7 +122,7 @@
                             <p class="field-error" id="set-size-error" role="alert">{{ $message }}</p>
                         @enderror
                     </div>
-                    <div class="field-row" style="margin-top:0">
+                    <div class="field-row u-mt-0">
                         <label class="field-label" for="set-orientation">Orientation</label>
                         <select id="set-orientation" wire:model="orientation" class="field" @error('orientation') aria-invalid="true" aria-describedby="set-orientation-error" @enderror>
                             <option value="portrait">Portrait</option>
@@ -141,7 +141,7 @@
                         ['marginBottom', 'Margin bottom', '25mm'],
                         ['marginLeft', 'Margin left', '20mm'],
                     ] as [$model, $label, $placeholder])
-                        <div class="field-row" style="margin-top:0">
+                        <div class="field-row u-mt-0">
                             <label class="field-label" for="set-{{ $model }}">{{ $label }}</label>
                             <input id="set-{{ $model }}" wire:model="{{ $model }}" type="text" class="field field-mono"
                                    placeholder="{{ $placeholder }}" @error($model) aria-invalid="true" aria-describedby="set-{{ $model }}-error" @enderror />
@@ -208,7 +208,7 @@
     <section class="panel" aria-labelledby="set-delete">
         <div class="panel-head">
             <span class="status-word-dot status-word-dot-danger" aria-hidden="true"></span>
-            <h2 class="section-title" id="set-delete" style="flex:1 1 auto">Deleting this document</h2>
+            <h2 class="section-title u-grow" id="set-delete">Deleting this document</h2>
         </div>
         <div class="panel-body">
             @if (! $showDeleteConfirm)

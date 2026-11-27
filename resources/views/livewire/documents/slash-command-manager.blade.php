@@ -17,12 +17,12 @@
             </div>
             <div class="panel-body">
                 <div class="grid-2">
-                    <div class="field-row" style="margin-top:0">
+                    <div class="field-row u-mt-0">
                         <label class="field-label" for="cmd-name">Command name</label>
-                        <div class="toolbar" style="gap:0">
-                            <span class="micro" style="padding:8px var(--s2);border:1px solid var(--line);border-right:0">/</span>
-                            <input id="cmd-name" wire:model="name" type="text" class="field field-mono"
-                                   style="flex:1 1 auto" placeholder="bullet-list" @error('name') aria-invalid="true" aria-describedby="cmd-name-error" @enderror />
+                        <div class="toolbar u-gap-0">
+                            <span class="micro input-prefix">/</span>
+                            <input id="cmd-name" wire:model="name" type="text" class="field field-mono u-grow"
+                                   placeholder="bullet-list" @error('name') aria-invalid="true" aria-describedby="cmd-name-error" @enderror />
                         </div>
                         <p class="field-hint">No spaces — this is what you type after the slash.</p>
                         @error('name')
@@ -30,7 +30,7 @@
                         @enderror
                     </div>
 
-                    <div class="field-row" style="margin-top:0">
+                    <div class="field-row u-mt-0">
                         <label class="field-label" for="cmd-desc">Description</label>
                         <input id="cmd-desc" wire:model="description" type="text" class="field"
                                placeholder="What it does, in a few words" @error('description') aria-invalid="true" aria-describedby="cmd-desc-error" @enderror />

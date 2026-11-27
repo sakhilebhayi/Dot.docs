@@ -10,7 +10,7 @@
     <x-slot name="form">
         @if (Laravel\Jetstream\Jetstream::managesProfilePhotos())
             <div class="field-row" x-data="{photoName: null, photoPreview: null}">
-                <input type="file" id="photo" class="sr-only"
+                <input type="file" id="photo" class="sr-only" @error('photo') aria-invalid="true" aria-describedby="photo-error" @enderror
                             wire:model.live="photo"
                             x-ref="photo"
                             x-on:change="
@@ -43,20 +43,20 @@
                     @endif
                 </div>
 
-                <x-input-error for="photo" />
+                <x-input-error for="photo" field="photo" />
             </div>
         @endif
 
         <div class="field-row">
             <x-label for="name" value="{{ __('Name') }}" />
-            <x-input id="name" type="text" wire:model="state.name" required autocomplete="name" />
-            <x-input-error for="name" />
+            <x-input id="name" error="name" type="text" wire:model="state.name" required autocomplete="name" />
+            <x-input-error for="name" field="name" />
         </div>
 
         <div class="field-row">
             <x-label for="email" value="{{ __('Email') }}" />
-            <x-input id="email" type="email" wire:model="state.email" required autocomplete="username" />
-            <x-input-error for="email" />
+            <x-input id="email" error="email" type="email" wire:model="state.email" required autocomplete="username" />
+            <x-input-error for="email" field="email" />
 
             @if (Laravel\Fortify\Features::enabled(Laravel\Fortify\Features::emailVerification()) && ! $this->user->hasVerifiedEmail())
                 <p class="field-hint">

@@ -25,12 +25,12 @@
 
         <div class="field-row" x-data="{}" x-on:confirming-password.window="setTimeout(() => $refs.confirmable_password.focus(), 250)">
             <label class="field-label" for="confirmable-password">{{ __('Password') }}</label>
-            <x-input id="confirmable-password" type="password" autocomplete="current-password"
+            <x-input id="confirmable-password" error="confirmable_password" type="password" autocomplete="current-password"
                         x-ref="confirmable_password"
                         wire:model="confirmablePassword"
                         wire:keydown.enter="confirmPassword" />
 
-            <x-input-error for="confirmable_password" />
+            <x-input-error for="confirmable_password" field="confirmable-password" />
         </div>
     </x-slot>
 

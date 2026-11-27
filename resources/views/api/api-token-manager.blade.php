@@ -11,8 +11,8 @@
         <x-slot name="form">
             <div class="field-row">
                 <x-label for="name" value="{{ __('Token Name') }}" />
-                <x-input id="name" type="text" wire:model="createApiTokenForm.name" autofocus />
-                <x-input-error for="name" />
+                <x-input id="name" error="name" type="text" wire:model="createApiTokenForm.name" autofocus />
+                <x-input-error for="name" field="name" />
             </div>
 
             @if (Laravel\Jetstream\Jetstream::hasPermissions())

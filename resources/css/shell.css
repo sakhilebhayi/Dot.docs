@@ -1572,7 +1572,8 @@ button.list-row {
     align-items: center;
     gap: var(--s2);
     padding: 8px var(--s3);
-    border: 1px solid var(--line);
+    /* R2-6 / A-02: a control's edge is measured against its ground (3:1, WCAG 1.4.11), like the fields'. */
+    border: 1px solid var(--line-control);
     border-radius: var(--r-control);
     background: var(--surface-raised);
     color: var(--ink);
@@ -1585,7 +1586,7 @@ button.list-row {
 }
 
 .btn:hover {
-    border-color: var(--ink-soft);
+    border-color: var(--ink);
 }
 
 .btn:disabled {
@@ -1773,12 +1774,17 @@ button.list-row {
     align-items: center;
     gap: var(--s1);
     padding: 4px var(--s3);
-    border: 1px solid var(--line);
+    /* R2-6 / A-02: a filter tag is a toggle button; its edge clears 3:1 like every control's. */
+    border: 1px solid var(--line-control);
     border-radius: var(--r-control);
     background: var(--surface-raised);
     color: var(--ink);
     font-size: var(--t-micro);
     cursor: pointer;
+}
+
+.tag:hover {
+    border-color: var(--ink);
 }
 
 .tag[aria-pressed='true'] {
@@ -2520,6 +2526,32 @@ button.list-row {
     justify-content: space-between;
     gap: var(--s3);
     flex-wrap: wrap;
+}
+
+/* R2-6 / U-03: a page's standing in status words, one line, wrapping on a phone. */
+.share-standing {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2) var(--s4);
+    margin: var(--s3) 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* A field with its one action beside it (Copy link): the field takes the room, the button keeps its width. */
+.field-with-action {
+    display: flex;
+    gap: var(--s2);
+    align-items: stretch;
+}
+
+.field-with-action > .field {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.field-with-action > .btn {
+    flex: 0 0 auto;
 }
 
 .grid-2 {
@@ -3272,3 +3304,99 @@ button.list-row {
     background: var(--surface-raised);
     cursor: pointer;
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Layout adjustments that used to be inline style="" one-offs in the document
+ * views (R2-6 / U-07). They are the LAST rules in the file and carry
+ * !important on purpose: an inline style beat every class rule, and these
+ * replace inline styles one for one, so each screen renders exactly as before.
+ * Values come from the shell's tokens only. A new one-off belongs here as a
+ * class, not back in a view's style attribute; values computed from data
+ * (the brand kit preview's chosen colours and fonts) are the exception.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+.u-m-0 { margin: 0 !important; }
+.u-mt-0 { margin-top: 0 !important; }
+.u-mt-2 { margin-top: var(--s2) !important; }
+.u-mt-3 { margin-top: var(--s3) !important; }
+.u-mt-4 { margin-top: var(--s4) !important; }
+.u-mb-2 { margin-bottom: var(--s2) !important; }
+.u-mb-3 { margin-bottom: var(--s3) !important; }
+.u-mb-4 { margin-bottom: var(--s4) !important; }
+.u-p-0 { padding: 0 !important; }
+.u-py-2 { padding: var(--s2) 0 !important; }
+.u-py-4 { padding: var(--s4) 0 !important; }
+.u-block { display: block !important; }
+.u-pre-line { white-space: pre-line !important; }
+.u-grow { flex: 1 1 auto !important; }
+.u-grow-sm { flex: 1 1 6rem !important; }
+.u-grow-md { flex: 1 1 16rem !important; }
+.u-grow-wide { flex: 1 1 260px !important; min-width: 0 !important; }
+.u-full-row { flex-basis: 100% !important; }
+.u-start { justify-content: flex-start !important; }
+.u-items-start { align-items: start !important; }
+.u-gap-0 { gap: 0 !important; }
+.u-gap-2 { gap: var(--s2) !important; }
+.u-wrap-rows { flex-wrap: wrap !important; row-gap: var(--s2) !important; }
+.u-row-button { width: 100% !important; text-align: left !important; }
+.u-square { border-radius: 0 !important; }
+.u-bl-0 { border-left: 0 !important; }
+.u-fill-pad { width: 100% !important; min-height: 0 !important; padding: var(--s5) !important; }
+
+/* A button that is only its text (a comment's "show more"), keyboard focus from the shell's ring. */
+.u-bare-button {
+    cursor: pointer !important;
+    background: none !important;
+    border: 0 !important;
+    padding: 0 !important;
+    font: inherit !important;
+    color: inherit !important;
+}
+
+/* The fixed label in front of a field (the "/" of a slash command), joined to the field's left edge. */
+.input-prefix {
+    padding: 8px var(--s2) !important;
+    border: 1px solid var(--line) !important;
+    border-right: 0 !important;
+}
+
+/* The commented passage, quoted above the comment: a 1px rule, never a coloured bar. */
+.comment-quote {
+    border-left: 1px solid var(--line) !important;
+    padding-left: var(--s2) !important;
+    margin: 0 0 var(--s2) !important;
+}
+
+.comment-body { margin: var(--s2) 0 0 !important; white-space: pre-line !important; }
+.comment-reply-body { margin: var(--s1) 0 0 !important; white-space: pre-line !important; }
+
+.comment-replies {
+    margin-top: var(--s3) !important;
+    border-left: 1px solid var(--line) !important;
+    padding-left: var(--s3) !important;
+}
+
+/* The mention list under a reply box flows with the form instead of floating over it. */
+.mention-list-inline { position: static !important; margin-top: var(--s2) !important; }
+
+/* A sheet that opens near the top of the screen (the AI assistant), not centred. */
+.sheet-top { align-items: flex-start !important; padding-top: 12vh !important; }
+.ai-scroll { max-height: 46vh !important; overflow-y: auto !important; }
+
+.ai-toast {
+    position: fixed !important;
+    bottom: var(--s4) !important;
+    right: var(--s4) !important;
+    z-index: 90 !important;
+    margin: 0 !important;
+}
+
+/* A secret shown once in full (a webhook's signing secret): one click selects all of it. */
+.secret-reveal {
+    display: block !important;
+    user-select: all !important;
+    word-break: break-all !important;
+    margin-top: var(--s1) !important;
+}
+
+.panel-inset { margin: var(--s3) var(--s4) 0 !important; }

@@ -21,15 +21,15 @@
 
     <ul class="list comment-thread-list">
         @forelse ($comments as $comment)
-            <li class="list-row" style="display:block" wire:key="comment-{{ $comment->id }}">
+            <li class="list-row u-block" wire:key="comment-{{ $comment->id }}">
                 @if ($comment->selection_text)
-                    <p class="field-hint" style="border-left:2px solid var(--line);padding-left:var(--s2);margin:0 0 var(--s2)">
+                    <p class="field-hint comment-quote">
                         &ldquo;{{ Str::limit($comment->selection_text, 90) }}&rdquo;
                     </p>
                 @endif
 
-                <div class="split" style="gap:var(--s2)">
-                    <span class="list-key" style="flex:1 1 auto">
+                <div class="split u-gap-2">
+                    <span class="list-key u-grow">
                         {{ $comment->user?->name ?? 'Former member' }}
                         <span class="list-sub">{{ $comment->created_at->diffForHumans() }}</span>
                     </span>
@@ -38,11 +38,11 @@
                     @endif
                 </div>
 
-                <p style="margin:var(--s2) 0 0;white-space:pre-line">
+                <p class="comment-body">
                     {!! $this->highlightMentions($comment->content) !!}
                 </p>
 
-                <div class="toolbar" style="margin-top:var(--s2)">
+                <div class="toolbar u-mt-2">
                     <button type="button" class="btn btn-quiet btn-sm" wire:click="startReply({{ $comment->id }})">Reply</button>
                     @if (! $comment->isResolved())
                         <button type="button" class="btn btn-quiet btn-sm" wire:click="resolve({{ $comment->id }})">Resolve</button>
@@ -56,14 +56,14 @@
                 </div>
 
                 @if ($comment->replies->isNotEmpty())
-                    <ul class="list" style="margin-top:var(--s3);border-left:1px solid var(--line);padding-left:var(--s3)">
+                    <ul class="list comment-replies">
                         @foreach ($comment->replies as $reply)
-                            <li style="padding:var(--s2) 0" wire:key="reply-{{ $reply->id }}">
+                            <li class="u-py-2" wire:key="reply-{{ $reply->id }}">
                                 <span class="list-key">
                                     {{ $reply->user?->name ?? 'Former member' }}
                                     <span class="list-sub">{{ $reply->created_at->diffForHumans() }}</span>
                                 </span>
-                                <p style="margin:var(--s1) 0 0;white-space:pre-line">
+                                <p class="comment-reply-body">
                                     {!! $this->highlightMentions($reply->content) !!}
                                 </p>
                                 @if ($reply->user_id === auth()->id())
@@ -76,12 +76,12 @@
                 @endif
 
                 @if ($replyingTo === $comment->id)
-                    <div style="margin-top:var(--s3)" x-data="mentionInput(@entangle('replyContent'), (q) => $wire.searchMentions(q, 'reply'))">
+                    <div class="u-mt-3" x-data="mentionInput(@entangle('replyContent'), (q) => $wire.searchMentions(q, 'reply'))">
                         <label class="sr-only" for="reply-{{ $comment->id }}">Your reply</label>
                         <textarea id="reply-{{ $comment->id }}" x-model="value" @input="handleInput($event)" rows="2" class="field"
                                   placeholder="Type @ to mention somebody" @error('replyContent') aria-invalid="true" aria-describedby="reply-{{ $comment->id }}-error" @enderror></textarea>
                         @if ($mentionTarget === 'reply' && count($mentionResults) > 0)
-                            <ul class="menu-list" style="position:static;margin-top:var(--s2)" aria-label="People to mention">
+                            <ul class="menu-list mention-list-inline" aria-label="People to mention">
                                 @foreach ($mentionResults as $u)
                                     <li><button type="button" x-on:click="insertMention(@js($u['name']))">{{ $u['name'] }}</button></li>
                                 @endforeach
@@ -90,7 +90,7 @@
                         @error('replyContent')
                             <p class="field-error" id="reply-{{ $comment->id }}-error" role="alert">{{ $message }}</p>
                         @enderror
-                        <div class="toolbar" style="margin-top:var(--s2)">
+                        <div class="toolbar u-mt-2">
                             <button type="button" class="btn btn-sm btn-primary" wire:click="postReply">Post the reply</button>
                             <button type="button" class="btn btn-sm" wire:click="cancelReply">Cancel</button>
                         </div>
@@ -124,14 +124,14 @@
             @enderror
 
             @if ($mentionTarget === 'new' && count($mentionResults) > 0)
-                <ul class="menu-list" style="position:static;margin-top:var(--s2)" aria-label="People to mention">
+                <ul class="menu-list mention-list-inline" aria-label="People to mention">
                     @foreach ($mentionResults as $u)
                         <li><button type="button" x-on:click="insertMention(@js($u['name']))">{{ $u['name'] }}</button></li>
                     @endforeach
                 </ul>
             @endif
         </div>
-        <div class="split" style="margin-top:var(--s2)">
+        <div class="split u-mt-2">
             <span class="micro">Ctrl + Enter posts it</span>
             <button type="button" class="btn btn-primary" wire:click="postComment" wire:loading.attr="disabled">Post</button>
         </div>

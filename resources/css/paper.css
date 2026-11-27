@@ -79,6 +79,18 @@
     outline: none;
 }
 
+/*
+ * R2-6 / A-08: a keyboard user who Tabs onto the page needs to see that the page now has the keys - the caret alone
+ * is a 1px line somewhere on an A4 sheet. Browsers count an editable area as focus-visible even after a click, so the
+ * ring is keyed to HOW focus arrived: shell.js sets data-focus-by="keyboard" on <html> on Tab and clears it on any
+ * pointer press. It is the shell's own ring (2px ink), offset clear of the paper's shadow, so it reads as the same
+ * focus mark as every other control, drawn around the sheet.
+ */
+html[data-focus-by='keyboard'] .canvas .paper:focus-within {
+    outline: 2px solid var(--ink);
+    outline-offset: 4px;
+}
+
 /* ── Editing affordances ─────────────────────────────────────────────── */
 
 .paper .ProseMirror-gapcursor:after {

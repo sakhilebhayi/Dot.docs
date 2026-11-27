@@ -51,14 +51,14 @@
 
                 <div class="field-row" x-data="{}" x-on:confirming-logout-other-browser-sessions.window="setTimeout(() => $refs.password.focus(), 250)">
                     <x-label for="logout-sessions-password" value="{{ __('Password') }}" />
-                    <x-input id="logout-sessions-password"
+                    <x-input id="logout-sessions-password" error="password"
                              type="password"
                              autocomplete="current-password"
                              x-ref="password"
                              wire:model="password"
                              wire:keydown.enter="logoutOtherBrowserSessions" />
 
-                    <x-input-error for="password" />
+                    <x-input-error for="password" field="logout-sessions-password" />
                 </div>
             </x-slot>
 
