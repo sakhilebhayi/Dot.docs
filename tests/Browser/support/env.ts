@@ -21,6 +21,8 @@ export function appEnv(): Record<string, string> {
     return {
         APP_ENV: 'local',
         APP_DEBUG: 'false',
+        // A lazy load or a silently dropped attribute fails the run here, as in PHPUnit (R2-8; production only logs).
+        MODELS_STRICT: 'true',
         APP_URL: baseURL,
         APP_KEY: process.env.APP_KEY ?? 'base64:ZTJlLWxvY2FsLWtleS1mb3ItYnJvd3Nlci10ZXN0cyE=',
         DB_CONNECTION: 'sqlite',
