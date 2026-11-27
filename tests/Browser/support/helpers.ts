@@ -27,7 +27,9 @@ export async function openWelcomePack(page: Page): Promise<string> {
 
 /** Puts the caret at the end of the document's last paragraph and types. */
 export async function typeAtEnd(page: Page, text: string): Promise<void> {
-    const last = page.locator('.ProseMirror p').last();
+    // `.ProseMirror > p`: the document's own paragraphs. In Pages view the header and footer bands are <p>s too, inside
+    // the page-boundary widgets, and `.ProseMirror p` last was the footer band - a click there put the caret at 1.
+    const last = page.locator('.ProseMirror > p').last();
     await last.click();
     await page.keyboard.press('End');
     await page.keyboard.type(text);
