@@ -674,7 +674,8 @@ class EditorSyncWiringTest extends TestCase
      */
     public function test_nothing_in_the_notice_bar_depends_on_what_the_server_renders(): void
     {
-        $blade = file_get_contents(resource_path('views/livewire/documents/editor.blade.php'));
+        // The notice bar is its own partial, included by the editor view.
+        $blade = file_get_contents(resource_path('views/livewire/documents/editor/notices.blade.php'));
 
         // From the bar's opening tag to the closing tag at the same indentation.
         $this->assertSame(1, preg_match('/^( *)<div class="doc-notices"[^>]*>.*?^\1<\/div>$/ms', $blade, $bar));
