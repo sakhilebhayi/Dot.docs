@@ -3,11 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Documents\DocumentStore;
-use App\Documents\Outline\EditorOutline;
+use App\Documents\Outline\SyncDerived;
 use App\Http\Requests\DocumentSyncRequest;
 use App\Models\Document;
 use App\Services\PresenceService;
-use App\Styles\StyleEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Gate;
 
@@ -34,8 +33,7 @@ class DocumentSyncController extends Controller
         string $uuid,
         DocumentStore $store,
         PresenceService $presence,
-        EditorOutline $outline,
-        StyleEngine $styles,
+        SyncDerived $derived,
     ): JsonResponse {
         $data = $request->validated();
 
@@ -78,10 +76,12 @@ class DocumentSyncController extends Controller
             $payload['version'] = (int) $full->version;
             $payload['changed'] = true;
             $payload['json'] = $store->json($full);
-            $payload['outline'] = $outline->of($full);
-            // The style may be what changed. The outline carries its
-            // numbering and page setup; this carries its fonts and colours.
-            $payload['css'] = $styles->css($styles->resolve($full), 'canvas');
+            // The outline and the canvas CSS (the style may be what changed),
+            // built once per state of the document and shared by every
+            // co-editor's poll for it: see SyncDerived.
+            $shared = $derived->of($full);
+            $payload['outline'] = $shared['outline'];
+            $payload['css'] = $shared['css'];
         }
 
         return response()->json($payload);
