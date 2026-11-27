@@ -95,6 +95,7 @@
         </style>
     </head>
     <body class="antialiased">
+        <a href="#main" class="skip-link">Skip to content</a>
 
         <!-- Nav -->
         <header id="site-header" class="fixed top-0 left-0 right-0 z-50 transition-colors duration-300 border-b border-transparent">
@@ -151,6 +152,8 @@
                 </div>
             </div>
         </header>
+
+        <main id="main" tabindex="-1">
 
         <!-- Hero -->
         <section class="relative min-h-[100dvh] flex items-end overflow-hidden bg-[var(--ink)]">
@@ -304,6 +307,8 @@
         </section>
 
         <!-- Footer -->
+        </main>
+
         <footer class="py-14 px-5 sm:px-8 border-t border-[var(--line)]">
             <div class="max-w-[1400px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
                 <a href="/" class="flex items-center gap-2.5 min-w-[44px]">

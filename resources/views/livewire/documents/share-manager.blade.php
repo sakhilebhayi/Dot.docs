@@ -22,9 +22,14 @@
                         ? 'Anyone holding the link can read this document.'
                         : 'Only you and the people listed below can reach it.' }}
                 </p>
-                <button type="button" class="btn {{ $document->is_public ? '' : 'btn-primary' }}" wire:click="togglePublicLink">
-                    {{ $document->is_public ? 'Stop publishing' : 'Publish a link' }}
-                </button>
+                {{-- Two buttons with their own keys: Livewire reads wire:confirm once
+                     per element, so one morphed button would keep the wrong prompt. --}}
+                @if ($document->is_public)
+                    <button type="button" class="btn" wire:key="publish-stop" wire:click="togglePublicLink"
+                            wire:confirm="Stop publishing? The link stops working for everyone who has it.">Stop publishing</button>
+                @else
+                    <button type="button" class="btn btn-primary" wire:key="publish-start" wire:click="togglePublicLink">Publish a link</button>
+                @endif
             </div>
 
             @if ($document->is_public && $publicLink)
@@ -39,9 +44,9 @@
                 <div class="field-row">
                     <label class="field-label" for="share-slug">A shorter address</label>
                     <input id="share-slug" wire:model="slug" type="text" class="field field-mono"
-                           placeholder="august-production" />
+                           placeholder="august-production" @error('slug') aria-invalid="true" aria-describedby="share-slug-error" @enderror />
                     @error('slug')
-                        <p class="field-error">{{ $message }}</p>
+                        <p class="field-error" id="share-slug-error" role="alert">{{ $message }}</p>
                     @enderror
                     @if ($publishedLink)
                         <p class="field-hint">
@@ -69,7 +74,7 @@
                     <div class="field-row">
                         <label class="field-label" for="share-password">Password</label>
                         <input id="share-password" wire:model="sharePassword" type="password" class="field"
-                               placeholder="{{ $showPasswordSet ? 'Type a new one to change it' : 'Leave empty for no password' }}" />
+                               placeholder="{{ $showPasswordSet ? 'Type a new one to change it' : 'Leave empty for no password' }}" @error('sharePassword') aria-invalid="true" aria-describedby="share-password-error" @enderror />
                         @if ($showPasswordSet)
                             <p class="field-hint">
                                 A password is set.
@@ -77,15 +82,15 @@
                             </p>
                         @endif
                         @error('sharePassword')
-                            <p class="field-error">{{ $message }}</p>
+                            <p class="field-error" id="share-password-error" role="alert">{{ $message }}</p>
                         @enderror
                     </div>
 
                     <div class="field-row">
                         <label class="field-label" for="share-expiry">Expires at</label>
-                        <input id="share-expiry" wire:model="shareExpiresAt" type="datetime-local" class="field field-mono" />
+                        <input id="share-expiry" wire:model="shareExpiresAt" type="datetime-local" class="field field-mono" @error('shareExpiresAt') aria-invalid="true" aria-describedby="share-expiry-error" @enderror />
                         @error('shareExpiresAt')
-                            <p class="field-error">{{ $message }}</p>
+                            <p class="field-error" id="share-expiry-error" role="alert">{{ $message }}</p>
                         @enderror
                         @if ($document->share_expires_at)
                             <p class="field-hint">
@@ -112,9 +117,9 @@
             <form wire:submit="invite" class="stack">
                 <div class="field-row">
                     <label class="field-label" for="invite-email">Email address</label>
-                    <input id="invite-email" wire:model="inviteEmail" type="email" class="field" placeholder="name@example.com" />
+                    <input id="invite-email" wire:model="inviteEmail" type="email" class="field" placeholder="name@example.com" @error('inviteEmail') aria-invalid="true" aria-describedby="invite-email-error" @enderror />
                     @error('inviteEmail')
-                        <p class="field-error">{{ $message }}</p>
+                        <p class="field-error" id="invite-email-error" role="alert">{{ $message }}</p>
                     @enderror
                 </div>
                 <div class="field-row">
@@ -158,7 +163,9 @@
                         <span class="list-sub">{{ $collab->user->email }}</span>
                     </span>
                     <span class="list-val">{{ ucfirst($collab->role) }}</span>
-                    <button type="button" class="btn btn-sm" wire:click="removeCollaborator({{ $collab->id }})">Remove</button>
+                    <button type="button" class="btn btn-sm" wire:click="removeCollaborator({{ $collab->id }})"
+                            wire:confirm="Remove {{ $collab->user->name }}? They lose access to this document at once."
+                            aria-label="Remove {{ $collab->user->name }}">Remove</button>
                 </li>
             @endforeach
         </ul>

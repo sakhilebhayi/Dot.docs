@@ -110,9 +110,9 @@
         <div class="field-row">
             <label class="field-label" for="hook-url">Endpoint URL</label>
             <input id="hook-url" wire:model="newUrl" type="url" class="field field-mono"
-                   placeholder="https://example.com/webhook" />
+                   placeholder="https://example.com/webhook" @error('newUrl') aria-invalid="true" aria-describedby="hook-url-error" @enderror />
             @error('newUrl')
-                <p class="field-error">{{ $message }}</p>
+                <p class="field-error" id="hook-url-error" role="alert">{{ $message }}</p>
             @enderror
         </div>
 

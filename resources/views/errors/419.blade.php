@@ -8,6 +8,6 @@
 @section('message', 'For your security, this form expires after a while of inactivity. Nothing was lost — go back and try submitting again.')
 
 @section('actions')
-    <a href="{{ url()->previous() === url()->current() ? '/' : url()->previous() }}" class="press" style="padding: 12px 24px; background: var(--accent); color: #1f1b14; font-family: var(--font-display); font-weight: 600; font-size: 15px; border-radius: 999px; text-decoration: none;">Go back and retry</a>
-    <a href="/" class="press link-underline" style="padding: 12px 24px; color: var(--ink); font-size: 15px; text-decoration: none;">Go home</a>
+    <a href="{{ url()->previous() === url()->current() ? '/' : url()->previous() }}" class="btn btn-primary press">Go back and retry</a>
+    <a href="/" class="btn btn-quiet press">Go home</a>
 @endsection

@@ -1,6 +1,6 @@
 <div>
     @if ($show)
-        <div class="scrim" role="dialog" aria-modal="true" aria-labelledby="gallery-title" wire:click.self="close">
+        <div class="scrim" x-data x-trap.noscroll="true" x-on:keydown.escape.stop="$wire.close()" role="dialog" aria-modal="true" aria-labelledby="gallery-title" wire:click.self="close">
             <div class="sheet sheet-wide">
                 <div class="sheet-head">
                     <h2 class="h-panel" id="gallery-title">Start from a template</h2>

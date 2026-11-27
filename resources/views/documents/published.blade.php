@@ -55,7 +55,7 @@
 
     <div class="shell" data-shell style="grid-template-columns:minmax(0,1fr);grid-template-areas:'topbar' 'canvas'">
         <header class="topbar" aria-label="Document status">
-            <div class="topbar-title">{{ Str::limit($document->title, 64) }}</div>
+            <h1 class="topbar-title">{{ Str::limit($document->title, 64) }}</h1>
 
             <span class="micro">{{ $document->owner->name }} · {{ $document->updated_at->format('j M Y') }}</span>
 

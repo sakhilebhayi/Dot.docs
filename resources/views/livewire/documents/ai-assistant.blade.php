@@ -7,7 +7,7 @@
 
     {{-- Command palette --}}
     @if ($showPalette)
-        <div class="scrim" style="align-items:flex-start;padding-top:12vh" role="dialog" aria-modal="true"
+        <div class="scrim" x-trap.noscroll="true" style="align-items:flex-start;padding-top:12vh" role="dialog" aria-modal="true"
              aria-label="Assistant commands" x-data x-init="$el.querySelector('input').focus()">
             <div class="sheet" wire:click.outside="closePalette">
                 <div class="sheet-head">
@@ -45,7 +45,7 @@
          fixed over the desk — it asks for a decision, and nothing in this
          product floats except the paper. --}}
     @if ($showResult)
-        <div class="scrim" role="dialog" aria-modal="true" aria-labelledby="ai-result-title"
+        <div class="scrim" x-on:keydown.escape.stop="$wire.dismissResult()" role="dialog" aria-modal="true" aria-labelledby="ai-result-title"
              x-data x-trap.inert.noscroll="true">
             <div class="sheet sheet-wide">
                 <div class="sheet-head">

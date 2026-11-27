@@ -22,21 +22,21 @@
                         <div class="toolbar" style="gap:0">
                             <span class="micro" style="padding:8px var(--s2);border:1px solid var(--line);border-right:0">/</span>
                             <input id="cmd-name" wire:model="name" type="text" class="field field-mono"
-                                   style="flex:1 1 auto" placeholder="bullet-list" />
+                                   style="flex:1 1 auto" placeholder="bullet-list" @error('name') aria-invalid="true" aria-describedby="cmd-name-error" @enderror />
                         </div>
                         <p class="field-hint">No spaces — this is what you type after the slash.</p>
                         @error('name')
-                            <p class="field-error">{{ $message }}</p>
+                            <p class="field-error" id="cmd-name-error" role="alert">{{ $message }}</p>
                         @enderror
                     </div>
 
                     <div class="field-row" style="margin-top:0">
                         <label class="field-label" for="cmd-desc">Description</label>
                         <input id="cmd-desc" wire:model="description" type="text" class="field"
-                               placeholder="What it does, in a few words" />
+                               placeholder="What it does, in a few words" @error('description') aria-invalid="true" aria-describedby="cmd-desc-error" @enderror />
                         <p class="field-hint">Shown beside the command in the palette.</p>
                         @error('description')
-                            <p class="field-error">{{ $message }}</p>
+                            <p class="field-error" id="cmd-desc-error" role="alert">{{ $message }}</p>
                         @enderror
                     </div>
                 </div>
@@ -44,10 +44,10 @@
                 <div class="field-row">
                     <label class="field-label" for="cmd-prompt">Prompt</label>
                     <textarea id="cmd-prompt" wire:model="promptTemplate" rows="5" class="field field-mono"
-                              placeholder="Rewrite the following as a numbered list, keeping each point short:&#10;&#10;{content}"></textarea>
+                              placeholder="Rewrite the following as a numbered list, keeping each point short:&#10;&#10;{content}" @error('promptTemplate') aria-invalid="true" aria-describedby="cmd-prompt-error" @enderror></textarea>
                     <p class="field-hint">Use <code class="micro">{content}</code> to drop the document's text into the prompt.</p>
                     @error('promptTemplate')
-                        <p class="field-error">{{ $message }}</p>
+                        <p class="field-error" id="cmd-prompt-error" role="alert">{{ $message }}</p>
                     @enderror
                 </div>
 

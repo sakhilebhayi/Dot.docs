@@ -271,11 +271,15 @@ class EditorSyncWiringTest extends TestCase
         $this->assertNotNull($this->notice($bar, 'setAside')->querySelector('button[\@click="putBack()"][title]'));
         $this->assertNotNull($this->notice($bar, 'setAside')->querySelector('button[\@click="discardSetAside()"][title]'));
 
-        // And nowhere else on the page: the strip carries no button at all.
+        // And nowhere else on the page: the strip carries no action button.
+        // Its one button is the AI error word itself, which dismisses it
+        // (EA-8 / A-05: it was a click-only span, the same size on screen).
         foreach (['keepMine()', 'loadTheirs()', 'putBackLost(0, $event.detail === 0)', 'putBackLost(1, $event.detail === 0)', 'putBackLost(2, $event.detail === 0)', 'putBackLost(3, $event.detail === 0)', 'putBackLost(4, $event.detail === 0)', 'putBackAllLost($event.detail === 0)', 'dismissLost()', 'putBack()', 'discardSetAside()'] as $handler) {
             $this->assertSame(1, substr_count($html, '@click="'.$handler.'"'));
         }
-        $this->assertCount(0, $strip->querySelectorAll('button'));
+        $stripButtons = $strip->querySelectorAll('button');
+        $this->assertCount(1, $stripButtons);
+        $this->assertSame("aiError = ''", $stripButtons->item(0)->getAttribute('@click'));
 
         // While the conflict notice shows, the strip says Not saved and no
         // more: the sentence is in the bar.

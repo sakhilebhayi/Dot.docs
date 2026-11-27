@@ -52,40 +52,40 @@
                 ->reject(fn ($p, $k) => ($p['internal'] ?? false) === true || in_array($k, ['memory', 'brain', 'dopemine'], true))
                 ->values()
                 ->all();
-
-            $logoLightPath = null;
-            foreach (['images/logo-light.png', null] as $logoLightCandidate) {
-                if ($logoLightCandidate && file_exists(public_path($logoLightCandidate))) {
-                    $logoLightPath = $logoLightCandidate;
-                    break;
-                }
-            }
         @endphp
         @if (!empty($viteEntries))
             @vite($viteEntries)
         @endif
 
         <style>
-            :root {
-                --paper: #fbf7ee;
-                --ink: #1f1b14;
-                --ink-soft: #5b5344;
-                --chrome: #1f1b14;
-                --chrome-soft: #1f1b14;
-                --accent: #f1c62e;
-                --accent-deep: #c9970f;
-                --line: rgba(0,0,0,0.12);
-                --font-display: var(--dot-font-sans);
-                --font-body: var(--dot-font-sans);
-                --font-mono: var(--dot-font-mono);
-                --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+            /*
+             * Fair Copy tokens come from shell.css (in app.css). These are only
+             * the day values to fall back on when the build is missing, and sit
+             * at zero specificity in the base layer so shell.css always wins
+             * (EA-8 / U-05: error pages used their own palette before).
+             */
+            @layer base {
+                :where(:root) {
+                    --ground: #f5f3ee;
+                    --surface: #fbfaf7;
+                    --surface-raised: #ffffff;
+                    --ink: #23211d;
+                    --ink-soft: #625e56;
+                    --line: #e5e1d8;
+                    --accent: #2f5233;
+                    --font-display: var(--dot-font-sans);
+                    --font-body: var(--dot-font-sans);
+                    --font-mono: var(--dot-font-mono);
+                }
+                /* In the layer, so .btn-primary's own colour still wins. */
+                a { color: inherit; }
             }
+            :root { --ease-out: cubic-bezier(0.23, 1, 0.32, 1); }
             * { box-sizing: border-box; }
-            html { background: var(--paper); }
-            body { margin: 0; font-family: var(--font-body); background: var(--paper); color: #5b5344; min-height: 100dvh; display: flex; flex-direction: column; }
+            html { background: var(--ground); }
+            body { margin: 0; font-family: var(--font-body); background: var(--ground); color: var(--ink-soft); min-height: 100dvh; display: flex; flex-direction: column; }
             .font-display { font-family: var(--font-display); }
             .font-mono { font-family: var(--font-mono); }
-            a { color: inherit; }
             .press { transition: transform 160ms var(--ease-out); }
             .press:active { transform: scale(0.97); }
             .link-underline { background-image: linear-gradient(currentColor, currentColor); background-position: 0 100%; background-repeat: no-repeat; background-size: 0% 1px; transition: background-size 200ms var(--ease-out); }
@@ -95,22 +95,17 @@
         </style>
     </head>
     <body>
-        <header style="background: var(--chrome);">
+        <header style="background: var(--surface); border-bottom: 1px solid var(--line);">
             <nav style="max-width: 1400px; margin: 0 auto; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between;">
                 <a href="/" class="press" style="display: flex; align-items: center; gap: 10px;">
-                    {{-- The header sits on --chrome, which is always a dark
-                         surface in this template regardless of whether the
-                         platform's overall theme is light or dark -- so the
-                         logo's ink-colored wordmark needs the dark-safe
-                         white-ink variant here, not the default asset. --}}
-                    <img src="{{ asset($logoLightPath ?? 'images/logo.png') }}" alt="Dot.docs" style="height: 40px; width: auto;">
+                    <img src="{{ asset('images/logo.png') }}" alt="Dot.docs" style="height: 40px; width: auto;">
                 </a>
                 <div style="display: flex; align-items: center; gap: 12px;">
                     @auth
-                        <a href="{{ route('dashboard') }}" class="press" style="padding: 10px 20px; background: var(--accent); color: #1f1b14; font-family: var(--font-display); font-weight: 600; font-size: 14px; border-radius: 999px; text-decoration: none;">Dashboard</a>
+                        <a href="{{ route('dashboard') }}" class="btn btn-primary press">Dashboard</a>
                     @else
                         @if (Route::has('login'))
-                            <a href="{{ \App\Support\CentralSignIn::login() }}" class="link-underline" style="color: rgba(255,255,255,0.85); font-size: 14px; text-decoration: none; padding-bottom: 1px;">Sign in</a>
+                            <a href="{{ \App\Support\CentralSignIn::login() }}" class="link-underline" style="color: var(--ink); font-size: 14px; text-decoration: none; padding-bottom: 1px;">Sign in</a>
                         @endif
                     @endauth
                 </div>
@@ -119,7 +114,7 @@
 
         <main style="flex: 1; display: flex; align-items: center; padding: 48px 20px;">
             <div style="max-width: 640px; margin: 0 auto; width: 100%; text-align: center;">
-                <div style="display: inline-flex; align-items: center; justify-content: center; width: 88px; height: 88px; border-radius: 24px; background: rgba(0,0,0,0.04); margin-bottom: 28px;" aria-hidden="true">
+                <div style="display: inline-flex; align-items: center; justify-content: center; width: 88px; height: 88px; border-radius: var(--r-canvas, 12px); background: var(--surface-raised); border: 1px solid var(--line); color: var(--accent); margin-bottom: 28px;" aria-hidden="true">
                     @yield('icon')
                 </div>
 
@@ -136,8 +131,8 @@
                         <p class="font-mono" style="font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 14px; text-align: center;">While you're here — the rest of the Dot Ecosystem ({{ count($discover) }})</p>
                         <div style="display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;">
                             @foreach ($discover as $platform)
-                                <a href="{{ $platform['url'] }}" class="press" style="flex: 0 0 auto; scroll-snap-align: start; display: flex; align-items: center; gap: 8px; padding: 7px 14px 7px 7px; background: #ffffff; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; white-space: nowrap;">
-                                    <span aria-hidden="true" aria-hidden="true" style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: {{ $platform['accent'] ?? 'var(--accent)' }}; color: #ffffff; font-size: 16px; flex-shrink: 0;">{{ mb_strtoupper(mb_substr($platform['name'], 0, 1)) }}</span>
+                                <a href="{{ $platform['url'] }}" class="press" style="flex: 0 0 auto; scroll-snap-align: start; display: flex; align-items: center; gap: 8px; padding: 7px 14px 7px 7px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--r-control, 8px); text-decoration: none; white-space: nowrap;">
+                                    <span aria-hidden="true" style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: {{ $platform['accent'] ?? 'var(--accent)' }}; color: #ffffff; font-size: 16px; flex-shrink: 0;">{{ mb_strtoupper(mb_substr($platform['name'], 0, 1)) }}</span>
                                     <span class="font-display" style="font-weight: 600; font-size: 13px; color: var(--ink);">{{ $platform['name'] }}</span>
                                 </a>
                             @endforeach
@@ -147,11 +142,11 @@
             </div>
         </main>
 
-        <footer style="background: var(--chrome-soft); padding: 24px 20px;">
+        <footer style="background: var(--surface); border-top: 1px solid var(--line); padding: 24px 20px;">
             <div style="max-width: 1400px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 16px;">
-                <p class="font-mono" style="font-size: 12px; color: rgba(255,255,255,0.6); margin: 0;">&copy; {{ date('Y') }} Dot.docs.</p>
+                <p class="font-mono" style="font-size: 12px; color: var(--ink-soft); margin: 0;">&copy; {{ date('Y') }} Dot.docs.</p>
                 @if (Route::has('contact'))
-                    <a href="{{ route('contact') }}" class="link-underline font-mono" style="font-size: 12px; color: rgba(255,255,255,0.6); text-decoration: none; padding-bottom: 1px;">Contact support</a>
+                    <a href="{{ route('contact') }}" class="link-underline font-mono" style="font-size: 12px; color: var(--ink-soft); text-decoration: none; padding-bottom: 1px;">Contact support</a>
                 @endif
             </div>
         </footer>

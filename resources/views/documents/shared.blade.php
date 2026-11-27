@@ -25,26 +25,36 @@
     <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-roboto.min.css') }}">
     <link rel="stylesheet" href="{{ asset('dot-ui/css/dot-type.min.css') }}">
     @vite(['resources/css/app.css', 'resources/css/paper.css', 'resources/js/app.js'])
+    <style>
+        /* Same print rules as the published page (EA-8 / U-06): paper only. */
+        @media print {
+            .topbar,
+            .skip-link { display: none !important; }
+
+            .shell { display: block; height: auto; }
+            .canvas { padding: 0; }
+            .canvas .paper {
+                width: auto;
+                min-height: 0;
+                max-width: none;
+                box-shadow: none;
+                border-radius: 0;
+            }
+            @page { margin: 0; }
+        }
+    </style>
 </head>
 <body>
     <a href="#paper" class="skip-link">Skip to the document</a>
 
     <div class="shell" data-shell style="grid-template-columns:minmax(0,1fr);grid-template-areas:'topbar' 'canvas'">
-        <main id="paper" class="canvas-region" tabindex="-1">
-            <div class="canvas">
-                <style id="doc-style">{!! $styleCss !!}</style>
-                <article class="paper">
-                    {!! $document->content !!}
-                </article>
-            </div>
-        </main>
-
         <header class="topbar" aria-label="Document status">
-            <div class="topbar-title">{{ Str::limit($document->title, 64) }}</div>
+            <h1 class="topbar-title">{{ Str::limit($document->title, 64) }}</h1>
 
             <span class="micro">{{ $document->owner->name }} · {{ $document->updated_at->format('j M Y') }}</span>
 
             <div class="topbar-actions">
+                <button type="button" class="topbar-action" onclick="window.print()">Print</button>
                 <button type="button" class="topbar-action" data-shell-theme-toggle
                         aria-pressed="{{ $theme === 'dark' ? 'true' : 'false' }}">
                     <span data-shell-theme-word>{{ $theme === 'dark' ? 'Night' : 'Day' }}</span>
@@ -53,6 +63,15 @@
                 <a class="topbar-action" href="{{ url('/') }}">Dot.docs</a>
             </div>
         </header>
+
+        <main id="paper" class="canvas-region" tabindex="-1">
+            <div class="canvas">
+                <style id="doc-style">{!! $styleCss !!}</style>
+                <article class="paper">
+                    {!! $document->content !!}
+                </article>
+            </div>
+        </main>
     </div>
 </body>
 </html>

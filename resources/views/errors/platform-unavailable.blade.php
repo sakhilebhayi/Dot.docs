@@ -10,5 +10,5 @@
 @section('message', ($message ?? 'Dot.docs is temporarily unavailable.').' The documents already here are kept as they are.')
 
 @section('actions')
-    <a href="/" class="press" style="padding: 12px 24px; background: var(--accent); color: #1f1b14; font-family: var(--font-display); font-weight: 600; font-size: 15px; border-radius: 999px; text-decoration: none;">Try again</a>
+    <a href="/" class="btn btn-primary press">Try again</a>
 @endsection

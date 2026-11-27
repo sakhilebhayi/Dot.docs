@@ -1,6 +1,6 @@
 <div>
     @if ($show)
-        <div class="scrim" role="dialog" aria-modal="true" aria-labelledby="tpl-title"
+        <div class="scrim" x-data x-trap.noscroll="true" x-on:keydown.escape.stop="$wire.set('show', false)" role="dialog" aria-modal="true" aria-labelledby="tpl-title"
              wire:click.self="$set('show', false)">
             <div class="sheet">
                 <div class="sheet-head">
@@ -11,9 +11,9 @@
                 <div class="sheet-body">
                     <div class="field-row" style="margin-top:0">
                         <label class="field-label" for="tpl-name">Template name</label>
-                        <input id="tpl-name" wire:model="name" type="text" class="field" />
+                        <input id="tpl-name" wire:model="name" type="text" class="field" @error('name') aria-invalid="true" aria-describedby="tpl-name-error" @enderror />
                         @error('name')
-                            <p class="field-error">{{ $message }}</p>
+                            <p class="field-error" id="tpl-name-error" role="alert">{{ $message }}</p>
                         @enderror
                     </div>
 

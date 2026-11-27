@@ -42,7 +42,11 @@ export const SlashMenu = Extension.create({
     },
 });
 
+let slashCount = 0;
+
 function renderSlashMenu() {
+    const menuId = `dotdoc-slash-${++slashCount}`;
+    let editorDom = null;
     let element = null;
     let unmount = null;
     let items = [];
@@ -59,8 +63,12 @@ function renderSlashMenu() {
         if (!items.length) {
             const empty = document.createElement('div');
             empty.className = 'dotdoc-panel-empty';
+            empty.setAttribute('role', 'option');
+            empty.setAttribute('aria-disabled', 'true');
+            empty.setAttribute('aria-selected', 'false');
             empty.textContent = 'No command matches';
             element.appendChild(empty);
+            editorDom?.removeAttribute('aria-activedescendant');
 
             return;
         }
@@ -68,6 +76,10 @@ function renderSlashMenu() {
         items.forEach((command, index) => {
             const row = document.createElement('button');
             row.type = 'button';
+            row.tabIndex = -1;
+            row.id = `${menuId}-${index}`;
+            row.setAttribute('role', 'option');
+            row.setAttribute('aria-selected', index === active ? 'true' : 'false');
             row.className = `dotdoc-panel-row${index === active ? ' is-active' : ''}`;
 
             const label = document.createElement('span');
@@ -87,6 +99,10 @@ function renderSlashMenu() {
 
             element.appendChild(row);
         });
+
+        // EA-8 (A-04): focus stays in the document, so the document points
+        // at the active command for screen readers.
+        editorDom?.setAttribute('aria-activedescendant', `${menuId}-${active}`);
     };
 
     const place = (props) => {
@@ -130,7 +146,13 @@ function renderSlashMenu() {
 
             element = document.createElement('div');
             element.className = 'dotdoc-slash';
+            element.id = menuId;
+            element.setAttribute('role', 'listbox');
+            element.setAttribute('aria-label', 'Insert');
             document.body.appendChild(element);
+
+            editorDom = props.editor?.view?.dom ?? null;
+            editorDom?.setAttribute('aria-controls', menuId);
 
             draw();
             place(props);
@@ -173,6 +195,11 @@ function renderSlashMenu() {
         },
 
         onExit: () => {
+            if (editorDom) {
+                editorDom.removeAttribute('aria-activedescendant');
+                editorDom.removeAttribute('aria-controls');
+                editorDom = null;
+            }
             if (unmount) {
                 unmount();
                 unmount = null;
